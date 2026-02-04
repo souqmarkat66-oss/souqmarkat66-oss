@@ -28,17 +28,19 @@ export default function Ads() {
       </div>
 
       {isLoading ? (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {[1, 2, 3, 4, 5, 6].map(i => (
-            <div key={i} className="space-y-3">
-              <Skeleton className="h-48 w-full rounded-xl" />
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="h-4 w-1/2" />
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+          {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+            <div key={i} className="space-y-4">
+              <Skeleton className="aspect-[4/3] w-full rounded-[2rem]" />
+              <div className="space-y-2 px-2">
+                <Skeleton className="h-6 w-3/4" />
+                <Skeleton className="h-4 w-1/2" />
+              </div>
             </div>
           ))}
         </div>
       ) : allAds.length > 0 ? (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
           {allAds.map((ad, i) => (
             <AdCard key={ad.id} ad={ad} index={i} />
           ))}

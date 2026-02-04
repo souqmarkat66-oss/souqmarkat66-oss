@@ -212,33 +212,35 @@ export default function CreateAd() {
             </AnimatePresence>
 
             {/* Standard Fields */}
-            <FormField
-              control={form.control}
-              name="title"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Ad Title</FormLabel>
-                  <FormControl>
-                    <Input className="text-lg font-medium h-12" placeholder="Catchy headline..." {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            <div className="space-y-8">
+              <FormField
+                control={form.control}
+                name="title"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-lg font-semibold">{t('create.title')}</FormLabel>
+                    <FormControl>
+                      <Input className="text-xl font-medium h-16 rounded-2xl px-6 border-none bg-muted/30 focus-visible:bg-muted/50 transition-colors" placeholder="e.g. Premium Coffee Beans" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-            <FormField
-              control={form.control}
-              name="description"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Description</FormLabel>
-                  <FormControl>
-                    <Textarea className="min-h-[120px] resize-none" placeholder="Detailed description of your offering..." {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-lg font-semibold">Description</FormLabel>
+                    <FormControl>
+                      <Textarea className="min-h-[160px] resize-none rounded-2xl p-6 border-none bg-muted/30 focus-visible:bg-muted/50 transition-colors text-lg" placeholder="Describe the value of your product..." {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
 
             <div className="grid md:grid-cols-2 gap-6">
               <FormField
@@ -287,19 +289,20 @@ export default function CreateAd() {
             </div>
 
             {/* Media URL / Generation */}
-            <div className="space-y-4 pt-4 border-t">
+            <div className="space-y-6 pt-10 border-t border-border/50">
               <div className="flex items-center justify-between">
-                <FormLabel className="text-base">Media</FormLabel>
+                <FormLabel className="text-xl font-bold">Visual Assets</FormLabel>
                 {aiMode && (
                   <Button 
                     type="button" 
-                    variant="outline" 
+                    variant="secondary" 
                     size="sm"
                     onClick={handleGenerateImage}
                     disabled={isGeneratingImage || !form.getValues().description}
+                    className="rounded-full bg-secondary/10 text-secondary hover:bg-secondary/20 border-none px-4"
                   >
-                    {isGeneratingImage ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <ImageIcon className="w-3 h-3 mr-2" />}
-                    Generate Image
+                    {isGeneratingImage ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ImageIcon className="w-4 h-4 mr-2" />}
+                    Generate Custom Visual
                   </Button>
                 )}
               </div>
@@ -310,7 +313,7 @@ export default function CreateAd() {
                 render={({ field }) => (
                   <FormItem>
                     <FormControl>
-                      <Input placeholder="Enter image or video URL..." {...field} />
+                      <Input className="h-14 rounded-2xl px-6 bg-muted/30 border-none" placeholder="Paste image/video URL or use AI..." {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -318,16 +321,22 @@ export default function CreateAd() {
               />
 
               {/* Preview */}
-              {(form.watch("mediaUrl") || generatedImageUrl) && (
-                <div className="rounded-xl overflow-hidden border bg-muted/20 aspect-video relative">
-                  <img 
-                    src={form.watch("mediaUrl")} 
-                    alt="Preview" 
-                    className="w-full h-full object-contain"
-                    onError={(e) => e.currentTarget.style.display = 'none'} 
-                  />
-                </div>
-              )}
+              <AnimatePresence>
+                {(form.watch("mediaUrl") || generatedImageUrl) && (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="rounded-[2rem] overflow-hidden border bg-muted/10 aspect-video relative group ring-1 ring-border/50"
+                  >
+                    <img 
+                      src={form.watch("mediaUrl")} 
+                      alt="Preview" 
+                      className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                      onError={(e) => e.currentTarget.style.display = 'none'} 
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             <Button 
