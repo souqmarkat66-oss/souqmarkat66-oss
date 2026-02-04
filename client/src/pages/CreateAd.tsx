@@ -335,16 +335,17 @@ export default function CreateAd() {
               size="lg" 
               className="w-full text-lg h-14 mt-8"
               disabled={isCreating}
+              data-testid="button-submit"
             >
               {isCreating ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                  Creating...
+                  {t('common.loading')}
                 </>
               ) : (
                 <>
                   <CheckCircle2 className="w-5 h-5 mr-2" />
-                  Publish Ad
+                  {t('create.submit')}
                 </>
               )}
             </Button>
