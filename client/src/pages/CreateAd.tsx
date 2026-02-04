@@ -133,26 +133,26 @@ export default function CreateAd() {
 
   return (
     <div className="container max-w-3xl px-4 py-12">
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold mb-2">{t('create.title')}</h1>
-        <p className="text-muted-foreground">Fill in the details below to publish your advertisement.</p>
+      <div className="mb-12">
+        <h1 className="text-5xl font-extrabold mb-4 tracking-tight">{t('create.title')}</h1>
+        <p className="text-muted-foreground text-xl">Craft your message with the power of artificial intelligence.</p>
       </div>
 
-      <div className="bg-card border rounded-3xl p-6 md:p-8 shadow-sm">
-        <div className="flex items-center gap-4 mb-8 bg-muted/50 p-4 rounded-xl">
-          <div className="flex-1">
-            <h3 className="font-semibold flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-primary" />
-              AI Assistant
+      <div className="bg-card border-none rounded-[2.5rem] p-8 md:p-12 shadow-2xl shadow-primary/5 ring-1 ring-border/50">
+        <div className="flex flex-col md:flex-row items-center gap-6 mb-12 bg-primary/5 p-8 rounded-[2rem] border border-primary/10">
+          <div className="flex-1 text-center md:text-left rtl:md:text-right">
+            <h3 className="text-xl font-bold flex items-center justify-center md:justify-start gap-3 mb-2">
+              <Sparkles className="w-6 h-6 text-primary animate-pulse" />
+              AI Creative Suite
             </h3>
-            <p className="text-sm text-muted-foreground">Use AI to generate content and images.</p>
+            <p className="text-muted-foreground">Unlock professional copy and visuals with a single click.</p>
           </div>
           <Button 
             variant={aiMode ? "default" : "outline"} 
             onClick={() => setAiMode(!aiMode)}
-            className="rounded-full"
+            className="rounded-full px-8 h-12 text-base font-semibold transition-all hover:scale-105 active:scale-95"
           >
-            {aiMode ? "AI Mode On" : "Enable AI"}
+            {aiMode ? "Suite Active" : "Activate AI"}
           </Button>
         </div>
 
@@ -198,14 +198,14 @@ export default function CreateAd() {
                     type="button" 
                     onClick={handleGenerateCopy} 
                     disabled={isGeneratingCopy}
-                    className="w-full bg-gradient-to-r from-primary to-secondary text-white border-none"
+                    className="w-full bg-primary text-white border-none h-14 rounded-2xl text-lg font-bold shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all hover:-translate-y-1"
                   >
                     {isGeneratingCopy ? (
-                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      <Loader2 className="w-5 h-5 animate-spin mr-2" />
                     ) : (
-                      <Sparkles className="w-4 h-4 mr-2" />
+                      <Sparkles className="w-5 h-5 mr-2" />
                     )}
-                    Generate Copy
+                    Generate Professional Copy
                   </Button>
                 </motion.div>
               )}
@@ -333,7 +333,7 @@ export default function CreateAd() {
             <Button 
               type="submit" 
               size="lg" 
-              className="w-full text-lg h-14 mt-8"
+              className="w-full text-xl h-16 mt-12 rounded-2xl shadow-xl shadow-primary/10 hover:shadow-primary/20 transition-all hover:-translate-y-1 active:scale-[0.98]"
               disabled={isCreating}
               data-testid="button-submit"
             >

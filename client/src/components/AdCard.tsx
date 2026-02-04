@@ -39,9 +39,9 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: index * 0.1 }}
     >
-      <Card className="group overflow-hidden border-border/50 hover:border-primary/50 transition-all hover:shadow-xl hover:shadow-primary/5 bg-card h-full flex flex-col">
+      <Card className="group overflow-hidden border-border/50 hover:border-primary/50 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 bg-card h-full flex flex-col rounded-3xl">
         {/* Image/Video Container */}
-        <div className="relative aspect-video bg-muted overflow-hidden">
+        <div className="relative aspect-[4/3] bg-muted overflow-hidden">
           {ad.mediaType === 'video' ? (
             <video 
               src={ad.mediaUrl} 
@@ -55,56 +55,55 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
             <img 
               src={ad.mediaUrl} 
               alt={ad.title} 
-              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+              className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
             />
           )}
           
-          <div className="absolute top-3 right-3 flex gap-2">
-            <Badge variant="secondary" className="bg-background/80 backdrop-blur text-foreground shadow-sm">
+          <div className="absolute top-4 right-4 flex gap-2">
+            <Badge variant="secondary" className="bg-background/90 backdrop-blur-md text-foreground shadow-sm px-3 py-1 rounded-full border-none font-medium">
               {ad.language === 'ar' ? 'العربية' : 'English'}
             </Badge>
           </div>
+
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-4">
+             <Link href={`/ads/${ad.id}`} className="w-full">
+               <Button variant="secondary" size="sm" className="w-full rounded-full bg-white/20 backdrop-blur-md border-white/30 text-white hover:bg-white/40">
+                 {t('common.view')}
+               </Button>
+             </Link>
+          </div>
         </div>
 
-        <CardContent className="p-5 flex-1">
-          <div className="flex items-start justify-between gap-2 mb-2">
-            <h3 className="font-bold text-lg leading-tight line-clamp-2 text-foreground group-hover:text-primary transition-colors">
-              {ad.title}
-            </h3>
-          </div>
-          <p className="text-muted-foreground text-sm line-clamp-3 mb-4">
+        <CardContent className="p-6 flex-1 flex flex-col">
+          <h3 className="font-bold text-xl leading-snug line-clamp-2 text-foreground group-hover:text-primary transition-colors mb-3">
+            {ad.title}
+          </h3>
+          <p className="text-muted-foreground text-sm line-clamp-2 mb-4 flex-1">
             {ad.description}
           </p>
           
-          <div className="flex items-center text-xs text-muted-foreground gap-1">
-            <Calendar className="w-3 h-3" />
-            <span>
-              {ad.createdAt && format(new Date(ad.createdAt), 'PPP', { 
-                locale: language === 'ar' ? ar : enUS 
-              })}
-            </span>
+          <div className="flex items-center justify-between mt-4 pt-4 border-t border-border/50">
+            <div className="flex items-center text-xs text-muted-foreground/80 gap-1.5 font-medium">
+              <Calendar className="w-3.5 h-3.5" />
+              <span>
+                {ad.createdAt && format(new Date(ad.createdAt), 'MMM d, yyyy', { 
+                  locale: language === 'ar' ? ar : enUS 
+                })}
+              </span>
+            </div>
+            
+            {isOwner && (
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-8 w-8 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 rounded-full transition-colors"
+                onClick={handleDelete}
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+            )}
           </div>
         </CardContent>
-
-        <CardFooter className="p-4 pt-0 flex gap-2 border-t bg-muted/20 mt-auto">
-          <Link href={`/ads/${ad.id}`} className="flex-1">
-            <Button variant="ghost" className="w-full justify-start gap-2 hover:text-primary hover:bg-primary/10">
-              <Eye className="w-4 h-4" />
-              {t('common.view')}
-            </Button>
-          </Link>
-          
-          {isOwner && (
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-              onClick={handleDelete}
-            >
-              <Trash2 className="w-4 h-4" />
-            </Button>
-          )}
-        </CardFooter>
       </Card>
     </motion.div>
   );

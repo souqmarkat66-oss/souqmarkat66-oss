@@ -18,11 +18,13 @@ export default function Ads() {
 
   return (
     <div className="container px-4 py-12">
-      <div className="mb-12">
-        <h1 className="text-4xl font-bold mb-4">{t('nav.ads')}</h1>
-        <p className="text-muted-foreground text-lg max-w-2xl">
-          Browse through the latest advertisements created by our community.
-        </p>
+      <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6">
+        <div>
+          <h1 className="text-5xl font-extrabold mb-4 tracking-tight">{t('nav.ads')}</h1>
+          <p className="text-muted-foreground text-xl max-w-2xl leading-relaxed">
+            Discover a curated selection of smart advertisements from our community, optimized for impact.
+          </p>
+        </div>
       </div>
 
       {isLoading ? (
