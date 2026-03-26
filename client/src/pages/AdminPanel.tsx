@@ -10,7 +10,7 @@ import { useAuth } from "@/hooks/use-auth";
 import {
   Users, BarChart2, Flag, Megaphone, Radio, CheckCircle, XCircle,
   AlertTriangle, TrendingUp, Eye, Banknote, Settings, Loader2,
-  ShieldAlert, Tv, Film
+  ShieldAlert, Tv, Film, ShieldX, VideoOff
 } from "lucide-react";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
@@ -59,6 +59,25 @@ export default function AdminPanel() {
   const { data: settings, refetch: refetchSettings } = useQuery<Record<string, string>>({
     queryKey: ["/api/settings"],
     queryFn: () => fetch("/api/settings").then(r => r.json()),
+    enabled: isAdmin,
+  });
+
+  const { data: fraudStats } = useQuery<any>({
+    queryKey: ["/api/admin/fraud-stats"],
+    queryFn: () => fetch("/api/admin/fraud-stats", { credentials: "include" }).then(r => r.json()),
+    enabled: isAdmin,
+    refetchInterval: 30000,
+  });
+
+  const { data: fraudAlerts = [] } = useQuery<any[]>({
+    queryKey: ["/api/admin/fraud-alerts"],
+    queryFn: () => fetch("/api/admin/fraud-alerts", { credentials: "include" }).then(r => r.json()),
+    enabled: isAdmin,
+  });
+
+  const { data: streamModeration = [] } = useQuery<any[]>({
+    queryKey: ["/api/admin/stream-moderation"],
+    queryFn: () => fetch("/api/admin/stream-moderation", { credentials: "include" }).then(r => r.json()),
     enabled: isAdmin,
   });
 
@@ -157,6 +176,8 @@ export default function AdminPanel() {
           <TabsTrigger value="reports" className="gap-1.5"><Flag className="w-4 h-4" /> البلاغات</TabsTrigger>
           <TabsTrigger value="campaigns" className="gap-1.5"><BarChart2 className="w-4 h-4" /> الحملات</TabsTrigger>
           <TabsTrigger value="channels" className="gap-1.5"><Tv className="w-4 h-4" /> القنوات</TabsTrigger>
+          <TabsTrigger value="fraud" className="gap-1.5 text-red-500"><ShieldX className="w-4 h-4" /> كشف الاحتيال</TabsTrigger>
+          <TabsTrigger value="streams" className="gap-1.5 text-orange-500"><VideoOff className="w-4 h-4" /> مراقبة البث</TabsTrigger>
         </TabsList>
 
         {/* PLATFORM SETTINGS */}
@@ -386,6 +407,109 @@ export default function AdminPanel() {
               </Card>
             ))}
           </div>
+        </TabsContent>
+
+        {/* FRAUD DETECTION */}
+        <TabsContent value="fraud">
+          <div className="space-y-6">
+            {/* Stats */}
+            {fraudStats && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: "نقرات وهمية", value: fraudStats.fraud_clicks || 0, color: "text-red-500" },
+                  { label: "مشاهدات وهمية", value: fraudStats.fraud_impressions || 0, color: "text-orange-500" },
+                  { label: "إجمالي الاحتيال", value: fraudStats.total_fraud || 0, color: "text-red-700" },
+                  { label: "حقيقية (نظيفة)", value: fraudStats.total_legit || 0, color: "text-green-600" },
+                ].map(s => (
+                  <Card key={s.label} className="rounded-2xl">
+                    <CardContent className="p-4">
+                      <div className={`text-2xl font-bold ${s.color}`}>{Number(s.value).toLocaleString()}</div>
+                      <div className="text-xs text-muted-foreground">{s.label}</div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+            {/* Fraud Alerts Table */}
+            <Card className="rounded-2xl">
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <ShieldX className="w-5 h-5 text-red-500" /> سجل التنبيهات الوهمية (آخر 200)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {fraudAlerts.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground text-sm">لا توجد تنبيهات احتيال حتى الآن ✅</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-muted-foreground border-b">
+                        <th className="pb-2 text-right">الحملة</th>
+                        <th className="pb-2 text-right">IP</th>
+                        <th className="pb-2 text-right">النوع</th>
+                        <th className="pb-2 text-right">التفاصيل</th>
+                        <th className="pb-2 text-right">الوقت</th>
+                      </tr></thead>
+                      <tbody>
+                        {fraudAlerts.map((alert: any) => (
+                          <tr key={alert.id} className="border-b last:border-0 hover:bg-muted/50">
+                            <td className="py-2 font-medium">{alert.campaign_name || `#${alert.campaign_id}`}</td>
+                            <td className="py-2 font-mono text-xs">{alert.ip_address}</td>
+                            <td className="py-2">
+                              <Badge variant={alert.alert_type === 'click' ? 'destructive' : 'secondary'} className="text-xs">
+                                {alert.alert_type === 'click' ? '🖱️ نقر' : '👁️ مشاهدة'}
+                              </Badge>
+                            </td>
+                            <td className="py-2 text-xs text-muted-foreground">{alert.details}</td>
+                            <td className="py-2 text-xs text-muted-foreground">
+                              {alert.created_at ? format(new Date(alert.created_at), 'dd/MM HH:mm', { locale: ar }) : '-'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* STREAM MODERATION */}
+        <TabsContent value="streams">
+          <Card className="rounded-2xl">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <VideoOff className="w-5 h-5 text-orange-500" /> مراقبة البث المباشر بالذكاء الاصطناعي
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {streamModeration.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground text-sm">لا توجد بثوث مراجَعة بعد</div>
+              ) : (
+                <div className="space-y-3">
+                  {streamModeration.map((sm: any) => (
+                    <div key={sm.id} className="flex items-start justify-between p-4 rounded-xl border" data-testid={`stream-mod-${sm.id}`}>
+                      <div>
+                        <div className="font-medium">{sm.stream_title || `بث #${sm.stream_id}`}</div>
+                        <div className="text-xs text-muted-foreground mt-1">{sm.ai_reason || 'لا توجد ملاحظات'}</div>
+                        <div className="text-xs text-muted-foreground">
+                          حالة البث: <span className={sm.stream_status === 'live' ? 'text-green-500' : 'text-red-500'}>{sm.stream_status}</span>
+                          {' · '}{sm.reviewed_at ? format(new Date(sm.reviewed_at), 'dd/MM HH:mm', { locale: ar }) : ''}
+                        </div>
+                      </div>
+                      <Badge
+                        variant={sm.ai_verdict === 'safe' ? 'default' : 'destructive'}
+                        className="text-xs shrink-0"
+                      >
+                        {sm.ai_verdict === 'safe' ? '✅ آمن' : '🚫 محظور'}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

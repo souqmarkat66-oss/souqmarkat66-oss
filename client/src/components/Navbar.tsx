@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useState } from "react";
 
+const ADMIN_USER_ID = "54219806";
+
 const navLinks = (user: any) => [
   { href: "/ads", label: "الإعلانات", icon: LayoutGrid },
   { href: "/channels", label: "القنوات", icon: Tv },
@@ -19,7 +21,7 @@ const navLinks = (user: any) => [
     { href: "/create", label: "إعلان جديد", icon: PlusCircle },
     { href: "/campaigns", label: "الحملات", icon: BarChart2 },
     { href: "/revenue", label: "الإيرادات", icon: DollarSign },
-    { href: "/admin", label: "الإدارة", icon: ShieldCheck },
+    ...(user.id === ADMIN_USER_ID ? [{ href: "/admin", label: "الإدارة", icon: ShieldCheck }] : []),
   ] : []),
 ];
 

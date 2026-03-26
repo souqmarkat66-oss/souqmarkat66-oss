@@ -351,6 +351,38 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const stream = await storage.getLiveStream(Number(req.params.id));
     if (!stream || stream.userId !== req.user.claims.sub) return res.status(403).json({ message: "Forbidden" });
     const updated = await storage.updateLiveStream(Number(req.params.id), { status: 'live', startedAt: new Date() });
+    // AI Moderation — async, non-blocking
+    (async () => {
+      try {
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [{
+            role: 'system',
+            content: 'أنت نظام مراقبة محتوى. حلل عنوان ووصف البث المباشر وقرر إذا كان يخالف سياسة المنصة (محتوى إباحي، عنف، تحريض، احتيال). أجب بـ JSON فقط: {"safe": true/false, "reason": "..."}'
+          }, {
+            role: 'user',
+            content: `عنوان البث: ${stream.title || ''}\nالوصف: ${stream.description || ''}`
+          }],
+          max_tokens: 150,
+          temperature: 0,
+        });
+        const raw = completion.choices[0].message.content || '{}';
+        let verdict: any = {};
+        try { verdict = JSON.parse(raw.replace(/```json|```/g, '').trim()); } catch {}
+        const isSafe = verdict.safe !== false;
+        await db.execute(
+          sql`INSERT INTO stream_moderation (stream_id, status, ai_verdict, ai_reason)
+              VALUES (${stream.id}, ${isSafe ? 'approved' : 'flagged'}, ${isSafe ? 'safe' : 'unsafe'}, ${verdict.reason || null})`
+        );
+        if (!isSafe) {
+          // Auto-suspend flagged stream
+          await storage.updateLiveStream(stream.id, { status: 'ended' });
+          console.warn(`[AI Moderation] Stream ${stream.id} flagged: ${verdict.reason}`);
+        }
+      } catch (e) {
+        console.error('[AI Moderation] Error:', e);
+      }
+    })();
     res.json(updated);
   });
 
@@ -521,17 +553,139 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ ...campaign, ctr, cpmEGP, cpcEGP });
   });
 
+  // ─── AI FRAUD DETECTION ──────────────────────────────────────
+  const BOT_AGENTS = ['bot','spider','crawl','scraper','headless','phantom','selenium','puppeteer','curl','wget','python-requests'];
+
+  async function detectFraud(campaignId: number, ip: string, ua: string, eventType: string): Promise<{ isFraud: boolean; reason: string }> {
+    const lowerUA = (ua || '').toLowerCase();
+    if (BOT_AGENTS.some(b => lowerUA.includes(b))) {
+      return { isFraud: true, reason: 'user_agent_bot' };
+    }
+    // Rate limit: same IP > 15 events in 5 minutes
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const countResult = await db.execute(
+      sql`SELECT COUNT(*) as cnt FROM ad_impressions 
+          WHERE campaign_id = ${campaignId} AND ip_address = ${ip} 
+          AND created_at > ${fiveMinAgo}::timestamp`
+    );
+    const cnt = Number((countResult.rows[0] as any)?.cnt || 0);
+    if (cnt >= 15) {
+      return { isFraud: true, reason: `rate_limit_${cnt}_events_5min` };
+    }
+    // Click-through fraud: >3 clicks from same IP in 10 min
+    if (eventType === 'click') {
+      const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const clickResult = await db.execute(
+        sql`SELECT COUNT(*) as cnt FROM ad_impressions
+            WHERE campaign_id = ${campaignId} AND ip_address = ${ip}
+            AND event_type = 'click' AND created_at > ${tenMinAgo}::timestamp`
+      );
+      const clicks = Number((clickResult.rows[0] as any)?.cnt || 0);
+      if (clicks >= 3) {
+        return { isFraud: true, reason: `click_flood_${clicks}_clicks_10min` };
+      }
+    }
+    return { isFraud: false, reason: '' };
+  }
+
   // Record impression/click
   app.post("/api/campaigns/:id/impression", async (req, res) => {
     const { channelId, userId } = req.body;
-    await storage.recordImpression(Number(req.params.id), channelId, userId);
-    res.json({ success: true });
+    const campaignId = Number(req.params.id);
+    const ip = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+    const ua = req.headers['user-agent'] || '';
+    try {
+      const fraud = await detectFraud(campaignId, ip, ua, 'impression');
+      await db.execute(
+        sql`INSERT INTO ad_impressions (campaign_id, channel_id, user_id, ip_address, user_agent, event_type, is_fraud, fraud_reason)
+            VALUES (${campaignId}, ${channelId || null}, ${userId || null}, ${ip}, ${ua}, 'impression', ${fraud.isFraud}, ${fraud.reason || null})`
+      );
+      if (!fraud.isFraud) {
+        await storage.recordImpression(campaignId, channelId, userId);
+      } else {
+        await db.execute(
+          sql`INSERT INTO fraud_alerts (campaign_id, ip_address, alert_type, details)
+              VALUES (${campaignId}, ${ip}, 'impression', ${fraud.reason})`
+        );
+      }
+      res.json({ success: true, fraud: fraud.isFraud });
+    } catch {
+      await storage.recordImpression(campaignId, channelId, userId);
+      res.json({ success: true });
+    }
   });
 
   app.post("/api/campaigns/:id/click", async (req, res) => {
     const { channelId, userId } = req.body;
-    await storage.recordClick(Number(req.params.id), channelId, userId);
-    res.json({ success: true });
+    const campaignId = Number(req.params.id);
+    const ip = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+    const ua = req.headers['user-agent'] || '';
+    try {
+      const fraud = await detectFraud(campaignId, ip, ua, 'click');
+      await db.execute(
+        sql`INSERT INTO ad_impressions (campaign_id, channel_id, user_id, ip_address, user_agent, event_type, is_fraud, fraud_reason)
+            VALUES (${campaignId}, ${channelId || null}, ${userId || null}, ${ip}, ${ua}, 'click', ${fraud.isFraud}, ${fraud.reason || null})`
+      );
+      if (!fraud.isFraud) {
+        await storage.recordClick(campaignId, channelId, userId);
+      } else {
+        await db.execute(
+          sql`INSERT INTO fraud_alerts (campaign_id, ip_address, alert_type, details)
+              VALUES (${campaignId}, ${ip}, 'click', ${fraud.reason})`
+        );
+      }
+      res.json({ success: true, fraud: fraud.isFraud });
+    } catch {
+      await storage.recordClick(campaignId, channelId, userId);
+      res.json({ success: true });
+    }
+  });
+
+  // Admin: stream moderation log
+  app.get("/api/admin/stream-moderation", isAuthenticated, requireAdmin, async (_req, res) => {
+    try {
+      const result = await db.execute(
+        sql`SELECT sm.*, ls.title as stream_title, ls.status as stream_status
+            FROM stream_moderation sm
+            LEFT JOIN live_streams ls ON ls.id = sm.stream_id
+            ORDER BY sm.reviewed_at DESC LIMIT 100`
+      );
+      res.json(result.rows);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Admin: get fraud alerts
+  app.get("/api/admin/fraud-alerts", isAuthenticated, requireAdmin, async (_req, res) => {
+    try {
+      const result = await db.execute(
+        sql`SELECT fa.*, c.name as campaign_name, c.budget_egp 
+            FROM fraud_alerts fa
+            LEFT JOIN ad_campaigns c ON c.id = fa.campaign_id
+            ORDER BY fa.created_at DESC LIMIT 200`
+      );
+      res.json(result.rows);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Admin: fraud stats summary
+  app.get("/api/admin/fraud-stats", isAuthenticated, requireAdmin, async (_req, res) => {
+    try {
+      const stats = await db.execute(
+        sql`SELECT 
+              COUNT(*) FILTER (WHERE is_fraud = true) as total_fraud,
+              COUNT(*) FILTER (WHERE is_fraud = false) as total_legit,
+              COUNT(*) FILTER (WHERE is_fraud = true AND event_type='click') as fraud_clicks,
+              COUNT(*) FILTER (WHERE is_fraud = true AND event_type='impression') as fraud_impressions
+            FROM ad_impressions`
+      );
+      res.json(stats.rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
   });
 
   // Embed JS script (AdSense-like)
