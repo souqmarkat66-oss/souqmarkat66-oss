@@ -4,7 +4,7 @@ import { useLanguage } from "./LanguageProvider";
 import { Button } from "@/components/ui/button";
 import { 
   LogIn, LogOut, PlusCircle, Globe, LayoutGrid, Megaphone, 
-  Radio, BarChart2, ShieldCheck, DollarSign, Menu, X, Tv
+  Radio, BarChart2, ShieldCheck, DollarSign, Menu, X, Tv, UserCircle2
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -18,6 +18,7 @@ const navLinks = (user: any) => [
   { href: "/channels", label: "القنوات", icon: Tv },
   { href: "/reels", label: "ريلز", icon: Radio },
   ...(user ? [
+    { href: "/my-content", label: "محتواي", icon: UserCircle2 },
     { href: "/create", label: "إعلان جديد", icon: PlusCircle },
     { href: "/campaigns", label: "الحملات", icon: BarChart2 },
     { href: "/revenue", label: "الإيرادات", icon: DollarSign },
@@ -93,7 +94,22 @@ export function Navbar() {
                   {user.firstName}
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuContent align="end" className="w-52" dir="rtl">
+                <DropdownMenuItem asChild>
+                  <Link href="/my-content" className="gap-2 cursor-pointer flex items-center">
+                    <UserCircle2 className="w-4 h-4 text-primary" /> محتواي وإعلاناتي
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/create" className="gap-2 cursor-pointer flex items-center">
+                    <PlusCircle className="w-4 h-4 text-green-500" /> إعلان جديد
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/reels" className="gap-2 cursor-pointer flex items-center">
+                    <Radio className="w-4 h-4 text-red-500" /> الريلز
+                  </Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => logout()} className="gap-2 text-destructive">
                   <LogOut className="w-4 h-4" /> تسجيل الخروج
                 </DropdownMenuItem>
@@ -101,8 +117,8 @@ export function Navbar() {
             </DropdownMenu>
           ) : (
             <a href="/login">
-              <Button size="sm" className="gap-2 bg-primary text-white" data-testid="btn-nav-login">
-                <LogIn className="w-4 h-4" /> {t('nav.login')}
+              <Button size="sm" className="gap-2 bg-primary text-white shadow-md shadow-primary/30" data-testid="btn-nav-login">
+                <LogIn className="w-4 h-4" /> دخول / تسجيل
               </Button>
             </a>
           )}
@@ -118,6 +134,13 @@ export function Navbar() {
       {mobileOpen && (
         <div className="lg:hidden border-t bg-background/95 backdrop-blur">
           <div className="container px-4 py-3 flex flex-col gap-1">
+            {!user && (
+              <a href="/login" onClick={() => setMobileOpen(false)}>
+                <Button className="w-full gap-2 bg-primary text-white mb-2">
+                  <LogIn className="w-4 h-4" /> دخول / تسجيل
+                </Button>
+              </a>
+            )}
             {links.map(l => (
               <Link key={l.href} href={l.href} onClick={() => setMobileOpen(false)}>
                 <Button variant={isActive(l.href) ? "secondary" : "ghost"} className="w-full justify-start gap-2">

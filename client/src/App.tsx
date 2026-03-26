@@ -21,6 +21,7 @@ import AdminPanel from "@/pages/AdminPanel";
 import Revenue from "@/pages/Revenue";
 import Reels from "@/pages/Reels";
 import Login from "@/pages/Login";
+import MyContent from "@/pages/MyContent";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -72,6 +73,7 @@ function Router() {
                 <ProtectedRoute component={AdminPanel} />
               </Route>
               <Route path="/login" component={Login} />
+              <Route path="/my-content" component={MyContent} />
               <Route component={NotFound} />
             </Switch>
           </main>
