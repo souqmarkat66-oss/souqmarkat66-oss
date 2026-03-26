@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown } from "lucide-react";
+import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown, Image as ImageIcon, Film } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -23,6 +23,13 @@ type Reel = {
   userId: string;
   createdAt: string;
 };
+
+// Detect if URL is an image vs video
+function isImageUrl(url: string): boolean {
+  if (!url) return false;
+  const clean = url.split('?')[0].toLowerCase();
+  return /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif)$/.test(clean);
+}
 
 function speakEgyptian(text: string) {
   if (!('speechSynthesis' in window)) return;
@@ -40,12 +47,14 @@ function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [liked, setLiked] = useState(false);
   const [localLikes, setLocalLikes] = useState(reel.likesCount);
-  const [muted, setMuted] = useState(true); // start muted — browser requires this for autoplay
+  const [muted, setMuted] = useState(true);
   const [showUnmuteHint, setShowUnmuteHint] = useState(true);
   const [showComments, setShowComments] = useState(false);
   const [comment, setComment] = useState("");
+  const [imgLoaded, setImgLoaded] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const isImage = isImageUrl(reel.videoUrl);
 
   const { data: comments = [] } = useQuery<any[]>({
     queryKey: ['/api/comments/reel', reel.id],
@@ -110,42 +119,76 @@ function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
 
   return (
     <div className="relative h-screen w-full snap-start bg-black flex items-center justify-center overflow-hidden">
-      <video
-        ref={videoRef}
-        src={reel.videoUrl}
-        className="w-full h-full object-contain"
-        loop
-        autoPlay={isActive}
-        muted={muted}
-        playsInline
-        onClick={() => videoRef.current?.paused ? videoRef.current.play() : videoRef.current?.pause()}
-      />
 
-      {/* TAP TO UNMUTE — always visible when muted */}
-      {muted && showUnmuteHint && (
-        <button
-          onClick={handleUnmute}
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-2 animate-pulse"
-          data-testid="btn-unmute-reel"
-        >
-          <div className="w-20 h-20 rounded-full bg-black/60 backdrop-blur border-2 border-white/40 flex items-center justify-center">
-            <Volume2 className="w-9 h-9 text-white" />
+      {isImage ? (
+        /* ── IMAGE REEL ── */
+        <>
+          {/* Blurred background */}
+          <div
+            className="absolute inset-0 bg-cover bg-center scale-110 blur-2xl opacity-40"
+            style={{ backgroundImage: `url(${reel.videoUrl})` }}
+          />
+          {/* Main image */}
+          <motion.img
+            src={reel.videoUrl}
+            alt={reel.title}
+            className="relative z-10 max-h-full max-w-full object-contain"
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.4 }}
+            onLoad={() => setImgLoaded(true)}
+          />
+          {!imgLoaded && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Loader2 className="w-8 h-8 animate-spin text-white" />
+            </div>
+          )}
+          {/* Image badge */}
+          <div className="absolute top-4 right-4 z-20">
+            <Badge className="bg-white/20 backdrop-blur text-white border-white/30 gap-1">
+              <ImageIcon className="w-3 h-3" /> صورة
+            </Badge>
           </div>
-          <span className="text-white text-sm font-bold bg-black/60 px-3 py-1 rounded-full">
-            انقر لتشغيل الصوت 🔊
-          </span>
-        </button>
-      )}
-
-      {/* Muted indicator (small) — after hint dismissed */}
-      {muted && !showUnmuteHint && (
-        <button
-          onClick={handleToggleMute}
-          className="absolute top-4 left-4 z-20 flex items-center gap-1.5 bg-black/60 backdrop-blur text-white text-xs px-3 py-1.5 rounded-full border border-white/20"
-          data-testid="btn-muted-indicator"
-        >
-          <VolumeX className="w-3.5 h-3.5" /> مكتوم
-        </button>
+        </>
+      ) : (
+        /* ── VIDEO REEL ── */
+        <>
+          <video
+            ref={videoRef}
+            src={reel.videoUrl}
+            className="w-full h-full object-contain"
+            loop
+            autoPlay={isActive}
+            muted={muted}
+            playsInline
+            onClick={() => videoRef.current?.paused ? videoRef.current.play() : videoRef.current?.pause()}
+          />
+          {/* TAP TO UNMUTE — always visible when muted */}
+          {muted && showUnmuteHint && (
+            <button
+              onClick={handleUnmute}
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-2 animate-pulse"
+              data-testid="btn-unmute-reel"
+            >
+              <div className="w-20 h-20 rounded-full bg-black/60 backdrop-blur border-2 border-white/40 flex items-center justify-center">
+                <Volume2 className="w-9 h-9 text-white" />
+              </div>
+              <span className="text-white text-sm font-bold bg-black/60 px-3 py-1 rounded-full">
+                انقر لتشغيل الصوت 🔊
+              </span>
+            </button>
+          )}
+          {/* Muted indicator (small) — after hint dismissed */}
+          {muted && !showUnmuteHint && (
+            <button
+              onClick={handleToggleMute}
+              className="absolute top-4 left-4 z-20 flex items-center gap-1.5 bg-black/60 backdrop-blur text-white text-xs px-3 py-1.5 rounded-full border border-white/20"
+              data-testid="btn-muted-indicator"
+            >
+              <VolumeX className="w-3.5 h-3.5" /> مكتوم
+            </button>
+          )}
+        </>
       )}
 
       {/* Overlay info */}
@@ -254,19 +297,22 @@ function CreateReelDialog() {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [videoUrl, setVideoUrl] = useState("");
+  const [mediaUrl, setMediaUrl] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [mediaTypeTab, setMediaTypeTab] = useState<'video' | 'image'>('video');
   const fileRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  const isImg = isImageUrl(mediaUrl);
+
   const createMutation = useMutation({
-    mutationFn: () => apiRequest('/api/reels', 'POST', { title, description, videoUrl }),
+    mutationFn: () => apiRequest('/api/reels', 'POST', { title, description, videoUrl: mediaUrl }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/reels'] });
       setOpen(false);
-      setTitle(""); setDescription(""); setVideoUrl("");
-      toast({ title: "🎉 تم نشر الريل بنجاح!" });
+      setTitle(""); setDescription(""); setMediaUrl("");
+      toast({ title: "🎉 تم النشر بنجاح!" });
     },
     onError: (err: any) => toast({ variant: "destructive", title: "خطأ", description: err.message }),
   });
@@ -280,12 +326,14 @@ function CreateReelDialog() {
     try {
       const res = await fetch("/api/upload", { method: "POST", body: formData, credentials: "include" });
       const data = await res.json();
-      setVideoUrl(data.url);
-      toast({ title: "✅ تم رفع الفيديو!" });
-    } catch (err: any) {
+      setMediaUrl(data.url);
+      toast({ title: file.type.startsWith('image') ? "✅ تم رفع الصورة!" : "✅ تم رفع الفيديو!" });
+    } catch {
       toast({ variant: "destructive", title: "فشل الرفع" });
     } finally { setUploading(false); }
   };
+
+  const accept = mediaTypeTab === 'image' ? 'image/*' : 'video/*';
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -296,45 +344,78 @@ function CreateReelDialog() {
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>🎬 إنشاء ريل جديد</DialogTitle>
-          <DialogDescription>ارفع فيديو قصير أو أدخل رابطاً لنشره كريل</DialogDescription>
+          <DialogTitle>✨ إنشاء ريل جديد</DialogTitle>
+          <DialogDescription>ارفع صورة أو فيديو لنشره كريل</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          {/* Step 1: Video */}
+
+          {/* Media Type Tabs */}
+          <div className="flex gap-2 p-1 bg-muted rounded-xl">
+            <button
+              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${mediaTypeTab === 'video' ? 'bg-background shadow text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              onClick={() => { setMediaTypeTab('video'); setMediaUrl(""); }}
+              data-testid="tab-video"
+            >
+              <Film className="w-4 h-4" /> فيديو
+            </button>
+            <button
+              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${mediaTypeTab === 'image' ? 'bg-background shadow text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              onClick={() => { setMediaTypeTab('image'); setMediaUrl(""); }}
+              data-testid="tab-image"
+            >
+              <ImageIcon className="w-4 h-4" /> صورة
+            </button>
+          </div>
+
+          {/* Step 1: Media Upload */}
           <div className="space-y-2">
-            <p className="text-sm font-bold text-muted-foreground">الخطوة 1: أضف الفيديو</p>
-            <input ref={fileRef} type="file" accept="video/*" onChange={handleUpload} className="hidden" />
-            {videoUrl ? (
-              <div className="relative">
-                <video src={videoUrl} className="w-full rounded-xl max-h-48 object-contain bg-black" controls />
+            <p className="text-sm font-bold text-muted-foreground">
+              الخطوة 1: {mediaTypeTab === 'image' ? 'أضف الصورة' : 'أضف الفيديو'}
+            </p>
+            <input ref={fileRef} type="file" accept={accept} onChange={handleUpload} className="hidden" />
+
+            {mediaUrl ? (
+              <div className="relative rounded-xl overflow-hidden">
+                {isImg
+                  ? <img src={mediaUrl} className="w-full max-h-52 object-contain bg-black rounded-xl" alt="معاينة" />
+                  : <video src={mediaUrl} className="w-full max-h-52 object-contain bg-black rounded-xl" controls />
+                }
                 <button
-                  onClick={() => setVideoUrl("")}
+                  onClick={() => setMediaUrl("")}
                   className="absolute top-2 right-2 w-7 h-7 rounded-full bg-red-500 text-white flex items-center justify-center text-xs font-bold hover:bg-red-600"
                 >✕</button>
+                <Badge className={`absolute bottom-2 left-2 ${isImg ? 'bg-purple-500' : 'bg-blue-500'} text-white`}>
+                  {isImg ? '🖼 صورة' : '🎬 فيديو'}
+                </Badge>
               </div>
             ) : (
               <div className="space-y-2">
                 <button
-                  type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading}
                   className="w-full border-2 border-dashed border-primary/40 rounded-xl p-6 flex flex-col items-center gap-2 hover:border-primary hover:bg-primary/5 cursor-pointer transition-all"
-                  data-testid="btn-upload-video"
+                  data-testid="btn-upload-media"
                 >
-                  {uploading
-                    ? <><Loader2 className="w-8 h-8 animate-spin text-primary" /><span className="text-sm font-medium text-primary">جاري الرفع...</span></>
-                    : <><Upload className="w-8 h-8 text-primary" /><span className="text-sm font-medium">ارفع فيديو من جهازك</span><span className="text-xs text-muted-foreground">MP4, MOV — حتى 200MB</span></>
-                  }
+                  {uploading ? (
+                    <><Loader2 className="w-8 h-8 animate-spin text-primary" /><span className="text-sm font-medium text-primary">جاري الرفع...</span></>
+                  ) : mediaTypeTab === 'image' ? (
+                    <><ImageIcon className="w-8 h-8 text-primary" /><span className="text-sm font-medium">ارفع صورة من جهازك</span><span className="text-xs text-muted-foreground">JPG, PNG, WebP — حتى 20MB</span></>
+                  ) : (
+                    <><Upload className="w-8 h-8 text-primary" /><span className="text-sm font-medium">ارفع فيديو من جهازك</span><span className="text-xs text-muted-foreground">MP4, MOV — حتى 200MB</span></>
+                  )}
                 </button>
                 <div className="flex items-center gap-2">
                   <div className="flex-1 h-px bg-border" />
-                  <span className="text-xs text-muted-foreground">أو أدخل رابط فيديو</span>
+                  <span className="text-xs text-muted-foreground">أو أدخل رابطاً مباشراً</span>
                   <div className="flex-1 h-px bg-border" />
                 </div>
                 <Input
-                  placeholder="https://example.com/video.mp4"
-                  value={videoUrl}
-                  onChange={e => setVideoUrl(e.target.value)}
+                  placeholder={mediaTypeTab === 'image' ? "https://example.com/image.jpg" : "https://example.com/video.mp4"}
+                  value={mediaUrl}
+                  onChange={e => setMediaUrl(e.target.value)}
                   dir="ltr"
-                  data-testid="input-video-url"
+                  data-testid="input-media-url"
                 />
               </div>
             )}
@@ -344,30 +425,38 @@ function CreateReelDialog() {
           <div className="space-y-2">
             <p className="text-sm font-bold text-muted-foreground">الخطوة 2: اكتب التفاصيل</p>
             <Input
-              placeholder="عنوان الريل... (مطلوب)"
+              placeholder="العنوان... (مطلوب)"
               value={title}
               onChange={e => setTitle(e.target.value)}
-              className={!title && videoUrl ? "border-red-400 focus:border-red-500" : ""}
+              className={!title && mediaUrl ? "border-red-400" : ""}
               data-testid="input-reel-title"
             />
-            {!title && videoUrl && <p className="text-xs text-red-500">⚠ العنوان مطلوب</p>}
-            <Textarea placeholder="وصف (اختياري)..." value={description} onChange={e => setDescription(e.target.value)} rows={2} />
+            {!title && mediaUrl && <p className="text-xs text-red-500">⚠ العنوان مطلوب</p>}
+            <Textarea
+              placeholder="وصف أو تعليق (اختياري)..."
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={2}
+            />
           </div>
 
           <Button
             className="w-full h-12 text-base gap-2"
             onClick={() => createMutation.mutate()}
-            disabled={!title.trim() || !videoUrl.trim() || createMutation.isPending}
+            disabled={!title.trim() || !mediaUrl.trim() || createMutation.isPending}
             data-testid="btn-publish-reel"
           >
-            {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "🎬"}
-            {createMutation.isPending ? "جاري النشر..." : "نشر الريل الآن"}
+            {createMutation.isPending
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري النشر...</>
+              : <>{mediaTypeTab === 'image' ? '🖼' : '🎬'} نشر الآن</>
+            }
           </Button>
 
-          {/* Why disabled hint */}
-          {(!title.trim() || !videoUrl.trim()) && (
+          {(!title.trim() || !mediaUrl.trim()) && (
             <p className="text-xs text-center text-muted-foreground">
-              {!videoUrl.trim() ? "⬆ ارفع فيديو أو أدخل رابط أولاً" : "✏ أدخل عنواناً للريل"}
+              {!mediaUrl.trim()
+                ? `⬆ ${mediaTypeTab === 'image' ? 'ارفع صورة أو أدخل رابطها' : 'ارفع فيديو أو أدخل رابطه'} أولاً`
+                : "✏ أدخل عنواناً"}
             </p>
           )}
         </div>

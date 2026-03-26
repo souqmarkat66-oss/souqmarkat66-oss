@@ -21,6 +21,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { EgyptTargetingMap } from "@/components/EgyptTargetingMap";
 
 const formSchema = insertAdSchema.extend({
+  title: z.string().min(2, "العنوان مطلوب (2 أحرف على الأقل)"),
+  description: z.string().min(5, "الوصف مطلوب (5 أحرف على الأقل)"),
   productName: z.string().optional(),
   targetAudience: z.string().optional(),
   userId: z.string().optional(), // set server-side from auth
