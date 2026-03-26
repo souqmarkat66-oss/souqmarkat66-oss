@@ -7,7 +7,6 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
-import { PlatformAssistant } from "@/components/PlatformAssistant";
 import {
   Users, BarChart2, Flag, Megaphone, Radio, CheckCircle, XCircle,
   AlertTriangle, TrendingUp, Eye, Banknote, Settings, Loader2,
@@ -525,7 +524,6 @@ export default function AdminPanel() {
         </TabsContent>
       </Tabs>
 
-      <PlatformAssistant />
     </div>
   );
 }

@@ -26,6 +26,7 @@ import EmbedGuide from "@/pages/EmbedGuide";
 import Messages from "@/pages/Messages";
 import Profile from "@/pages/Profile";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
+import { GlobalAssistant } from "@/components/GlobalAssistant";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -54,6 +55,7 @@ function Router() {
       <Route>
         <div className="flex flex-col min-h-screen font-sans">
           <Navbar />
+          <GlobalAssistant />
           <main className="flex-1 bg-background">
             <Switch>
               <Route path="/" component={Home} />
