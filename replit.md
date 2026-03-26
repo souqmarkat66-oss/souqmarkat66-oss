@@ -1,70 +1,152 @@
-# Smart Ads Platform
+# Souq Ads Network — شبكة سوق للإعلانات
 
 ## Overview
 
-A bilingual (Arabic/English) smart advertising platform that allows users to create, browse, and manage advertisements with AI-powered content generation. The platform supports RTL/LTR layouts, image/video ads, and integrates with OpenAI for generating ad copy and images.
+A comprehensive bilingual (Arabic/English) advertising and live streaming platform with AI-powered tools, an ad network like Meta/Google AdSense, and full admin panel.
 
 ## User Preferences
 
-Preferred communication style: Simple, everyday language.
+Preferred communication style: Arabic/bilingual, everyday language.
 
 ## System Architecture
 
 ### Frontend Architecture
 - **Framework**: React 18 with TypeScript
-- **Routing**: Wouter (lightweight React router)
-- **State Management**: TanStack React Query for server state
-- **Styling**: Tailwind CSS with shadcn/ui component library
-- **Animations**: Framer Motion for page transitions and micro-interactions
-- **Internationalization**: Custom LanguageProvider supporting Arabic (RTL) and English (LTR)
+- **Routing**: Wouter
+- **State Management**: TanStack React Query v5
+- **Styling**: Tailwind CSS + shadcn/ui
+- **Animations**: Framer Motion
+- **Internationalization**: Custom LanguageProvider (Arabic RTL / English LTR)
+- **Real-time**: Socket.IO client for live streaming chat + WebRTC
 
 ### Backend Architecture
-- **Runtime**: Node.js with Express
-- **Language**: TypeScript with ES modules
-- **Build Tool**: Custom build script using esbuild for server, Vite for client
-- **API Design**: REST endpoints under `/api/*` with Zod validation
+- **Runtime**: Node.js with Express + TypeScript
+- **Real-time**: Socket.IO for WebRTC signaling + live chat
+- **File Uploads**: Multer (direct file upload to /uploads directory)
+- **AI**: OpenAI via Replit AI Integrations
 
 ### Data Storage
 - **Database**: PostgreSQL via Drizzle ORM
-- **Schema Location**: `shared/schema.ts` with models in `shared/models/`
-- **Tables**: users, sessions (for auth), ads, conversations, messages
-- **Migrations**: Drizzle Kit with `db:push` command
+- **Schema**: `shared/schema.ts`
+- **Tables**:
+  - `users`, `sessions` — Auth
+  - `ads` — Classified ads with likes/comments/views
+  - `channels` — Creator channels (verified, monetized)
+  - `live_streams` — Live streaming sessions
+  - `chat_messages` — Live stream chat
+  - `likes` — Polymorphic likes (ads, streams, channels)
+  - `comments` — Polymorphic comments
+  - `follows` — Channel subscriptions
+  - `ad_campaigns` — Meta/AdSense-style ad campaigns with targeting
+  - `ad_impressions` — Track impressions/clicks
+  - `revenue_transactions` — Earnings/spending tracking
+  - `reports` — Content moderation
+  - `uploaded_files` — Direct file upload records
 
 ### Authentication
 - **Method**: Replit Auth (OpenID Connect)
-- **Session Storage**: PostgreSQL via connect-pg-simple
-- **Protected Routes**: Middleware-based with `isAuthenticated` function
+- **Session Storage**: PostgreSQL
 
 ### AI Integrations
 - **Provider**: OpenAI via Replit AI Integrations
-- **Features**: 
-  - Ad copy generation (text)
-  - Image generation (`gpt-image-1` model)
-  - Chat/conversation support
-  - Voice chat with audio streaming (PCM16)
+- **Features**:
+  - Ad copy generation (Arabic + English)
+  - AI image generation
+  - Video ad script generation with scenes
+  - Article generation
 
-### Key Design Patterns
-- **Shared Types**: Schema and route definitions shared between client/server via `@shared/*` alias
-- **Storage Abstraction**: Interface-based storage classes for database operations
-- **Component Library**: shadcn/ui with custom theming for Arabic-inspired color palette
+## Key Features
+
+### Live Streaming (WebRTC)
+- Browser-based camera + audio streaming
+- WebRTC P2P via Socket.IO signaling
+- Real-time chat rooms per stream
+- Like reactions in live stream
+- Viewer count tracking
+- Start/end stream controls with mute/video toggle
+
+### Social Features  
+- Like/unlike (ads, streams)
+- Comments on ads and streams
+- Follow/unfollow channels
+- Share and report content
+
+### Ad Network (Meta/AdSense-style)
+- Create campaigns with targeting (language, category)
+- Budget management with CPM pricing
+- Revenue sharing with publishers (60% default)
+- AdSense-like embed code for external sites
+- Admin approval workflow for campaigns
+- Full analytics (impressions, clicks, CTR, spend)
+
+### Channel System
+- Create and manage creator channels
+- Channel verification and monetization (admin-controlled)
+- Channel suspension system
+- Subscriber counts with auto-update
+
+### Admin Panel
+- Platform statistics dashboard
+- Report management (approve/dismiss)
+- Campaign approval/rejection
+- Channel verification, monetization, suspension
+
+### File Upload System
+- Direct file upload (images + videos up to 200MB)
+- Stored locally in /uploads directory
+- Served via /uploads static route
+
+## API Routes
+
+### Core
+- `GET/POST /api/ads` — Ad listings
+- `GET/POST /api/channels` — Channels
+- `GET/POST /api/streams` — Live streams
+- `POST /api/upload` — Direct file upload
+
+### Social
+- `POST /api/likes` — Toggle like
+- `GET/POST /api/comments/:type/:id` — Comments
+- `POST /api/channels/:id/follow` — Follow/unfollow
+
+### Ad Network
+- `GET/POST /api/campaigns` — Campaign management
+- `GET /api/campaigns/embed.js` — AdSense-like embed script
+- `POST /api/campaigns/:id/impression` — Record impression
+- `POST /api/campaigns/:id/click` — Record click
+
+### AI
+- `POST /api/ai/generate-copy` — Ad copy generation
+- `POST /api/ai/generate-article` — Article generation
+- `POST /api/ai/generate-video-script` — Video script + scenes
+
+### Admin
+- `GET /api/admin/stats` — Platform statistics
+- `GET/PUT /api/admin/reports` — Manage reports
+- `GET/PUT /api/admin/campaigns` — Manage campaigns
+- `GET/PUT /api/admin/channels` — Manage channels
+
+## Frontend Pages
+- `/` — Home with live streams, featured ads, top channels
+- `/ads` — Browse all ads
+- `/ads/:id` — Ad detail with likes/comments
+- `/create` — Create ad with AI + direct upload
+- `/channels` — Channel directory
+- `/channels/:id` — Channel page with streams
+- `/streams/:id` — Live stream viewer/broadcaster (WebRTC)
+- `/stream/start` — Start new live stream
+- `/campaigns` — Advertiser campaign management
+- `/revenue` — Publisher revenue dashboard
+- `/admin` — Admin panel (stats, reports, campaigns, channels)
 
 ## External Dependencies
 
 ### Database
-- PostgreSQL (required, connection via `DATABASE_URL` environment variable)
+- PostgreSQL via `DATABASE_URL`
 
 ### AI Services
-- OpenAI API via Replit AI Integrations
-  - `AI_INTEGRATIONS_OPENAI_API_KEY` - API key
-  - `AI_INTEGRATIONS_OPENAI_BASE_URL` - Base URL for Replit proxy
+- `AI_INTEGRATIONS_OPENAI_API_KEY`
+- `AI_INTEGRATIONS_OPENAI_BASE_URL`
 
 ### Authentication
 - Replit OpenID Connect
-  - `ISSUER_URL` - OIDC issuer (defaults to https://replit.com/oidc)
-  - `REPL_ID` - Replit environment ID
-  - `SESSION_SECRET` - Session encryption secret
-
-### Frontend Libraries
-- Google Fonts (Cairo font for Arabic support)
-- Radix UI primitives (via shadcn/ui)
-- Lucide React icons

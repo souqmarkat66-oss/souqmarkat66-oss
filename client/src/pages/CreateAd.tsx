@@ -3,36 +3,24 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { insertAdSchema } from "@shared/schema";
-import { useCreateAd, useGenerateAdCopy, useGenerateImage } from "@/hooks/use-ads";
+import { useCreateAd, useGenerateAdCopy } from "@/hooks/use-ads";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Sparkles, Loader2, Image as ImageIcon, CheckCircle2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Sparkles, Loader2, Video, Film } from "lucide-react";
+import { UploadZone } from "@/components/UploadZone";
 import { motion, AnimatePresence } from "framer-motion";
+import { useMutation } from "@tanstack/react-query";
 
-// Extend schema for client form
 const formSchema = insertAdSchema.extend({
-  productName: z.string().optional(), // Helper field for AI
-  targetAudience: z.string().optional(), // Helper field for AI
+  productName: z.string().optional(),
+  targetAudience: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -41,326 +29,197 @@ export default function CreateAd() {
   const { t, language } = useLanguage();
   const { mutateAsync: createAd, isPending: isCreating } = useCreateAd();
   const { mutateAsync: generateCopy, isPending: isGeneratingCopy } = useGenerateAdCopy();
-  const { mutateAsync: generateImage, isPending: isGeneratingImage } = useGenerateImage();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
-
   const [aiMode, setAiMode] = useState(false);
-  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
+  const [videoScript, setVideoScript] = useState<any>(null);
+  const [generatingScript, setGeneratingScript] = useState(false);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: {
-      title: "",
-      description: "",
-      mediaUrl: "",
-      mediaType: "image",
-      language: language,
-      status: "active",
-      productName: "",
-      targetAudience: "",
+    defaultValues: { title: "", description: "", mediaUrl: "", mediaType: "image", language, status: "active", productName: "", targetAudience: "" },
+  });
+
+  const generateImageMutation = useMutation({
+    mutationFn: async (prompt: string) => {
+      const res = await fetch("/api/generate-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, size: "1024x1024" }), credentials: "include" });
+      if (!res.ok) throw new Error("فشل توليد الصورة");
+      const data = await res.json();
+      return data.url as string;
     },
   });
 
   const onSubmit = async (values: FormValues) => {
     try {
-      await createAd({
-        title: values.title,
-        description: values.description,
-        mediaUrl: values.mediaUrl,
-        mediaType: values.mediaType,
-        language: values.language,
-        status: "active",
-        userId: "temp", // Backend handles this from session
-      });
-      
-      toast({
-        title: t('create.success'),
-        className: "bg-green-500 text-white border-none",
-      });
-      
+      await createAd({ title: values.title, description: values.description, mediaUrl: values.mediaUrl, mediaType: values.mediaType, language: values.language, status: "active", userId: "temp" });
+      toast({ title: t('create.success'), className: "bg-green-500 text-white border-none" });
       setLocation("/ads");
     } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: t('common.error'),
-        description: error.message,
-      });
+      toast({ variant: "destructive", title: t('common.error'), description: error.message });
     }
   };
 
   const handleGenerateCopy = async () => {
     const { productName, targetAudience, language } = form.getValues();
-    if (!productName || !targetAudience) {
-      toast({
-        variant: "destructive",
-        title: "Missing Information",
-        description: "Please fill in Product Name and Target Audience for AI generation.",
-      });
-      return;
-    }
-
+    if (!productName || !targetAudience) { toast({ variant: "destructive", title: "أدخل اسم المنتج والجمهور المستهدف" }); return; }
     try {
-      const result = await generateCopy({
-        productName,
-        targetAudience,
-        language: language as 'ar' | 'en',
-      });
-      
+      const result = await generateCopy({ productName, targetAudience, language: language as 'ar' | 'en' });
       form.setValue("title", result.title);
       form.setValue("description", result.description);
-      toast({ title: "Content Generated!", description: "Review and edit as needed." });
-    } catch (error) {
-      toast({ variant: "destructive", title: "AI Generation Failed" });
-    }
+      toast({ title: "تم توليد المحتوى! ✨" });
+    } catch { toast({ variant: "destructive", title: "فشل التوليد" }); }
   };
 
   const handleGenerateImage = async () => {
     const { description, productName } = form.getValues();
     const prompt = description || `Advertisement for ${productName}`;
-    
     if (!prompt) return;
-
     try {
-      const url = await generateImage(prompt);
+      const url = await generateImageMutation.mutateAsync(prompt);
       form.setValue("mediaUrl", url);
-      setGeneratedImageUrl(url);
-      toast({ title: "Image Generated!" });
-    } catch (error) {
-      toast({ variant: "destructive", title: "Image Generation Failed" });
-    }
+      toast({ title: "تم توليد الصورة! 🎨" });
+    } catch { toast({ variant: "destructive", title: "فشل توليد الصورة" }); }
+  };
+
+  const handleGenerateVideoScript = async () => {
+    const { productName } = form.getValues();
+    if (!productName) { toast({ variant: "destructive", title: "أدخل اسم المنتج أولاً" }); return; }
+    setGeneratingScript(true);
+    try {
+      const res = await fetch("/api/ai/generate-video-script", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productName, duration: 30, language: form.getValues("language") }), credentials: "include" });
+      const data = await res.json();
+      setVideoScript(data);
+      toast({ title: "تم توليد سكريبت الفيديو! 🎬" });
+    } catch { toast({ variant: "destructive", title: "فشل التوليد" }); }
+    finally { setGeneratingScript(false); }
   };
 
   return (
     <div className="container max-w-3xl px-4 py-12">
-      <div className="mb-12">
-        <h1 className="text-5xl font-extrabold mb-4 tracking-tight">{t('create.title')}</h1>
-        <p className="text-muted-foreground text-xl">Craft your message with the power of artificial intelligence.</p>
-      </div>
-
-      <div className="bg-card border-none rounded-[2.5rem] p-8 md:p-12 shadow-2xl shadow-primary/5 ring-1 ring-border/50">
-        <div className="flex flex-col md:flex-row items-center gap-6 mb-12 bg-primary/5 p-8 rounded-[2rem] border border-primary/10">
-          <div className="flex-1 text-center md:text-left rtl:md:text-right">
-            <h3 className="text-xl font-bold flex items-center justify-center md:justify-start gap-3 mb-2">
-              <Sparkles className="w-6 h-6 text-primary animate-pulse" />
-              AI Creative Suite
-            </h3>
-            <p className="text-muted-foreground">Unlock professional copy and visuals with a single click.</p>
-          </div>
-          <Button 
-            variant={aiMode ? "default" : "outline"} 
-            onClick={() => setAiMode(!aiMode)}
-            className="rounded-full px-8 h-12 text-base font-semibold transition-all hover:scale-105 active:scale-95"
-          >
-            {aiMode ? "Suite Active" : "Activate AI"}
-          </Button>
+      <div className="flex items-center gap-3 mb-8">
+        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
+          <Sparkles className="w-6 h-6 text-white" />
         </div>
-
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            
-            {/* AI Helper Fields */}
-            <AnimatePresence>
-              {aiMode && (
-                <motion.div 
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="space-y-6 overflow-hidden border-b pb-6 mb-6"
-                >
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <FormField
-                      control={form.control}
-                      name="productName"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Product/Service Name</FormLabel>
-                          <FormControl>
-                            <Input placeholder="e.g. Smart Coffee Maker" {...field} />
-                          </FormControl>
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="targetAudience"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Target Audience</FormLabel>
-                          <FormControl>
-                            <Input placeholder="e.g. Coffee lovers, Office workers" {...field} />
-                          </FormControl>
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                  <Button 
-                    type="button" 
-                    onClick={handleGenerateCopy} 
-                    disabled={isGeneratingCopy}
-                    className="w-full bg-primary text-white border-none h-14 rounded-2xl text-lg font-bold shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all hover:-translate-y-1"
-                  >
-                    {isGeneratingCopy ? (
-                      <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                    ) : (
-                      <Sparkles className="w-5 h-5 mr-2" />
-                    )}
-                    Generate Professional Copy
-                  </Button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Standard Fields */}
-            <div className="space-y-8">
-              <FormField
-                control={form.control}
-                name="title"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="text-lg font-semibold">{t('create.title')}</FormLabel>
-                    <FormControl>
-                      <Input className="text-xl font-medium h-16 rounded-2xl px-6 border-none bg-muted/30 focus-visible:bg-muted/50 transition-colors" placeholder="e.g. Premium Coffee Beans" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="description"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="text-lg font-semibold">Description</FormLabel>
-                    <FormControl>
-                      <Textarea className="min-h-[160px] resize-none rounded-2xl p-6 border-none bg-muted/30 focus-visible:bg-muted/50 transition-colors text-lg" placeholder="Describe the value of your product..." {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            <div className="grid md:grid-cols-2 gap-6">
-              <FormField
-                control={form.control}
-                name="language"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Language</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select language" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="ar">العربية (Arabic)</SelectItem>
-                        <SelectItem value="en">English</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="mediaType"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Media Type</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="image">Image</SelectItem>
-                        <SelectItem value="video">Video</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            {/* Media URL / Generation */}
-            <div className="space-y-6 pt-10 border-t border-border/50">
-              <div className="flex items-center justify-between">
-                <FormLabel className="text-xl font-bold">Visual Assets</FormLabel>
-                {aiMode && (
-                  <Button 
-                    type="button" 
-                    variant="secondary" 
-                    size="sm"
-                    onClick={handleGenerateImage}
-                    disabled={isGeneratingImage || !form.getValues().description}
-                    className="rounded-full bg-secondary/10 text-secondary hover:bg-secondary/20 border-none px-4"
-                  >
-                    {isGeneratingImage ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ImageIcon className="w-4 h-4 mr-2" />}
-                    Generate Custom Visual
-                  </Button>
-                )}
-              </div>
-              
-              <FormField
-                control={form.control}
-                name="mediaUrl"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormControl>
-                      <Input className="h-14 rounded-2xl px-6 bg-muted/30 border-none" placeholder="Paste image/video URL or use AI..." {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {/* Preview */}
-              <AnimatePresence>
-                {(form.watch("mediaUrl") || generatedImageUrl) && (
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="rounded-[2rem] overflow-hidden border bg-muted/10 aspect-video relative group ring-1 ring-border/50"
-                  >
-                    <img 
-                      src={form.watch("mediaUrl")} 
-                      alt="Preview" 
-                      className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-                      onError={(e) => e.currentTarget.style.display = 'none'} 
-                    />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            <Button 
-              type="submit" 
-              size="lg" 
-              className="w-full text-xl h-16 mt-12 rounded-2xl shadow-xl shadow-primary/10 hover:shadow-primary/20 transition-all hover:-translate-y-1 active:scale-[0.98]"
-              disabled={isCreating}
-              data-testid="button-submit"
-            >
-              {isCreating ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                  {t('common.loading')}
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-5 h-5 mr-2" />
-                  {t('create.submit')}
-                </>
-              )}
-            </Button>
-          </form>
-        </Form>
+        <div>
+          <h1 className="text-3xl font-extrabold">{t('create.title')}</h1>
+          <p className="text-muted-foreground">أنشئ إعلاناً احترافياً بمساعدة الذكاء الاصطناعي</p>
+        </div>
       </div>
+
+      <div className="flex gap-3 mb-6">
+        <Button onClick={() => setAiMode(false)} variant={!aiMode ? "default" : "outline"} size="sm">✏️ يدوي</Button>
+        <Button onClick={() => setAiMode(true)} variant={aiMode ? "default" : "outline"} size="sm" className="gap-2">
+          <Sparkles className="w-4 h-4" /> AI مساعد
+        </Button>
+      </div>
+
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+          {aiMode && (
+            <AnimatePresence>
+              <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
+                <Card className="rounded-2xl border-primary/20 bg-primary/5">
+                  <CardHeader><CardTitle className="text-base flex items-center gap-2"><Sparkles className="w-4 h-4 text-primary" /> توليد بالذكاء الاصطناعي</CardTitle></CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField control={form.control} name="productName" render={({ field }) => (
+                        <FormItem><FormLabel>اسم المنتج</FormLabel><FormControl><Input placeholder="مثال: هاتف سامسونج" {...field} /></FormControl></FormItem>
+                      )} />
+                      <FormField control={form.control} name="targetAudience" render={({ field }) => (
+                        <FormItem><FormLabel>الجمهور المستهدف</FormLabel><FormControl><Input placeholder="مثال: شباب 18-35" {...field} /></FormControl></FormItem>
+                      )} />
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      <Button type="button" onClick={handleGenerateCopy} disabled={isGeneratingCopy} size="sm" className="gap-2">
+                        {isGeneratingCopy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                        توليد نص
+                      </Button>
+                      <Button type="button" onClick={handleGenerateImage} disabled={generateImageMutation.isPending} size="sm" variant="outline" className="gap-2">
+                        {generateImageMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "🎨"}
+                        توليد صورة AI
+                      </Button>
+                      <Button type="button" onClick={handleGenerateVideoScript} disabled={generatingScript} size="sm" variant="outline" className="gap-2">
+                        {generatingScript ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
+                        سكريبت فيديو
+                      </Button>
+                    </div>
+                    {videoScript && (
+                      <div className="bg-background rounded-xl p-4 text-sm space-y-2">
+                        <h4 className="font-bold">{videoScript.title}</h4>
+                        <p className="text-muted-foreground">{videoScript.script}</p>
+                        {videoScript.scenes && (
+                          <div className="space-y-2 mt-3">
+                            {videoScript.scenes.map((sc: any, i: number) => (
+                              <div key={i} className="border rounded-lg p-2">
+                                <span className="text-xs text-primary font-bold">{sc.time}s</span>
+                                <p className="text-xs mt-1"><strong>مشهد:</strong> {sc.visual}</p>
+                                <p className="text-xs text-muted-foreground"><strong>صوت:</strong> {sc.narration}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </motion.div>
+            </AnimatePresence>
+          )}
+
+          <FormField control={form.control} name="title" render={({ field }) => (
+            <FormItem><FormLabel>عنوان الإعلان</FormLabel><FormControl><Input placeholder="أدخل عنواناً جذاباً..." {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
+
+          <FormField control={form.control} name="description" render={({ field }) => (
+            <FormItem><FormLabel>وصف الإعلان</FormLabel><FormControl><Textarea placeholder="اكتب وصفاً مقنعاً..." rows={4} {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
+
+          <div className="grid grid-cols-2 gap-4">
+            <FormField control={form.control} name="mediaType" render={({ field }) => (
+              <FormItem><FormLabel>نوع الوسيط</FormLabel>
+                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                  <SelectContent>
+                    <SelectItem value="image">📷 صورة</SelectItem>
+                    <SelectItem value="video">🎬 فيديو</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="language" render={({ field }) => (
+              <FormItem><FormLabel>اللغة</FormLabel>
+                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                  <SelectContent>
+                    <SelectItem value="ar">🇸🇦 العربية</SelectItem>
+                    <SelectItem value="en">🇺🇸 English</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormItem>
+            )} />
+          </div>
+
+          <FormField control={form.control} name="mediaUrl" render={({ field }) => (
+            <FormItem>
+              <FormLabel>الصورة / الفيديو</FormLabel>
+              <UploadZone value={field.value} onChange={field.onChange} label="ارفع صورة أو فيديو مباشرة" />
+              {!field.value && (
+                <div className="flex items-center gap-2 mt-2">
+                  <div className="flex-1 h-px bg-border" />
+                  <span className="text-xs text-muted-foreground">أو أدخل رابطاً</span>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+              )}
+              {!field.value && <FormControl><Input placeholder="https://..." className="mt-2" onChange={e => field.onChange(e.target.value)} /></FormControl>}
+              <FormMessage />
+            </FormItem>
+          )} />
+
+          <Button type="submit" disabled={isCreating} size="lg" className="w-full h-14 text-lg gap-2 shadow-xl shadow-primary/25">
+            {isCreating ? <><Loader2 className="w-5 h-5 animate-spin" /> جاري النشر...</> : <>{t('create.submit')} 🚀</>}
+          </Button>
+        </form>
+      </Form>
     </div>
   );
 }

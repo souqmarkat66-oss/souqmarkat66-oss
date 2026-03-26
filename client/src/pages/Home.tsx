@@ -1,161 +1,165 @@
 import { useLanguage } from "@/components/LanguageProvider";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Link } from "wouter";
-import { ArrowRight, Sparkles, Zap, LayoutTemplate } from "lucide-react";
+import { ArrowRight, Sparkles, Radio, Users, Megaphone, TrendingUp, BarChart2 } from "lucide-react";
 import { motion } from "framer-motion";
-import { useAds } from "@/hooks/use-ads";
+import { useQuery } from "@tanstack/react-query";
 import { AdCard } from "@/components/AdCard";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Home() {
   const { t, language } = useLanguage();
-  const { data: ads, isLoading } = useAds(language);
+  const { data: ads, isLoading: adsLoading } = useQuery({ queryKey: ["/api/ads"], queryFn: () => fetch(`/api/ads?language=${language}`).then(r => r.json()) });
+  const { data: streams, isLoading: streamsLoading } = useQuery({ queryKey: ["/api/streams"], queryFn: () => fetch("/api/streams").then(r => r.json()) });
+  const { data: channels } = useQuery({ queryKey: ["/api/channels"], queryFn: () => fetch("/api/channels").then(r => r.json()) });
 
-  // Background pattern for visual interest
-  const bgPattern = `
-    radial-gradient(circle at 50% 0%, hsl(var(--primary) / 0.15) 0%, transparent 60%),
-    radial-gradient(circle at 100% 0%, hsl(var(--secondary) / 0.1) 0%, transparent 50%)
-  `;
+  const liveStreams = (streams || []).filter((s: any) => s.status === 'live').slice(0, 4);
+  const featuredAds = (ads || []).slice(0, 4);
+  const topChannels = (channels || []).slice(0, 6);
 
   return (
     <div className="min-h-screen">
-      {/* Hero Section */}
-      <section className="relative overflow-hidden pt-20 pb-32">
-        <div 
-          className="absolute inset-0 z-0 pointer-events-none"
-          style={{ background: bgPattern }} 
-        />
-        
-        <div className="container relative z-10 px-4">
-          <div className="flex flex-col lg:flex-row items-center gap-12 lg:gap-20">
-            <motion.div 
-              className="flex-1 text-center lg:text-start"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.6 }}
-            >
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6">
-                <Sparkles className="w-4 h-4" />
-                <span>AI-Powered Advertising</span>
-              </div>
-              
-              <h1 className="text-5xl lg:text-7xl font-extrabold tracking-tight mb-6 leading-[1.1]">
-                {t('hero.title')}
-              </h1>
-              
-              <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto lg:mx-0 leading-relaxed">
-                {t('hero.subtitle')}
-              </p>
-              
-              <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-                <Link href="/create">
-                  <Button size="lg" className="h-14 px-8 text-lg gap-2 shadow-xl shadow-primary/25 hover:shadow-primary/40 transition-all hover:-translate-y-1">
-                    {t('hero.cta')}
-                    <ArrowRight className="w-5 h-5 rtl:rotate-180" />
-                  </Button>
-                </Link>
-                <Link href="/ads">
-                  <Button size="lg" variant="outline" className="h-14 px-8 text-lg bg-background/50 backdrop-blur hover:bg-background">
-                    {t('nav.ads')}
-                  </Button>
-                </Link>
-              </div>
-            </motion.div>
-
-            {/* Hero Visual */}
-            <motion.div 
-              className="flex-1 w-full max-w-xl lg:max-w-none"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.8 }}
-            >
-              <div className="relative aspect-square lg:aspect-[4/3] rounded-3xl overflow-hidden shadow-2xl border border-white/20">
-                {/* Abstract marketing visual */}
-                <img 
-                  src="https://images.unsplash.com/photo-1557804506-669a67965ba0?q=80&w=2574&auto=format&fit=crop" 
-                  alt="Creative Workspace" 
-                  className="absolute inset-0 w-full h-full object-cover"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex items-end p-8">
-                  <div className="bg-white/10 backdrop-blur-md p-6 rounded-2xl border border-white/20 w-full">
-                    <div className="flex items-center gap-4 mb-3">
-                      <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-white font-bold text-lg">
-                        SA
-                      </div>
-                      <div className="text-white">
-                        <div className="font-bold">Smart Campaign #1</div>
-                        <div className="text-xs opacity-80">Generated by AI • 2 mins ago</div>
-                      </div>
-                    </div>
-                    <div className="h-2 bg-white/20 rounded-full overflow-hidden">
-                      <div className="h-full w-3/4 bg-secondary rounded-full" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
+      {/* Hero */}
+      <section className="relative overflow-hidden py-20 md:py-32">
+        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(circle at 50% 0%, hsl(174 100% 29% / 0.12) 0%, transparent 60%), radial-gradient(circle at 100% 0%, hsl(38 92% 50% / 0.08) 0%, transparent 50%)" }} />
+        <div className="container relative px-4 text-center">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6">
+              <Sparkles className="w-4 h-4" /> شبكة الإعلانات الذكية مع AI
+            </div>
+            <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight mb-6 leading-[1.1]">
+              {t('hero.title')}
+            </h1>
+            <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto leading-relaxed">
+              منصة متكاملة للإعلانات والبث المباشر وإدارة الحملات بذكاء اصطناعي
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <Link href="/create">
+                <Button size="lg" className="h-14 px-8 text-lg gap-2 shadow-xl shadow-primary/25 hover:shadow-primary/40 transition-all hover:-translate-y-1">
+                  {t('hero.cta')} <ArrowRight className="w-5 h-5 rtl:rotate-180" />
+                </Button>
+              </Link>
+              <Link href="/stream/start">
+                <Button size="lg" variant="outline" className="h-14 px-8 text-lg gap-2 bg-background/50 backdrop-blur">
+                  <Radio className="w-5 h-5 text-red-500 animate-pulse" /> ابدأ بثاً مباشراً
+                </Button>
+              </Link>
+              <Link href="/ads">
+                <Button size="lg" variant="ghost" className="h-14 px-8 text-lg">
+                  {t('nav.ads')}
+                </Button>
+              </Link>
+            </div>
+          </motion.div>
         </div>
       </section>
 
-      {/* Features Grid */}
-      <section className="py-20 bg-muted/30">
+      {/* Features */}
+      <section className="py-12 bg-muted/30">
         <div className="container px-4">
-          <div className="grid md:grid-cols-3 gap-8">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
-              { icon: Sparkles, title: "AI Copywriting", desc: "Generate compelling ad text in seconds using advanced language models." },
-              { icon: LayoutTemplate, title: "Smart Layouts", desc: "Beautifully designed templates that adapt to both Arabic and English." },
-              { icon: Zap, title: "Instant Publishing", desc: "Create, review, and publish your ads instantly to the marketplace." }
-            ].map((feature, i) => (
-              <motion.div
-                key={i}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.1 }}
-                className="bg-card p-8 rounded-2xl border shadow-sm hover:shadow-md transition-all"
-              >
-                <div className="w-12 h-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center mb-6">
-                  <feature.icon className="w-6 h-6" />
-                </div>
-                <h3 className="text-xl font-bold mb-3">{feature.title}</h3>
-                <p className="text-muted-foreground leading-relaxed">{feature.desc}</p>
-              </motion.div>
+              { icon: Radio, title: "بث مباشر", desc: "كاميرا وصوت وصورة مع دردشة حية", color: "text-red-500", bg: "bg-red-500/10", href: "/channels" },
+              { icon: Megaphone, title: "إعلانات ذكية", desc: "توليد محتوى بالذكاء الاصطناعي", color: "text-primary", bg: "bg-primary/10", href: "/create" },
+              { icon: BarChart2, title: "حملات مستهدفة", desc: "استهداف حقيقي مثل Facebook Ads", color: "text-blue-500", bg: "bg-blue-500/10", href: "/campaigns" },
+              { icon: TrendingUp, title: "إيرادات القنوات", desc: "اربح من قناتك مثل YouTube", color: "text-green-500", bg: "bg-green-500/10", href: "/revenue" },
+            ].map(f => (
+              <Link key={f.title} href={f.href}>
+                <motion.div whileHover={{ y: -4 }} className="cursor-pointer">
+                  <Card className="rounded-2xl hover:shadow-lg transition-all border-border/50 hover:border-primary/30">
+                    <CardContent className="p-5">
+                      <div className={`w-10 h-10 rounded-xl ${f.bg} flex items-center justify-center mb-3`}>
+                        <f.icon className={`w-5 h-5 ${f.color}`} />
+                      </div>
+                      <h3 className="font-bold mb-1">{f.title}</h3>
+                      <p className="text-sm text-muted-foreground">{f.desc}</p>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              </Link>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Latest Ads */}
-      <section className="py-20">
-        <div className="container px-4">
-          <div className="flex items-center justify-between mb-10">
-            <h2 className="text-3xl font-bold">{t('ads.title')}</h2>
-            <Link href="/ads">
-              <Button variant="ghost" className="gap-2">
-                {t('nav.ads')} <ArrowRight className="w-4 h-4 rtl:rotate-180" />
-              </Button>
-            </Link>
-          </div>
-
-          {isLoading ? (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="h-80 bg-muted rounded-2xl animate-pulse" />
+      {/* Live Streams */}
+      {liveStreams.length > 0 && (
+        <section className="py-12">
+          <div className="container px-4">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-extrabold flex items-center gap-2">
+                <Radio className="w-6 h-6 text-red-500 animate-pulse" /> البث المباشر الآن
+                <Badge className="bg-red-500 text-white animate-pulse text-xs">{liveStreams.length} مباشر</Badge>
+              </h2>
+              <Link href="/channels"><Button variant="ghost" size="sm" className="gap-1">عرض الكل <ArrowRight className="w-4 h-4 rtl:rotate-180" /></Button></Link>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {liveStreams.map((s: any, i: number) => (
+                <motion.div key={s.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+                  <Link href={`/streams/${s.id}`}>
+                    <Card className="overflow-hidden rounded-2xl cursor-pointer hover:shadow-xl hover:border-red-500/30 transition-all group">
+                      <div className="aspect-video bg-muted relative">
+                        {s.thumbnailUrl ? <img src={s.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform" alt="" /> : <div className="w-full h-full flex items-center justify-center"><Radio className="w-8 h-8 text-red-500 animate-pulse" /></div>}
+                        <Badge className="absolute top-2 end-2 bg-red-500 text-white gap-1 text-xs animate-pulse"><Radio className="w-2 h-2" /> مباشر</Badge>
+                        <div className="absolute bottom-2 start-2 bg-black/60 text-white text-xs px-2 py-0.5 rounded-full">{(s.viewerCount || 0).toLocaleString()} مشاهد</div>
+                      </div>
+                      <CardContent className="p-3">
+                        <h3 className="font-bold text-sm line-clamp-1">{s.title}</h3>
+                      </CardContent>
+                    </Card>
+                  </Link>
+                </motion.div>
               ))}
             </div>
-          ) : ads && ads.length > 0 ? (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {ads.slice(0, 3).map((ad, i) => (
-                <AdCard key={ad.id} ad={ad} index={i} />
-              ))}
+          </div>
+        </section>
+      )}
+
+      {/* Featured Ads */}
+      <section className="py-12 bg-muted/20">
+        <div className="container px-4">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-extrabold">{t('ads.title')}</h2>
+            <Link href="/ads"><Button variant="ghost" size="sm" className="gap-1">عرض الكل <ArrowRight className="w-4 h-4 rtl:rotate-180" /></Button></Link>
+          </div>
+          {adsLoading ? (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[...Array(4)].map((_, i) => <Skeleton key={i} className="aspect-[4/3] rounded-3xl" />)}
             </div>
           ) : (
-            <div className="text-center py-20 bg-muted/20 rounded-3xl border border-dashed">
-              <h3 className="text-xl font-medium text-muted-foreground">{t('ads.no_ads')}</h3>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {featuredAds.map((ad: any, i: number) => <AdCard key={ad.id} ad={ad} index={i} />)}
             </div>
           )}
         </div>
       </section>
+
+      {/* Top Channels */}
+      {topChannels.length > 0 && (
+        <section className="py-12">
+          <div className="container px-4">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-extrabold">🌟 أبرز القنوات</h2>
+              <Link href="/channels"><Button variant="ghost" size="sm" className="gap-1">عرض الكل <ArrowRight className="w-4 h-4 rtl:rotate-180" /></Button></Link>
+            </div>
+            <div className="flex gap-4 overflow-x-auto pb-2">
+              {topChannels.map((ch: any) => (
+                <Link key={ch.id} href={`/channels/${ch.id}`}>
+                  <motion.div whileHover={{ y: -4 }} className="flex flex-col items-center gap-2 min-w-[100px] cursor-pointer">
+                    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white text-xl font-bold border-4 border-background shadow-lg">
+                      {ch.avatarUrl ? <img src={ch.avatarUrl} className="w-full h-full rounded-full object-cover" alt="" /> : ch.name[0]}
+                    </div>
+                    <span className="text-xs font-medium text-center line-clamp-1 max-w-[80px]">{ch.name}</span>
+                    <span className="text-xs text-muted-foreground">{ch.subscriberCount?.toLocaleString()} مشترك</span>
+                  </motion.div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
