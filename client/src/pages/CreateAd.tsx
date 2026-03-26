@@ -23,6 +23,8 @@ import { EgyptTargetingMap } from "@/components/EgyptTargetingMap";
 const formSchema = insertAdSchema.extend({
   productName: z.string().optional(),
   targetAudience: z.string().optional(),
+  userId: z.string().optional(), // set server-side from auth
+  mediaUrl: z.string().optional().default(""),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -112,7 +114,7 @@ export default function CreateAd() {
     defaultValues: {
       title: "", description: "", mediaUrl: "", mediaType: "image",
       language: language as 'ar' | 'en', status: "active",
-      productName: "", targetAudience: "", targetRegion: ""
+      userId: "", productName: "", targetAudience: "", targetRegion: ""
     },
   });
 
@@ -578,7 +580,33 @@ export default function CreateAd() {
             </FormItem>
           )} />
 
-          <Button type="submit" disabled={isCreating} size="lg" className="w-full h-14 text-lg gap-2 shadow-xl shadow-primary/25" data-testid="btn-submit">
+          {/* Show any validation errors */}
+          {Object.keys(form.formState.errors).length > 0 && (
+            <div className="rounded-xl border border-red-300 bg-red-50 dark:bg-red-950/20 p-4 space-y-1" data-testid="form-errors">
+              <p className="text-sm font-bold text-red-600 dark:text-red-400 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4" /> يرجى تصحيح الأخطاء التالية:
+              </p>
+              {form.formState.errors.title && <p className="text-sm text-red-500">• العنوان: {String(form.formState.errors.title.message)}</p>}
+              {form.formState.errors.description && <p className="text-sm text-red-500">• الوصف: {String(form.formState.errors.description.message)}</p>}
+              {Object.entries(form.formState.errors)
+                .filter(([k]) => !['title','description','mediaUrl','userId','productName','targetAudience'].includes(k))
+                .map(([k, v]: any) => <p key={k} className="text-sm text-red-500">• {k}: {String(v?.message)}</p>)
+              }
+            </div>
+          )}
+
+          <Button
+            type="submit"
+            disabled={isCreating}
+            size="lg"
+            className="w-full h-14 text-lg gap-2 shadow-xl shadow-primary/25"
+            data-testid="btn-submit"
+            onClick={() => {
+              // Debug: log errors if form is invalid
+              const errs = form.formState.errors;
+              if (Object.keys(errs).length > 0) console.log("Form errors:", errs);
+            }}
+          >
             {isCreating ? <><Loader2 className="w-5 h-5 animate-spin" /> جاري النشر...</> : <>{t('create.submit')} 🚀</>}
           </Button>
         </form>

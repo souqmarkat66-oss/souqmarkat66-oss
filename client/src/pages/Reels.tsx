@@ -294,28 +294,81 @@ function CreateReelDialog() {
           <Plus className="w-6 h-6" />
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>إنشاء ريل جديد</DialogTitle>
+          <DialogTitle>🎬 إنشاء ريل جديد</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <input ref={fileRef} type="file" accept="video/*" onChange={handleUpload} className="hidden" />
-          {videoUrl ? (
-            <video src={videoUrl} className="w-full rounded-xl max-h-48 object-contain bg-black" controls />
-          ) : (
-            <button
-              type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
-              className="w-full border-2 border-dashed border-border rounded-xl p-8 flex flex-col items-center gap-2 hover:border-primary cursor-pointer"
-            >
-              {uploading ? <Loader2 className="w-8 h-8 animate-spin text-primary" /> : <><Upload className="w-8 h-8 text-muted-foreground" /><span className="text-sm">ارفع فيديو قصير (حتى 200MB)</span></>}
-            </button>
-          )}
-          <Input placeholder="عنوان الريل..." value={title} onChange={e => setTitle(e.target.value)} data-testid="input-reel-title" />
-          <Textarea placeholder="وصف (اختياري)..." value={description} onChange={e => setDescription(e.target.value)} rows={2} />
-          <Button className="w-full" onClick={() => createMutation.mutate()} disabled={!title || !videoUrl || createMutation.isPending} data-testid="btn-publish-reel">
-            {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin me-2" /> : null}
-            نشر الريل 🎬
+          {/* Step 1: Video */}
+          <div className="space-y-2">
+            <p className="text-sm font-bold text-muted-foreground">الخطوة 1: أضف الفيديو</p>
+            <input ref={fileRef} type="file" accept="video/*" onChange={handleUpload} className="hidden" />
+            {videoUrl ? (
+              <div className="relative">
+                <video src={videoUrl} className="w-full rounded-xl max-h-48 object-contain bg-black" controls />
+                <button
+                  onClick={() => setVideoUrl("")}
+                  className="absolute top-2 right-2 w-7 h-7 rounded-full bg-red-500 text-white flex items-center justify-center text-xs font-bold hover:bg-red-600"
+                >✕</button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <button
+                  type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
+                  className="w-full border-2 border-dashed border-primary/40 rounded-xl p-6 flex flex-col items-center gap-2 hover:border-primary hover:bg-primary/5 cursor-pointer transition-all"
+                  data-testid="btn-upload-video"
+                >
+                  {uploading
+                    ? <><Loader2 className="w-8 h-8 animate-spin text-primary" /><span className="text-sm font-medium text-primary">جاري الرفع...</span></>
+                    : <><Upload className="w-8 h-8 text-primary" /><span className="text-sm font-medium">ارفع فيديو من جهازك</span><span className="text-xs text-muted-foreground">MP4, MOV — حتى 200MB</span></>
+                  }
+                </button>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-px bg-border" />
+                  <span className="text-xs text-muted-foreground">أو أدخل رابط فيديو</span>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+                <Input
+                  placeholder="https://example.com/video.mp4"
+                  value={videoUrl}
+                  onChange={e => setVideoUrl(e.target.value)}
+                  dir="ltr"
+                  data-testid="input-video-url"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Step 2: Details */}
+          <div className="space-y-2">
+            <p className="text-sm font-bold text-muted-foreground">الخطوة 2: اكتب التفاصيل</p>
+            <Input
+              placeholder="عنوان الريل... (مطلوب)"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              className={!title && videoUrl ? "border-red-400 focus:border-red-500" : ""}
+              data-testid="input-reel-title"
+            />
+            {!title && videoUrl && <p className="text-xs text-red-500">⚠ العنوان مطلوب</p>}
+            <Textarea placeholder="وصف (اختياري)..." value={description} onChange={e => setDescription(e.target.value)} rows={2} />
+          </div>
+
+          <Button
+            className="w-full h-12 text-base gap-2"
+            onClick={() => createMutation.mutate()}
+            disabled={!title.trim() || !videoUrl.trim() || createMutation.isPending}
+            data-testid="btn-publish-reel"
+          >
+            {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "🎬"}
+            {createMutation.isPending ? "جاري النشر..." : "نشر الريل الآن"}
           </Button>
+
+          {/* Why disabled hint */}
+          {(!title.trim() || !videoUrl.trim()) && (
+            <p className="text-xs text-center text-muted-foreground">
+              {!videoUrl.trim() ? "⬆ ارفع فيديو أو أدخل رابط أولاً" : "✏ أدخل عنواناً للريل"}
+            </p>
+          )}
         </div>
       </DialogContent>
     </Dialog>
