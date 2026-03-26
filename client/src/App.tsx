@@ -22,6 +22,7 @@ import Revenue from "@/pages/Revenue";
 import Reels from "@/pages/Reels";
 import Login from "@/pages/Login";
 import MyContent from "@/pages/MyContent";
+import EmbedGuide from "@/pages/EmbedGuide";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -74,6 +75,7 @@ function Router() {
               </Route>
               <Route path="/login" component={Login} />
               <Route path="/my-content" component={MyContent} />
+              <Route path="/embed-guide" component={EmbedGuide} />
               <Route component={NotFound} />
             </Switch>
           </main>
@@ -179,6 +181,7 @@ function AppFooter() {
               <li><a href="/reels" className="hover:text-foreground transition-colors">الريلز</a></li>
               <li><a href="/campaigns" className="hover:text-foreground transition-colors">الحملات الإعلانية</a></li>
               <li><a href="/revenue" className="hover:text-foreground transition-colors">الإيرادات</a></li>
+              <li><a href="/embed-guide" className="hover:text-foreground transition-colors font-bold text-primary">دليل ربط الإعلانات</a></li>
             </ul>
           </div>
         </div>

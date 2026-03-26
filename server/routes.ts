@@ -535,6 +535,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(campaigns);
   });
 
+  app.get("/api/campaigns/random", async (req, res) => {
+    const campaigns = await storage.getActiveCampaigns();
+    if (!campaigns || campaigns.length === 0) return res.status(404).json({ message: "No active campaigns" });
+    const random = campaigns[Math.floor(Math.random() * campaigns.length)];
+    res.json(random);
+  });
+
   app.get("/api/campaigns/:id", isAuthenticated, async (req: any, res) => {
     const campaign = await storage.getAdCampaign(Number(req.params.id));
     if (!campaign) return res.status(404).json({ message: "Not found" });
