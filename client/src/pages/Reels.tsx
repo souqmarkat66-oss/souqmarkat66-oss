@@ -12,6 +12,7 @@ import { EditReelDialog } from "@/components/EditReelDialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiRequest } from "@/lib/queryClient";
 import { useTTS } from "@/hooks/use-tts";
+import { useAuth } from "@/hooks/use-auth";
 
 type Reel = {
   id: number;
@@ -488,7 +489,7 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete }: {
   );
 }
 
-function CreateReelDialog() {
+function CreateReelDialog({ centered = false }: { centered?: boolean }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -596,9 +597,15 @@ function CreateReelDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="icon" className="fixed bottom-20 left-4 z-50 w-14 h-14 rounded-full shadow-xl" data-testid="btn-create-reel">
-          <Plus className="w-6 h-6" />
-        </Button>
+        {centered ? (
+          <Button className="gap-2 px-6 py-3 text-base rounded-2xl shadow-xl bg-primary hover:bg-primary/90" data-testid="btn-create-reel-centered">
+            <Plus className="w-5 h-5" /> نشر ريل جديد
+          </Button>
+        ) : (
+          <Button size="icon" className="fixed bottom-20 left-4 z-50 w-14 h-14 rounded-full shadow-xl" data-testid="btn-create-reel">
+            <Plus className="w-6 h-6" />
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="max-h-[92vh] overflow-y-auto">
         <DialogHeader>
@@ -887,7 +894,7 @@ export default function Reels() {
   const containerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { data: user } = useQuery<any>({ queryKey: ['/api/auth/user'] });
+  const { user } = useAuth();
   const { data: reels = [], isLoading } = useQuery<Reel[]>({
     queryKey: ['/api/reels'],
     queryFn: () => fetch('/api/reels', { credentials: 'include' }).then(r => r.json()),
@@ -921,8 +928,8 @@ export default function Reels() {
       <div className="h-screen bg-black flex flex-col items-center justify-center text-white gap-4">
         <div className="text-6xl">🎬</div>
         <h2 className="text-2xl font-bold">لا توجد ريلز بعد</h2>
-        <p className="text-white/60">كن أول من ينشر ريل!</p>
-        {user && <CreateReelDialog />}
+        <p className="text-white/60 text-center px-8">كن أول من ينشر ريل واجذب المتابعين!</p>
+        {user && <CreateReelDialog centered />}
       </div>
     );
   }

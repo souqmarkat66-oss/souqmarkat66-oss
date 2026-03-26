@@ -230,32 +230,34 @@ function AuthenticatedContent({ user }: { user: any }) {
                   {/* Overlay */}
                   <div className="absolute inset-0 bg-black/40 group-hover:bg-black/60 transition-all" />
 
-                  {/* Action buttons — shown on hover */}
-                  <div className="absolute top-2 left-2 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                  {/* Action buttons — always visible */}
+                  <div className="absolute top-2 inset-x-0 flex justify-between px-2 z-10">
                     <button
-                      className="w-8 h-8 rounded-full bg-blue-500/90 text-white flex items-center justify-center shadow hover:bg-blue-600"
+                      className="w-8 h-8 rounded-full bg-blue-500/90 text-white flex items-center justify-center shadow active:scale-95"
                       title="تعديل"
                       onClick={e => { e.stopPropagation(); setEditingReel(reel); }}
                       data-testid={`btn-edit-reel-${reel.id}`}
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
-                    <button
-                      className="w-8 h-8 rounded-full bg-red-500/90 text-white flex items-center justify-center shadow hover:bg-red-600"
-                      title="حذف"
-                      onClick={e => { e.stopPropagation(); if (confirm("حذف هذا الريل؟")) deleteReelMut.mutate(reel.id); }}
-                      data-testid={`btn-delete-reel-${reel.id}`}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                    <Link href="/reels">
+                    <div className="flex gap-1.5">
+                      <Link href="/reels">
+                        <button
+                          className="w-8 h-8 rounded-full bg-white/70 text-gray-700 flex items-center justify-center shadow active:scale-95"
+                          title="عرض"
+                        >
+                          <Play className="w-3.5 h-3.5" />
+                        </button>
+                      </Link>
                       <button
-                        className="w-8 h-8 rounded-full bg-white/80 text-gray-700 flex items-center justify-center shadow hover:bg-white"
-                        title="عرض"
+                        className="w-8 h-8 rounded-full bg-red-500/90 text-white flex items-center justify-center shadow active:scale-95"
+                        title="حذف"
+                        onClick={e => { e.stopPropagation(); if (confirm("حذف هذا الريل؟")) deleteReelMut.mutate(reel.id); }}
+                        data-testid={`btn-delete-reel-${reel.id}`}
                       >
-                        <Play className="w-3.5 h-3.5" />
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
-                    </Link>
+                    </div>
                   </div>
 
                   {/* Bottom info */}
