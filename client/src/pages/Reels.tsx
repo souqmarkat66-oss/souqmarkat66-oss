@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown, Image as ImageIcon, Film, Music, ChevronLeft, ChevronRight, Pause } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiRequest } from "@/lib/queryClient";
+import { useTTS } from "@/hooks/use-tts";
 
 type Reel = {
   id: number;
@@ -473,6 +474,7 @@ function CreateReelDialog() {
   const fileAudioRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const tts = useTTS();
 
   // Computed final videoUrl value to store
   const finalVideoUrl = mediaTypeTab === 'image'
@@ -485,12 +487,18 @@ function CreateReelDialog() {
       title,
       description,
       videoUrl: finalVideoUrl,
-      audioUrl: mediaTypeTab === 'image' && audioUrl.trim() ? audioUrl.trim() : undefined,
+      audioUrl: (() => {
+        const explicit = audioUrl.trim();
+        if (explicit) return explicit;
+        if (tts.audioUrl) return tts.audioUrl;
+        return undefined;
+      })(),
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/reels'] });
       setOpen(false);
       setTitle(""); setDescription(""); setVideoUrl(""); setImageUrls([]); setAudioUrl("");
+      tts.reset();
       toast({ title: "🎉 تم النشر بنجاح!" });
     },
     onError: (err: any) => toast({ variant: "destructive", title: "خطأ", description: err.message }),
@@ -708,7 +716,58 @@ function CreateReelDialog() {
               data-testid="input-reel-title"
             />
             {!title && hasMedia && <p className="text-xs text-red-500">⚠ العنوان مطلوب</p>}
-            <Textarea placeholder="وصف أو تعليق (اختياري)..." value={description} onChange={e => setDescription(e.target.value)} rows={2} />
+            <Textarea
+              placeholder="وصف أو تعليق (اختياري) — سيُحوَّل لصوت..."
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={2}
+            />
+
+            {/* 🎤 AI Voice Generation */}
+            {title.trim() && (
+              <div className="rounded-xl bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border border-purple-200/50 dark:border-purple-700/30 p-3 space-y-2">
+                <p className="text-xs font-bold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
+                  🎙 توليد صوت بالذكاء الاصطناعي
+                </p>
+                {tts.audioUrl ? (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 bg-green-500/10 rounded-lg p-2">
+                      <Music className="w-4 h-4 text-green-500 flex-shrink-0" />
+                      <span className="text-xs text-green-700 dark:text-green-300 font-medium flex-1">صوت جاهز ✅</span>
+                      <audio src={tts.audioUrl} controls className="h-7 flex-1" style={{ height: 28 }} />
+                      <button
+                        onClick={() => { tts.reset(); }}
+                        className="w-6 h-6 rounded-full bg-red-100 text-red-500 text-xs flex items-center justify-center hover:bg-red-200"
+                        title="حذف الصوت المولّد"
+                      >✕</button>
+                    </div>
+                    <p className="text-xs text-muted-foreground text-center">سيُضاف الصوت تلقائياً عند النشر 🚀</p>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={tts.loading || !title.trim()}
+                    onClick={async () => {
+                      const text = description.trim()
+                        ? `${title}. ${description}`
+                        : title;
+                      try {
+                        await tts.generate(text, "nova", true);
+                      } catch {
+                        toast({ variant: "destructive", title: "فشل توليد الصوت", description: "تأكد من اتصالك" });
+                      }
+                    }}
+                    className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-purple-600 text-white text-sm font-bold hover:bg-purple-700 disabled:opacity-50 transition-all"
+                    data-testid="btn-generate-voice"
+                  >
+                    {tts.loading
+                      ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري التوليد بالذكاء الاصطناعي...</>
+                      : <>🎤 حوّل النص لصوت عربي مصري</>
+                    }
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <Button
@@ -719,7 +778,7 @@ function CreateReelDialog() {
           >
             {createMutation.isPending
               ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري النشر...</>
-              : <>{mediaTypeTab === 'image' ? '🖼' : '🎬'} نشر الآن</>
+              : <>{mediaTypeTab === 'image' ? '🖼' : '🎬'} نشر الريل الآن {tts.audioUrl ? '🎵' : ''}</>
             }
           </Button>
 

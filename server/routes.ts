@@ -957,6 +957,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ─── AI TEXT-TO-SPEECH (Egyptian Arabic) ─────────────────────
+  app.post("/api/ai/tts", isAuthenticated, async (req: any, res) => {
+    try {
+      const { text, voice = "alloy" } = req.body;
+      if (!text || text.trim().length < 2) return res.status(400).json({ message: "النص مطلوب" });
+
+      const response = await openai.audio.speech.create({
+        model: "tts-1-hd",
+        voice: voice as any,
+        input: text.trim(),
+        speed: 0.9,
+      });
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const filename = `tts-${Date.now()}.mp3`;
+      const savePath = path.join(process.cwd(), 'uploads', filename);
+      fs.writeFileSync(savePath, buffer);
+      res.json({ url: `/uploads/${filename}` });
+    } catch (error: any) {
+      res.status(500).json({ message: "فشل توليد الصوت: " + error.message });
+    }
+  });
+
   // ─── PAYMENT NOTIFICATIONS (from ad buyers) ──────────────────
   app.post("/api/payment-notifications", async (req, res) => {
     try {

@@ -5,12 +5,13 @@ import { useLanguage } from "./LanguageProvider";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, MessageCircle } from "lucide-react";
+import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square } from "lucide-react";
 import { format } from "date-fns";
 import { ar, enUS } from "date-fns/locale";
 import { useAuth } from "@/hooks/use-auth";
 import { useDeleteAd } from "@/hooks/use-ads";
 import { useToast } from "@/hooks/use-toast";
+import { useTTS } from "@/hooks/use-tts";
 import { motion } from "framer-motion";
 import { LikeCommentBar } from "./LikeCommentBar";
 
@@ -22,6 +23,7 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
+  const tts = useTTS();
 
   const isOwner = user?.id === ad.userId;
   const isVideo = ad.mediaType === 'video';
@@ -209,6 +211,35 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
           </div>
 
           <LikeCommentBar targetType="ad" targetId={ad.id} initialLikes={ad.likesCount || 0} />
+
+          {/* 🔊 Listen (TTS) button */}
+          {user && (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (tts.playing) { tts.stop(); return; }
+                const text = `${ad.title}. ${ad.description || ''}`;
+                tts.generate(text, "nova", true).catch(() =>
+                  toast({ variant: "destructive", title: "فشل تشغيل الصوت", description: "تأكد من اتصالك بالإنترنت" })
+                );
+              }}
+              disabled={tts.loading}
+              className={`mt-2 w-full flex items-center justify-center gap-2 rounded-full py-2 text-sm font-bold border transition-all ${
+                tts.playing
+                  ? 'bg-red-50 dark:bg-red-900/20 border-red-200 text-red-600 hover:bg-red-100'
+                  : 'bg-primary/5 border-primary/20 text-primary hover:bg-primary/10'
+              }`}
+              data-testid={`btn-listen-ad-${ad.id}`}
+            >
+              {tts.loading
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري التوليد...</>
+                : tts.playing
+                ? <><Square className="w-3.5 h-3.5 fill-current" /> إيقاف</>
+                : <><Headphones className="w-4 h-4" /> استمع بالعربي 🎙</>
+              }
+            </button>
+          )}
 
           {/* WhatsApp CTA */}
           {ad.whatsappNumber && (
