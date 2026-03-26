@@ -424,9 +424,41 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ================================================================
   // SOCIAL FEATURES - LIKES & COMMENTS
   // ================================================================
+  // Helper: create notification silently
+  async function createNotification(userId: string, type: string, title: string, body: string, link?: string) {
+    try {
+      await db.execute(
+        sql`INSERT INTO notifications (user_id, type, title, body, link) VALUES (${userId}, ${type}, ${title}, ${body}, ${link ?? null})`
+      );
+    } catch {}
+  }
+
   app.post("/api/likes", isAuthenticated, async (req: any, res) => {
     const { targetType, targetId } = req.body;
-    const result = await storage.toggleLike(req.user.claims.sub, targetType, Number(targetId));
+    const userId = req.user.claims.sub;
+    const result = await storage.toggleLike(userId, targetType, Number(targetId));
+
+    // Send notification to content owner (async, don't block)
+    if (result.liked) {
+      try {
+        let ownerRow: any = null;
+        let link = "";
+        if (targetType === "ad") {
+          const r = await db.execute(sql`SELECT user_id FROM ads WHERE id = ${targetId}`);
+          ownerRow = r.rows[0]; link = `/ads/${targetId}`;
+        } else if (targetType === "reel") {
+          const r = await db.execute(sql`SELECT user_id FROM reels WHERE id = ${targetId}`);
+          ownerRow = r.rows[0]; link = `/reels`;
+        } else if (targetType === "stream") {
+          const r = await db.execute(sql`SELECT user_id FROM live_streams WHERE id = ${targetId}`);
+          ownerRow = r.rows[0]; link = `/streams/${targetId}`;
+        }
+        if (ownerRow && ownerRow.user_id !== userId) {
+          const name = req.user.claims?.first_name || "مستخدم";
+          await createNotification(ownerRow.user_id, "like", "إعجاب جديد ❤️", `${name} أعجب بمحتواك`, link);
+        }
+      } catch {}
+    }
     res.json(result);
   });
 
@@ -447,6 +479,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const userName = req.user.claims?.first_name || req.user.claims?.name || "مستخدم";
       const input = insertCommentSchema.parse({ ...req.body, userId, userName });
       const comment = await storage.createComment(input);
+      // Notify content owner
+      try {
+        const { targetType, targetId } = req.body;
+        let ownerRow: any = null; let link = "";
+        if (targetType === "ad") {
+          const r = await db.execute(sql`SELECT user_id FROM ads WHERE id = ${targetId}`);
+          ownerRow = r.rows[0]; link = `/ads/${targetId}`;
+        } else if (targetType === "reel") {
+          const r = await db.execute(sql`SELECT user_id FROM reels WHERE id = ${targetId}`);
+          ownerRow = r.rows[0]; link = `/reels`;
+        }
+        if (ownerRow && ownerRow.user_id !== userId) {
+          await createNotification(ownerRow.user_id, "comment", "تعليق جديد 💬", `${userName}: ${String(req.body.content).slice(0, 60)}`, link);
+        }
+      } catch {}
       res.status(201).json(comment);
     } catch (err: any) {
       res.status(400).json({ message: err.message });
@@ -1120,6 +1167,210 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
+  });
+
+  // ================================================================
+  // NOTIFICATIONS ROUTES
+  // ================================================================
+  app.get("/api/notifications", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const result = await db.execute(
+        sql`SELECT * FROM notifications WHERE user_id = ${userId} ORDER BY created_at DESC LIMIT 50`
+      );
+      res.json(result.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/notifications/unread-count", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const result = await db.execute(
+        sql`SELECT COUNT(*) as count FROM notifications WHERE user_id = ${userId} AND is_read = false`
+      );
+      res.json({ count: Number(result.rows[0]?.count || 0) });
+    } catch { res.json({ count: 0 }); }
+  });
+
+  app.put("/api/notifications/read-all", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      await db.execute(sql`UPDATE notifications SET is_read = true WHERE user_id = ${userId}`);
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.put("/api/notifications/:id/read", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      await db.execute(sql`UPDATE notifications SET is_read = true WHERE id = ${req.params.id} AND user_id = ${userId}`);
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.delete("/api/notifications/:id", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      await db.execute(sql`DELETE FROM notifications WHERE id = ${req.params.id} AND user_id = ${userId}`);
+      res.status(204).send();
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ================================================================
+  // DIRECT MESSAGES ROUTES
+  // ================================================================
+  app.get("/api/messages", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      // Get all conversation partners
+      const result = await db.execute(
+        sql`SELECT DISTINCT ON (partner_id)
+              partner_id,
+              message,
+              created_at,
+              is_read,
+              from_user_id,
+              ad_id
+            FROM (
+              SELECT
+                CASE WHEN from_user_id = ${userId} THEN to_user_id ELSE from_user_id END as partner_id,
+                message, created_at, is_read, from_user_id, ad_id
+              FROM direct_messages
+              WHERE from_user_id = ${userId} OR to_user_id = ${userId}
+              ORDER BY created_at DESC
+            ) sub
+            ORDER BY partner_id, created_at DESC`
+      );
+      res.json(result.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/messages/:partnerId", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const { partnerId } = req.params;
+    try {
+      const result = await db.execute(
+        sql`SELECT * FROM direct_messages
+            WHERE (from_user_id = ${userId} AND to_user_id = ${partnerId})
+               OR (from_user_id = ${partnerId} AND to_user_id = ${userId})
+            ORDER BY created_at ASC LIMIT 100`
+      );
+      // Mark as read
+      await db.execute(
+        sql`UPDATE direct_messages SET is_read = true
+            WHERE to_user_id = ${userId} AND from_user_id = ${partnerId} AND is_read = false`
+      );
+      res.json(result.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/messages", isAuthenticated, async (req: any, res) => {
+    const fromUserId = req.user.claims.sub;
+    const { toUserId, message, adId } = req.body;
+    if (!toUserId || !message) return res.status(400).json({ message: "Missing required fields" });
+    // Anti-spam: max 10 messages per minute per user
+    try {
+      const spamCheck = await db.execute(
+        sql`SELECT COUNT(*) as count FROM direct_messages WHERE from_user_id = ${fromUserId} AND created_at > now() - interval '1 minute'`
+      );
+      if (Number(spamCheck.rows[0]?.count) > 10) {
+        return res.status(429).json({ message: "الرسائل كثيرة جداً، انتظر قليلاً" });
+      }
+      const result = await db.execute(
+        sql`INSERT INTO direct_messages (from_user_id, to_user_id, ad_id, message)
+            VALUES (${fromUserId}, ${toUserId}, ${adId ?? null}, ${message})
+            RETURNING *`
+      );
+      // Send notification to recipient
+      const senderName = req.user.claims?.first_name || "مستخدم";
+      await createNotification(toUserId, "comment", "رسالة جديدة 📩", `${senderName}: ${String(message).slice(0, 60)}`, `/messages`);
+      res.status(201).json(result.rows[0]);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/messages/unread-count", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const result = await db.execute(
+        sql`SELECT COUNT(*) as count FROM direct_messages WHERE to_user_id = ${userId} AND is_read = false`
+      );
+      res.json({ count: Number(result.rows[0]?.count || 0) });
+    } catch { res.json({ count: 0 }); }
+  });
+
+  // ================================================================
+  // USER PROFILE ROUTES
+  // ================================================================
+  app.get("/api/profile/:userId", async (req, res) => {
+    const { userId } = req.params;
+    try {
+      const [userRow, adsRow, channelRow] = await Promise.all([
+        db.execute(sql`SELECT id, first_name, last_name, profile_image_url, created_at FROM users WHERE id = ${userId}`),
+        db.execute(sql`SELECT COUNT(*) as count, SUM(views_count) as views, SUM(likes_count) as likes FROM ads WHERE user_id = ${userId} AND status = 'active'`),
+        db.execute(sql`SELECT * FROM channels WHERE user_id = ${userId} LIMIT 1`),
+      ]);
+      const user = userRow.rows[0];
+      if (!user) return res.status(404).json({ message: "User not found" });
+      const stats = adsRow.rows[0];
+      const channel = channelRow.rows[0];
+      res.json({ user, stats, channel });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/profile/:userId/ads", async (req, res) => {
+    const { userId } = req.params;
+    try {
+      const result = await db.execute(
+        sql`SELECT * FROM ads WHERE user_id = ${userId} AND status = 'active' ORDER BY created_at DESC LIMIT 20`
+      );
+      res.json(result.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ================================================================
+  // FRAUD DETECTION ROUTES
+  // ================================================================
+  app.get("/api/fraud/check-ad", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const title = String(req.query.title || "");
+    const warnings: string[] = [];
+    try {
+      // Check ad creation rate (max 10 per day)
+      const rateCheck = await db.execute(
+        sql`SELECT COUNT(*) as count FROM ads WHERE user_id = ${userId} AND created_at > now() - interval '24 hours'`
+      );
+      if (Number(rateCheck.rows[0]?.count) >= 10) {
+        warnings.push("تجاوزت الحد اليومي للنشر (10 إعلانات في 24 ساعة)");
+      }
+      // Check for duplicate title
+      if (title.length > 3) {
+        const dupCheck = await db.execute(
+          sql`SELECT COUNT(*) as count FROM ads WHERE LOWER(title) = LOWER(${title}) AND user_id = ${userId}`
+        );
+        if (Number(dupCheck.rows[0]?.count) > 0) {
+          warnings.push("لديك إعلان بنفس العنوان مسبقاً");
+        }
+      }
+      res.json({ warnings, safe: warnings.length === 0 });
+    } catch { res.json({ warnings: [], safe: true }); }
+  });
+
+  app.post("/api/fraud/report", isAuthenticated, async (req: any, res) => {
+    const reporterId = req.user.claims.sub;
+    const { targetType, targetId, reason } = req.body;
+    try {
+      await db.execute(
+        sql`INSERT INTO reports (reporter_id, target_type, target_id, reason) VALUES (${reporterId}, ${targetType}, ${targetId}, ${reason})`
+      );
+      // Alert admin
+      await createNotification(
+        "54219806", "fraud_alert",
+        "🚨 بلاغ احتيال جديد",
+        `بلاغ على ${targetType} #${targetId}: ${String(reason).slice(0, 80)}`,
+        `/admin`
+      );
+      res.status(201).json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   return httpServer;

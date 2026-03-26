@@ -9,14 +9,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { ArrowLeft, Calendar, Share2, PhoneCall, CreditCard, Banknote, MessageCircle, ExternalLink, CheckCircle, Volume2, VolumeX, Play, ChevronLeft, ChevronRight, Smartphone, Download } from "lucide-react";
-import { Link } from "wouter";
+import { ArrowLeft, Calendar, Share2, PhoneCall, CreditCard, Banknote, MessageCircle, ExternalLink, CheckCircle, Volume2, VolumeX, Play, ChevronLeft, ChevronRight, Smartphone, Download, AlertTriangle, User } from "lucide-react";
+import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 import { LikeCommentBar } from "@/components/LikeCommentBar";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { Textarea } from "@/components/ui/textarea";
 
 const PLATFORM_PAYMENTS = [
   { label: "فودافون كاش", number: "01098553911", color: "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900 text-red-700 dark:text-red-400", emoji: "📱" },
@@ -26,11 +27,44 @@ const PLATFORM_PAYMENTS = [
 
 function PaymentSection({ ad, user }: { ad: any; user: any }) {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [payerName, setPayerName] = useState("");
   const [payerPhone, setPayerPhone] = useState("");
   const [paidAmount, setPaidAmount] = useState(ad.priceEGP?.toString() || "");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [open, setOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+  const [msgOpen, setMsgOpen] = useState(false);
+  const [msgText, setMsgText] = useState("");
+
+  const sendMsgMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/messages", {
+      toUserId: ad.userId,
+      message: msgText,
+      adId: ad.id,
+    }),
+    onSuccess: () => {
+      setMsgOpen(false);
+      setMsgText("");
+      toast({ title: "✅ تم إرسال رسالتك للبائع!" });
+    },
+    onError: () => toast({ variant: "destructive", title: "خطأ في إرسال الرسالة" }),
+  });
+
+  const reportMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/fraud/report", {
+      targetType: "ad",
+      targetId: ad.id,
+      reason: reportReason,
+    }),
+    onSuccess: () => {
+      setReportOpen(false);
+      setReportReason("");
+      toast({ title: "✅ تم إرسال البلاغ. شكراً لمساعدتنا في حماية المنصة." });
+    },
+    onError: () => toast({ variant: "destructive", title: "خطأ في إرسال البلاغ" }),
+  });
 
   const confirmMutation = useMutation({
     mutationFn: () => apiRequest('/api/payment-notifications', 'POST', {
@@ -46,6 +80,25 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
 
   return (
     <div className="mt-6 space-y-4">
+
+      {/* Seller Actions */}
+      {user && ad.userId !== user?.id && (
+        <div className="flex gap-2">
+          <Button
+            className="flex-1 gap-2 bg-green-500 hover:bg-green-600 text-white rounded-xl h-10"
+            onClick={() => setMsgOpen(true)}
+            data-testid="btn-message-seller"
+          >
+            <MessageCircle className="w-4 h-4" /> راسل البائع
+          </Button>
+          <a href={`/profile/${ad.userId}`} className="flex-1">
+            <Button variant="outline" className="w-full gap-2 rounded-xl h-10">
+              <User className="w-4 h-4" /> ملف البائع
+            </Button>
+          </a>
+        </div>
+      )}
+
       {/* Price Badge */}
       {ad.priceEGP > 0 && (
         <div className="flex items-center gap-3 p-4 bg-gradient-to-r from-green-500/10 to-emerald-500/5 border border-green-300 dark:border-green-800 rounded-2xl">
@@ -164,6 +217,17 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
         </div>
       </div>
 
+      {/* Report Ad Button */}
+      {user && ad.userId !== user?.id && (
+        <button
+          onClick={() => setReportOpen(true)}
+          className="w-full flex items-center justify-center gap-2 py-2 text-xs text-muted-foreground hover:text-red-500 transition-colors"
+          data-testid="btn-report-ad"
+        >
+          <AlertTriangle className="w-3 h-3" /> الإبلاغ عن إعلان مشبوه
+        </button>
+      )}
+
       {/* Payment Confirmation Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent dir="rtl">
@@ -193,6 +257,68 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
               disabled={!payerName || !payerPhone || !paidAmount || confirmMutation.isPending}
             >
               <CheckCircle className="w-4 h-4" /> أرسل تأكيد الدفع
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Message Seller Dialog */}
+      <Dialog open={msgOpen} onOpenChange={setMsgOpen}>
+        <DialogContent dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageCircle className="w-5 h-5 text-green-500" /> مراسلة البائع
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-muted/40 rounded-xl p-3">
+              <p className="text-sm font-medium">بخصوص إعلان: {ad.title}</p>
+            </div>
+            <Textarea
+              value={msgText}
+              onChange={e => setMsgText(e.target.value)}
+              placeholder="اكتب سؤالك أو استفساريك هنا..."
+              className="min-h-[120px]"
+              data-testid="input-msg-seller"
+            />
+            <Button
+              className="w-full gap-2 bg-green-500 hover:bg-green-600 text-white"
+              onClick={() => sendMsgMutation.mutate()}
+              disabled={!msgText.trim() || sendMsgMutation.isPending}
+            >
+              <MessageCircle className="w-4 h-4" /> إرسال الرسالة
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Report Dialog */}
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="w-5 h-5" /> بلاغ عن إعلان مشبوه
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-yellow-50 dark:bg-yellow-950/20 rounded-xl p-3">
+              <p className="text-sm text-yellow-700 dark:text-yellow-400">
+                ⚠️ البلاغات الكاذبة تُعرّضك للتعليق. استخدم هذه الميزة بمسؤولية.
+              </p>
+            </div>
+            <Textarea
+              value={reportReason}
+              onChange={e => setReportReason(e.target.value)}
+              placeholder="مثال: إعلان احتيال، سعر مبالغ فيه، محتوى مضلل..."
+              className="min-h-[100px]"
+              data-testid="input-report-reason"
+            />
+            <Button
+              className="w-full gap-2 bg-red-500 hover:bg-red-600 text-white"
+              onClick={() => reportMutation.mutate()}
+              disabled={!reportReason.trim() || reportMutation.isPending}
+            >
+              إرسال البلاغ
             </Button>
           </div>
         </DialogContent>

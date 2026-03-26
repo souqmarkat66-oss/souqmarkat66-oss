@@ -303,3 +303,34 @@ export const paymentRequests = pgTable("payment_requests", {
 export const insertPaymentRequestSchema = createInsertSchema(paymentRequests).omit({ id: true, createdAt: true, status: true, adminNote: true });
 export type PaymentRequest = typeof paymentRequests.$inferSelect;
 export type InsertPaymentRequest = z.infer<typeof insertPaymentRequestSchema>;
+
+// ============================================================
+// NOTIFICATIONS TABLE
+// ============================================================
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  type: text("type", { enum: ["like", "comment", "payment", "campaign_approved", "campaign_rejected", "new_subscriber", "fraud_alert", "system"] }).notNull(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  link: text("link"),
+  isRead: boolean("is_read").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type Notification = typeof notifications.$inferSelect;
+
+// ============================================================
+// DIRECT MESSAGES TABLE
+// ============================================================
+export const directMessages = pgTable("direct_messages", {
+  id: serial("id").primaryKey(),
+  fromUserId: varchar("from_user_id").references(() => users.id).notNull(),
+  toUserId: varchar("to_user_id").references(() => users.id).notNull(),
+  adId: integer("ad_id"),
+  message: text("message").notNull(),
+  isRead: boolean("is_read").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type DirectMessage = typeof directMessages.$inferSelect;

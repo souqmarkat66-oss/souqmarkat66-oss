@@ -23,6 +23,8 @@ import Reels from "@/pages/Reels";
 import Login from "@/pages/Login";
 import MyContent from "@/pages/MyContent";
 import EmbedGuide from "@/pages/EmbedGuide";
+import Messages from "@/pages/Messages";
+import Profile from "@/pages/Profile";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -76,6 +78,13 @@ function Router() {
               <Route path="/login" component={Login} />
               <Route path="/my-content" component={MyContent} />
               <Route path="/embed-guide" component={EmbedGuide} />
+              <Route path="/messages">
+                <ProtectedRoute component={Messages} />
+              </Route>
+              <Route path="/profile/:userId" component={Profile} />
+              <Route path="/profile">
+                <ProtectedRoute component={Profile} />
+              </Route>
               <Route component={NotFound} />
             </Switch>
           </main>
