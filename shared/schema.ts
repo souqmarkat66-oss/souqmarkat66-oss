@@ -49,6 +49,11 @@ export const ads = pgTable("ads", {
   priceEGP: real("price_egp"),
   whatsappNumber: varchar("whatsapp_number", { length: 20 }),
   paymentLink: text("payment_link"),
+  appStoreUrl: text("app_store_url"),
+  googlePlayUrl: text("google_play_url"),
+  appGalleryUrl: text("app_gallery_url"),
+  installmentMonths: integer("installment_months"),
+  installmentMonthlyEGP: real("installment_monthly_egp"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

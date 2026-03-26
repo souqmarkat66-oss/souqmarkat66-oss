@@ -27,8 +27,13 @@ const formSchema = insertAdSchema.extend({
   description: z.string().min(5, "الوصف مطلوب (5 أحرف على الأقل)"),
   productName: z.string().optional(),
   targetAudience: z.string().optional(),
-  userId: z.string().optional(), // set server-side from auth
+  userId: z.string().optional(),
   mediaUrl: z.string().optional().default(""),
+  appStoreUrl: z.string().optional(),
+  googlePlayUrl: z.string().optional(),
+  appGalleryUrl: z.string().optional(),
+  installmentMonths: z.number().optional(),
+  installmentMonthlyEGP: z.number().optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -124,7 +129,9 @@ export default function CreateAd() {
     defaultValues: {
       title: "", description: "", mediaUrl: "", mediaType: "image",
       language: language as 'ar' | 'en', status: "active",
-      userId: "", productName: "", targetAudience: "", targetRegion: ""
+      userId: "", productName: "", targetAudience: "", targetRegion: "",
+      appStoreUrl: "", googlePlayUrl: "", appGalleryUrl: "",
+      paymentLink: "", whatsappNumber: "",
     },
   });
 
@@ -552,12 +559,74 @@ export default function CreateAd() {
             </div>
             <FormField control={form.control} name="paymentLink" render={({ field }) => (
               <FormItem>
-                <FormLabel>رابط الدفع المباشر (اختياري)</FormLabel>
+                <FormLabel>رابط الدفع / تقسيط تكلفة الإعلان (اختياري)</FormLabel>
                 <FormControl>
-                  <Input placeholder="https://payment.example.com/pay" {...field} dir="ltr" />
+                  <Input placeholder="https://play.google.com/store/apps/details?id=com.apmo.souqmarket" {...field} dir="ltr" data-testid="input-payment-link" />
                 </FormControl>
+                <p className="text-xs text-muted-foreground">يمكنك وضع رابط تطبيق سوق ماركات لتفعيل التقسيط</p>
               </FormItem>
             )} />
+
+            {/* Installment Option */}
+            <div className="bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-xl p-3">
+              <h4 className="font-bold text-sm mb-2 text-blue-700 dark:text-blue-400">📅 خيار التقسيط (اختياري)</h4>
+              <div className="grid grid-cols-2 gap-3">
+                <FormField control={form.control} name="installmentMonths" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs">عدد الأقساط (شهر)</FormLabel>
+                    <FormControl>
+                      <Input type="number" min="2" max="24" placeholder="مثال: 3" {...field} onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)} data-testid="input-installment-months" />
+                    </FormControl>
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="installmentMonthlyEGP" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs">القسط الشهري (ج.م)</FormLabel>
+                    <FormControl>
+                      <Input type="number" min="0" placeholder="مثال: 100" {...field} onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)} data-testid="input-installment-monthly" />
+                    </FormControl>
+                  </FormItem>
+                )} />
+              </div>
+            </div>
+
+            {/* App Download Links */}
+            <div className="border border-border/60 rounded-xl p-3 space-y-2">
+              <h4 className="font-bold text-sm mb-1">📱 روابط تحميل التطبيق (اختياري)</h4>
+              <FormField control={form.control} name="appStoreUrl" render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-xs flex items-center gap-2">
+                    <span className="w-5 h-5 rounded bg-black text-white flex items-center justify-center text-[10px] font-bold"></span>
+                    App Store (iOS)
+                  </FormLabel>
+                  <FormControl>
+                    <Input placeholder="https://apps.apple.com/app/..." {...field} dir="ltr" className="text-xs h-8" data-testid="input-appstore-url" />
+                  </FormControl>
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="googlePlayUrl" render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-xs flex items-center gap-2">
+                    <span className="w-5 h-5 rounded bg-green-600 text-white flex items-center justify-center text-[10px] font-bold">G</span>
+                    Google Play (Android)
+                  </FormLabel>
+                  <FormControl>
+                    <Input placeholder="https://play.google.com/store/apps/..." {...field} dir="ltr" className="text-xs h-8" data-testid="input-googleplay-url" />
+                  </FormControl>
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="appGalleryUrl" render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-xs flex items-center gap-2">
+                    <span className="w-5 h-5 rounded bg-red-600 text-white flex items-center justify-center text-[10px] font-bold">H</span>
+                    AppGallery (Huawei)
+                  </FormLabel>
+                  <FormControl>
+                    <Input placeholder="https://appgallery.huawei.com/..." {...field} dir="ltr" className="text-xs h-8" data-testid="input-appgallery-url" />
+                  </FormControl>
+                </FormItem>
+              )} />
+            </div>
           </div>
 
           {/* Targeting Map */}

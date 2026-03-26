@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { ArrowLeft, Calendar, Share2, PhoneCall, CreditCard, Banknote, MessageCircle, ExternalLink, CheckCircle, Volume2, VolumeX, Play, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, Calendar, Share2, PhoneCall, CreditCard, Banknote, MessageCircle, ExternalLink, CheckCircle, Volume2, VolumeX, Play, ChevronLeft, ChevronRight, Smartphone, Download } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
@@ -70,12 +70,71 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
         </a>
       )}
 
+      {/* Installment Badge */}
+      {ad.installmentMonths > 0 && ad.installmentMonthlyEGP > 0 && (
+        <div className="flex items-center gap-3 p-4 bg-gradient-to-r from-blue-500/10 to-indigo-500/5 border border-blue-300 dark:border-blue-800 rounded-2xl">
+          <div className="text-2xl">📅</div>
+          <div>
+            <div className="font-bold text-blue-700 dark:text-blue-400 text-sm">التقسيط متاح!</div>
+            <div className="text-xs text-muted-foreground">
+              {ad.installmentMonths} شهر × <span className="font-bold text-blue-600">{ad.installmentMonthlyEGP?.toLocaleString('ar-EG')} ج.م</span> شهرياً
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* App Download Buttons */}
+      {(ad.appStoreUrl || ad.googlePlayUrl || ad.appGalleryUrl) && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 mb-1">
+            <Smartphone className="w-4 h-4 text-primary" />
+            <span className="text-sm font-bold">حمّل التطبيق</span>
+          </div>
+          {ad.appStoreUrl && (
+            <a href={ad.appStoreUrl} target="_blank" rel="noopener noreferrer" data-testid="btn-appstore-link">
+              <button className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-black text-white hover:bg-gray-900 active:scale-[0.98] transition-all shadow-md">
+                <svg viewBox="0 0 24 24" className="w-6 h-6 fill-white flex-shrink-0"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+                <div className="text-right flex-1">
+                  <div className="text-[10px] opacity-70">تحميل على</div>
+                  <div className="text-sm font-bold leading-tight">App Store</div>
+                </div>
+                <Download className="w-4 h-4 opacity-60" />
+              </button>
+            </a>
+          )}
+          {ad.googlePlayUrl && (
+            <a href={ad.googlePlayUrl} target="_blank" rel="noopener noreferrer" data-testid="btn-googleplay-link">
+              <button className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-[#01875f] text-white hover:bg-[#017a56] active:scale-[0.98] transition-all shadow-md">
+                <svg viewBox="0 0 24 24" className="w-6 h-6 flex-shrink-0" fill="white"><path d="M3.18 23.45a2 2 0 0 1-.93-.87V1.42a2 2 0 0 1 .93-.87l11.47 11.45L3.18 23.45zm13.12-6.92L4.43 23.35l9.1-9.09 2.77 2.27zm2.43-5.14c.4.28.65.72.65 1.21s-.25.93-.65 1.21l-2 1.3-3.06-3.05 3.06-3.06 2 1.39zM4.43.65l11.87 6.82-2.77 2.27L4.43.65z"/></svg>
+                <div className="text-right flex-1">
+                  <div className="text-[10px] opacity-70">تحميل على</div>
+                  <div className="text-sm font-bold leading-tight">Google Play</div>
+                </div>
+                <Download className="w-4 h-4 opacity-60" />
+              </button>
+            </a>
+          )}
+          {ad.appGalleryUrl && (
+            <a href={ad.appGalleryUrl} target="_blank" rel="noopener noreferrer" data-testid="btn-appgallery-link">
+              <button className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-[#cf0a2c] text-white hover:bg-[#b50926] active:scale-[0.98] transition-all shadow-md">
+                <svg viewBox="0 0 24 24" className="w-6 h-6 flex-shrink-0" fill="white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
+                <div className="text-right flex-1">
+                  <div className="text-[10px] opacity-70">تحميل على</div>
+                  <div className="text-sm font-bold leading-tight">AppGallery</div>
+                </div>
+                <Download className="w-4 h-4 opacity-60" />
+              </button>
+            </a>
+          )}
+        </div>
+      )}
+
       {/* External Payment Link */}
       {ad.paymentLink && (
         <a href={ad.paymentLink} target="_blank" rel="noopener noreferrer">
-          <Button variant="outline" className="w-full gap-2 rounded-2xl h-11">
+          <Button variant="outline" className="w-full gap-2 rounded-2xl h-11 border-primary/30 text-primary hover:bg-primary/5">
             <ExternalLink className="w-4 h-4" />
-            رابط الدفع المباشر
+            {ad.installmentMonths > 0 ? "ادفع بالتقسيط — تطبيق سوق ماركات" : "رابط الدفع المباشر"}
           </Button>
         </a>
       )}
