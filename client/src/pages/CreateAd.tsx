@@ -80,9 +80,6 @@ export default function CreateAd() {
   const [cinemaFullscreen, setCinemaFullscreen] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [paymentMode, setPaymentMode] = useState<"cash" | "installment">("cash");
-  // Detect user role: only advertisers see app-store links section
-  const userRole = localStorage.getItem("souq_role") || "client";
-  const isAdvertiser = userRole === "advertiser";
   // Targeting map states
   const [targetRegions, setTargetRegions] = useState<string[]>([]);
   const [targetInterests, setTargetInterests] = useState<string[]>([]);
@@ -646,16 +643,44 @@ export default function CreateAd() {
                 </div>
               </div>
 
-              {/* Custom link — always visible, for advertiser's own link */}
-              <FormField control={form.control} name="paymentLink" render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-xs flex items-center gap-1">🔗 رابطك الخاص (اختياري)</FormLabel>
-                  <FormControl>
-                    <Input placeholder="ضع رابط تطبيقك أو موقعك أو متجرك هنا..." {...field} dir="ltr" className="text-xs h-8" data-testid="input-payment-link" />
-                  </FormControl>
-                  <p className="text-[10px] text-muted-foreground">يظهر هذا الرابط في صفحة إعلانك للزوار</p>
-                </FormItem>
-              )} />
+              {/* Advertiser's own app links — 3 fields stacked */}
+              <div className="space-y-1.5">
+                <p className="text-xs font-bold flex items-center gap-1">📱 روابط تطبيقك الخاص (اختياري)</p>
+                <p className="text-[10px] text-muted-foreground mb-1">أضف رابط تطبيقك على أي متجر — تظهر في صفحة إعلانك</p>
+                <FormField control={form.control} name="appStoreUrl" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs flex items-center gap-2">
+                      <span className="w-4 h-4 rounded bg-black text-white flex items-center justify-center text-[9px] font-bold flex-shrink-0"></span>
+                      App Store (iOS)
+                    </FormLabel>
+                    <FormControl>
+                      <Input placeholder="https://apps.apple.com/app/..." {...field} dir="ltr" className="text-xs h-8" data-testid="input-appstore-url" />
+                    </FormControl>
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="googlePlayUrl" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs flex items-center gap-2">
+                      <span className="w-4 h-4 rounded bg-green-600 text-white flex items-center justify-center text-[9px] font-bold flex-shrink-0">G</span>
+                      Google Play (Android)
+                    </FormLabel>
+                    <FormControl>
+                      <Input placeholder="https://play.google.com/store/apps/..." {...field} dir="ltr" className="text-xs h-8" data-testid="input-googleplay-url" />
+                    </FormControl>
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="appGalleryUrl" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs flex items-center gap-2">
+                      <span className="w-4 h-4 rounded bg-red-600 text-white flex items-center justify-center text-[9px] font-bold flex-shrink-0">H</span>
+                      AppGallery (Huawei)
+                    </FormLabel>
+                    <FormControl>
+                      <Input placeholder="https://appgallery.huawei.com/..." {...field} dir="ltr" className="text-xs h-8" data-testid="input-appgallery-url" />
+                    </FormControl>
+                  </FormItem>
+                )} />
+              </div>
 
               {/* Installment: months + monthly amount */}
               {paymentMode === "installment" && (
@@ -680,46 +705,6 @@ export default function CreateAd() {
               )}
             </div>
 
-            {/* App Download Links — للمعلنين فقط */}
-            {isAdvertiser && (
-              <div className="border border-primary/30 bg-primary/5 rounded-xl p-3 space-y-2">
-                <h4 className="font-bold text-sm flex items-center gap-2">📱 روابط تحميل تطبيقك (للمعلنين فقط)</h4>
-                <p className="text-xs text-muted-foreground">أضف روابط تطبيقك على المتاجر لتظهر في صفحة الإعلان</p>
-                <FormField control={form.control} name="appStoreUrl" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="text-xs flex items-center gap-2">
-                      <span className="w-5 h-5 rounded bg-black text-white flex items-center justify-center text-[10px] font-bold"></span>
-                      App Store (iOS)
-                    </FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://apps.apple.com/app/..." {...field} dir="ltr" className="text-xs h-8" data-testid="input-appstore-url" />
-                    </FormControl>
-                  </FormItem>
-                )} />
-                <FormField control={form.control} name="googlePlayUrl" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="text-xs flex items-center gap-2">
-                      <span className="w-5 h-5 rounded bg-green-600 text-white flex items-center justify-center text-[10px] font-bold">G</span>
-                      Google Play (Android)
-                    </FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://play.google.com/store/apps/..." {...field} dir="ltr" className="text-xs h-8" data-testid="input-googleplay-url" />
-                    </FormControl>
-                  </FormItem>
-                )} />
-                <FormField control={form.control} name="appGalleryUrl" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="text-xs flex items-center gap-2">
-                      <span className="w-5 h-5 rounded bg-red-600 text-white flex items-center justify-center text-[10px] font-bold">H</span>
-                      AppGallery (Huawei)
-                    </FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://appgallery.huawei.com/..." {...field} dir="ltr" className="text-xs h-8" data-testid="input-appgallery-url" />
-                    </FormControl>
-                  </FormItem>
-                )} />
-              </div>
-            )}
           </div>
 
           {/* Targeting Map */}
