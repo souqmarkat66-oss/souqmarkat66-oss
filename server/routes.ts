@@ -273,7 +273,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/channels/:id", async (req, res) => {
-    const ch = await storage.getChannel(Number(req.params.id));
+    const channelId = Number(req.params.id);
+    if (isNaN(channelId)) return res.status(400).json({ message: "Invalid channel id" });
+    const ch = await storage.getChannel(channelId);
     if (!ch) return res.status(404).json({ message: "Channel not found" });
     res.json(ch);
   });
@@ -305,7 +307,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/channels/:id/follow", isAuthenticated, async (req: any, res) => {
-    const follow = await storage.getFollow(req.user.claims.sub, Number(req.params.id));
+    const channelId = Number(req.params.id);
+    if (isNaN(channelId)) return res.json({ following: false });
+    const follow = await storage.getFollow(req.user.claims.sub, channelId);
     res.json({ following: !!follow });
   });
 
@@ -336,7 +340,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/channels/:channelId/streams", async (req, res) => {
-    const streams = await storage.getLiveStreamsByChannel(Number(req.params.channelId));
+    const channelId = Number(req.params.channelId);
+    if (isNaN(channelId)) return res.json([]);
+    const streams = await storage.getLiveStreamsByChannel(channelId);
     res.json(streams);
   });
 

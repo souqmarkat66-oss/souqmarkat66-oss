@@ -16,20 +16,25 @@ export default function ChannelPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
+  const numericId = Number(id);
+  const isValidId = !isNaN(numericId) && numericId > 0;
+
   const { data: channel, isLoading } = useQuery<Channel>({
-    queryKey: ["/api/channels", Number(id)],
-    queryFn: () => fetch(`/api/channels/${id}`).then(r => r.json())
+    queryKey: ["/api/channels", numericId],
+    queryFn: () => fetch(`/api/channels/${id}`).then(r => r.json()),
+    enabled: isValidId
   });
 
   const { data: streams } = useQuery<LiveStream[]>({
-    queryKey: ["/api/channels", Number(id), "streams"],
-    queryFn: () => fetch(`/api/channels/${id}/streams`).then(r => r.json())
+    queryKey: ["/api/channels", numericId, "streams"],
+    queryFn: () => fetch(`/api/channels/${id}/streams`).then(r => r.json()),
+    enabled: isValidId
   });
 
   const { data: followData } = useQuery<{ following: boolean }>({
-    queryKey: ["/api/channels", Number(id), "follow"],
+    queryKey: ["/api/channels", numericId, "follow"],
     queryFn: () => fetch(`/api/channels/${id}/follow`, { credentials: "include" }).then(r => r.json()),
-    enabled: !!user
+    enabled: !!user && isValidId
   });
 
   // Fetch ads belonging to this channel's owner
@@ -57,10 +62,11 @@ export default function ChannelPage() {
 
   const isOwner = user && channel?.userId === user.id;
 
+  if (!isValidId) return <div className="container py-12 text-center"><h2 className="text-2xl">رقم القناة غير صحيح</h2></div>;
   if (isLoading) return <div className="container py-12"><Skeleton className="h-64 rounded-2xl" /></div>;
   if (!channel) return <div className="container py-12 text-center"><h2 className="text-2xl">القناة غير موجودة</h2></div>;
 
-  const liveStream = (streams || []).find(s => s.status === 'live');
+  const liveStream = (Array.isArray(streams) ? streams : []).find(s => s.status === 'live');
 
   return (
     <div className="min-h-screen" dir="rtl">
