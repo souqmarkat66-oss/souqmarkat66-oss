@@ -14,6 +14,7 @@ import { useState } from "react";
 const navLinks = (user: any) => [
   { href: "/ads", label: "الإعلانات", icon: LayoutGrid },
   { href: "/channels", label: "القنوات", icon: Tv },
+  { href: "/reels", label: "ريلز", icon: Radio },
   ...(user ? [
     { href: "/create", label: "إعلان جديد", icon: PlusCircle },
     { href: "/campaigns", label: "الحملات", icon: BarChart2 },

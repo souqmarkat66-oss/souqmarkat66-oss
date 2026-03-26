@@ -2,18 +2,20 @@ import { db } from "./db";
 import { 
   ads, channels, liveStreams, chatMessages, likes, comments, follows, 
   adCampaigns, revenueTransactions, reports, uploadedFiles,
+  platformSettings, aiUsage, reels, paymentRequests,
   type Ad, type InsertAd, type Channel, type InsertChannel,
   type LiveStream, type InsertLiveStream, type ChatMessage, type Like,
   type Comment, type InsertComment, type Follow, type AdCampaign, 
   type InsertAdCampaign, type RevenueTransaction, type Report, 
-  type InsertReport, type UploadedFile
+  type InsertReport, type UploadedFile, type Reel, type InsertReel,
+  type PaymentRequest, type InsertPaymentRequest
 } from "@shared/schema";
 import { eq, desc, and, sql, ne } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 
 export interface IStorage {
   // Ads
-  getAds(language?: string): Promise<Ad[]>;
+  getAds(language?: string, userId?: string): Promise<Ad[]>;
   getAd(id: number): Promise<Ad | undefined>;
   createAd(ad: InsertAd): Promise<Ad>;
   updateAd(id: number, ad: Partial<InsertAd>): Promise<Ad | undefined>;
@@ -66,7 +68,7 @@ export interface IStorage {
 
   // Revenue
   getRevenueTransactions(userId: string): Promise<RevenueTransaction[]>;
-  getUserBalance(userId: string): Promise<number>;
+  getUserBalanceEGP(userId: string): Promise<number>;
   createTransaction(tx: Omit<RevenueTransaction, 'id' | 'createdAt'>): Promise<RevenueTransaction>;
 
   // Reports
@@ -78,6 +80,27 @@ export interface IStorage {
   createUploadedFile(file: Omit<UploadedFile, 'id' | 'createdAt'>): Promise<UploadedFile>;
   getUserFiles(userId: string): Promise<UploadedFile[]>;
 
+  // Platform Settings
+  getSetting(key: string): Promise<string | null>;
+  setSetting(key: string, value: string): Promise<void>;
+  getAllSettings(): Promise<Record<string, string>>;
+
+  // AI Usage
+  getAiUsageCount(userId: string): Promise<number>;
+  recordAiUsage(userId: string, type: string, cost?: number): Promise<void>;
+
+  // Reels
+  getReels(userId?: string): Promise<Reel[]>;
+  getReel(id: number): Promise<Reel | undefined>;
+  createReel(reel: InsertReel): Promise<Reel>;
+  updateReel(id: number, data: Partial<InsertReel>): Promise<Reel | undefined>;
+  deleteReel(id: number): Promise<void>;
+
+  // Payment Requests
+  getPaymentRequests(userId?: string): Promise<PaymentRequest[]>;
+  createPaymentRequest(req: InsertPaymentRequest): Promise<PaymentRequest>;
+  updatePaymentRequest(id: number, status: string, adminNote?: string): Promise<PaymentRequest | undefined>;
+
   // Admin
   getAllUsers(): Promise<any[]>;
   getStats(): Promise<any>;
@@ -85,15 +108,18 @@ export interface IStorage {
 
 export class DatabaseStorage implements IStorage {
   // ─── ADS ──────────────────────────────────────────────────────
-  async getAds(language?: string): Promise<Ad[]> {
-    const q = db.select().from(ads).orderBy(desc(ads.createdAt));
-    if (language) return (q as any).where(eq(ads.language, language as any));
-    return q;
+  async getAds(language?: string, userId?: string): Promise<Ad[]> {
+    if (userId) {
+      return db.select().from(ads).where(eq(ads.userId, userId)).orderBy(desc(ads.createdAt));
+    }
+    if (language) {
+      return db.select().from(ads).where(eq(ads.language, language as any)).orderBy(desc(ads.createdAt));
+    }
+    return db.select().from(ads).orderBy(desc(ads.createdAt));
   }
 
   async getAd(id: number): Promise<Ad | undefined> {
     const [ad] = await db.select().from(ads).where(eq(ads.id, id));
-    // Increment view count
     if (ad) await db.update(ads).set({ viewsCount: (ad.viewsCount || 0) + 1 }).where(eq(ads.id, id));
     return ad;
   }
@@ -114,9 +140,10 @@ export class DatabaseStorage implements IStorage {
 
   // ─── CHANNELS ─────────────────────────────────────────────────
   async getChannels(language?: string): Promise<Channel[]> {
-    const q = db.select().from(channels).where(eq(channels.status, 'active')).orderBy(desc(channels.subscriberCount));
-    if (language) return (q as any).where(and(eq(channels.status, 'active'), eq(channels.language, language as any)));
-    return q;
+    if (language) {
+      return db.select().from(channels).where(and(eq(channels.status, 'active'), eq(channels.language, language as any))).orderBy(desc(channels.subscriberCount));
+    }
+    return db.select().from(channels).where(eq(channels.status, 'active')).orderBy(desc(channels.subscriberCount));
   }
 
   async getChannel(id: number): Promise<Channel | undefined> {
@@ -145,10 +172,8 @@ export class DatabaseStorage implements IStorage {
 
   // ─── LIVE STREAMS ─────────────────────────────────────────────
   async getLiveStreams(status?: string): Promise<LiveStream[]> {
-    if (status) {
-      return db.select().from(liveStreams).where(eq(liveStreams.status, status as any)).orderBy(desc(liveStreams.viewerCount));
-    }
-    return db.select().from(liveStreams).where(eq(liveStreams.status, 'live')).orderBy(desc(liveStreams.viewerCount));
+    const st = status || 'live';
+    return db.select().from(liveStreams).where(eq(liveStreams.status, st as any)).orderBy(desc(liveStreams.viewerCount));
   }
 
   async getLiveStream(id: number): Promise<LiveStream | undefined> {
@@ -195,14 +220,15 @@ export class DatabaseStorage implements IStorage {
     const existing = await this.getLike(userId, targetType, targetId);
     if (existing) {
       await db.delete(likes).where(eq(likes.id, existing.id));
-      // Decrement count
       if (targetType === 'ad') await db.update(ads).set({ likesCount: sql`GREATEST(0, ${ads.likesCount} - 1)` }).where(eq(ads.id, targetId));
       if (targetType === 'stream') await db.update(liveStreams).set({ likesCount: sql`GREATEST(0, ${liveStreams.likesCount} - 1)` }).where(eq(liveStreams.id, targetId));
+      if (targetType === 'reel') await db.update(reels).set({ likesCount: sql`GREATEST(0, ${reels.likesCount} - 1)` }).where(eq(reels.id, targetId));
       return { liked: false };
     } else {
       await db.insert(likes).values({ userId, targetType: targetType as any, targetId });
       if (targetType === 'ad') await db.update(ads).set({ likesCount: sql`${ads.likesCount} + 1` }).where(eq(ads.id, targetId));
       if (targetType === 'stream') await db.update(liveStreams).set({ likesCount: sql`${liveStreams.likesCount} + 1` }).where(eq(liveStreams.id, targetId));
+      if (targetType === 'reel') await db.update(reels).set({ likesCount: sql`${reels.likesCount} + 1` }).where(eq(reels.id, targetId));
       return { liked: true };
     }
   }
@@ -224,6 +250,9 @@ export class DatabaseStorage implements IStorage {
     const [c] = await db.insert(comments).values(comment).returning();
     if (comment.targetType === 'ad') {
       await db.update(ads).set({ commentsCount: sql`${ads.commentsCount} + 1` }).where(eq(ads.id, comment.targetId));
+    }
+    if (comment.targetType === 'reel') {
+      await db.update(reels).set({ commentsCount: sql`${reels.commentsCount} + 1` }).where(eq(reels.id, comment.targetId));
     }
     return c;
   }
@@ -278,10 +307,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createAdCampaign(campaign: InsertAdCampaign): Promise<AdCampaign> {
-    const embedCode = `<script src="${process.env.REPL_URL || ''}/api/campaigns/embed.js?id=CAMPAIGN_ID&key=${uuidv4().slice(0,8)}" async></script>`;
-    const [c] = await db.insert(adCampaigns).values({ ...campaign, embedCode }).returning();
-    const code = `<script src="/api/campaigns/embed.js?id=${c.id}&key=${uuidv4().slice(0,8)}" async></script>`;
-    const [updated] = await db.update(adCampaigns).set({ embedCode: code }).where(eq(adCampaigns.id, c.id)).returning();
+    const trackingKey = uuidv4().slice(0, 12);
+    const [c] = await db.insert(adCampaigns).values({ ...campaign }).returning();
+    const embedCode = `<script src="/api/campaigns/embed.js?id=${c.id}&key=${trackingKey}" async></script>`;
+    const clickCode = `<!-- كود تتبع النقرات - Google AdSense Style -->\n<img src="/api/campaigns/${c.id}/click?ref=PUBLISHER_ID" width="1" height="1" style="display:none">`;
+    const [updated] = await db.update(adCampaigns).set({ embedCode, clickTrackingCode: clickCode }).where(eq(adCampaigns.id, c.id)).returning();
     return updated;
   }
 
@@ -295,19 +325,36 @@ export class DatabaseStorage implements IStorage {
   }
 
   async recordImpression(campaignId: number, channelId?: number, userId?: string): Promise<void> {
-    await db.update(adCampaigns).set({ impressions: sql`${adCampaigns.impressions} + 1` }).where(eq(adCampaigns.id, campaignId));
     const campaign = await this.getAdCampaign(campaignId);
     if (!campaign) return;
-    const revenue = campaign.cpmRate / 1000;
-    const publisherShare = revenue * campaign.publisherRevShare;
-    await db.update(adCampaigns).set({ spent: sql`${adCampaigns.spent} + ${revenue}` }).where(eq(adCampaigns.id, campaignId));
-    // Credit publisher if channel known
+    const revenueEGP = (campaign.cpmRateEGP || 15) / 1000;
+    const publisherShareEGP = revenueEGP * (campaign.publisherRevShare || 0.6);
+    await db.update(adCampaigns).set({
+      impressions: sql`${adCampaigns.impressions} + 1`,
+      spentEGP: sql`${adCampaigns.spentEGP} + ${revenueEGP}`
+    }).where(eq(adCampaigns.id, campaignId));
     if (channelId) {
       const ch = await this.getChannel(channelId);
       if (ch) {
-        await db.update(channels).set({ earnings: sql`${channels.earnings} + ${publisherShare}` }).where(eq(channels.id, channelId));
+        await db.update(channels).set({ earningsEGP: sql`${channels.earningsEGP} + ${publisherShareEGP}` }).where(eq(channels.id, channelId));
+        await db.insert(revenueTransactions).values({
+          userId: ch.userId,
+          type: 'earning',
+          amountEGP: publisherShareEGP,
+          description: `إيراد إعلان - حملة #${campaignId}`,
+          campaignId,
+          channelId,
+        });
       }
     }
+    // Deduct from advertiser
+    await db.insert(revenueTransactions).values({
+      userId: campaign.advertiserId,
+      type: 'spending',
+      amountEGP: revenueEGP,
+      description: `تكلفة مشاهدة - حملة ${campaign.name}`,
+      campaignId,
+    });
   }
 
   async recordClick(campaignId: number, channelId?: number, userId?: string): Promise<void> {
@@ -319,9 +366,13 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(revenueTransactions).where(eq(revenueTransactions.userId, userId)).orderBy(desc(revenueTransactions.createdAt));
   }
 
-  async getUserBalance(userId: string): Promise<number> {
+  async getUserBalanceEGP(userId: string): Promise<number> {
     const txs = await this.getRevenueTransactions(userId);
-    return txs.reduce((sum, tx) => tx.type === 'spending' ? sum - tx.amount : sum + tx.amount, 0);
+    return txs.reduce((sum, tx) => {
+      if (tx.type === 'earning') return sum + (tx.amountEGP || 0);
+      if (tx.type === 'spending' || tx.type === 'withdrawal' || tx.type === 'ai_charge') return sum - (tx.amountEGP || 0);
+      return sum;
+    }, 0);
   }
 
   async createTransaction(tx: Omit<RevenueTransaction, 'id' | 'createdAt'>): Promise<RevenueTransaction> {
@@ -357,6 +408,81 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(uploadedFiles).where(eq(uploadedFiles.userId, userId)).orderBy(desc(uploadedFiles.createdAt));
   }
 
+  // ─── PLATFORM SETTINGS ────────────────────────────────────────
+  async getSetting(key: string): Promise<string | null> {
+    const [s] = await db.select().from(platformSettings).where(eq(platformSettings.key, key));
+    return s?.value ?? null;
+  }
+
+  async setSetting(key: string, value: string): Promise<void> {
+    await db.insert(platformSettings).values({ key, value })
+      .onConflictDoUpdate({ target: platformSettings.key, set: { value, updatedAt: new Date() } });
+  }
+
+  async getAllSettings(): Promise<Record<string, string>> {
+    const settings = await db.select().from(platformSettings);
+    return Object.fromEntries(settings.map(s => [s.key, s.value]));
+  }
+
+  // ─── AI USAGE ─────────────────────────────────────────────────
+  async getAiUsageCount(userId: string): Promise<number> {
+    const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(aiUsage)
+      .where(eq(aiUsage.userId, userId));
+    return Number(count);
+  }
+
+  async recordAiUsage(userId: string, type: string, cost = 0): Promise<void> {
+    await db.insert(aiUsage).values({ userId, type: type as any, cost });
+  }
+
+  // ─── REELS ────────────────────────────────────────────────────
+  async getReels(userId?: string): Promise<Reel[]> {
+    if (userId) {
+      return db.select().from(reels).where(and(eq(reels.userId, userId), eq(reels.status, 'active'))).orderBy(desc(reels.createdAt));
+    }
+    return db.select().from(reels).where(eq(reels.status, 'active')).orderBy(desc(reels.createdAt));
+  }
+
+  async getReel(id: number): Promise<Reel | undefined> {
+    const [r] = await db.select().from(reels).where(eq(reels.id, id));
+    if (r) {
+      await db.update(reels).set({ viewsCount: sql`${reels.viewsCount} + 1` }).where(eq(reels.id, id));
+    }
+    return r;
+  }
+
+  async createReel(reel: InsertReel): Promise<Reel> {
+    const [r] = await db.insert(reels).values(reel).returning();
+    return r;
+  }
+
+  async updateReel(id: number, data: Partial<InsertReel>): Promise<Reel | undefined> {
+    const [r] = await db.update(reels).set(data as any).where(eq(reels.id, id)).returning();
+    return r;
+  }
+
+  async deleteReel(id: number): Promise<void> {
+    await db.delete(reels).where(eq(reels.id, id));
+  }
+
+  // ─── PAYMENT REQUESTS ─────────────────────────────────────────
+  async getPaymentRequests(userId?: string): Promise<PaymentRequest[]> {
+    if (userId) {
+      return db.select().from(paymentRequests).where(eq(paymentRequests.userId, userId)).orderBy(desc(paymentRequests.createdAt));
+    }
+    return db.select().from(paymentRequests).orderBy(desc(paymentRequests.createdAt));
+  }
+
+  async createPaymentRequest(req: InsertPaymentRequest): Promise<PaymentRequest> {
+    const [r] = await db.insert(paymentRequests).values(req).returning();
+    return r;
+  }
+
+  async updatePaymentRequest(id: number, status: string, adminNote?: string): Promise<PaymentRequest | undefined> {
+    const [r] = await db.update(paymentRequests).set({ status: status as any, adminNote }).where(eq(paymentRequests.id, id)).returning();
+    return r;
+  }
+
   // ─── ADMIN ────────────────────────────────────────────────────
   async getAllUsers(): Promise<any[]> {
     const { users } = await import("@shared/schema");
@@ -369,16 +495,20 @@ export class DatabaseStorage implements IStorage {
     const [streamsCount] = await db.select({ count: sql<number>`count(*)` }).from(liveStreams).where(eq(liveStreams.status, 'live'));
     const [campaignsCount] = await db.select({ count: sql<number>`count(*)` }).from(adCampaigns).where(eq(adCampaigns.status, 'active'));
     const [reportsCount] = await db.select({ count: sql<number>`count(*)` }).from(reports).where(eq(reports.status, 'pending'));
+    const [reelsCount] = await db.select({ count: sql<number>`count(*)` }).from(reels);
     const [totalImpressions] = await db.select({ total: sql<number>`sum(impressions)` }).from(adCampaigns);
-    const [totalRevenue] = await db.select({ total: sql<number>`sum(spent)` }).from(adCampaigns);
+    const [totalRevenueEGP] = await db.select({ total: sql<number>`sum(spent_egp)` }).from(adCampaigns);
+    const [pendingPayments] = await db.select({ count: sql<number>`count(*)` }).from(paymentRequests).where(eq(paymentRequests.status, 'pending'));
     return {
       totalAds: Number(adsCount.count),
       totalChannels: Number(channelsCount.count),
       liveStreams: Number(streamsCount.count),
       activeCampaigns: Number(campaignsCount.count),
       pendingReports: Number(reportsCount.count),
-      totalImpressions: Number(totalImpressions?.total || 0),
-      totalRevenue: Number(totalRevenue?.total || 0).toFixed(2),
+      totalReels: Number(reelsCount.count),
+      totalImpressions: Number(totalImpressions.total || 0),
+      totalRevenueEGP: Number(totalRevenueEGP.total || 0),
+      pendingPayments: Number(pendingPayments.count),
     };
   }
 }

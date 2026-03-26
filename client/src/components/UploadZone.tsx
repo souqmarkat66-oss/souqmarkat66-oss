@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Upload, X, Image, Video, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -17,6 +17,16 @@ export function UploadZone({ value, onChange, accept = "image/*,video/*", label 
   const [isVideo, setIsVideo] = useState(false);
   const { toast } = useToast();
 
+  // Sync preview with external value changes (e.g., AI image generation)
+  useEffect(() => {
+    if (value !== undefined && value !== preview) {
+      setPreview(value);
+      if (value) {
+        setIsVideo(value.includes('.mp4') || value.includes('.mov') || value.includes('.webm') || value.includes('.avi'));
+      }
+    }
+  }, [value]);
+
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -30,7 +40,7 @@ export function UploadZone({ value, onChange, accept = "image/*,video/*", label 
       const data = await res.json();
       setPreview(data.url);
       onChange(data.url);
-      toast({ title: "تم الرفع بنجاح!" });
+      toast({ title: "✅ تم الرفع بنجاح!" });
     } catch (err: any) {
       toast({ variant: "destructive", title: "خطأ في الرفع", description: err.message });
     } finally {
@@ -44,15 +54,20 @@ export function UploadZone({ value, onChange, accept = "image/*,video/*", label 
     <div>
       <input ref={fileRef} type="file" accept={accept} onChange={handleFile} className="hidden" />
       {preview ? (
-        <div className="relative rounded-xl overflow-hidden border">
+        <div className="relative rounded-xl overflow-hidden border-2 border-primary/30">
           {isVideo ? (
-            <video src={preview} className="w-full max-h-48 object-contain bg-black" controls />
+            <video src={preview} className="w-full max-h-64 object-contain bg-black" controls />
           ) : (
-            <img src={preview} className="w-full max-h-48 object-contain bg-muted" alt="Preview" />
+            <img src={preview} className="w-full max-h-64 object-contain bg-muted rounded-xl" alt="Preview" />
           )}
-          <Button size="icon" variant="destructive" onClick={clear} className="absolute top-2 end-2 w-7 h-7">
-            <X className="w-3 h-3" />
-          </Button>
+          <div className="absolute top-2 end-2 flex gap-2">
+            <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()} className="text-xs">
+              تغيير
+            </Button>
+            <Button size="icon" variant="destructive" onClick={clear} className="w-7 h-7">
+              <X className="w-3 h-3" />
+            </Button>
+          </div>
         </div>
       ) : (
         <button

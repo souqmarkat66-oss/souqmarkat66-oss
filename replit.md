@@ -30,18 +30,22 @@ Preferred communication style: Arabic/bilingual, everyday language.
 - **Schema**: `shared/schema.ts`
 - **Tables**:
   - `users`, `sessions` — Auth
-  - `ads` — Classified ads with likes/comments/views
-  - `channels` — Creator channels (verified, monetized)
-  - `live_streams` — Live streaming sessions
+  - `ads` — Classified ads with likes/comments/views + targetRegion
+  - `channels` — Creator channels (verified, monetized, earningsEGP)
+  - `live_streams` — Live streaming sessions (showAds, totalEarningsEGP)
   - `chat_messages` — Live stream chat
   - `likes` — Polymorphic likes (ads, streams, channels)
-  - `comments` — Polymorphic comments
+  - `comments` — Polymorphic comments (isVoice field)
   - `follows` — Channel subscriptions
-  - `ad_campaigns` — Meta/AdSense-style ad campaigns with targeting
+  - `ad_campaigns` — Meta/AdSense-style ad campaigns (budgetEGP, cpmRateEGP, spentEGP, targetRegions[], targetCategories[], targetLanguages[], embedCode, clickTrackingCode)
   - `ad_impressions` — Track impressions/clicks
-  - `revenue_transactions` — Earnings/spending tracking
+  - `revenue_transactions` — Earnings/spending tracking (amountEGP)
   - `reports` — Content moderation
   - `uploaded_files` — Direct file upload records
+  - `platform_settings` — Key-value settings (ai_free_credits, ai_price_per_credit_egp, cpm_rate_egp, publisher_rev_share, min_withdrawal_egp)
+  - `ai_usage` — Per-user AI credit tracking
+  - `reels` — TikTok-style short videos (videoUrl, thumbnailUrl, likes, views, isVoiceComment)
+  - `payment_requests` — Withdrawal requests (amountEGP, method, phoneNumber, status)
 
 ### Authentication
 - **Method**: Replit Auth (OpenID Connect)
