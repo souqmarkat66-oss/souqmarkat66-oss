@@ -15,11 +15,13 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { EditAdDialog } from "@/components/EditAdDialog";
+import { EditReelDialog } from "@/components/EditReelDialog";
 
 export default function MyContent() {
   const { user, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const [editingAd, setEditingAd] = useState<any | null>(null);
+  const [editingReel, setEditingReel] = useState<any | null>(null);
 
   if (authLoading) return (
     <div className="flex justify-center items-center min-h-[60vh]">
@@ -75,6 +77,11 @@ function AuthenticatedContent({ user }: { user: any }) {
   const deleteAdMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/ads/${id}`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/ads"] }); toast({ title: "تم حذف الإعلان" }); },
+  });
+
+  const deleteReelMut = useMutation({
+    mutationFn: (id: number) => fetch(`/api/reels/${id}`, { method: "DELETE", credentials: "include" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/reels"] }); toast({ title: "تم حذف الريل" }); },
   });
 
   return (
@@ -201,29 +208,66 @@ function AuthenticatedContent({ user }: { user: any }) {
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {myReels.map((reel: any) => (
-                <Link href="/reels" key={reel.id}>
-                  <div className="relative aspect-[9/16] rounded-2xl overflow-hidden bg-black group cursor-pointer">
-                    {reel.thumbnailUrl ? (
-                      <img src={reel.thumbnailUrl} alt={reel.title} className="w-full h-full object-cover" />
-                    ) : reel.videoUrl ? (
-                      <video src={reel.videoUrl} className="w-full h-full object-cover" muted />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-primary/20 to-black">
-                        <Video className="w-10 h-10 text-white/50" />
-                      </div>
-                    )}
-                    <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-all flex items-center justify-center">
-                      <Play className="w-10 h-10 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div key={reel.id} className="relative aspect-[9/16] rounded-2xl overflow-hidden bg-black group cursor-pointer">
+                  {/* Thumbnail / preview */}
+                  {reel.thumbnailUrl ? (
+                    <img src={reel.thumbnailUrl} alt={reel.title} className="w-full h-full object-cover" />
+                  ) : reel.videoUrl ? (
+                    (() => {
+                      try {
+                        const parsed = JSON.parse(reel.videoUrl);
+                        if (Array.isArray(parsed) && parsed[0]) return <img src={parsed[0]} alt={reel.title} className="w-full h-full object-cover" />;
+                      } catch {}
+                      return reel.videoUrl.match(/\.(jpg|jpeg|png|gif|webp)/i)
+                        ? <img src={reel.videoUrl} alt={reel.title} className="w-full h-full object-cover" />
+                        : <video src={reel.videoUrl} className="w-full h-full object-cover" muted />;
+                    })()
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-primary/20 to-black">
+                      <Video className="w-10 h-10 text-white/50" />
                     </div>
-                    <div className="absolute bottom-0 inset-x-0 p-3 bg-gradient-to-t from-black/80 to-transparent">
-                      <p className="text-white text-xs font-medium line-clamp-2">{reel.title}</p>
-                      <div className="flex items-center gap-2 mt-1 text-white/70 text-[10px]">
-                        <span className="flex items-center gap-0.5"><Eye className="w-3 h-3" />{reel.viewsCount || 0}</span>
-                        <span className="flex items-center gap-0.5"><Heart className="w-3 h-3" />{reel.likesCount || 0}</span>
-                      </div>
+                  )}
+
+                  {/* Overlay */}
+                  <div className="absolute inset-0 bg-black/40 group-hover:bg-black/60 transition-all" />
+
+                  {/* Action buttons — shown on hover */}
+                  <div className="absolute top-2 left-2 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                    <button
+                      className="w-8 h-8 rounded-full bg-blue-500/90 text-white flex items-center justify-center shadow hover:bg-blue-600"
+                      title="تعديل"
+                      onClick={e => { e.stopPropagation(); setEditingReel(reel); }}
+                      data-testid={`btn-edit-reel-${reel.id}`}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      className="w-8 h-8 rounded-full bg-red-500/90 text-white flex items-center justify-center shadow hover:bg-red-600"
+                      title="حذف"
+                      onClick={e => { e.stopPropagation(); if (confirm("حذف هذا الريل؟")) deleteReelMut.mutate(reel.id); }}
+                      data-testid={`btn-delete-reel-${reel.id}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                    <Link href="/reels">
+                      <button
+                        className="w-8 h-8 rounded-full bg-white/80 text-gray-700 flex items-center justify-center shadow hover:bg-white"
+                        title="عرض"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                      </button>
+                    </Link>
+                  </div>
+
+                  {/* Bottom info */}
+                  <div className="absolute bottom-0 inset-x-0 p-3 bg-gradient-to-t from-black/80 to-transparent z-10">
+                    <p className="text-white text-xs font-medium line-clamp-2">{reel.title}</p>
+                    <div className="flex items-center gap-2 mt-1 text-white/70 text-[10px]">
+                      <span className="flex items-center gap-0.5"><Eye className="w-3 h-3" />{reel.viewsCount || 0}</span>
+                      <span className="flex items-center gap-0.5"><Heart className="w-3 h-3" />{reel.likesCount || 0}</span>
                     </div>
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
           )}
@@ -276,6 +320,15 @@ function AuthenticatedContent({ user }: { user: any }) {
           ad={editingAd}
           open={!!editingAd}
           onClose={() => setEditingAd(null)}
+        />
+      )}
+
+      {/* Edit Reel Dialog */}
+      {editingReel && (
+        <EditReelDialog
+          reel={editingReel}
+          open={!!editingReel}
+          onClose={() => setEditingReel(null)}
         />
       )}
     </div>
