@@ -14,7 +14,7 @@ import { ar } from "date-fns/locale";
 
 const PAYMENT_METHODS = [
   { value: "vodafone", label: "فودافون كاش", number: "01098553911", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
-  { value: "etisalat", label: "اتصالات e& كاش", number: "0112666571", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
+  { value: "etisalat", label: "اتصالات e& كاش", number: "01126665741", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
   { value: "instapay", label: "InstaPay", number: "01285558567", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
   { value: "souq", label: "تطبيق سوق ماركات", number: "", color: "bg-primary/10 text-primary" },
 ];

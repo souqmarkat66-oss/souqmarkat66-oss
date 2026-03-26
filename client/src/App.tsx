@@ -173,7 +173,7 @@ function AppFooter() {
                 <span className="text-xl">📲</span>
                 <div>
                   <div className="text-xs font-bold text-orange-700 dark:text-orange-400">اتصالات (e&) كاش</div>
-                  <div className="text-sm font-mono font-bold">0112666571</div>
+                  <div className="text-sm font-mono font-bold">01126665741</div>
                 </div>
               </div>
               <div className="flex items-center gap-3 bg-blue-50 dark:bg-blue-950/20 rounded-xl p-3 border border-blue-200 dark:border-blue-900">
