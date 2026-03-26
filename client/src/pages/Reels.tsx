@@ -468,6 +468,7 @@ function CreateReelDialog() {
   // Audio (image mode only)
   const [audioUrl, setAudioUrl] = useState("");
   const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [convertingToVideo, setConvertingToVideo] = useState(false);
 
   const fileVideoRef = useRef<HTMLInputElement>(null);
   const fileImageRef = useRef<HTMLInputElement>(null);
@@ -674,6 +675,53 @@ function CreateReelDialog() {
                   </>
                 )}
               </div>
+
+              {/* 🎬 Convert Images to Video */}
+              {imageUrls.length >= 1 && (
+                <div className="rounded-xl bg-gradient-to-r from-orange-50 to-red-50 dark:from-orange-900/20 dark:to-red-900/20 border border-orange-200/50 dark:border-orange-700/30 p-3 space-y-2">
+                  <p className="text-xs font-bold text-orange-700 dark:text-orange-300 flex items-center gap-1.5">
+                    🎬 تحويل الصور لفيديو احترافي
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {imageUrls.length} {imageUrls.length === 1 ? 'صورة' : 'صور'} — ستُحوَّل لفيديو MP4 بمقاس ريلز (9:16)
+                  </p>
+                  <button
+                    type="button"
+                    disabled={convertingToVideo}
+                    onClick={async () => {
+                      setConvertingToVideo(true);
+                      try {
+                        const res = await fetch('/api/ai/images-to-video', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            imageUrls,
+                            audioUrl: audioUrl || (tts.audioUrl ?? undefined),
+                            duration: 3,
+                          }),
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.message);
+                        setVideoUrl(data.url);
+                        setImageUrls([]);
+                        setMediaTypeTab('video');
+                        toast({ title: "🎬 تم تحويل الصور لفيديو بنجاح!" });
+                      } catch (e: any) {
+                        toast({ variant: "destructive", title: "فشل التحويل", description: e.message });
+                      } finally {
+                        setConvertingToVideo(false);
+                      }
+                    }}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-orange-600 text-white text-sm font-bold hover:bg-orange-700 disabled:opacity-50 transition-all"
+                    data-testid="btn-convert-to-video"
+                  >
+                    {convertingToVideo
+                      ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري التحويل... (قد يستغرق دقيقة)</>
+                      : <>🎬 حوّل الصور لفيديو MP4 الآن</>
+                    }
+                  </button>
+                </div>
+              )}
 
               {/* Audio section */}
               <div className="space-y-2 rounded-xl bg-muted/50 p-3">

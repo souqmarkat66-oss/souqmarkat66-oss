@@ -5,6 +5,11 @@ import { storage } from "./storage";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { registerImageRoutes, openai } from "./replit_integrations/image";
+import { textToSpeech } from "./replit_integrations/audio";
+import { spawn } from "child_process";
+import { writeFile, unlink, readFile, mkdir } from "fs/promises";
+import { randomUUID } from "crypto";
+import { tmpdir } from "os";
 import { upload } from "./upload";
 import path from "path";
 import fs from "fs";
@@ -957,26 +962,105 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // ─── AI TEXT-TO-SPEECH (Egyptian Arabic) ─────────────────────
+  // ─── AI TEXT-TO-SPEECH (Egyptian Arabic via gpt-audio) ───────
   app.post("/api/ai/tts", isAuthenticated, async (req: any, res) => {
     try {
-      const { text, voice = "alloy" } = req.body;
+      const { text, voice = "nova" } = req.body;
       if (!text || text.trim().length < 2) return res.status(400).json({ message: "النص مطلوب" });
 
-      const response = await openai.audio.speech.create({
-        model: "tts-1-hd",
-        voice: voice as any,
-        input: text.trim(),
-        speed: 0.9,
-      });
+      const arabicPrompt = `تكلم بالعربية المصرية بوضوح واحترافية: ${text.trim()}`;
+      const audioBuffer = await textToSpeech(arabicPrompt, voice as any, "mp3");
 
-      const buffer = Buffer.from(await response.arrayBuffer());
+      if (!audioBuffer || audioBuffer.length < 100) {
+        return res.status(500).json({ message: "الصوت لم يتم توليده بشكل صحيح، حاول مرة أخرى" });
+      }
+
       const filename = `tts-${Date.now()}.mp3`;
       const savePath = path.join(process.cwd(), 'uploads', filename);
-      fs.writeFileSync(savePath, buffer);
-      res.json({ url: `/uploads/${filename}` });
+      await writeFile(savePath, audioBuffer);
+      res.json({ url: `/uploads/${filename}`, size: audioBuffer.length });
     } catch (error: any) {
+      console.error("TTS error:", error);
       res.status(500).json({ message: "فشل توليد الصوت: " + error.message });
+    }
+  });
+
+  // ─── AI IMAGES-TO-VIDEO (FFmpeg slideshow) ───────────────────
+  app.post("/api/ai/images-to-video", isAuthenticated, async (req: any, res) => {
+    const tmpFiles: string[] = [];
+    try {
+      const { imageUrls, audioUrl, duration = 3, transition = "fade" } = req.body;
+      if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length < 1) {
+        return res.status(400).json({ message: "أرسل صورة واحدة على الأقل" });
+      }
+
+      const uploadsDir = path.join(process.cwd(), 'uploads');
+
+      // Download / resolve each image to a local tmp file
+      const localImages: string[] = [];
+      for (const imgUrl of imageUrls) {
+        const tmpPath = path.join(tmpdir(), `img-${randomUUID()}.jpg`);
+        tmpFiles.push(tmpPath);
+        if (imgUrl.startsWith('/uploads/')) {
+          const src = path.join(process.cwd(), imgUrl);
+          const buf = await readFile(src);
+          await writeFile(tmpPath, buf);
+        } else {
+          // Remote URL
+          const resp = await fetch(imgUrl);
+          const buf = Buffer.from(await resp.arrayBuffer());
+          await writeFile(tmpPath, buf);
+        }
+        localImages.push(tmpPath);
+      }
+
+      // Build ffmpeg input list file
+      const listFile = path.join(tmpdir(), `list-${randomUUID()}.txt`);
+      tmpFiles.push(listFile);
+      const listContent = localImages.map(p => `file '${p}'\nduration ${duration}`).join('\n');
+      await writeFile(listFile, listContent + `\nfile '${localImages[localImages.length - 1]}'`);
+
+      const outFilename = `video-${Date.now()}.mp4`;
+      const outPath = path.join(uploadsDir, outFilename);
+
+      // Build ffmpeg args
+      const ffmpegArgs: string[] = [
+        "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", listFile,
+      ];
+
+      // Add audio if provided
+      if (audioUrl) {
+        const audioSrc = audioUrl.startsWith('/uploads/') ? path.join(process.cwd(), audioUrl) : audioUrl;
+        ffmpegArgs.push("-i", audioSrc, "-shortest");
+      }
+
+      ffmpegArgs.push(
+        "-vf", `scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25,format=yuv420p`,
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "23",
+        ...(audioUrl ? ["-c:a", "aac", "-b:a", "128k"] : []),
+        "-movflags", "+faststart",
+        outPath
+      );
+
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn("ffmpeg", ffmpegArgs);
+        let stderr = "";
+        proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+        proc.on("close", (code) => code === 0 ? resolve() : reject(new Error("ffmpeg: " + stderr.slice(-500))));
+        proc.on("error", reject);
+      });
+
+      res.json({ url: `/uploads/${outFilename}` });
+    } catch (error: any) {
+      console.error("images-to-video error:", error.message);
+      res.status(500).json({ message: "فشل تحويل الصور لفيديو: " + error.message });
+    } finally {
+      for (const f of tmpFiles) await unlink(f).catch(() => {});
     }
   });
 

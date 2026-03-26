@@ -14,11 +14,13 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, Loader2, Film, Volume2, ImageIcon, AlertCircle, CreditCard } from "lucide-react";
+import { Sparkles, Loader2, Film, Volume2, ImageIcon, AlertCircle, CreditCard, Plus, X, Music } from "lucide-react";
 import { UploadZone } from "@/components/UploadZone";
 import { motion, AnimatePresence } from "framer-motion";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { EgyptTargetingMap } from "@/components/EgyptTargetingMap";
+import { useTTS } from "@/hooks/use-tts";
+import { useRef } from "react";
 
 const formSchema = insertAdSchema.extend({
   title: z.string().min(2, "العنوان مطلوب (2 أحرف على الأقل)"),
@@ -73,6 +75,12 @@ export default function CreateAd() {
   const [targetRegions, setTargetRegions] = useState<string[]>([]);
   const [targetInterests, setTargetInterests] = useState<string[]>([]);
   const [targetAges, setTargetAges] = useState<string[]>([]);
+  // Multi-image to video
+  const [adImageUrls, setAdImageUrls] = useState<string[]>([]);
+  const [uploadingAdImages, setUploadingAdImages] = useState(false);
+  const [convertingAdToVideo, setConvertingAdToVideo] = useState(false);
+  const fileAdImagesRef = useRef<HTMLInputElement>(null);
+  const tts = useTTS();
 
   // Auto-advance cinema slideshow
   useEffect(() => {
@@ -581,6 +589,132 @@ export default function CreateAd() {
                 </>
               )}
               <FormMessage />
+
+              {/* ─── Multi-image → Video ─── */}
+              <div className="mt-3 rounded-xl border border-dashed border-orange-300 bg-orange-50/50 dark:bg-orange-900/10 p-3 space-y-3">
+                <p className="text-xs font-bold text-orange-700 dark:text-orange-300 flex items-center gap-1.5">
+                  🎬 أو ارفع عدة صور وحوّلها لفيديو احترافي
+                </p>
+                <input
+                  ref={fileAdImagesRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={async (e) => {
+                    const files = Array.from(e.target.files || []);
+                    if (!files.length) return;
+                    setUploadingAdImages(true);
+                    try {
+                      const urls: string[] = [];
+                      for (const file of files) {
+                        const fd = new FormData();
+                        fd.append('file', file);
+                        const r = await fetch('/api/upload', { method: 'POST', body: fd });
+                        const d = await r.json();
+                        if (d.url) urls.push(d.url);
+                      }
+                      setAdImageUrls(prev => [...prev, ...urls].slice(0, 15));
+                    } catch { toast({ variant: "destructive", title: "فشل رفع الصور" }); }
+                    finally { setUploadingAdImages(false); e.target.value = ""; }
+                  }}
+                />
+
+                {adImageUrls.length > 0 && (
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {adImageUrls.map((url, i) => (
+                      <div key={i} className="relative aspect-square rounded-lg overflow-hidden group">
+                        <img src={url} alt="" className="w-full h-full object-cover" />
+                        <button
+                          onClick={() => setAdImageUrls(prev => prev.filter((_, j) => j !== i))}
+                          className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-red-500 text-white text-xs opacity-0 group-hover:opacity-100 flex items-center justify-center"
+                        ><X className="w-3 h-3" /></button>
+                      </div>
+                    ))}
+                    {adImageUrls.length < 15 && (
+                      <button
+                        onClick={() => fileAdImagesRef.current?.click()}
+                        disabled={uploadingAdImages}
+                        className="aspect-square rounded-lg border-2 border-dashed border-orange-300 flex items-center justify-center hover:bg-orange-50 transition-all"
+                      >
+                        {uploadingAdImages ? <Loader2 className="w-4 h-4 animate-spin text-orange-500" /> : <Plus className="w-4 h-4 text-orange-500" />}
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  {adImageUrls.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => fileAdImagesRef.current?.click()}
+                      disabled={uploadingAdImages}
+                      className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border border-orange-300 text-orange-700 text-sm hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-all"
+                      data-testid="btn-upload-ad-images"
+                    >
+                      {uploadingAdImages ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ImageIcon className="w-4 h-4" /> ارفع صور متعددة</>}
+                    </button>
+                  )}
+                  {adImageUrls.length >= 1 && (
+                    <button
+                      type="button"
+                      disabled={convertingAdToVideo}
+                      onClick={async () => {
+                        setConvertingAdToVideo(true);
+                        try {
+                          const r = await fetch('/api/ai/images-to-video', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ imageUrls: adImageUrls, duration: 3 }),
+                          });
+                          const d = await r.json();
+                          if (!r.ok) throw new Error(d.message);
+                          field.onChange(d.url);
+                          form.setValue("mediaType", "video");
+                          setAdImageUrls([]);
+                          toast({ title: "🎬 تم تحويل الصور لفيديو!" });
+                        } catch (e: any) {
+                          toast({ variant: "destructive", title: "فشل التحويل", description: e.message });
+                        } finally { setConvertingAdToVideo(false); }
+                      }}
+                      className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-orange-600 text-white text-sm font-bold hover:bg-orange-700 disabled:opacity-50 transition-all"
+                      data-testid="btn-convert-ad-to-video"
+                    >
+                      {convertingAdToVideo
+                        ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري التحويل...</>
+                        : <>🎬 حوّل {adImageUrls.length} صور لفيديو MP4</>
+                      }
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* ─── TTS for Ad ─── */}
+              {(form.watch("title")?.length >= 2) && (
+                <div className="mt-3 rounded-xl bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border border-purple-200/50 p-3 space-y-2">
+                  <p className="text-xs font-bold text-purple-700 dark:text-purple-300">🎙 تحويل النص لصوت (للريلز والإعلانات)</p>
+                  {tts.audioUrl ? (
+                    <div className="flex items-center gap-2">
+                      <audio src={tts.audioUrl} controls className="flex-1 h-8" />
+                      <button onClick={() => tts.reset()} className="w-6 h-6 rounded-full bg-red-100 text-red-500 text-xs flex items-center justify-center">✕</button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={tts.loading}
+                      onClick={async () => {
+                        const text = [form.getValues("title"), form.getValues("description")].filter(Boolean).join(". ");
+                        try { await tts.generate(text, "nova", true); }
+                        catch { toast({ variant: "destructive", title: "فشل توليد الصوت" }); }
+                      }}
+                      className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-purple-600 text-white text-sm font-bold hover:bg-purple-700 disabled:opacity-50"
+                      data-testid="btn-ad-tts"
+                    >
+                      {tts.loading ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري التوليد...</> : <>🎤 حوّل النص لصوت عربي مصري</>}
+                    </button>
+                  )}
+                </div>
+              )}
             </FormItem>
           )} />
 
