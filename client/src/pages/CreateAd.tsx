@@ -587,77 +587,74 @@ export default function CreateAd() {
                 </button>
               </div>
 
-              {/* Cash Mode */}
-              {paymentMode === "cash" && (
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">الدفع الفوري عبر تطبيق سوق ماركات أو مباشرة</p>
-                  <div className="flex gap-2">
-                    <a href={SOUQ_PLAY} target="_blank" rel="noopener noreferrer"
-                      className="flex-1 flex items-center justify-center gap-2 bg-black text-white rounded-xl px-3 py-2 text-xs font-bold hover:bg-gray-800 transition-colors"
-                      data-testid="btn-souq-play">
-                      <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white flex-shrink-0"><path d="M3.18 23.45a2 2 0 0 1-.93-.87V1.42a2 2 0 0 1 .93-.87l11.47 11.45L3.18 23.45zm13.12-6.92L4.43 23.35l9.1-9.09 2.77 2.27zm2.43-5.14c.4.28.65.72.65 1.21s-.25.93-.65 1.21l-2 1.3-3.06-3.05 3.06-3.06 2 1.39zM4.43.65l11.87 6.82-2.77 2.27L4.43.65z"/></svg>
-                      Google Play
-                    </a>
-                    <a href={SOUQ_APPLE} target="_blank" rel="noopener noreferrer"
-                      className="flex-1 flex items-center justify-center gap-2 bg-black text-white rounded-xl px-3 py-2 text-xs font-bold hover:bg-gray-800 transition-colors"
-                      data-testid="btn-souq-apple">
-                      <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white flex-shrink-0"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-                      App Store
-                    </a>
+              {/* Souq Market unified download card — shown in both modes */}
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+                <div className="flex items-center gap-3 px-3 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                  <span className="text-xl">🛒</span>
+                  <div>
+                    <p className="text-xs font-bold">{paymentMode === "cash" ? "ادفع كاش عبر تطبيق سوق ماركات" : "قسّط عبر تطبيق سوق ماركات"}</p>
+                    <p className="text-[10px] text-muted-foreground">حمّل التطبيق لإتمام {paymentMode === "cash" ? "الدفع" : "التقسيط"} بسهولة</p>
                   </div>
-                  <FormField control={form.control} name="paymentLink" render={({ field }) => (
+                </div>
+                <div className="flex divide-x divide-x-reverse divide-gray-200 dark:divide-gray-700">
+                  <a
+                    href={SOUQ_PLAY}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 flex flex-col items-center gap-1 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                    data-testid="btn-souq-play"
+                  >
+                    <svg viewBox="0 0 24 24" className="w-5 h-5" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M3.18 23.45a2 2 0 0 1-.93-.87V1.42a2 2 0 0 1 .93-.87l11.47 11.45L3.18 23.45zm13.12-6.92L4.43 23.35l9.1-9.09 2.77 2.27zm2.43-5.14c.4.28.65.72.65 1.21s-.25.93-.65 1.21l-2 1.3-3.06-3.05 3.06-3.06 2 1.39zM4.43.65l11.87 6.82-2.77 2.27L4.43.65z" fill="#01875f"/>
+                    </svg>
+                    <span className="text-[10px] font-bold text-muted-foreground">Google Play</span>
+                  </a>
+                  <a
+                    href={SOUQ_APPLE}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 flex flex-col items-center gap-1 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                    data-testid="btn-souq-apple"
+                  >
+                    <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+                    </svg>
+                    <span className="text-[10px] font-bold text-muted-foreground">App Store</span>
+                  </a>
+                </div>
+              </div>
+
+              {/* Cash: optional custom payment link */}
+              {paymentMode === "cash" && (
+                <FormField control={form.control} name="paymentLink" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs">رابط الدفع المخصص (اختياري)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="https://..." {...field} dir="ltr" className="text-xs h-8" data-testid="input-payment-link" />
+                    </FormControl>
+                  </FormItem>
+                )} />
+              )}
+
+              {/* Installment: months + monthly amount */}
+              {paymentMode === "installment" && (
+                <div className="grid grid-cols-2 gap-2">
+                  <FormField control={form.control} name="installmentMonths" render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs">رابط الدفع المخصص (اختياري)</FormLabel>
+                      <FormLabel className="text-xs">عدد الأقساط (شهر)</FormLabel>
                       <FormControl>
-                        <Input placeholder="https://..." {...field} dir="ltr" className="text-xs h-8" data-testid="input-payment-link" />
+                        <Input type="number" min="2" max="24" placeholder="مثال: 3" {...field} onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)} data-testid="input-installment-months" />
                       </FormControl>
                     </FormItem>
                   )} />
-                </div>
-              )}
-
-              {/* Installment Mode */}
-              {paymentMode === "installment" && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg p-2">
-                    <span className="text-lg">🛒</span>
-                    <div>
-                      <p className="text-xs font-bold text-blue-700 dark:text-blue-400">التقسيط عبر تطبيق سوق ماركات</p>
-                      <p className="text-xs text-muted-foreground">حمّل التطبيق وادفع بالتقسيط بكل سهولة</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <a href={SOUQ_PLAY} target="_blank" rel="noopener noreferrer"
-                      className="flex-1 flex items-center justify-center gap-1 bg-black text-white rounded-xl px-2 py-1.5 text-xs font-bold hover:bg-gray-800 transition-colors"
-                      data-testid="btn-installment-play">
-                      <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-white flex-shrink-0"><path d="M3.18 23.45a2 2 0 0 1-.93-.87V1.42a2 2 0 0 1 .93-.87l11.47 11.45L3.18 23.45zm13.12-6.92L4.43 23.35l9.1-9.09 2.77 2.27zm2.43-5.14c.4.28.65.72.65 1.21s-.25.93-.65 1.21l-2 1.3-3.06-3.05 3.06-3.06 2 1.39zM4.43.65l11.87 6.82-2.77 2.27L4.43.65z"/></svg>
-                      Google Play
-                    </a>
-                    <a href={SOUQ_APPLE} target="_blank" rel="noopener noreferrer"
-                      className="flex-1 flex items-center justify-center gap-1 bg-black text-white rounded-xl px-2 py-1.5 text-xs font-bold hover:bg-gray-800 transition-colors"
-                      data-testid="btn-installment-apple">
-                      <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-white flex-shrink-0"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-                      App Store
-                    </a>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <FormField control={form.control} name="installmentMonths" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-xs">عدد الأقساط (شهر)</FormLabel>
-                        <FormControl>
-                          <Input type="number" min="2" max="24" placeholder="مثال: 3" {...field} onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)} data-testid="input-installment-months" />
-                        </FormControl>
-                      </FormItem>
-                    )} />
-                    <FormField control={form.control} name="installmentMonthlyEGP" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-xs">القسط الشهري (ج.م)</FormLabel>
-                        <FormControl>
-                          <Input type="number" min="0" placeholder="مثال: 100" {...field} onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)} data-testid="input-installment-monthly" />
-                        </FormControl>
-                      </FormItem>
-                    )} />
-                  </div>
+                  <FormField control={form.control} name="installmentMonthlyEGP" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">القسط الشهري (ج.م)</FormLabel>
+                      <FormControl>
+                        <Input type="number" min="0" placeholder="مثال: 100" {...field} onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)} data-testid="input-installment-monthly" />
+                      </FormControl>
+                    </FormItem>
+                  )} />
                 </div>
               )}
             </div>
