@@ -360,10 +360,10 @@ export default function CreateAd() {
           <FormField control={form.control} name="targetRegion" render={({ field }) => (
             <FormItem>
               <FormLabel>المنطقة الجغرافية (اختياري)</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
+              <Select onValueChange={v => field.onChange(v === "all" ? "" : v)} defaultValue={field.value || "all"}>
                 <FormControl><SelectTrigger data-testid="select-region"><SelectValue placeholder="كل مصر" /></SelectTrigger></FormControl>
                 <SelectContent>
-                  <SelectItem value="">🗺 كل مصر</SelectItem>
+                  <SelectItem value="all">🗺 كل مصر</SelectItem>
                   {EGYPT_REGIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
                 </SelectContent>
               </Select>

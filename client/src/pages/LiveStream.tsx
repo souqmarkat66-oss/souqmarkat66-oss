@@ -52,7 +52,9 @@ export default function LiveStream() {
   });
 
   useEffect(() => {
-    if (historyMessages) setMessages(historyMessages.map((m: any) => ({ id: m.id, userName: m.userName, message: m.message, timestamp: m.createdAt })));
+    if (Array.isArray(historyMessages)) {
+      setMessages(historyMessages.map((m: any) => ({ id: m.id, userName: m.userName, message: m.message, timestamp: m.createdAt })));
+    }
   }, [historyMessages]);
 
   useEffect(() => {
