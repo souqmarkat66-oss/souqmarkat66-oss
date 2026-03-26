@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useToast } from "@/hooks/use-toast";
@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, ChevronUp, ChevronDown } from "lucide-react";
+import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -40,7 +40,8 @@ function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [liked, setLiked] = useState(false);
   const [localLikes, setLocalLikes] = useState(reel.likesCount);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(true); // start muted — browser requires this for autoplay
+  const [showUnmuteHint, setShowUnmuteHint] = useState(true);
   const [showComments, setShowComments] = useState(false);
   const [comment, setComment] = useState("");
   const queryClient = useQueryClient();
@@ -68,6 +69,45 @@ function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
     }
   });
 
+  // React doesn't sync the `muted` prop to the DOM element correctly — must use ref
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = muted;
+      videoRef.current.volume = muted ? 0 : 1;
+    }
+  }, [muted]);
+
+  // Auto-play when active
+  useEffect(() => {
+    if (!videoRef.current) return;
+    if (isActive) {
+      videoRef.current.muted = true; // must start muted
+      videoRef.current.play().catch(() => {});
+    } else {
+      videoRef.current.pause();
+    }
+  }, [isActive]);
+
+  const handleUnmute = () => {
+    if (videoRef.current) {
+      videoRef.current.muted = false;
+      videoRef.current.volume = 1;
+      if (videoRef.current.paused) videoRef.current.play();
+    }
+    setMuted(false);
+    setShowUnmuteHint(false);
+  };
+
+  const handleToggleMute = () => {
+    const newMuted = !muted;
+    if (videoRef.current) {
+      videoRef.current.muted = newMuted;
+      videoRef.current.volume = newMuted ? 0 : 1;
+    }
+    setMuted(newMuted);
+    if (!newMuted) setShowUnmuteHint(false);
+  };
+
   return (
     <div className="relative h-screen w-full snap-start bg-black flex items-center justify-center overflow-hidden">
       <video
@@ -80,6 +120,33 @@ function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
         playsInline
         onClick={() => videoRef.current?.paused ? videoRef.current.play() : videoRef.current?.pause()}
       />
+
+      {/* TAP TO UNMUTE — always visible when muted */}
+      {muted && showUnmuteHint && (
+        <button
+          onClick={handleUnmute}
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-2 animate-pulse"
+          data-testid="btn-unmute-reel"
+        >
+          <div className="w-20 h-20 rounded-full bg-black/60 backdrop-blur border-2 border-white/40 flex items-center justify-center">
+            <Volume2 className="w-9 h-9 text-white" />
+          </div>
+          <span className="text-white text-sm font-bold bg-black/60 px-3 py-1 rounded-full">
+            انقر لتشغيل الصوت 🔊
+          </span>
+        </button>
+      )}
+
+      {/* Muted indicator (small) — after hint dismissed */}
+      {muted && !showUnmuteHint && (
+        <button
+          onClick={handleToggleMute}
+          className="absolute top-4 left-4 z-20 flex items-center gap-1.5 bg-black/60 backdrop-blur text-white text-xs px-3 py-1.5 rounded-full border border-white/20"
+          data-testid="btn-muted-indicator"
+        >
+          <VolumeX className="w-3.5 h-3.5" /> مكتوم
+        </button>
+      )}
 
       {/* Overlay info */}
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
@@ -124,11 +191,18 @@ function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
           <span className="text-white text-xs font-bold">شارك</span>
         </button>
 
+        {/* Volume toggle — always visible */}
         <button
-          onClick={() => setMuted(!muted)}
-          className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-white"
+          onClick={handleToggleMute}
+          className={`flex flex-col items-center gap-1`}
+          data-testid="btn-volume-reel"
         >
-          <Volume2 className={`w-5 h-5 ${muted ? 'opacity-30' : ''}`} />
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${
+            muted ? 'bg-red-500/30 border-red-400 text-red-300' : 'bg-white/20 border-white/30 text-white'
+          }`}>
+            {muted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+          </div>
+          <span className="text-white text-xs font-bold">{muted ? 'صوت' : 'كتم'}</span>
         </button>
       </div>
 

@@ -191,24 +191,18 @@ function VideoPlayer({ src }: { src: string }) {
           </div>
         </div>
       )}
-      {/* Controls */}
-      <div className="absolute bottom-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button
-          onClick={e => { e.stopPropagation(); toggleMute(); }}
-          className="w-9 h-9 rounded-full bg-black/60 flex items-center justify-center text-white hover:bg-black/80"
-          title={muted ? "تشغيل الصوت" : "كتم الصوت"}
-        >
-          {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-        </button>
-      </div>
-      {muted && (
-        <div
-          className="absolute top-3 left-3 bg-black/60 text-white text-xs px-2 py-1 rounded-full cursor-pointer flex items-center gap-1"
-          onClick={e => { e.stopPropagation(); toggleMute(); }}
-        >
-          <VolumeX className="w-3 h-3" /> اضغط لتشغيل الصوت
-        </div>
-      )}
+      {/* Volume button — always visible */}
+      <button
+        onClick={e => { e.stopPropagation(); toggleMute(); }}
+        className={`absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-2 rounded-full text-white text-xs font-bold transition-all shadow-lg ${
+          muted
+            ? 'bg-red-500/80 hover:bg-red-500 border border-red-400/50'
+            : 'bg-black/60 hover:bg-black/80 border border-white/20'
+        }`}
+        data-testid="btn-video-mute-toggle"
+      >
+        {muted ? <><VolumeX className="w-4 h-4" /> انقر للصوت</> : <><Volume2 className="w-4 h-4" /> كتم</>}
+      </button>
     </div>
   );
 }
