@@ -920,19 +920,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const userId = req.user.claims.sub;
       const { prompt, size } = req.body;
       const response = await openai.images.generate({
-        model: "dall-e-3",
+        model: "gpt-image-1",
         prompt: prompt,
         n: 1,
         size: (size || "1024x1024") as any,
-        quality: "standard",
       });
+      // gpt-image-1 returns b64_json, save to file
+      const b64 = response.data[0]?.b64_json;
       const imageUrl = response.data[0]?.url;
-      if (!imageUrl) throw new Error("No image generated");
+      let finalUrl = imageUrl;
+      if (!finalUrl && b64) {
+        const buf = Buffer.from(b64, 'base64');
+        const filename = `ai-img-${Date.now()}.png`;
+        const savePath = path.join(process.cwd(), 'uploads', filename);
+        fs.writeFileSync(savePath, buf);
+        finalUrl = `/uploads/${filename}`;
+      }
+      if (!finalUrl) throw new Error("No image generated");
       await storage.recordAiUsage(userId, 'image');
       if (req.aiChargeEGP) {
         await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد صورة بالذكاء الاصطناعي' });
       }
-      res.json({ url: imageUrl, creditsUsed: (req.aiUsageCount || 0) + 1 });
+      res.json({ url: finalUrl, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
       res.status(500).json({ message: "Failed to generate image: " + error.message });
     }

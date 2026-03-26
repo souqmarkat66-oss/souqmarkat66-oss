@@ -60,6 +60,22 @@ export default function CreateAd() {
   const [generatingCopy, setGeneratingCopy] = useState(false);
   const [aiImageUrl, setAiImageUrl] = useState("");
   const [speakingScene, setSpeakingScene] = useState<number | null>(null);
+  const [cinemaScene, setCinemaScene] = useState(0);
+  const [cinemaPlaying, setCinemaPlaying] = useState(false);
+
+  // Auto-advance cinema slideshow
+  useEffect(() => {
+    if (!cinemaPlaying || !videoScript?.scenes?.length) return;
+    const scenes = videoScript.scenes;
+    // Speak current scene
+    speakEgyptian(scenes[cinemaScene]?.narration || scenes[cinemaScene]?.visual || '');
+    const timer = setTimeout(() => {
+      const next = (cinemaScene + 1) % scenes.length;
+      setCinemaScene(next);
+      if (next === 0) setCinemaPlaying(false);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [cinemaPlaying, cinemaScene, videoScript]);
 
   // AI usage info
   const { data: aiUsage } = useQuery<any>({
@@ -79,9 +95,13 @@ export default function CreateAd() {
   const onSubmit = async (values: FormValues) => {
     try {
       const { productName, targetAudience, ...adData } = values;
-      await createAd({ ...adData, userId: "temp" });
+      const newAd = await createAd({ ...adData, userId: "temp" });
       toast({ title: "🎉 تم نشر الإعلان بنجاح!", className: "bg-green-500 text-white border-none" });
-      setLocation("/ads");
+      if (newAd?.id) {
+        setLocation(`/ads/${newAd.id}`);
+      } else {
+        setLocation("/ads");
+      }
     } catch (error: any) {
       toast({ variant: "destructive", title: "خطأ", description: error.message });
     }
@@ -259,9 +279,40 @@ export default function CreateAd() {
                     {videoScript && (
                       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-background rounded-xl border overflow-hidden">
                         <div className="bg-gradient-to-r from-primary to-secondary p-3 text-white">
-                          <h4 className="font-bold text-sm">🎬 {videoScript.title}</h4>
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-bold text-sm">🎬 {videoScript.title}</h4>
+                            <Button
+                              size="sm" variant="secondary" className="h-7 gap-1 text-xs bg-white/20 text-white hover:bg-white/30 border-0"
+                              onClick={() => { setCinemaScene(0); setCinemaPlaying(true); }}
+                            >
+                              <Film className="w-3 h-3" /> {cinemaPlaying ? 'يعرض...' : 'عرض سينمائي ▶'}
+                            </Button>
+                          </div>
                           {videoScript.music && <p className="text-xs opacity-80 mt-1">🎵 موسيقى: {videoScript.music}</p>}
                         </div>
+
+                        {/* Cinema Slideshow Player */}
+                        {cinemaPlaying && videoScript.scenes && (
+                          <div className="relative bg-black text-white p-6 min-h-[160px] flex flex-col justify-between">
+                            <div className="absolute inset-0 bg-gradient-to-b from-black/80 to-black/95" />
+                            <div className="relative z-10">
+                              <Badge variant="secondary" className="text-xs mb-3 bg-white/20 text-white">
+                                مشهد {cinemaScene + 1} / {videoScript.scenes.length}  ·  {videoScript.scenes[cinemaScene]?.time}
+                              </Badge>
+                              <p className="text-base font-bold leading-relaxed mb-2">
+                                {videoScript.scenes[cinemaScene]?.narration}
+                              </p>
+                              <p className="text-xs opacity-70">{videoScript.scenes[cinemaScene]?.visual}</p>
+                            </div>
+                            <div className="relative z-10 flex gap-2 justify-between mt-4">
+                              <span className="text-xs opacity-50">{videoScript.scenes[cinemaScene]?.mood}</span>
+                              <Button size="sm" variant="ghost" className="h-6 text-xs text-white/70 hover:text-white" onClick={() => { setCinemaPlaying(false); window.speechSynthesis.cancel(); }}>⏹ إيقاف</Button>
+                            </div>
+                            {/* Progress bar */}
+                            <div className="absolute bottom-0 left-0 h-0.5 bg-primary transition-all" style={{ width: `${((cinemaScene + 1) / videoScript.scenes.length) * 100}%`, transitionDuration: '5000ms' }} />
+                          </div>
+                        )}
+
                         <div className="p-4 space-y-3">
                           {videoScript.voiceover && (
                             <div className="bg-muted rounded-lg p-3">
@@ -278,7 +329,7 @@ export default function CreateAd() {
                             <div className="space-y-2">
                               <p className="text-xs font-bold text-muted-foreground">المشاهد السينمائية:</p>
                               {videoScript.scenes.map((sc: any, i: number) => (
-                                <div key={i} className="border rounded-lg p-3 bg-muted/30">
+                                <div key={i} className={`border rounded-lg p-3 bg-muted/30 transition-all ${cinemaPlaying && cinemaScene === i ? 'ring-2 ring-primary' : ''}`}>
                                   <div className="flex items-center justify-between mb-2">
                                     <div className="flex items-center gap-2">
                                       <Badge variant="secondary" className="text-xs px-2 py-0">{sc.time || `${i * 5}s`}</Badge>

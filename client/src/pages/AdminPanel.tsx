@@ -121,12 +121,23 @@ export default function AdminPanel() {
   const getSettingValue = (key: string, fallback: string) =>
     settingsForm[key] !== undefined ? settingsForm[key] : (settings?.[key] ?? fallback);
 
+  // Still loading user
+  if (user === undefined) {
+    return (
+      <div className="container py-20 text-center">
+        <Loader2 className="w-10 h-10 mx-auto animate-spin text-primary mb-4" />
+        <p className="text-muted-foreground">جاري التحقق من الصلاحيات...</p>
+      </div>
+    );
+  }
+
   if (!isAdmin) {
     return (
       <div className="container py-20 text-center">
         <ShieldAlert className="w-16 h-16 mx-auto mb-4 text-red-500" />
         <h2 className="text-2xl font-bold mb-2">غير مصرح لك بالدخول</h2>
         <p className="text-muted-foreground">هذه الصفحة مخصصة لمالك المشروع فقط.</p>
+        <p className="text-xs text-muted-foreground mt-2">للدخول كأدمن: تسجيل الدخول أولاً ثم اذهب إلى /admin</p>
       </div>
     );
   }

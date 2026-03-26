@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRoute } from "wouter";
 import { useAd } from "@/hooks/use-ads";
 import { useAuth } from "@/hooks/use-auth";
@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { ArrowLeft, Calendar, Share2, PhoneCall, CreditCard, Banknote, MessageCircle, ExternalLink, CheckCircle } from "lucide-react";
+import { ArrowLeft, Calendar, Share2, PhoneCall, CreditCard, Banknote, MessageCircle, ExternalLink, CheckCircle, Volume2, VolumeX, Play, ChevronLeft, ChevronRight } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
@@ -142,6 +142,103 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
   );
 }
 
+function VideoPlayer({ src }: { src: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [muted, setMuted] = useState(true);
+  const [playing, setPlaying] = useState(false);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = true;
+    v.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  }, [src]);
+
+  const toggleMute = () => {
+    if (videoRef.current) {
+      videoRef.current.muted = !muted;
+      setMuted(!muted);
+    }
+  };
+
+  const togglePlay = () => {
+    if (!videoRef.current) return;
+    if (videoRef.current.paused) {
+      videoRef.current.play();
+      setPlaying(true);
+    } else {
+      videoRef.current.pause();
+      setPlaying(false);
+    }
+  };
+
+  return (
+    <div className="relative w-full h-full bg-black group cursor-pointer" onClick={togglePlay}>
+      <video
+        ref={videoRef}
+        src={src}
+        className="w-full h-full object-contain"
+        loop
+        playsInline
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+      />
+      {/* Play/Pause overlay */}
+      {!playing && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
+            <Play className="w-8 h-8 text-white fill-white" />
+          </div>
+        </div>
+      )}
+      {/* Controls */}
+      <div className="absolute bottom-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={e => { e.stopPropagation(); toggleMute(); }}
+          className="w-9 h-9 rounded-full bg-black/60 flex items-center justify-center text-white hover:bg-black/80"
+          title={muted ? "تشغيل الصوت" : "كتم الصوت"}
+        >
+          {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+        </button>
+      </div>
+      {muted && (
+        <div
+          className="absolute top-3 left-3 bg-black/60 text-white text-xs px-2 py-1 rounded-full cursor-pointer flex items-center gap-1"
+          onClick={e => { e.stopPropagation(); toggleMute(); }}
+        >
+          <VolumeX className="w-3 h-3" /> اضغط لتشغيل الصوت
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ImageSlideshow({ images }: { images: string[] }) {
+  const [current, setCurrent] = useState(0);
+  useEffect(() => {
+    if (images.length <= 1) return;
+    const timer = setInterval(() => setCurrent(c => (c + 1) % images.length), 3000);
+    return () => clearInterval(timer);
+  }, [images.length]);
+  if (images.length === 0) return null;
+  return (
+    <div className="relative w-full h-full bg-black">
+      <img src={images[current]} alt="" className="w-full h-full object-contain transition-opacity duration-500" />
+      {images.length > 1 && (
+        <>
+          <button onClick={() => setCurrent(c => (c - 1 + images.length) % images.length)} className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 flex items-center justify-center text-white"><ChevronLeft className="w-4 h-4" /></button>
+          <button onClick={() => setCurrent(c => (c + 1) % images.length)} className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 flex items-center justify-center text-white"><ChevronRight className="w-4 h-4" /></button>
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
+            {images.map((_, i) => (
+              <div key={i} className={`w-1.5 h-1.5 rounded-full transition-all ${i === current ? 'bg-white w-3' : 'bg-white/50'}`} />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function AdDetails() {
   const [match, params] = useRoute("/ads/:id");
   const id = parseInt(params?.id || "0");
@@ -186,11 +283,15 @@ export default function AdDetails() {
         <div className="lg:col-span-2">
           <div className="bg-card border rounded-3xl overflow-hidden shadow-sm">
             {/* Media */}
-            <div className="aspect-video bg-black relative">
+            <div className="aspect-video bg-black relative overflow-hidden rounded-t-3xl">
               {ad.mediaType === 'video' ? (
-                <video src={ad.mediaUrl} className="w-full h-full object-contain" controls autoPlay />
+                <VideoPlayer src={ad.mediaUrl} />
+              ) : ad.mediaUrl ? (
+                <ImageSlideshow images={[ad.mediaUrl]} />
               ) : (
-                <img src={ad.mediaUrl} alt={ad.title} className="w-full h-full object-contain bg-black/5" />
+                <div className="w-full h-full flex items-center justify-center text-muted-foreground/30">
+                  <span className="text-6xl">📷</span>
+                </div>
               )}
             </div>
 
