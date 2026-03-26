@@ -596,30 +596,52 @@ export default function CreateAd() {
                     <p className="text-[10px] text-muted-foreground">حمّل التطبيق لإتمام {paymentMode === "cash" ? "الدفع" : "التقسيط"} بسهولة</p>
                   </div>
                 </div>
-                <div className="flex divide-x divide-x-reverse divide-gray-200 dark:divide-gray-700">
+                <div className="flex flex-col divide-y divide-gray-200 dark:divide-gray-700">
                   <a
                     href={SOUQ_PLAY}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 flex flex-col items-center gap-1 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                     data-testid="btn-souq-play"
                   >
-                    <svg viewBox="0 0 24 24" className="w-5 h-5" xmlns="http://www.w3.org/2000/svg">
+                    <svg viewBox="0 0 24 24" className="w-5 h-5 flex-shrink-0" xmlns="http://www.w3.org/2000/svg">
                       <path d="M3.18 23.45a2 2 0 0 1-.93-.87V1.42a2 2 0 0 1 .93-.87l11.47 11.45L3.18 23.45zm13.12-6.92L4.43 23.35l9.1-9.09 2.77 2.27zm2.43-5.14c.4.28.65.72.65 1.21s-.25.93-.65 1.21l-2 1.3-3.06-3.05 3.06-3.06 2 1.39zM4.43.65l11.87 6.82-2.77 2.27L4.43.65z" fill="#01875f"/>
                     </svg>
-                    <span className="text-[10px] font-bold text-muted-foreground">Google Play</span>
+                    <div>
+                      <div className="text-[10px] text-muted-foreground">تحميل على</div>
+                      <div className="text-xs font-bold">Google Play</div>
+                    </div>
                   </a>
                   <a
                     href={SOUQ_APPLE}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 flex flex-col items-center gap-1 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                     data-testid="btn-souq-apple"
                   >
-                    <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current" xmlns="http://www.w3.org/2000/svg">
+                    <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current flex-shrink-0" xmlns="http://www.w3.org/2000/svg">
                       <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
                     </svg>
-                    <span className="text-[10px] font-bold text-muted-foreground">App Store</span>
+                    <div>
+                      <div className="text-[10px] text-muted-foreground">تحميل على</div>
+                      <div className="text-xs font-bold">App Store</div>
+                    </div>
+                  </a>
+                  <a
+                    href={SOUQ_PLAY}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                    data-testid="btn-souq-gallery"
+                  >
+                    <svg viewBox="0 0 24 24" className="w-5 h-5 flex-shrink-0" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <circle cx="12" cy="12" r="10" fill="#CF0A2C"/>
+                      <path d="M8 9.5h8M8 12h5M8 14.5h6" stroke="#fff" strokeWidth="1.5" strokeLinecap="round"/>
+                    </svg>
+                    <div>
+                      <div className="text-[10px] text-muted-foreground">تحميل على</div>
+                      <div className="text-xs font-bold">AppGallery</div>
+                    </div>
                   </a>
                 </div>
               </div>
