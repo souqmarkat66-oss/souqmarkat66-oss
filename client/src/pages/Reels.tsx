@@ -529,11 +529,15 @@ function CreateReelDialog() {
   const handleImagesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
+    e.target.value = "";
+    const remaining = 10 - imageUrls.length;
+    const toUpload = files.slice(0, remaining);
+    if (!toUpload.length) { toast({ title: "⚠ وصلت للحد الأقصى (10 صور)" }); return; }
     setUploadingImages(true);
     try {
-      const uploaded = await Promise.all(files.map(uploadFile));
+      const uploaded = await Promise.all(toUpload.map(uploadFile));
       setImageUrls(prev => [...prev, ...uploaded]);
-      toast({ title: `✅ تم رفع ${uploaded.length} صورة!` });
+      toast({ title: `✅ تم رفع ${uploaded.length} صورة دفعة واحدة!` });
     } catch { toast({ variant: "destructive", title: "فشل رفع الصور" }); }
     finally { setUploadingImages(false); }
   };

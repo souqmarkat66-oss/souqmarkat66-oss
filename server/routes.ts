@@ -968,8 +968,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { text, voice = "nova" } = req.body;
       if (!text || text.trim().length < 2) return res.status(400).json({ message: "النص مطلوب" });
 
-      const arabicPrompt = `تكلم بالعربية المصرية بوضوح واحترافية: ${text.trim()}`;
-      const audioBuffer = await textToSpeech(arabicPrompt, voice as any, "mp3");
+      const audioBuffer = await textToSpeech(text.trim(), voice as any, "mp3");
 
       if (!audioBuffer || audioBuffer.length < 100) {
         return res.status(500).json({ message: "الصوت لم يتم توليده بشكل صحيح، حاول مرة أخرى" });

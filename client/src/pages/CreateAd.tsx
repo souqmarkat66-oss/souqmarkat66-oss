@@ -604,19 +604,23 @@ export default function CreateAd() {
                   onChange={async (e) => {
                     const files = Array.from(e.target.files || []);
                     if (!files.length) return;
+                    e.target.value = "";
+                    const remaining = 15 - adImageUrls.length;
+                    const toUpload = files.slice(0, remaining);
+                    if (!toUpload.length) { toast({ title: "⚠ وصلت للحد الأقصى (15 صورة)" }); return; }
                     setUploadingAdImages(true);
                     try {
-                      const urls: string[] = [];
-                      for (const file of files) {
+                      const uploaded = await Promise.all(toUpload.map(async (file) => {
                         const fd = new FormData();
                         fd.append('file', file);
                         const r = await fetch('/api/upload', { method: 'POST', body: fd });
                         const d = await r.json();
-                        if (d.url) urls.push(d.url);
-                      }
-                      setAdImageUrls(prev => [...prev, ...urls].slice(0, 15));
+                        return d.url as string;
+                      }));
+                      setAdImageUrls(prev => [...prev, ...uploaded.filter(Boolean)].slice(0, 15));
+                      toast({ title: `✅ تم رفع ${uploaded.length} صورة دفعة واحدة!` });
                     } catch { toast({ variant: "destructive", title: "فشل رفع الصور" }); }
-                    finally { setUploadingAdImages(false); e.target.value = ""; }
+                    finally { setUploadingAdImages(false); }
                   }}
                 />
 
