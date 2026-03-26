@@ -1,4 +1,5 @@
 import { useAuth } from "@/hooks/use-auth";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -8,15 +9,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AdCard } from "@/components/AdCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  PlusCircle, Video, Image, Play, Eye, Heart, Trash2, Edit,
+  PlusCircle, Video, Image, Play, Eye, Heart, Trash2, Edit, Pencil,
   LayoutGrid, Radio, User, LogIn, MessageSquare
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { EditAdDialog } from "@/components/EditAdDialog";
 
 export default function MyContent() {
   const { user, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
+  const [editingAd, setEditingAd] = useState<any | null>(null);
 
   if (authLoading) return (
     <div className="flex justify-center items-center min-h-[60vh]">
@@ -151,6 +154,14 @@ function AuthenticatedContent({ user }: { user: any }) {
                       </button>
                     </Link>
                     <button
+                      className="w-7 h-7 rounded-full bg-blue-500/90 text-white flex items-center justify-center shadow hover:bg-blue-600"
+                      title="تعديل"
+                      onClick={() => setEditingAd(ad)}
+                      data-testid={`btn-edit-ad-${ad.id}`}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
                       className="w-7 h-7 rounded-full bg-red-500/90 text-white flex items-center justify-center shadow hover:bg-red-500"
                       title="حذف"
                       onClick={() => { if (confirm("حذف هذا الإعلان؟")) deleteAdMut.mutate(ad.id); }}
@@ -258,6 +269,15 @@ function AuthenticatedContent({ user }: { user: any }) {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Edit Ad Dialog */}
+      {editingAd && (
+        <EditAdDialog
+          ad={editingAd}
+          open={!!editingAd}
+          onClose={() => setEditingAd(null)}
+        />
+      )}
     </div>
   );
 }

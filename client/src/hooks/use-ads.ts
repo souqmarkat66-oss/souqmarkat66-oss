@@ -63,6 +63,29 @@ export function useCreateAd() {
   });
 }
 
+export function useUpdateAd() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: Partial<AdInput> }) => {
+      const res = await fetch(`/api/ads/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "فشل التعديل");
+      }
+      return res.json();
+    },
+    onSuccess: (_d, { id }) => {
+      queryClient.invalidateQueries({ queryKey: [api.ads.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.ads.get.path, id] });
+    },
+  });
+}
+
 export function useDeleteAd() {
   const queryClient = useQueryClient();
   return useMutation({
