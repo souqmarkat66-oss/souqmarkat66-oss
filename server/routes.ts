@@ -197,9 +197,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/ads", async (req: any, res) => {
     const language = req.query.language as string | undefined;
     const myAds = req.query.mine === 'true';
-    const userId = req.user?.claims?.sub;
-    if (myAds && userId) {
-      const ads = await storage.getAds(undefined, userId);
+    const filterUserId = req.query.userId as string | undefined;
+    const authUserId = req.user?.claims?.sub;
+    if (myAds && authUserId) {
+      const ads = await storage.getAds(undefined, authUserId);
+      return res.json(ads);
+    }
+    if (filterUserId) {
+      const ads = await storage.getAds(undefined, filterUserId);
       return res.json(ads);
     }
     const ads = await storage.getAds(language);

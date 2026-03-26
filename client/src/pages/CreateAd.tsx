@@ -416,7 +416,7 @@ export default function CreateAd() {
                               <Film className="w-3 h-3" /> {cinemaPlaying ? 'يعرض...' : 'عرض سينمائي ▶'}
                             </Button>
                           </div>
-                          {videoScript.music && <p className="text-xs opacity-80 mt-1">🎵 موسيقى: {videoScript.music}</p>}
+                          {videoScript.music && <p className="text-xs opacity-80 mt-1">🎵 موسيقى: {typeof videoScript.music === 'string' ? videoScript.music : videoScript.music?.description || ''}</p>}
                         </div>
 
                         {/* Inline cinema preview placeholder */}
@@ -462,7 +462,9 @@ export default function CreateAd() {
                           )}
                           {videoScript.callToAction && (
                             <div className="bg-primary/10 rounded-lg p-3 text-center">
-                              <p className="text-sm font-bold text-primary">📢 {videoScript.callToAction}</p>
+                              <p className="text-sm font-bold text-primary">
+                                📢 {typeof videoScript.callToAction === 'string' ? videoScript.callToAction : videoScript.callToAction?.text || videoScript.callToAction?.description || ''}
+                              </p>
                             </div>
                           )}
                         </div>
