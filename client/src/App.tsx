@@ -108,10 +108,12 @@ function AppFooter() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
           {/* App Download */}
           <div>
-            <h3 className="font-bold text-sm mb-3">حمّل تطبيق سوق للإعلانات</h3>
+            <h3 className="font-bold text-sm mb-3">حمّل تطبيق سوق ماركات</h3>
             <div className="flex flex-col gap-2">
               <a
-                href="#"
+                href="https://apps.apple.com/eg/app/as-souqmarket/id6740153334"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="flex items-center gap-3 bg-black text-white rounded-xl px-4 py-2.5 hover:bg-gray-900 transition-colors"
                 data-testid="btn-appstore"
               >
@@ -124,7 +126,9 @@ function AppFooter() {
                 </div>
               </a>
               <a
-                href="#"
+                href="https://play.google.com/store/apps/details?id=com.apmo.souqmarket"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="flex items-center gap-3 bg-black text-white rounded-xl px-4 py-2.5 hover:bg-gray-900 transition-colors"
                 data-testid="btn-playstore"
               >
@@ -137,7 +141,9 @@ function AppFooter() {
                 </div>
               </a>
               <a
-                href="#"
+                href="https://play.google.com/store/apps/details?id=com.apmo.souqmarket"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="flex items-center gap-3 bg-black text-white rounded-xl px-4 py-2.5 hover:bg-gray-900 transition-colors"
                 data-testid="btn-appgallery"
               >
