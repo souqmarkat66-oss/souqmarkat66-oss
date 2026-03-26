@@ -1,11 +1,10 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Copy, Check, MessageCircle, X, Send, Loader2, Code2, Globe, Tv, Radio, Smartphone, ChevronDown, ChevronUp } from "lucide-react";
+import { Copy, Check, Code2, Globe, Tv, Radio, Smartphone, ChevronDown, ChevronUp } from "lucide-react";
 
 /* ─── Copy Button ─────────────────────────────────────────── */
 function CopyBtn({ text }: { text: string }) {
@@ -71,153 +70,6 @@ function Step({
   );
 }
 
-/* ─── AI Assistant ────────────────────────────────────────── */
-const PRESET_QA: Record<string, string> = {
-  "كيف أضيف الإعلانات في موقعي؟": "بسيطة جداً! انسخ كود التضمين من صفحة حملاتك، ثم الصقه في أي مكان في صفحة HTML قبل </body>. الإعلانات ستظهر تلقائياً ويُحسَب كل ظهور وكل نقرة.",
-  "كيف أضيف الإعلانات في البث المباشر؟": "في البث المباشر، الإعلانات تظهر تلقائياً في الشريط الجانبي للمشاهدين. تأكد أن خيار 'عرض الإعلانات' مُفعَّل عند إنشاء البث. يمكنك أيضاً استدعاء /api/campaigns/random للحصول على إعلان عشوائي وعرضه.",
-  "كيف أضيف الإعلانات في تطبيق موبايل؟": "استخدم الـ API مباشرة:\nGET /api/campaigns?status=active\nستحصل على قائمة الحملات النشطة. اعرضها في تطبيقك وأرسل GET /api/campaigns/{id}/impression لكل ظهور، وGET /api/campaigns/{id}/click عند النقر.",
-  "ما هو نظام توزيع الأرباح؟": "النظام بسيط:\n• المنصة: 40% من كل حملة\n• الناشر (صاحب القناة/الموقع): 60%\nالأسعار الافتراضية: 15 جنيه لكل 1000 ظهور (CPM). يمكن تغييرها من لوحة الأدمن.",
-  "كيف أتابع الإيرادات؟": "اذهب إلى صفحة الإيرادات (/revenue). ستجد:\n• رصيدك الكلي بالجنيه المصري\n• كل المعاملات مع التاريخ\n• طلبات السحب عبر فودافون كاش / اتصالات / InstaPay",
-};
-
-function AIAssistant() {
-  const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<{ role: "user" | "bot"; text: string }[]>([
-    { role: "bot", text: "مرحباً! أنا مساعد سوق للإعلانات 🤖\nاسألني عن كيفية ربط الإعلانات بموقعك أو قناتك أو تطبيقك." }
-  ]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
-
-  const send = async () => {
-    const q = input.trim();
-    if (!q) return;
-    setMessages(m => [...m, { role: "user", text: q }]);
-    setInput("");
-    setLoading(true);
-
-    // Check preset answers first
-    const preset = Object.entries(PRESET_QA).find(([k]) =>
-      q.includes(k.replace("؟","").slice(0, 8))
-    );
-
-    await new Promise(r => setTimeout(r, 600));
-
-    if (preset) {
-      setMessages(m => [...m, { role: "bot", text: preset[1] }]);
-    } else {
-      try {
-        const res = await fetch("/api/ai/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            message: q,
-            context: "أنت مساعد ذكي لمنصة شبكة سوق للإعلانات. تساعد المستخدمين على فهم كيفية ربط وتضمين الإعلانات في مواقعهم وقنواتهم وتطبيقاتهم وبثوثهم المباشرة. الأسعار بالجنيه المصري. المنصة عربية. كن مختصراً ومفيداً."
-          })
-        });
-        if (res.ok) {
-          const d = await res.json();
-          setMessages(m => [...m, { role: "bot", text: d.reply || d.message || "عذراً، لم أفهم سؤالك. جرب إعادة الصياغة." }]);
-        } else {
-          throw new Error();
-        }
-      } catch {
-        // Fallback smart response
-        const fallbacks = [
-          "لدمج الإعلانات، انسخ الكود من صفحة حملاتك وضعه في موقعك. للمساعدة التفصيلية، اطلع على الأقسام أعلاه.",
-          "يمكنك استخدام الـ API على المسار /api/campaigns لجلب الإعلانات وعرضها في أي منصة.",
-          "لأي استفسار تقني، تواصل مع فريق الدعم عبر واتساب أو راجع الأقسام التفصيلية في هذه الصفحة.",
-        ];
-        setMessages(m => [...m, { role: "bot", text: fallbacks[Math.floor(Math.random() * fallbacks.length)] }]);
-      }
-    }
-    setLoading(false);
-  };
-
-  return (
-    <>
-      {/* Toggle Button */}
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="fixed bottom-6 left-6 z-50 w-14 h-14 rounded-full bg-primary shadow-xl flex items-center justify-center hover:bg-primary/90 active:scale-95 transition-all"
-        data-testid="btn-ai-assistant"
-      >
-        {open ? <X className="w-6 h-6 text-white" /> : <MessageCircle className="w-6 h-6 text-white" />}
-      </button>
-
-      {/* Chat Window */}
-      {open && (
-        <div className="fixed bottom-24 left-6 z-50 w-80 max-h-[500px] flex flex-col bg-background border border-border rounded-2xl shadow-2xl overflow-hidden">
-          {/* Header */}
-          <div className="bg-primary px-4 py-3 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white font-bold text-sm">م</div>
-            <div>
-              <p className="text-white font-bold text-sm">مساعد سوق الذكي</p>
-              <p className="text-white/70 text-xs">جاهز للمساعدة 🟢</p>
-            </div>
-          </div>
-
-          {/* Quick questions */}
-          <div className="px-3 py-2 border-b border-border/40 flex gap-2 overflow-x-auto">
-            {Object.keys(PRESET_QA).slice(0,3).map(q => (
-              <button
-                key={q}
-                onClick={() => { setInput(q); }}
-                className="text-xs px-2.5 py-1 rounded-full border border-primary/30 text-primary hover:bg-primary/10 transition-all whitespace-nowrap flex-shrink-0"
-              >
-                {q.slice(0, 14)}...
-              </button>
-            ))}
-          </div>
-
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0" style={{ maxHeight: 280 }}>
-            {messages.map((m, i) => (
-              <div key={i} className={`flex ${m.role === "user" ? "justify-start" : "justify-end"}`}>
-                <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap ${
-                  m.role === "user"
-                    ? "bg-primary text-white rounded-br-sm"
-                    : "bg-muted text-foreground rounded-bl-sm"
-                }`}>
-                  {m.text}
-                </div>
-              </div>
-            ))}
-            {loading && (
-              <div className="flex justify-end">
-                <div className="bg-muted rounded-2xl rounded-bl-sm px-3 py-2">
-                  <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                </div>
-              </div>
-            )}
-            <div ref={bottomRef} />
-          </div>
-
-          {/* Input */}
-          <div className="p-3 border-t border-border/40 flex gap-2">
-            <Input
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && send()}
-              placeholder="اسأل أي سؤال..."
-              className="text-xs h-8"
-              dir="rtl"
-              data-testid="input-ai-chat"
-            />
-            <Button size="sm" className="h-8 w-8 p-0" onClick={send} disabled={loading || !input.trim()} data-testid="btn-ai-send">
-              <Send className="w-3.5 h-3.5" />
-            </Button>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-/* ─── Main Page ───────────────────────────────────────────── */
 export default function EmbedGuide() {
   const { user } = useAuth();
   const { data: campaigns = [] } = useQuery<any[]>({
@@ -468,8 +320,6 @@ function SouqAd() {
         </div>
       </div>
 
-      {/* AI Assistant */}
-      <AIAssistant />
     </div>
   );
 }
