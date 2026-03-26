@@ -54,6 +54,9 @@ export const ads = pgTable("ads", {
   appGalleryUrl: text("app_gallery_url"),
   installmentMonths: integer("installment_months"),
   installmentMonthlyEGP: real("installment_monthly_egp"),
+  targetLat: real("target_lat"),
+  targetLng: real("target_lng"),
+  targetRadiusKm: real("target_radius_km"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

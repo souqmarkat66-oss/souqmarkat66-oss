@@ -19,6 +19,7 @@ import { UploadZone } from "@/components/UploadZone";
 import { motion, AnimatePresence } from "framer-motion";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { EgyptTargetingMap } from "@/components/EgyptTargetingMap";
+import LocationPickerMap from "@/components/LocationPickerMap";
 import { useTTS } from "@/hooks/use-tts";
 import { useRef } from "react";
 
@@ -84,6 +85,7 @@ export default function CreateAd() {
   const [targetRegions, setTargetRegions] = useState<string[]>([]);
   const [targetInterests, setTargetInterests] = useState<string[]>([]);
   const [targetAges, setTargetAges] = useState<string[]>([]);
+  const [locationTarget, setLocationTarget] = useState<{ lat: number; lng: number; radiusKm: number } | null>(null);
   // Multi-image to video
   const [adImageUrls, setAdImageUrls] = useState<string[]>([]);
   const [uploadingAdImages, setUploadingAdImages] = useState(false);
@@ -146,7 +148,11 @@ export default function CreateAd() {
         ...adData,
         userId: "temp",
         targetRegion: targetRegions.join(",") || adData.targetRegion || "",
-        // extra targeting sent as description extension (stored as JSON comment for now)
+        ...(locationTarget ? {
+          targetLat: locationTarget.lat,
+          targetLng: locationTarget.lng,
+          targetRadiusKm: locationTarget.radiusKm,
+        } : {}),
       });
       toast({ title: "🎉 تم نشر الإعلان بنجاح!", className: "bg-green-500 text-white border-none" });
       if (newAd?.id) {
@@ -717,6 +723,11 @@ export default function CreateAd() {
               onInterestsChange={setTargetInterests}
               onAgesChange={setTargetAges}
             />
+          </div>
+
+          {/* Location Picker Map */}
+          <div className="border rounded-2xl p-4 bg-background">
+            <LocationPickerMap value={locationTarget} onChange={setLocationTarget} />
           </div>
 
           <FormField control={form.control} name="mediaUrl" render={({ field }) => (

@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin
+
+Sitemap: https://souq-ads.replit.app/sitemap.xml
+
+# Souq Ads Network - شبكة سوق للإعلانات
