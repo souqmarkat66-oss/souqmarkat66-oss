@@ -25,6 +25,7 @@ import MyContent from "@/pages/MyContent";
 import EmbedGuide from "@/pages/EmbedGuide";
 import Messages from "@/pages/Messages";
 import Profile from "@/pages/Profile";
+import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -47,6 +48,7 @@ function ReelsPage() {
 
 function Router() {
   return (
+    <>
     <Switch>
       <Route path="/reels" component={ReelsPage} />
       <Route>
@@ -92,6 +94,8 @@ function Router() {
         </div>
       </Route>
     </Switch>
+    <PWAInstallPrompt />
+    </>
   );
 }
 
