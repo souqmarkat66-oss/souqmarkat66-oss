@@ -624,17 +624,16 @@ export default function CreateAd() {
                 </div>
               </div>
 
-              {/* Cash: optional custom payment link */}
-              {paymentMode === "cash" && (
-                <FormField control={form.control} name="paymentLink" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="text-xs">رابط الدفع المخصص (اختياري)</FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://..." {...field} dir="ltr" className="text-xs h-8" data-testid="input-payment-link" />
-                    </FormControl>
-                  </FormItem>
-                )} />
-              )}
+              {/* Custom link — always visible, for advertiser's own link */}
+              <FormField control={form.control} name="paymentLink" render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-xs flex items-center gap-1">🔗 رابطك الخاص (اختياري)</FormLabel>
+                  <FormControl>
+                    <Input placeholder="ضع رابط تطبيقك أو موقعك أو متجرك هنا..." {...field} dir="ltr" className="text-xs h-8" data-testid="input-payment-link" />
+                  </FormControl>
+                  <p className="text-[10px] text-muted-foreground">يظهر هذا الرابط في صفحة إعلانك للزوار</p>
+                </FormItem>
+              )} />
 
               {/* Installment: months + monthly amount */}
               {paymentMode === "installment" && (
