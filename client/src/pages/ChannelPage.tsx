@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Radio, CheckCircle, Plus, Bell, Megaphone } from "lucide-react";
+import { Users, Radio, CheckCircle, Plus, Bell, Megaphone, Film, Play } from "lucide-react";
 import { motion } from "framer-motion";
 import { AdCard } from "@/components/AdCard";
 import type { Channel, LiveStream, Ad } from "@shared/schema";
@@ -36,6 +36,13 @@ export default function ChannelPage() {
   const { data: channelAds = [] } = useQuery<Ad[]>({
     queryKey: ["/api/ads", "channel", channel?.userId],
     queryFn: () => fetch(`/api/ads?userId=${channel!.userId}`).then(r => r.json()),
+    enabled: !!channel?.userId
+  });
+
+  // Fetch reels belonging to this channel's owner
+  const { data: channelReels = [] } = useQuery<any[]>({
+    queryKey: ["/api/reels", "channel", channel?.userId],
+    queryFn: () => fetch(`/api/reels?userId=${channel!.userId}`).then(r => r.json()),
     enabled: !!channel?.userId
   });
 
@@ -201,6 +208,49 @@ export default function ChannelPage() {
             </div>
           )}
         </section>
+
+        {/* ── REELS ─────────────────────────────────────────── */}
+        {channelReels.length > 0 && <section className="mb-12">
+          <div className="flex items-center gap-3 mb-5">
+            <Film className="w-5 h-5 text-primary" />
+            <h2 className="text-xl font-bold">ريلز القناة</h2>
+            <Badge variant="secondary">{channelReels.length}</Badge>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            {channelReels.map((reel: any, i: number) => {
+              const urls: string[] = (() => {
+                try { const p = JSON.parse(reel.videoUrl); return Array.isArray(p) ? p : [reel.videoUrl]; }
+                catch { return [reel.videoUrl]; }
+              })();
+              const isVid = /\.(mp4|mov|webm)/i.test(urls[0] ?? "");
+              return (
+                <Link href="/reels" key={reel.id}>
+                  <motion.div
+                    initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
+                    className="relative aspect-[9/16] rounded-2xl overflow-hidden bg-black cursor-pointer group"
+                  >
+                    {isVid
+                      ? <video src={urls[0]} className="w-full h-full object-cover" muted playsInline />
+                      : <img src={urls[0]} className="w-full h-full object-cover" alt={reel.title} />
+                    }
+                    <div className="absolute inset-0 bg-black/30 group-hover:bg-black/50 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                      <Play className="w-10 h-10 text-white drop-shadow-lg" />
+                    </div>
+                    <div className="absolute bottom-0 inset-x-0 p-2.5 bg-gradient-to-t from-black/80 to-transparent">
+                      <p className="text-white text-xs font-semibold line-clamp-2">{reel.title}</p>
+                      <div className="flex items-center gap-2 mt-0.5 text-white/60 text-[10px]">
+                        <span>👁 {reel.viewsCount || 0}</span>
+                        <span>❤ {reel.likesCount || 0}</span>
+                        {urls.length > 1 && <span>🖼 {urls.length}</span>}
+                      </div>
+                    </div>
+                  </motion.div>
+                </Link>
+              );
+            })}
+          </div>
+        </section>}
+
       </div>
     </div>
   );

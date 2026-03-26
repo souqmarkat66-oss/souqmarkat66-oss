@@ -463,9 +463,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ================================================================
   app.get("/api/reels", async (req: any, res) => {
     const myReels = req.query.mine === 'true';
-    const userId = req.user?.claims?.sub;
-    if (myReels && userId) {
-      const reels = await storage.getReels(userId);
+    const filterUserId = req.query.userId as string | undefined;
+    const authUserId = req.user?.claims?.sub;
+    if (myReels && authUserId) {
+      const reels = await storage.getReels(authUserId);
+      return res.json(reels);
+    }
+    if (filterUserId) {
+      const reels = await storage.getReels(filterUserId);
       return res.json(reels);
     }
     const reels = await storage.getReels();

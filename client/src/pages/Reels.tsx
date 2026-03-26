@@ -929,7 +929,7 @@ export default function Reels() {
         <div className="text-6xl">🎬</div>
         <h2 className="text-2xl font-bold">لا توجد ريلز بعد</h2>
         <p className="text-white/60 text-center px-8">كن أول من ينشر ريل واجذب المتابعين!</p>
-        {user && <CreateReelDialog centered />}
+        <CreateReelDialog centered />
       </div>
     );
   }
@@ -966,7 +966,7 @@ export default function Reels() {
         </div>
       )}
 
-      {user && <CreateReelDialog />}
+      <CreateReelDialog />
 
       {editingReel && (
         <EditReelDialog
