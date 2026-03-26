@@ -2,40 +2,53 @@ import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Megaphone, Radio, User, BarChart2, Sparkles, LogIn, CheckCircle2 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import {
+  Megaphone, Radio, User, BarChart2, CheckCircle2,
+  LogIn, Sparkles, Shield, Star, Tv, ShoppingBag
+} from "lucide-react";
 
 const ROLES = [
   {
     id: "advertiser",
     icon: Megaphone,
+    emoji: "📢",
     title: "معلن",
-    subtitle: "أريد نشر إعلاناتي",
-    desc: "أنشئ حملات إعلانية، ارفع إعلاناتك، وتتبع النتائج بالجنيه المصري",
-    color: "from-primary/20 to-primary/5 border-primary/30 hover:border-primary",
-    iconBg: "bg-primary/10",
-    iconColor: "text-primary",
+    subtitle: "أريد نشر إعلاناتي وحملاتي",
+    features: ["رفع إعلانات مرئية وصورية", "إنشاء حملات CPM بالجنيه المصري", "استهداف 26 محافظة مصرية", "تتبع الأداء والنتائج"],
+    gradient: "from-violet-600/20 via-purple-500/10 to-violet-600/5",
+    border: "border-violet-400/40 hover:border-violet-500",
+    ring: "ring-violet-500",
+    iconBg: "bg-violet-500",
+    badge: "أكثر استخداماً",
+    badgeColor: "bg-violet-500",
   },
   {
     id: "channel",
-    icon: Radio,
+    icon: Tv,
+    emoji: "📡",
     title: "صاحب قناة",
-    subtitle: "أريد بث وإنشاء محتوى",
-    desc: "أنشئ قناتك، ابث مباشراً، ونشر ريلز لجمهورك وكسب أرباح",
-    color: "from-red-500/20 to-red-500/5 border-red-400/30 hover:border-red-400",
-    iconBg: "bg-red-500/10",
-    iconColor: "text-red-500",
+    subtitle: "أريد البث وإنشاء المحتوى",
+    features: ["قناة يوتيوب بجودة عالية", "بث مباشر WebRTC HD", "نشر ريلز TikTok-Style", "أرباح 60% من الإعلانات"],
+    gradient: "from-red-600/20 via-rose-500/10 to-red-600/5",
+    border: "border-red-400/40 hover:border-red-500",
+    ring: "ring-red-500",
+    iconBg: "bg-red-500",
+    badge: "دخل شهري",
+    badgeColor: "bg-red-500",
   },
   {
     id: "client",
-    icon: User,
-    title: "عميل عادي",
+    icon: ShoppingBag,
+    emoji: "🛍️",
+    title: "مستخدم",
     subtitle: "أريد التصفح والتسوق",
-    desc: "تصفح الإعلانات، شاهد البث المباشر، وتفاعل مع المحتوى بحرية",
-    color: "from-green-500/20 to-green-500/5 border-green-400/30 hover:border-green-400",
-    iconBg: "bg-green-500/10",
-    iconColor: "text-green-600",
+    features: ["تصفح آلاف الإعلانات", "شاهد البث المباشر مجاناً", "تواصل مع البائعين", "إشعارات ذكية مخصصة"],
+    gradient: "from-emerald-600/20 via-green-500/10 to-emerald-600/5",
+    border: "border-emerald-400/40 hover:border-emerald-500",
+    ring: "ring-emerald-500",
+    iconBg: "bg-emerald-500",
+    badge: "مجاني دائماً",
+    badgeColor: "bg-emerald-500",
   },
 ];
 
@@ -43,15 +56,21 @@ export default function Login() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
+  const [animStep, setAnimStep] = useState(0);
 
   useEffect(() => {
     if (user) {
       const role = localStorage.getItem("souq_role");
       if (role === "advertiser") setLocation("/create");
-      else if (role === "channel") setLocation("/channels/mine");
+      else if (role === "channel") setLocation("/channels");
       else setLocation("/");
     }
   }, [user]);
+
+  useEffect(() => {
+    const t = setInterval(() => setAnimStep(s => (s + 1) % 3), 3500);
+    return () => clearInterval(t);
+  }, []);
 
   const handleLogin = () => {
     if (selectedRole) localStorage.setItem("souq_role", selectedRole);
@@ -59,101 +78,130 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-background flex flex-col items-center justify-center p-4" dir="rtl">
-      <motion.div
-        initial={{ opacity: 0, y: 30 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="w-full max-w-lg"
-      >
-        {/* Logo */}
+    <div
+      className="min-h-screen flex flex-col items-center justify-center p-4 relative overflow-hidden"
+      dir="rtl"
+      style={{ background: "radial-gradient(ellipse at top, hsl(var(--primary)/15%) 0%, transparent 60%), radial-gradient(ellipse at bottom, hsl(var(--secondary)/10%) 0%, transparent 60%)" }}
+    >
+      {/* Ambient blobs */}
+      <div className="absolute top-0 right-0 w-96 h-96 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-96 h-96 bg-secondary/5 rounded-full blur-3xl pointer-events-none" />
+
+      <div className="relative w-full max-w-2xl">
+
+        {/* Logo & Title */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-gradient-to-tr from-primary to-secondary shadow-2xl shadow-primary/30 mb-4">
-            <Megaphone className="w-10 h-10 text-white" />
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-gradient-to-tr from-primary to-secondary shadow-2xl shadow-primary/30 mb-4 relative">
+            <Megaphone className="w-9 h-9 text-white" />
+            <span className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-2 border-background animate-pulse" />
           </div>
-          <h1 className="text-3xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">
+          <h1 className="text-4xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-primary via-violet-500 to-secondary mb-1">
             شبكة سوق للإعلانات
           </h1>
-          <p className="text-muted-foreground mt-1 text-sm">منصة الإعلانات الأولى في مصر 🇪🇬</p>
+          <p className="text-muted-foreground text-sm flex items-center justify-center gap-2">
+            <span className="text-lg">🇪🇬</span>
+            المنصة الإعلانية الأولى في مصر · مئات المعلنين والمبدعين
+          </p>
+
+          {/* Live stats */}
+          <div className="flex items-center justify-center gap-6 mt-4">
+            {[
+              { label: "معلن نشط", value: "2.4K+" },
+              { label: "بث يومي", value: "150+" },
+              { label: "إعلان منشور", value: "18K+" },
+            ].map(stat => (
+              <div key={stat.label} className="text-center">
+                <div className="text-base font-extrabold text-foreground">{stat.value}</div>
+                <div className="text-[10px] text-muted-foreground">{stat.label}</div>
+              </div>
+            ))}
+          </div>
         </div>
 
-        <Card className="rounded-3xl shadow-xl border-border/50 bg-card/90 backdrop-blur">
-          <CardContent className="p-6">
-            <div className="text-center mb-5">
-              <h2 className="text-xl font-bold mb-1">أهلاً بك 👋</h2>
-              <p className="text-muted-foreground text-sm">اختر نوع حسابك للمتابعة</p>
-            </div>
-
-            {/* Role Selection */}
-            <div className="space-y-3 mb-6">
-              {ROLES.map(role => (
-                <motion.button
+        {/* Role Selection */}
+        <div className="mb-4">
+          <p className="text-center text-sm font-semibold text-muted-foreground mb-4">اختر نوع حسابك للبدء</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {ROLES.map((role, idx) => {
+              const selected = selectedRole === role.id;
+              return (
+                <button
                   key={role.id}
                   onClick={() => setSelectedRole(role.id)}
-                  whileHover={{ scale: 1.01 }}
-                  whileTap={{ scale: 0.99 }}
-                  className={`w-full text-right p-4 rounded-2xl border-2 bg-gradient-to-r transition-all duration-200 ${role.color} ${
-                    selectedRole === role.id ? 'ring-2 ring-primary ring-offset-2 ring-offset-card' : ''
-                  }`}
                   data-testid={`role-${role.id}`}
+                  className={`relative text-right p-4 rounded-2xl border-2 bg-gradient-to-br transition-all duration-200 group
+                    ${role.gradient} ${role.border}
+                    ${selected ? `${role.ring} ring-2 ring-offset-2 ring-offset-background shadow-lg scale-[1.02]` : "hover:scale-[1.01]"}
+                  `}
                 >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${role.iconBg}`}>
-                      <role.icon className={`w-5 h-5 ${role.iconColor}`} />
+                  {/* Badge */}
+                  <span className={`absolute -top-2 -right-2 text-[10px] text-white font-bold px-2 py-0.5 rounded-full ${role.badgeColor}`}>
+                    {role.badge}
+                  </span>
+
+                  {/* Icon & Title */}
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${role.iconBg}`}>
+                      <role.icon className="w-5 h-5 text-white" />
                     </div>
-                    <div className="flex-1">
-                      <div className="font-bold text-sm flex items-center gap-2">
-                        {role.title}
-                        {selectedRole === role.id && <CheckCircle2 className="w-4 h-4 text-primary" />}
+                    <div>
+                      <div className="font-extrabold flex items-center gap-1.5">
+                        {role.emoji} {role.title}
+                        {selected && <CheckCircle2 className="w-4 h-4 text-primary" />}
                       </div>
-                      <div className="text-xs text-muted-foreground font-medium">{role.subtitle}</div>
-                      <div className="text-[11px] text-muted-foreground mt-0.5 leading-tight">{role.desc}</div>
+                      <div className="text-[11px] text-muted-foreground leading-tight">{role.subtitle}</div>
                     </div>
                   </div>
-                </motion.button>
-              ))}
-            </div>
 
-            {/* Login Button */}
-            <AnimatePresence>
-              {selectedRole && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                >
-                  <Button
-                    size="lg"
-                    onClick={handleLogin}
-                    className="w-full h-12 text-base gap-3 rounded-2xl shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-0.5 transition-all"
-                    data-testid="btn-login"
-                  >
-                    <LogIn className="w-5 h-5" />
-                    ادخل الآن — مجاناً
-                  </Button>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                  {/* Features */}
+                  <ul className="space-y-1">
+                    {role.features.map(f => (
+                      <li key={f} className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                        <span className="w-1 h-1 rounded-full bg-primary/60 flex-shrink-0" />
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
-            {!selectedRole && (
-              <p className="text-center text-xs text-muted-foreground">
-                ← اختر نوع حسابك أعلاه للمتابعة
-              </p>
-            )}
+        {/* Login Button */}
+        <div className="space-y-3">
+          <Button
+            size="lg"
+            onClick={handleLogin}
+            disabled={!selectedRole}
+            className="w-full h-14 text-base gap-3 rounded-2xl shadow-xl shadow-primary/30 hover:shadow-primary/50 hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+            data-testid="btn-login"
+          >
+            <LogIn className="w-5 h-5" />
+            {selectedRole
+              ? `ادخل كـ${ROLES.find(r => r.id === selectedRole)?.title} — مجاناً`
+              : "اختر نوع حسابك أولاً"}
+          </Button>
 
-            <div className="flex items-center gap-3 mt-4 p-3 bg-muted/40 rounded-xl">
-              <Sparkles className="w-4 h-4 text-primary flex-shrink-0" />
-              <p className="text-xs text-muted-foreground">
-                3 رصيد AI مجاناً عند التسجيل · جميع التعاملات بالجنيه المصري
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+          {/* Trust Badges */}
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { icon: Shield, text: "تسجيل آمن 100%" },
+              { icon: Sparkles, text: "3 رصيد AI مجاناً" },
+              { icon: Star, text: "بدون رسوم خفية" },
+            ].map(badge => (
+              <div key={badge.text} className="flex items-center justify-center gap-1.5 py-2 px-2 bg-muted/40 rounded-xl text-[11px] text-muted-foreground">
+                <badge.icon className="w-3 h-3 text-primary flex-shrink-0" />
+                {badge.text}
+              </div>
+            ))}
+          </div>
+        </div>
 
-        <p className="text-center text-xs text-muted-foreground mt-5">
-          بالدخول فأنت توافق على شروط الخدمة. منصة آمنة 100% 🔒
+        <p className="text-center text-[11px] text-muted-foreground mt-4">
+          بالدخول فأنت توافق على شروط الخدمة وسياسة الخصوصية
         </p>
-      </motion.div>
+      </div>
     </div>
   );
 }
