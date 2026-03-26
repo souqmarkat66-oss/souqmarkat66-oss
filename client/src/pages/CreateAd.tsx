@@ -18,6 +18,7 @@ import { Sparkles, Loader2, Film, Volume2, ImageIcon, AlertCircle, CreditCard } 
 import { UploadZone } from "@/components/UploadZone";
 import { motion, AnimatePresence } from "framer-motion";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { EgyptTargetingMap } from "@/components/EgyptTargetingMap";
 
 const formSchema = insertAdSchema.extend({
   productName: z.string().optional(),
@@ -62,19 +63,42 @@ export default function CreateAd() {
   const [speakingScene, setSpeakingScene] = useState<number | null>(null);
   const [cinemaScene, setCinemaScene] = useState(0);
   const [cinemaPlaying, setCinemaPlaying] = useState(false);
+  const [cinemaFullscreen, setCinemaFullscreen] = useState(false);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  // Targeting map states
+  const [targetRegions, setTargetRegions] = useState<string[]>([]);
+  const [targetInterests, setTargetInterests] = useState<string[]>([]);
+  const [targetAges, setTargetAges] = useState<string[]>([]);
 
   // Auto-advance cinema slideshow
   useEffect(() => {
     if (!cinemaPlaying || !videoScript?.scenes?.length) return;
     const scenes = videoScript.scenes;
-    // Speak current scene
-    speakEgyptian(scenes[cinemaScene]?.narration || scenes[cinemaScene]?.visual || '');
+    const text = scenes[cinemaScene]?.narration || scenes[cinemaScene]?.visual || '';
+    // Speak
+    setAudioPlaying(true);
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.lang = 'ar-EG';
+      utt.rate = 0.85;
+      utt.pitch = 1.1;
+      const voices = window.speechSynthesis.getVoices();
+      const arVoice = voices.find(v => v.lang.startsWith('ar')) || voices[0];
+      if (arVoice) utt.voice = arVoice;
+      utt.onend = () => setAudioPlaying(false);
+      window.speechSynthesis.speak(utt);
+    }
     const timer = setTimeout(() => {
-      const next = (cinemaScene + 1) % scenes.length;
-      setCinemaScene(next);
-      if (next === 0) setCinemaPlaying(false);
-    }, 5000);
-    return () => clearTimeout(timer);
+      const next = cinemaScene + 1;
+      if (next >= scenes.length) {
+        setCinemaPlaying(false);
+        setCinemaScene(0);
+      } else {
+        setCinemaScene(next);
+      }
+    }, 6000);
+    return () => { clearTimeout(timer); };
   }, [cinemaPlaying, cinemaScene, videoScript]);
 
   // AI usage info
@@ -95,7 +119,12 @@ export default function CreateAd() {
   const onSubmit = async (values: FormValues) => {
     try {
       const { productName, targetAudience, ...adData } = values;
-      const newAd = await createAd({ ...adData, userId: "temp" });
+      const newAd = await createAd({
+        ...adData,
+        userId: "temp",
+        targetRegion: targetRegions.join(",") || adData.targetRegion || "",
+        // extra targeting sent as description extension (stored as JSON comment for now)
+      });
       toast({ title: "🎉 تم نشر الإعلان بنجاح!", className: "bg-green-500 text-white border-none" });
       if (newAd?.id) {
         setLocation(`/ads/${newAd.id}`);
@@ -201,6 +230,103 @@ export default function CreateAd() {
 
   return (
     <div className="container max-w-3xl px-4 py-12">
+    {/* ===== FULLSCREEN CINEMA OVERLAY ===== */}
+    {cinemaPlaying && videoScript?.scenes && (
+      <div className="fixed inset-0 z-[9999] bg-black flex flex-col" dir="rtl">
+        {/* Top bar */}
+        <div className="flex items-center justify-between p-4 bg-black/80 backdrop-blur border-b border-white/10">
+          <div className="flex items-center gap-2">
+            <Film className="w-5 h-5 text-primary" />
+            <span className="text-white font-bold text-sm">{videoScript.title}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-white/60 text-xs">
+              مشهد {cinemaScene + 1} / {videoScript.scenes.length}
+            </span>
+            <button
+              onClick={() => { setCinemaPlaying(false); window.speechSynthesis?.cancel?.(); }}
+              className="text-white/70 hover:text-white text-sm border border-white/20 rounded-full px-3 py-1 hover:bg-white/10 transition-all"
+            >
+              ⏹ إيقاف
+            </button>
+          </div>
+        </div>
+
+        {/* Main scene */}
+        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+          {/* Time badge */}
+          <div className="mb-6">
+            <span className="bg-primary/20 text-primary border border-primary/40 rounded-full px-4 py-1 text-sm font-medium">
+              ⏱ {videoScript.scenes[cinemaScene]?.time}
+            </span>
+          </div>
+
+          {/* Narration — BIG TEXT */}
+          <p className="text-white text-2xl md:text-4xl font-extrabold leading-relaxed mb-6 max-w-3xl">
+            {videoScript.scenes[cinemaScene]?.narration}
+          </p>
+
+          {/* Visual description */}
+          <p className="text-white/50 text-base md:text-lg max-w-2xl leading-relaxed">
+            🎥 {videoScript.scenes[cinemaScene]?.visual}
+          </p>
+
+          {/* Mood */}
+          {videoScript.scenes[cinemaScene]?.mood && (
+            <span className="mt-4 text-white/40 text-sm italic">
+              {videoScript.scenes[cinemaScene].mood}
+            </span>
+          )}
+        </div>
+
+        {/* Audio wave indicator */}
+        <div className="flex items-center justify-center gap-1.5 py-4">
+          {[1,2,3,4,5,6,7].map(i => (
+            <div
+              key={i}
+              className="w-1 bg-primary rounded-full"
+              style={{
+                height: audioPlaying ? `${12 + Math.sin(Date.now()/200 + i) * 10}px` : '4px',
+                animation: audioPlaying ? `audioWave 0.6s ease-in-out ${i * 0.1}s infinite alternate` : 'none',
+                transition: 'height 0.2s'
+              }}
+            />
+          ))}
+          <span className="text-white/50 text-xs mr-2 ml-1">
+            {audioPlaying ? '🔊 يتحدث...' : '🔇 في الانتظار'}
+          </span>
+        </div>
+
+        {/* Progress bar */}
+        <div className="h-1 bg-white/10">
+          <div
+            className="h-full bg-primary transition-all"
+            style={{
+              width: `${((cinemaScene + 1) / videoScript.scenes.length) * 100}%`,
+              transitionDuration: '6000ms'
+            }}
+          />
+        </div>
+
+        {/* Scene dots */}
+        <div className="flex items-center justify-center gap-2 py-3 bg-black/50">
+          {videoScript.scenes.map((_: any, i: number) => (
+            <button
+              key={i}
+              onClick={() => { window.speechSynthesis?.cancel?.(); setCinemaScene(i); }}
+              className={`rounded-full transition-all ${i === cinemaScene ? 'w-6 h-2 bg-primary' : 'w-2 h-2 bg-white/30 hover:bg-white/60'}`}
+            />
+          ))}
+        </div>
+      </div>
+    )}
+
+    <style>{`
+      @keyframes audioWave {
+        from { height: 4px; }
+        to { height: 24px; }
+      }
+    `}</style>
       <div className="flex items-center gap-3 mb-8">
         <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
           <Sparkles className="w-6 h-6 text-white" />
@@ -291,27 +417,8 @@ export default function CreateAd() {
                           {videoScript.music && <p className="text-xs opacity-80 mt-1">🎵 موسيقى: {videoScript.music}</p>}
                         </div>
 
-                        {/* Cinema Slideshow Player */}
-                        {cinemaPlaying && videoScript.scenes && (
-                          <div className="relative bg-black text-white p-6 min-h-[160px] flex flex-col justify-between">
-                            <div className="absolute inset-0 bg-gradient-to-b from-black/80 to-black/95" />
-                            <div className="relative z-10">
-                              <Badge variant="secondary" className="text-xs mb-3 bg-white/20 text-white">
-                                مشهد {cinemaScene + 1} / {videoScript.scenes.length}  ·  {videoScript.scenes[cinemaScene]?.time}
-                              </Badge>
-                              <p className="text-base font-bold leading-relaxed mb-2">
-                                {videoScript.scenes[cinemaScene]?.narration}
-                              </p>
-                              <p className="text-xs opacity-70">{videoScript.scenes[cinemaScene]?.visual}</p>
-                            </div>
-                            <div className="relative z-10 flex gap-2 justify-between mt-4">
-                              <span className="text-xs opacity-50">{videoScript.scenes[cinemaScene]?.mood}</span>
-                              <Button size="sm" variant="ghost" className="h-6 text-xs text-white/70 hover:text-white" onClick={() => { setCinemaPlaying(false); window.speechSynthesis.cancel(); }}>⏹ إيقاف</Button>
-                            </div>
-                            {/* Progress bar */}
-                            <div className="absolute bottom-0 left-0 h-0.5 bg-primary transition-all" style={{ width: `${((cinemaScene + 1) / videoScript.scenes.length) * 100}%`, transitionDuration: '5000ms' }} />
-                          </div>
-                        )}
+                        {/* Inline cinema preview placeholder */}
+                        {cinemaPlaying && <div className="bg-muted/30 rounded-xl p-3 text-xs text-center text-muted-foreground animate-pulse">🎬 جاري العرض السينمائي في الشاشة...</div>}
 
                         <div className="p-4 space-y-3">
                           {videoScript.voiceover && (
@@ -439,18 +546,17 @@ export default function CreateAd() {
             )} />
           </div>
 
-          <FormField control={form.control} name="targetRegion" render={({ field }) => (
-            <FormItem>
-              <FormLabel>المنطقة الجغرافية (اختياري)</FormLabel>
-              <Select onValueChange={v => field.onChange(v === "all" ? "" : v)} defaultValue={field.value || "all"}>
-                <FormControl><SelectTrigger data-testid="select-region"><SelectValue placeholder="كل مصر" /></SelectTrigger></FormControl>
-                <SelectContent>
-                  <SelectItem value="all">🗺 كل مصر</SelectItem>
-                  {EGYPT_REGIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </FormItem>
-          )} />
+          {/* Targeting Map */}
+          <div className="border rounded-2xl p-4 bg-background space-y-2">
+            <EgyptTargetingMap
+              selectedRegions={targetRegions}
+              selectedInterests={targetInterests}
+              selectedAges={targetAges}
+              onRegionsChange={setTargetRegions}
+              onInterestsChange={setTargetInterests}
+              onAgesChange={setTargetAges}
+            />
+          </div>
 
           <FormField control={form.control} name="mediaUrl" render={({ field }) => (
             <FormItem>

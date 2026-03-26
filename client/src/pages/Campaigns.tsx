@@ -15,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, BarChart2, Eye, MousePointer, Code, Pause, Play, TrendingUp, MapPin, Loader2, Copy, CheckCheck } from "lucide-react";
 import { UploadZone } from "@/components/UploadZone";
+import { EgyptTargetingMap } from "@/components/EgyptTargetingMap";
 import type { AdCampaign } from "@shared/schema";
 
 const EGYPT_REGIONS = [
@@ -75,6 +76,9 @@ export default function Campaigns() {
   const [open, setOpen] = useState(false);
   const [embedCampaign, setEmbedCampaign] = useState<AdCampaign | null>(null);
   const [analyticsCampaign, setAnalyticsCampaign] = useState<any | null>(null);
+  const [mapRegions, setMapRegions] = useState<string[]>([]);
+  const [mapInterests, setMapInterests] = useState<string[]>([]);
+  const [mapAges, setMapAges] = useState<string[]>([]);
 
   const { data: campaigns = [], isLoading } = useQuery<AdCampaign[]>({
     queryKey: ["/api/campaigns"],
@@ -200,53 +204,16 @@ export default function Campaigns() {
                   </FormItem>
                 )} />
 
-                {/* Regional Targeting */}
-                <div>
-                  <FormLabel className="flex items-center gap-2"><MapPin className="w-4 h-4" /> الاستهداف الجغرافي (المحافظات)</FormLabel>
-                  <div className="mt-2 grid grid-cols-3 gap-1.5 max-h-40 overflow-y-auto border rounded-xl p-2">
-                    {EGYPT_REGIONS.map(region => (
-                      <label key={region} className="flex items-center gap-1.5 text-xs cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={(form.watch("targetRegions") || []).includes(region)}
-                          onChange={(e) => {
-                            const current = form.getValues("targetRegions") || [];
-                            if (e.target.checked) form.setValue("targetRegions", [...current, region]);
-                            else form.setValue("targetRegions", current.filter(r => r !== region));
-                          }}
-                          className="rounded"
-                        />
-                        {region}
-                      </label>
-                    ))}
-                  </div>
-                  {(form.watch("targetRegions") || []).length === 0 && (
-                    <p className="text-xs text-muted-foreground mt-1">بدون تحديد = استهداف كل مصر</p>
-                  )}
-                </div>
-
-                {/* Category Targeting */}
-                <div>
-                  <FormLabel>استهداف الاهتمامات</FormLabel>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {CATEGORIES.map(cat => (
-                      <button
-                        key={cat} type="button"
-                        onClick={() => {
-                          const current = form.getValues("targetCategories") || [];
-                          if (current.includes(cat)) form.setValue("targetCategories", current.filter(c => c !== cat));
-                          else form.setValue("targetCategories", [...current, cat]);
-                        }}
-                        className={`px-3 py-1 rounded-full text-xs border transition-colors ${
-                          (form.watch("targetCategories") || []).includes(cat)
-                            ? 'bg-primary text-primary-foreground border-primary'
-                            : 'bg-muted border-border hover:border-primary'
-                        }`}
-                      >
-                        {cat}
-                      </button>
-                    ))}
-                  </div>
+                {/* Egypt Targeting Map */}
+                <div className="border rounded-2xl p-3 bg-background/50">
+                  <EgyptTargetingMap
+                    selectedRegions={mapRegions}
+                    selectedInterests={mapInterests}
+                    selectedAges={mapAges}
+                    onRegionsChange={(r) => { setMapRegions(r); form.setValue("targetRegions", r); }}
+                    onInterestsChange={(i) => { setMapInterests(i); form.setValue("targetCategories", i); }}
+                    onAgesChange={setMapAges}
+                  />
                 </div>
 
                 {/* Language Targeting */}
