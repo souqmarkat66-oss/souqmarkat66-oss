@@ -55,6 +55,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerAuthRoutes(app);
   registerImageRoutes(app);
 
+  // ── DB Migrations (safe — ADD COLUMN IF NOT EXISTS) ──
+  try {
+    await db.execute(sql`ALTER TABLE reels ADD COLUMN IF NOT EXISTS audio_url text`);
+  } catch { /* column may already exist */ }
+
   // Serve uploads directory
   const uploadsDir = path.join(process.cwd(), "uploads");
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });

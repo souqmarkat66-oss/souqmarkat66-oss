@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown, Image as ImageIcon, Film } from "lucide-react";
+import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown, Image as ImageIcon, Film, Music, ChevronLeft, ChevronRight, Pause } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -15,7 +15,8 @@ type Reel = {
   id: number;
   title: string;
   description?: string;
-  videoUrl: string;
+  videoUrl: string;    // single URL, or JSON array of image URLs e.g. ["url1","url2"]
+  audioUrl?: string;   // optional background music for image reels
   thumbnailUrl?: string;
   viewsCount: number;
   likesCount: number;
@@ -29,6 +30,15 @@ function isImageUrl(url: string): boolean {
   if (!url) return false;
   const clean = url.split('?')[0].toLowerCase();
   return /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif)$/.test(clean);
+}
+
+// Parse videoUrl — may be a JSON array of image URLs or a single URL
+function parseMediaUrls(videoUrl: string): string[] {
+  if (!videoUrl) return [];
+  if (videoUrl.trim().startsWith('[')) {
+    try { return JSON.parse(videoUrl) as string[]; } catch {}
+  }
+  return [videoUrl];
 }
 
 function speakEgyptian(text: string) {
@@ -45,6 +55,7 @@ function speakEgyptian(text: string) {
 
 function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const [liked, setLiked] = useState(false);
   const [localLikes, setLocalLikes] = useState(reel.likesCount);
   const [muted, setMuted] = useState(true);
@@ -52,9 +63,17 @@ function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
   const [showComments, setShowComments] = useState(false);
   const [comment, setComment] = useState("");
   const [imgLoaded, setImgLoaded] = useState(false);
+  const [imgIndex, setImgIndex] = useState(0);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const [audioMuted, setAudioMuted] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const isImage = isImageUrl(reel.videoUrl);
+
+  // Parse media
+  const urls = parseMediaUrls(reel.videoUrl);
+  const isImageMode = urls.length > 0 && urls.every(u => isImageUrl(u));
+  const isMultiImage = isImageMode && urls.length > 1;
+  const hasAudio = isImageMode && !!reel.audioUrl;
 
   const { data: comments = [] } = useQuery<any[]>({
     queryKey: ['/api/comments/reel', reel.id],
@@ -78,7 +97,7 @@ function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
     }
   });
 
-  // React doesn't sync the `muted` prop to the DOM element correctly — must use ref
+  // Sync video muted state via ref (React muted prop bug)
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.muted = muted;
@@ -86,16 +105,43 @@ function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
     }
   }, [muted]);
 
-  // Auto-play when active
+  // Auto-play/pause video when active
   useEffect(() => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || isImageMode) return;
     if (isActive) {
-      videoRef.current.muted = true; // must start muted
+      videoRef.current.muted = true;
       videoRef.current.play().catch(() => {});
     } else {
       videoRef.current.pause();
     }
+  }, [isActive, isImageMode]);
+
+  // Auto-advance slideshow every 3s when active
+  useEffect(() => {
+    if (!isMultiImage || !isActive) return;
+    const timer = setInterval(() => {
+      setImgIndex(i => (i + 1) % urls.length);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [isMultiImage, isActive, urls.length]);
+
+  // Reset slideshow index when reel becomes inactive
+  useEffect(() => {
+    if (!isActive) setImgIndex(0);
   }, [isActive]);
+
+  // Audio control when active
+  useEffect(() => {
+    if (!hasAudio || !audioRef.current) return;
+    if (isActive) {
+      audioRef.current.muted = audioMuted;
+      audioRef.current.play().catch(() => {});
+      setAudioPlaying(true);
+    } else {
+      audioRef.current.pause();
+      setAudioPlaying(false);
+    }
+  }, [isActive, hasAudio]);
 
   const handleUnmute = () => {
     if (videoRef.current) {
@@ -117,38 +163,153 @@ function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
     if (!newMuted) setShowUnmuteHint(false);
   };
 
+  const currentImgUrl = isImageMode ? urls[imgIndex] : "";
+
   return (
     <div className="relative h-screen w-full snap-start bg-black flex items-center justify-center overflow-hidden">
 
-      {isImage ? (
-        /* ── IMAGE REEL ── */
+      {isImageMode ? (
+        /* ── IMAGE / SLIDESHOW REEL ── */
         <>
-          {/* Blurred background */}
+          {/* Hidden audio element */}
+          {hasAudio && (
+            <audio
+              ref={audioRef}
+              src={reel.audioUrl!}
+              loop
+              muted={audioMuted}
+              preload="auto"
+              onPlay={() => setAudioPlaying(true)}
+              onPause={() => setAudioPlaying(false)}
+            />
+          )}
+
+          {/* Blurred background from current image */}
           <div
-            className="absolute inset-0 bg-cover bg-center scale-110 blur-2xl opacity-40"
-            style={{ backgroundImage: `url(${reel.videoUrl})` }}
+            className="absolute inset-0 bg-cover bg-center scale-110 blur-2xl opacity-50 transition-all duration-700"
+            style={{ backgroundImage: `url(${currentImgUrl})` }}
           />
-          {/* Main image */}
-          <motion.img
-            src={reel.videoUrl}
-            alt={reel.title}
-            className="relative z-10 max-h-full max-w-full object-contain"
-            initial={{ opacity: 0, scale: 0.97 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.4 }}
-            onLoad={() => setImgLoaded(true)}
-          />
+
+          {/* Main image — animated on slide change */}
+          <AnimatePresence mode="wait">
+            <motion.img
+              key={`${reel.id}-${imgIndex}`}
+              src={currentImgUrl}
+              alt={`${reel.title} ${imgIndex + 1}`}
+              className="relative z-10 max-h-full max-w-full object-contain select-none"
+              initial={{ opacity: 0, x: 40 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -40 }}
+              transition={{ duration: 0.35 }}
+              onLoad={() => setImgLoaded(true)}
+              draggable={false}
+            />
+          </AnimatePresence>
+
           {!imgLoaded && (
-            <div className="absolute inset-0 flex items-center justify-center">
+            <div className="absolute inset-0 flex items-center justify-center z-20">
               <Loader2 className="w-8 h-8 animate-spin text-white" />
             </div>
           )}
-          {/* Image badge */}
-          <div className="absolute top-4 right-4 z-20">
-            <Badge className="bg-white/20 backdrop-blur text-white border-white/30 gap-1">
-              <ImageIcon className="w-3 h-3" /> صورة
-            </Badge>
-          </div>
+
+          {/* Slideshow navigation arrows */}
+          {isMultiImage && (
+            <>
+              <button
+                onClick={() => setImgIndex(i => (i - 1 + urls.length) % urls.length)}
+                className="absolute left-3 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-black/50 backdrop-blur flex items-center justify-center text-white hover:bg-black/70"
+                data-testid="btn-prev-slide"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setImgIndex(i => (i + 1) % urls.length)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-black/50 backdrop-blur flex items-center justify-center text-white hover:bg-black/70"
+                data-testid="btn-next-slide"
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+
+              {/* Dot indicators */}
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex gap-1.5">
+                {urls.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setImgIndex(i)}
+                    className={`h-1.5 rounded-full transition-all duration-300 ${
+                      i === imgIndex ? 'w-6 bg-white' : 'w-1.5 bg-white/40'
+                    }`}
+                    data-testid={`dot-slide-${i}`}
+                  />
+                ))}
+              </div>
+
+              {/* Slide counter */}
+              <div className="absolute top-10 right-3 z-20">
+                <Badge className="bg-black/50 backdrop-blur text-white text-xs">
+                  {imgIndex + 1}/{urls.length}
+                </Badge>
+              </div>
+            </>
+          )}
+
+          {/* Image type badge (single) */}
+          {!isMultiImage && (
+            <div className="absolute top-4 right-4 z-20">
+              <Badge className="bg-white/20 backdrop-blur text-white border-white/30 gap-1">
+                <ImageIcon className="w-3 h-3" /> صورة
+              </Badge>
+            </div>
+          )}
+
+          {/* 🎵 Audio Player Bar */}
+          {hasAudio && (
+            <div className="absolute top-16 left-3 right-14 z-20 flex items-center gap-2 bg-black/60 backdrop-blur-md rounded-2xl px-3 py-2 border border-white/10">
+              <button
+                onClick={() => {
+                  if (!audioRef.current) return;
+                  if (audioPlaying) { audioRef.current.pause(); setAudioPlaying(false); }
+                  else { audioRef.current.play(); setAudioPlaying(true); }
+                }}
+                className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white hover:bg-white/30"
+                data-testid="btn-audio-play"
+              >
+                {audioPlaying ? <Pause className="w-4 h-4 fill-white" /> : <Play className="w-4 h-4 fill-white" />}
+              </button>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <Music className="w-3 h-3 text-green-400 flex-shrink-0 animate-pulse" />
+                  <span className="text-white text-xs font-medium truncate">موسيقى الريل</span>
+                </div>
+                {/* Animated equalizer bars */}
+                {audioPlaying && (
+                  <div className="flex items-end gap-0.5 h-3 mt-0.5">
+                    {[1,2,3,4,5].map(n => (
+                      <div
+                        key={n}
+                        className="w-1 bg-green-400 rounded-full"
+                        style={{
+                          height: `${30 + Math.random() * 70}%`,
+                          animation: `bounce ${0.4 + n * 0.1}s ease-in-out infinite alternate`,
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => {
+                  const newMuted = !audioMuted;
+                  setAudioMuted(newMuted);
+                  if (audioRef.current) audioRef.current.muted = newMuted;
+                }}
+                className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white"
+                data-testid="btn-audio-mute"
+              >
+                {audioMuted ? <VolumeX className="w-3.5 h-3.5 text-red-400" /> : <Volume2 className="w-3.5 h-3.5 text-green-400" />}
+              </button>
+            </div>
+          )}
         </>
       ) : (
         /* ── VIDEO REEL ── */
@@ -163,7 +324,7 @@ function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
             playsInline
             onClick={() => videoRef.current?.paused ? videoRef.current.play() : videoRef.current?.pause()}
           />
-          {/* TAP TO UNMUTE — always visible when muted */}
+          {/* TAP TO UNMUTE */}
           {muted && showUnmuteHint && (
             <button
               onClick={handleUnmute}
@@ -178,7 +339,6 @@ function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
               </span>
             </button>
           )}
-          {/* Muted indicator (small) — after hint dismissed */}
           {muted && !showUnmuteHint && (
             <button
               onClick={handleToggleMute}
@@ -297,43 +457,94 @@ function CreateReelDialog() {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [mediaUrl, setMediaUrl] = useState("");
-  const [uploading, setUploading] = useState(false);
   const [mediaTypeTab, setMediaTypeTab] = useState<'video' | 'image'>('video');
-  const fileRef = useRef<HTMLInputElement>(null);
+  // Video mode
+  const [videoUrl, setVideoUrl] = useState("");
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  // Image mode — multiple images
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [uploadingImages, setUploadingImages] = useState(false);
+  // Audio (image mode only)
+  const [audioUrl, setAudioUrl] = useState("");
+  const [uploadingAudio, setUploadingAudio] = useState(false);
+
+  const fileVideoRef = useRef<HTMLInputElement>(null);
+  const fileImageRef = useRef<HTMLInputElement>(null);
+  const fileAudioRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const isImg = isImageUrl(mediaUrl);
+  // Computed final videoUrl value to store
+  const finalVideoUrl = mediaTypeTab === 'image'
+    ? (imageUrls.length > 1 ? JSON.stringify(imageUrls) : imageUrls[0] ?? "")
+    : videoUrl;
+  const hasMedia = finalVideoUrl.trim() !== "" && finalVideoUrl !== "[]";
 
   const createMutation = useMutation({
-    mutationFn: () => apiRequest('/api/reels', 'POST', { title, description, videoUrl: mediaUrl }),
+    mutationFn: () => apiRequest('/api/reels', 'POST', {
+      title,
+      description,
+      videoUrl: finalVideoUrl,
+      audioUrl: mediaTypeTab === 'image' && audioUrl.trim() ? audioUrl.trim() : undefined,
+    }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/reels'] });
       setOpen(false);
-      setTitle(""); setDescription(""); setMediaUrl("");
+      setTitle(""); setDescription(""); setVideoUrl(""); setImageUrls([]); setAudioUrl("");
       toast({ title: "🎉 تم النشر بنجاح!" });
     },
     onError: (err: any) => toast({ variant: "destructive", title: "خطأ", description: err.message }),
   });
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
+  const uploadFile = async (file: File): Promise<string> => {
     const formData = new FormData();
     formData.append("file", file);
-    try {
-      const res = await fetch("/api/upload", { method: "POST", body: formData, credentials: "include" });
-      const data = await res.json();
-      setMediaUrl(data.url);
-      toast({ title: file.type.startsWith('image') ? "✅ تم رفع الصورة!" : "✅ تم رفع الفيديو!" });
-    } catch {
-      toast({ variant: "destructive", title: "فشل الرفع" });
-    } finally { setUploading(false); }
+    const res = await fetch("/api/upload", { method: "POST", body: formData, credentials: "include" });
+    const data = await res.json();
+    if (!data.url) throw new Error("رفع فاشل");
+    return data.url;
   };
 
-  const accept = mediaTypeTab === 'image' ? 'image/*' : 'video/*';
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingVideo(true);
+    try {
+      const url = await uploadFile(file);
+      setVideoUrl(url);
+      toast({ title: "✅ تم رفع الفيديو!" });
+    } catch { toast({ variant: "destructive", title: "فشل رفع الفيديو" }); }
+    finally { setUploadingVideo(false); }
+  };
+
+  const handleImagesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    setUploadingImages(true);
+    try {
+      const uploaded = await Promise.all(files.map(uploadFile));
+      setImageUrls(prev => [...prev, ...uploaded]);
+      toast({ title: `✅ تم رفع ${uploaded.length} صورة!` });
+    } catch { toast({ variant: "destructive", title: "فشل رفع الصور" }); }
+    finally { setUploadingImages(false); }
+  };
+
+  const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingAudio(true);
+    try {
+      const url = await uploadFile(file);
+      setAudioUrl(url);
+      toast({ title: "🎵 تم رفع الموسيقى!" });
+    } catch { toast({ variant: "destructive", title: "فشل رفع الصوت" }); }
+    finally { setUploadingAudio(false); }
+  };
+
+  const resetTab = (tab: 'video' | 'image') => {
+    setMediaTypeTab(tab);
+    setVideoUrl(""); setImageUrls([]); setAudioUrl("");
+  };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -342,108 +553,168 @@ function CreateReelDialog() {
           <Plus className="w-6 h-6" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>✨ إنشاء ريل جديد</DialogTitle>
-          <DialogDescription>ارفع صورة أو فيديو لنشره كريل</DialogDescription>
+          <DialogDescription>ارفع صور أو فيديو مع موسيقى اختيارية</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
 
           {/* Media Type Tabs */}
           <div className="flex gap-2 p-1 bg-muted rounded-xl">
             <button
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${mediaTypeTab === 'video' ? 'bg-background shadow text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-              onClick={() => { setMediaTypeTab('video'); setMediaUrl(""); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${mediaTypeTab === 'video' ? 'bg-background shadow text-foreground' : 'text-muted-foreground'}`}
+              onClick={() => resetTab('video')}
               data-testid="tab-video"
             >
               <Film className="w-4 h-4" /> فيديو
             </button>
             <button
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${mediaTypeTab === 'image' ? 'bg-background shadow text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-              onClick={() => { setMediaTypeTab('image'); setMediaUrl(""); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${mediaTypeTab === 'image' ? 'bg-background shadow text-foreground' : 'text-muted-foreground'}`}
+              onClick={() => resetTab('image')}
               data-testid="tab-image"
             >
-              <ImageIcon className="w-4 h-4" /> صورة
+              <ImageIcon className="w-4 h-4" /> صور 🖼
             </button>
           </div>
 
-          {/* Step 1: Media Upload */}
-          <div className="space-y-2">
-            <p className="text-sm font-bold text-muted-foreground">
-              الخطوة 1: {mediaTypeTab === 'image' ? 'أضف الصورة' : 'أضف الفيديو'}
-            </p>
-            <input ref={fileRef} type="file" accept={accept} onChange={handleUpload} className="hidden" />
-
-            {mediaUrl ? (
-              <div className="relative rounded-xl overflow-hidden">
-                {isImg
-                  ? <img src={mediaUrl} className="w-full max-h-52 object-contain bg-black rounded-xl" alt="معاينة" />
-                  : <video src={mediaUrl} className="w-full max-h-52 object-contain bg-black rounded-xl" controls />
-                }
-                <button
-                  onClick={() => setMediaUrl("")}
-                  className="absolute top-2 right-2 w-7 h-7 rounded-full bg-red-500 text-white flex items-center justify-center text-xs font-bold hover:bg-red-600"
-                >✕</button>
-                <Badge className={`absolute bottom-2 left-2 ${isImg ? 'bg-purple-500' : 'bg-blue-500'} text-white`}>
-                  {isImg ? '🖼 صورة' : '🎬 فيديو'}
-                </Badge>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={() => fileRef.current?.click()}
-                  disabled={uploading}
-                  className="w-full border-2 border-dashed border-primary/40 rounded-xl p-6 flex flex-col items-center gap-2 hover:border-primary hover:bg-primary/5 cursor-pointer transition-all"
-                  data-testid="btn-upload-media"
-                >
-                  {uploading ? (
-                    <><Loader2 className="w-8 h-8 animate-spin text-primary" /><span className="text-sm font-medium text-primary">جاري الرفع...</span></>
-                  ) : mediaTypeTab === 'image' ? (
-                    <><ImageIcon className="w-8 h-8 text-primary" /><span className="text-sm font-medium">ارفع صورة من جهازك</span><span className="text-xs text-muted-foreground">JPG, PNG, WebP — حتى 20MB</span></>
-                  ) : (
-                    <><Upload className="w-8 h-8 text-primary" /><span className="text-sm font-medium">ارفع فيديو من جهازك</span><span className="text-xs text-muted-foreground">MP4, MOV — حتى 200MB</span></>
-                  )}
-                </button>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-px bg-border" />
-                  <span className="text-xs text-muted-foreground">أو أدخل رابطاً مباشراً</span>
-                  <div className="flex-1 h-px bg-border" />
+          {/* ── VIDEO MODE ── */}
+          {mediaTypeTab === 'video' && (
+            <div className="space-y-2">
+              <p className="text-sm font-bold text-muted-foreground">أضف الفيديو</p>
+              <input ref={fileVideoRef} type="file" accept="video/*" onChange={handleVideoUpload} className="hidden" />
+              {videoUrl ? (
+                <div className="relative">
+                  <video src={videoUrl} className="w-full rounded-xl max-h-48 object-contain bg-black" controls />
+                  <button onClick={() => setVideoUrl("")} className="absolute top-2 right-2 w-7 h-7 rounded-full bg-red-500 text-white flex items-center justify-center text-xs font-bold hover:bg-red-600">✕</button>
                 </div>
-                <Input
-                  placeholder={mediaTypeTab === 'image' ? "https://example.com/image.jpg" : "https://example.com/video.mp4"}
-                  value={mediaUrl}
-                  onChange={e => setMediaUrl(e.target.value)}
-                  dir="ltr"
-                  data-testid="input-media-url"
-                />
-              </div>
-            )}
-          </div>
+              ) : (
+                <>
+                  <button
+                    type="button" onClick={() => fileVideoRef.current?.click()} disabled={uploadingVideo}
+                    className="w-full border-2 border-dashed border-primary/40 rounded-xl p-6 flex flex-col items-center gap-2 hover:border-primary hover:bg-primary/5 cursor-pointer transition-all"
+                    data-testid="btn-upload-video"
+                  >
+                    {uploadingVideo
+                      ? <><Loader2 className="w-8 h-8 animate-spin text-primary" /><span className="text-sm text-primary">جاري الرفع...</span></>
+                      : <><Upload className="w-8 h-8 text-primary" /><span className="text-sm font-medium">ارفع فيديو</span><span className="text-xs text-muted-foreground">MP4، MOV — حتى 200MB</span></>
+                    }
+                  </button>
+                  <div className="flex items-center gap-2"><div className="flex-1 h-px bg-border" /><span className="text-xs text-muted-foreground">أو رابط</span><div className="flex-1 h-px bg-border" /></div>
+                  <Input placeholder="https://example.com/video.mp4" value={videoUrl} onChange={e => setVideoUrl(e.target.value)} dir="ltr" data-testid="input-video-url" />
+                </>
+              )}
+            </div>
+          )}
 
-          {/* Step 2: Details */}
+          {/* ── IMAGE MODE ── */}
+          {mediaTypeTab === 'image' && (
+            <div className="space-y-3">
+              {/* Image upload */}
+              <div className="space-y-2">
+                <p className="text-sm font-bold text-muted-foreground">أضف صوراً (حتى 10)</p>
+                <input ref={fileImageRef} type="file" accept="image/*" multiple onChange={handleImagesUpload} className="hidden" />
+
+                {/* Uploaded images grid */}
+                {imageUrls.length > 0 && (
+                  <div className="grid grid-cols-3 gap-2">
+                    {imageUrls.map((url, i) => (
+                      <div key={i} className="relative aspect-square rounded-xl overflow-hidden bg-black">
+                        <img src={url} className="w-full h-full object-cover" alt={`صورة ${i+1}`} />
+                        <button
+                          onClick={() => setImageUrls(prev => prev.filter((_, idx) => idx !== i))}
+                          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-xs font-bold hover:bg-red-600"
+                          data-testid={`btn-remove-img-${i}`}
+                        >✕</button>
+                        {i === 0 && <Badge className="absolute bottom-1 left-1 text-xs bg-white/80 text-black">غلاف</Badge>}
+                      </div>
+                    ))}
+                    {imageUrls.length < 10 && (
+                      <button
+                        onClick={() => fileImageRef.current?.click()}
+                        disabled={uploadingImages}
+                        className="aspect-square rounded-xl border-2 border-dashed border-primary/40 flex flex-col items-center justify-center gap-1 hover:border-primary hover:bg-primary/5 transition-all"
+                        data-testid="btn-add-more-images"
+                      >
+                        {uploadingImages
+                          ? <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                          : <><Plus className="w-5 h-5 text-primary" /><span className="text-xs text-primary">إضافة</span></>
+                        }
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {imageUrls.length === 0 && (
+                  <>
+                    <button
+                      type="button" onClick={() => fileImageRef.current?.click()} disabled={uploadingImages}
+                      className="w-full border-2 border-dashed border-primary/40 rounded-xl p-6 flex flex-col items-center gap-2 hover:border-primary hover:bg-primary/5 cursor-pointer transition-all"
+                      data-testid="btn-upload-images"
+                    >
+                      {uploadingImages
+                        ? <><Loader2 className="w-8 h-8 animate-spin text-primary" /><span className="text-sm text-primary">جاري الرفع...</span></>
+                        : <><ImageIcon className="w-8 h-8 text-primary" /><span className="text-sm font-medium">ارفع صوراً من جهازك</span><span className="text-xs text-muted-foreground">يمكن اختيار أكثر من صورة — JPG, PNG, WebP</span></>
+                      }
+                    </button>
+                    <div className="flex items-center gap-2"><div className="flex-1 h-px bg-border" /><span className="text-xs text-muted-foreground">أو أدخل رابط صورة</span><div className="flex-1 h-px bg-border" /></div>
+                    <Input
+                      placeholder="https://example.com/image.jpg"
+                      onBlur={e => { if (e.target.value.trim() && isImageUrl(e.target.value.trim())) setImageUrls([e.target.value.trim()]); }}
+                      dir="ltr" data-testid="input-image-url"
+                    />
+                  </>
+                )}
+              </div>
+
+              {/* Audio section */}
+              <div className="space-y-2 rounded-xl bg-muted/50 p-3">
+                <p className="text-sm font-bold flex items-center gap-2">
+                  <Music className="w-4 h-4 text-green-500" /> موسيقى في الخلفية (اختياري)
+                </p>
+                <input ref={fileAudioRef} type="file" accept="audio/*" onChange={handleAudioUpload} className="hidden" />
+                {audioUrl ? (
+                  <div className="flex items-center gap-2 bg-green-500/10 rounded-lg p-2">
+                    <Music className="w-4 h-4 text-green-500" />
+                    <audio src={audioUrl} controls className="flex-1 h-8" style={{ height: 32 }} />
+                    <button onClick={() => setAudioUrl("")} className="w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center hover:bg-red-600">✕</button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <button
+                      type="button" onClick={() => fileAudioRef.current?.click()} disabled={uploadingAudio}
+                      className="flex-1 flex items-center justify-center gap-2 border border-dashed border-green-400/40 rounded-lg py-2 text-sm text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 transition-all"
+                      data-testid="btn-upload-audio"
+                    >
+                      {uploadingAudio ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Upload className="w-4 h-4" /> رفع ملف صوتي (MP3)</>}
+                    </button>
+                  </div>
+                )}
+                {!audioUrl && (
+                  <Input placeholder="أو رابط مباشر لملف mp3..." value={audioUrl} onChange={e => setAudioUrl(e.target.value)} dir="ltr" className="text-sm" data-testid="input-audio-url" />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Details */}
           <div className="space-y-2">
-            <p className="text-sm font-bold text-muted-foreground">الخطوة 2: اكتب التفاصيل</p>
+            <p className="text-sm font-bold text-muted-foreground">التفاصيل</p>
             <Input
               placeholder="العنوان... (مطلوب)"
               value={title}
               onChange={e => setTitle(e.target.value)}
-              className={!title && mediaUrl ? "border-red-400" : ""}
+              className={!title && hasMedia ? "border-red-400" : ""}
               data-testid="input-reel-title"
             />
-            {!title && mediaUrl && <p className="text-xs text-red-500">⚠ العنوان مطلوب</p>}
-            <Textarea
-              placeholder="وصف أو تعليق (اختياري)..."
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              rows={2}
-            />
+            {!title && hasMedia && <p className="text-xs text-red-500">⚠ العنوان مطلوب</p>}
+            <Textarea placeholder="وصف أو تعليق (اختياري)..." value={description} onChange={e => setDescription(e.target.value)} rows={2} />
           </div>
 
           <Button
             className="w-full h-12 text-base gap-2"
             onClick={() => createMutation.mutate()}
-            disabled={!title.trim() || !mediaUrl.trim() || createMutation.isPending}
+            disabled={!title.trim() || !hasMedia || createMutation.isPending}
             data-testid="btn-publish-reel"
           >
             {createMutation.isPending
@@ -452,10 +723,10 @@ function CreateReelDialog() {
             }
           </Button>
 
-          {(!title.trim() || !mediaUrl.trim()) && (
+          {(!title.trim() || !hasMedia) && (
             <p className="text-xs text-center text-muted-foreground">
-              {!mediaUrl.trim()
-                ? `⬆ ${mediaTypeTab === 'image' ? 'ارفع صورة أو أدخل رابطها' : 'ارفع فيديو أو أدخل رابطه'} أولاً`
+              {!hasMedia
+                ? `⬆ ${mediaTypeTab === 'image' ? 'أضف صورة واحدة على الأقل' : 'أضف فيديو'} أولاً`
                 : "✏ أدخل عنواناً"}
             </p>
           )}

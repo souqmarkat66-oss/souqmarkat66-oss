@@ -65,7 +65,8 @@ export const reels = pgTable("reels", {
   channelId: integer("channel_id"),
   title: text("title").notNull(),
   description: text("description"),
-  videoUrl: text("video_url").notNull(),
+  videoUrl: text("video_url").notNull(), // stores single video URL, single image URL, or JSON array of image URLs
+  audioUrl: text("audio_url"),           // optional background music for image reels
   thumbnailUrl: text("thumbnail_url"),
   duration: integer("duration").default(30),
   viewsCount: integer("views_count").default(0),
