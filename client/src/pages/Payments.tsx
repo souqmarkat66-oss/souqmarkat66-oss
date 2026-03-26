@@ -1,0 +1,336 @@
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/use-auth";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone } from "lucide-react";
+
+const METHOD_LABELS: Record<string, { label: string; emoji: string; color: string }> = {
+  vodafone:  { label: "فودافون كاش",    emoji: "📱", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
+  etisalat:  { label: "اتصالات e& كاش", emoji: "📲", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
+  instapay:  { label: "InstaPay",        emoji: "💳", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
+  souq:      { label: "سوق ماركات",      emoji: "🛒", color: "bg-primary/10 text-primary" },
+};
+
+const STATUS_MAP: Record<string, { label: string; icon: any; color: string }> = {
+  pending:  { label: "قيد المراجعة", icon: Clock,          color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" },
+  approved: { label: "مقبول",         icon: CheckCircle2,   color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" },
+  rejected: { label: "مرفوض",         icon: XCircle,        color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
+};
+
+const PAYMENT_METHODS = [
+  { value: "vodafone",  label: "📱 فودافون كاش",    number: "01098553911" },
+  { value: "etisalat",  label: "📲 اتصالات e& كاش", number: "01126665741" },
+  { value: "instapay",  label: "💳 InstaPay",        number: "01285558567" },
+  { value: "souq",      label: "🛒 سوق ماركات",      number: "" },
+];
+
+export default function Payments() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [formData, setFormData] = useState({ type: "top_up", amountEGP: "", method: "vodafone", phoneNumber: "", adId: "" });
+
+  const { data: payments = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/payments"],
+  });
+
+  const { data: ads = [] } = useQuery<any[]>({
+    queryKey: ["/api/ads"],
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/payments", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+      toast({ title: "✅ تم إرسال طلب الدفع", description: "سيتم مراجعته خلال 24 ساعة" });
+      setShowForm(false);
+      setFormData({ type: "top_up", amountEGP: "", method: "vodafone", phoneNumber: "", adId: "" });
+    },
+    onError: () => toast({ title: "خطأ", description: "فشل إرسال الطلب", variant: "destructive" }),
+  });
+
+  const filtered = payments.filter(p =>
+    !search ||
+    p.orderNumber?.toLowerCase().includes(search.toLowerCase()) ||
+    String(p.adId || "").includes(search) ||
+    String(p.id).includes(search)
+  );
+
+  const selectedMethod = PAYMENT_METHODS.find(m => m.value === formData.method);
+  const userAds = ads.filter((a: any) => a.userId === (user as any)?.id);
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-6" dir="rtl">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+            <Receipt className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-xl font-extrabold">جدول المدفوعات</h1>
+            <p className="text-xs text-muted-foreground">تتبّع طلبات الدفع والتحميل</p>
+          </div>
+        </div>
+        <Button size="sm" onClick={() => setShowForm(true)} data-testid="btn-new-payment" className="gap-2">
+          <Plus className="w-4 h-4" />
+          طلب دفع جديد
+        </Button>
+      </div>
+
+      {/* Stats Row */}
+      <div className="grid grid-cols-3 gap-3 mb-5">
+        {[
+          { label: "إجمالي الطلبات", value: payments.length, color: "text-foreground" },
+          { label: "مقبولة", value: payments.filter(p => p.status === "approved").length, color: "text-green-600" },
+          { label: "قيد المراجعة", value: payments.filter(p => p.status === "pending").length, color: "text-yellow-600" },
+        ].map(stat => (
+          <div key={stat.label} className="border rounded-xl p-3 text-center bg-muted/20">
+            <div className={`text-2xl font-extrabold ${stat.color}`}>{stat.value}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{stat.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Search */}
+      <div className="relative mb-4">
+        <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <Input
+          placeholder="ابحث برقم الطلب أو رقم الإعلان..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="pr-9 text-sm"
+          data-testid="input-search-payments"
+        />
+      </div>
+
+      {/* Table */}
+      <div className="border rounded-xl overflow-hidden bg-background">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
+                <th className="text-right px-4 py-3 font-bold">رقم الطلب</th>
+                <th className="text-right px-4 py-3 font-bold">رقم الإعلان</th>
+                <th className="text-right px-4 py-3 font-bold">النوع</th>
+                <th className="text-right px-4 py-3 font-bold">المبلغ (ج.م)</th>
+                <th className="text-right px-4 py-3 font-bold">طريقة الدفع</th>
+                <th className="text-right px-4 py-3 font-bold">الحالة</th>
+                <th className="text-right px-4 py-3 font-bold">التاريخ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                [...Array(4)].map((_, i) => (
+                  <tr key={i} className="border-b">
+                    {[...Array(7)].map((_, j) => (
+                      <td key={j} className="px-4 py-3">
+                        <div className="h-4 bg-muted animate-pulse rounded w-20" />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-12 text-muted-foreground">
+                    <Receipt className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">لا توجد طلبات دفع بعد</p>
+                    <p className="text-xs mt-1">اضغط "طلب دفع جديد" للبدء</p>
+                  </td>
+                </tr>
+              ) : filtered.map((p: any) => {
+                const method = METHOD_LABELS[p.method] || { label: p.method, emoji: "💰", color: "" };
+                const status = STATUS_MAP[p.status] || STATUS_MAP.pending;
+                const StatusIcon = status.icon;
+                return (
+                  <tr key={p.id} className="border-b hover:bg-muted/10 transition-colors" data-testid={`row-payment-${p.id}`}>
+                    <td className="px-4 py-3">
+                      <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded font-bold">
+                        {p.orderNumber || `ORD-${String(p.id).padStart(6,"0")}`}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {p.adId ? (
+                        <span className="font-mono text-xs bg-primary/10 text-primary px-2 py-0.5 rounded font-bold">
+                          #{p.adId}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-xs font-bold">
+                        {p.type === "withdrawal" ? "🏧 سحب" : "💰 إيداع"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-bold text-green-600">
+                      {p.amountEGP?.toLocaleString()} ج.م
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-bold ${method.color}`}>
+                        {method.emoji} {method.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-bold ${status.color}`}>
+                        <StatusIcon className="w-3 h-3" />
+                        {status.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {new Date(p.createdAt).toLocaleDateString("ar-EG", { year: "numeric", month: "short", day: "numeric" })}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* New Payment Dialog */}
+      <Dialog open={showForm} onOpenChange={setShowForm}>
+        <DialogContent dir="rtl" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CreditCard className="w-5 h-5 text-primary" />
+              طلب دفع جديد
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+
+            {/* Type */}
+            <div className="flex gap-2">
+              {[
+                { value: "top_up", label: "💰 إيداع رصيد" },
+                { value: "withdrawal", label: "🏧 سحب رصيد" },
+              ].map(t => (
+                <button
+                  key={t.value}
+                  type="button"
+                  onClick={() => setFormData(f => ({ ...f, type: t.value }))}
+                  className={`flex-1 py-2 rounded-xl text-sm font-bold border transition-all ${formData.type === t.value ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/50"}`}
+                  data-testid={`btn-type-${t.value}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Ad ID (optional) */}
+            <div className="space-y-1">
+              <label className="text-xs font-bold flex items-center gap-1">📋 رقم الإعلان (اختياري)</label>
+              {userAds.length > 0 ? (
+                <Select value={formData.adId} onValueChange={v => setFormData(f => ({ ...f, adId: v }))}>
+                  <SelectTrigger className="text-xs h-9" data-testid="select-ad-id">
+                    <SelectValue placeholder="اختر إعلان (اختياري)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">بدون إعلان محدد</SelectItem>
+                    {userAds.map((a: any) => (
+                      <SelectItem key={a.id} value={String(a.id)}>
+                        #{a.id} — {a.title?.slice(0, 30)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  type="number"
+                  placeholder="أدخل رقم الإعلان..."
+                  value={formData.adId}
+                  onChange={e => setFormData(f => ({ ...f, adId: e.target.value }))}
+                  className="text-xs h-9"
+                  data-testid="input-ad-id"
+                />
+              )}
+            </div>
+
+            {/* Amount */}
+            <div className="space-y-1">
+              <label className="text-xs font-bold">💵 المبلغ (جنيه مصري)</label>
+              <Input
+                type="number"
+                min="10"
+                placeholder="مثال: 500"
+                value={formData.amountEGP}
+                onChange={e => setFormData(f => ({ ...f, amountEGP: e.target.value }))}
+                className="text-sm h-9"
+                data-testid="input-amount"
+              />
+            </div>
+
+            {/* Method */}
+            <div className="space-y-1">
+              <label className="text-xs font-bold">💳 طريقة الدفع</label>
+              <div className="grid grid-cols-2 gap-2">
+                {PAYMENT_METHODS.map(m => (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => setFormData(f => ({ ...f, method: m.value }))}
+                    className={`flex flex-col items-start p-2.5 rounded-xl border text-xs font-bold transition-all ${formData.method === m.value ? "border-primary bg-primary/5 text-primary" : "border-border hover:border-primary/40"}`}
+                    data-testid={`btn-method-${m.value}`}
+                  >
+                    {m.label}
+                    {m.number && <span className="font-mono text-[10px] text-muted-foreground mt-0.5">{m.number}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Phone */}
+            {formData.method !== "souq" && (
+              <div className="space-y-1">
+                <label className="text-xs font-bold flex items-center gap-1">
+                  <Smartphone className="w-3 h-3" />
+                  رقم المحفظة الخاصة بك
+                </label>
+                <Input
+                  type="tel"
+                  placeholder="01XXXXXXXXX"
+                  value={formData.phoneNumber}
+                  onChange={e => setFormData(f => ({ ...f, phoneNumber: e.target.value }))}
+                  className="text-sm h-9 font-mono"
+                  dir="ltr"
+                  data-testid="input-phone"
+                />
+                {selectedMethod?.number && (
+                  <p className="text-[10px] text-muted-foreground">
+                    حوّل المبلغ على: <span className="font-mono font-bold">{selectedMethod.number}</span>
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Submit */}
+            <Button
+              className="w-full gap-2"
+              disabled={!formData.amountEGP || createMutation.isPending}
+              onClick={() => createMutation.mutate({
+                type: formData.type,
+                amountEGP: Number(formData.amountEGP),
+                method: formData.method,
+                phoneNumber: formData.phoneNumber || undefined,
+                adId: formData.adId && formData.adId !== "none" ? Number(formData.adId) : undefined,
+              })}
+              data-testid="btn-submit-payment"
+            >
+              {createMutation.isPending ? "جاري الإرسال..." : "📤 إرسال الطلب"}
+            </Button>
+            <p className="text-[10px] text-center text-muted-foreground">
+              سيصلك رقم الطلب عند التأكيد · المراجعة خلال 24 ساعة
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

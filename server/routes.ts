@@ -818,7 +818,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/payments", isAuthenticated, async (req: any, res) => {
     try {
       const { insertPaymentRequestSchema } = await import("@shared/schema");
-      const input = insertPaymentRequestSchema.parse({ ...req.body, userId: req.user.claims.sub });
+      // Generate unique order number: ORD-YYYYMMDD-XXXX
+      const now = new Date();
+      const datePart = now.toISOString().slice(0,10).replace(/-/g,"");
+      const rand = Math.floor(1000 + Math.random() * 9000);
+      const orderNumber = `ORD-${datePart}-${rand}`;
+      const input = insertPaymentRequestSchema.parse({
+        ...req.body,
+        userId: req.user.claims.sub,
+        orderNumber,
+      });
       const payment = await storage.createPaymentRequest(input);
       res.status(201).json(payment);
     } catch (err: any) {

@@ -19,6 +19,7 @@ import StartStream from "@/pages/StartStream";
 import Campaigns from "@/pages/Campaigns";
 import AdminPanel from "@/pages/AdminPanel";
 import Revenue from "@/pages/Revenue";
+import Payments from "@/pages/Payments";
 import Reels from "@/pages/Reels";
 import Login from "@/pages/Login";
 import MyContent from "@/pages/MyContent";
@@ -75,6 +76,9 @@ function Router() {
               </Route>
               <Route path="/revenue">
                 <ProtectedRoute component={Revenue} />
+              </Route>
+              <Route path="/payments">
+                <ProtectedRoute component={Payments} />
               </Route>
               <Route path="/admin">
                 <ProtectedRoute component={AdminPanel} />

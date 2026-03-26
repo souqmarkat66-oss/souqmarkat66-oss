@@ -2,9 +2,11 @@ import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  Megaphone, Radio, User, BarChart2, CheckCircle2,
-  LogIn, Sparkles, Shield, Star, Tv, ShoppingBag
+  Megaphone, CheckCircle2,
+  LogIn, Sparkles, Shield, Star, Tv, ShoppingBag, KeyRound, Mail, Phone
 } from "lucide-react";
 
 const ROLES = [
@@ -57,6 +59,9 @@ export default function Login() {
   const [, setLocation] = useLocation();
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
   const [animStep, setAnimStep] = useState(0);
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotStep, setForgotStep] = useState<"input" | "sent">("input");
+  const [forgotValue, setForgotValue] = useState("");
 
   useEffect(() => {
     if (user) {
@@ -75,6 +80,11 @@ export default function Login() {
   const handleLogin = () => {
     if (selectedRole) localStorage.setItem("souq_role", selectedRole);
     window.location.href = "/api/login";
+  };
+
+  const handleForgotSubmit = () => {
+    if (!forgotValue.trim()) return;
+    setForgotStep("sent");
   };
 
   return (
@@ -201,7 +211,93 @@ export default function Login() {
         <p className="text-center text-[11px] text-muted-foreground mt-4">
           بالدخول فأنت توافق على شروط الخدمة وسياسة الخصوصية
         </p>
+
+        {/* Forgot Password Link */}
+        <div className="text-center mt-3">
+          <button
+            type="button"
+            onClick={() => { setShowForgot(true); setForgotStep("input"); setForgotValue(""); }}
+            className="text-xs text-primary hover:underline flex items-center justify-center gap-1 mx-auto"
+            data-testid="btn-forgot-password"
+          >
+            <KeyRound className="w-3 h-3" />
+            نسيت كلمة المرور؟
+          </button>
+        </div>
       </div>
+
+      {/* Forgot Password Dialog */}
+      <Dialog open={showForgot} onOpenChange={setShowForgot}>
+        <DialogContent dir="rtl" className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-primary" />
+              استرجاع كلمة المرور
+            </DialogTitle>
+          </DialogHeader>
+
+          {forgotStep === "input" ? (
+            <div className="space-y-4 pt-1">
+              <p className="text-sm text-muted-foreground">
+                أدخل بريدك الإلكتروني أو رقم هاتفك المسجّل وسنرسل لك رابط إعادة التعيين.
+              </p>
+              <div className="space-y-2">
+                <label className="text-xs font-bold">البريد الإلكتروني أو رقم الهاتف</label>
+                <div className="relative">
+                  <Mail className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="example@email.com أو 01XXXXXXXXX"
+                    value={forgotValue}
+                    onChange={e => setForgotValue(e.target.value)}
+                    className="pr-9 text-sm"
+                    dir="ltr"
+                    data-testid="input-forgot-value"
+                  />
+                </div>
+              </div>
+              <Button
+                className="w-full gap-2"
+                disabled={!forgotValue.trim()}
+                onClick={handleForgotSubmit}
+                data-testid="btn-forgot-submit"
+              >
+                <Mail className="w-4 h-4" />
+                إرسال رابط الاسترجاع
+              </Button>
+              <div className="bg-muted/40 rounded-xl p-3">
+                <p className="text-xs font-bold mb-2 flex items-center gap-1">
+                  <Phone className="w-3 h-3 text-primary" />
+                  تواصل مباشر معنا
+                </p>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">📱 فودافون كاش: <span className="font-mono font-bold">01098553911</span></p>
+                  <p className="text-xs text-muted-foreground">📲 اتصالات: <span className="font-mono font-bold">01126665741</span></p>
+                  <p className="text-xs text-muted-foreground">💳 InstaPay: <span className="font-mono font-bold">01285558567</span></p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4 pt-1 text-center">
+              <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-8 h-8 text-green-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base mb-1">تم الإرسال بنجاح!</h3>
+                <p className="text-sm text-muted-foreground">
+                  تم إرسال رابط استرجاع كلمة المرور إلى:
+                </p>
+                <p className="font-mono font-bold text-sm mt-1 text-primary">{forgotValue}</p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                تحقّق من بريدك الوارد أو رسائل الـ SMS · قد يستغرق حتى 5 دقائق
+              </p>
+              <Button variant="outline" className="w-full" onClick={() => setShowForgot(false)}>
+                العودة لتسجيل الدخول
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

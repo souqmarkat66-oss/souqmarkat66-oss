@@ -290,7 +290,9 @@ export type UploadedFile = typeof uploadedFiles.$inferSelect;
 // ============================================================
 export const paymentRequests = pgTable("payment_requests", {
   id: serial("id").primaryKey(),
+  orderNumber: text("order_number").unique(),
   userId: varchar("user_id").references(() => users.id).notNull(),
+  adId: integer("ad_id"),
   type: text("type", { enum: ["withdrawal", "top_up"] }).notNull(),
   amountEGP: real("amount_egp").notNull(),
   method: text("method", { enum: ["vodafone", "etisalat", "instapay", "souq"] }).notNull(),
