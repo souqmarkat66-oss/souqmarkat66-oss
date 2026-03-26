@@ -8,6 +8,8 @@ import { registerImageRoutes, openai } from "./replit_integrations/image";
 import { upload } from "./upload";
 import path from "path";
 import fs from "fs";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
 import express from "express";
 
 // Admin user ID
@@ -779,6 +781,53 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({ url: imageUrl, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
       res.status(500).json({ message: "Failed to generate image: " + error.message });
+    }
+  });
+
+  // ─── PAYMENT NOTIFICATIONS (from ad buyers) ──────────────────
+  app.post("/api/payment-notifications", async (req, res) => {
+    try {
+      const { adId, payerName, payerPhone, paidAmount, paymentMethod } = req.body;
+      if (!adId || !payerName || !payerPhone || !paidAmount || !paymentMethod)
+        return res.status(400).json({ message: "بيانات ناقصة" });
+      const result = await db.execute(
+        sql`INSERT INTO payment_notifications (ad_id, payer_name, payer_phone, paid_amount, payment_method, status)
+            VALUES (${adId}, ${payerName}, ${payerPhone}, ${paidAmount}, ${paymentMethod}, 'pending')
+            RETURNING *`
+      );
+      res.json(result.rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Get payment notifications for ad owners
+  app.get("/api/payment-notifications", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const result = await db.execute(
+        sql`SELECT pn.*, a.title as ad_title FROM payment_notifications pn
+            JOIN ads a ON a.id = pn.ad_id
+            WHERE a.user_id = ${userId} OR ${userId === ADMIN_USER_ID}
+            ORDER BY pn.created_at DESC`
+      );
+      res.json(result.rows);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Admin update payment notification
+  app.put("/api/payment-notifications/:id", isAuthenticated, async (req: any, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
+    const { status } = req.body;
+    try {
+      const result = await db.execute(
+        sql`UPDATE payment_notifications SET status = ${status} WHERE id = ${req.params.id} RETURNING *`
+      );
+      res.json(result.rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
     }
   });
 

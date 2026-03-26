@@ -46,6 +46,9 @@ export const ads = pgTable("ads", {
   commentsCount: integer("comments_count").default(0),
   viewsCount: integer("views_count").default(0),
   targetRegion: text("target_region"),
+  priceEGP: real("price_egp"),
+  whatsappNumber: varchar("whatsapp_number", { length: 20 }),
+  paymentLink: text("payment_link"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

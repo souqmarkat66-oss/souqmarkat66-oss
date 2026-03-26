@@ -118,6 +118,11 @@ export default function Revenue() {
     queryFn: () => fetch('/api/payments', { credentials: 'include' }).then(r => r.json()),
   });
 
+  const { data: paymentNotifications = [] } = useQuery<any[]>({
+    queryKey: ['/api/payment-notifications'],
+    queryFn: () => fetch('/api/payment-notifications', { credentials: 'include' }).then(r => r.json()),
+  });
+
   const balanceEGP = data?.balanceEGP || 0;
   const transactions = data?.transactions || [];
   const channel = data?.channel;
@@ -227,6 +232,29 @@ export default function Revenue() {
                   <div className="font-bold">{p.amountEGP} ج.م</div>
                   <Badge variant={p.status === 'approved' ? 'default' : p.status === 'rejected' ? 'destructive' : 'secondary'} className="text-xs">
                     {p.status === 'pending' ? 'قيد المراجعة' : p.status === 'approved' ? 'مقبول' : 'مرفوض'}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Payment Notifications from Buyers */}
+      {paymentNotifications.length > 0 && (
+        <Card className="rounded-2xl mb-6 border-green-200 dark:border-green-900">
+          <CardHeader><CardTitle className="text-base flex items-center gap-2">📩 إشعارات دفع من المشترين</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {paymentNotifications.map((pn: any) => (
+              <div key={pn.id} className="flex items-center justify-between p-3 bg-muted rounded-xl" data-testid={`pn-${pn.id}`}>
+                <div>
+                  <div className="text-sm font-bold">{pn.payer_name} — {pn.payer_phone}</div>
+                  <div className="text-xs text-muted-foreground">{pn.ad_title} · {pn.payment_method}</div>
+                </div>
+                <div className="text-right">
+                  <div className="font-bold text-green-600">{pn.paid_amount} ج.م</div>
+                  <Badge variant={pn.status === 'confirmed' ? 'default' : 'secondary'} className="text-xs">
+                    {pn.status === 'pending' ? 'قيد المراجعة' : 'مؤكد'}
                   </Badge>
                 </div>
               </div>

@@ -357,6 +357,37 @@ export default function CreateAd() {
             )} />
           </div>
 
+          {/* Pricing & Payment */}
+          <div className="border rounded-2xl p-4 bg-green-50/30 dark:bg-green-950/10 space-y-3">
+            <h3 className="font-bold text-sm flex items-center gap-2">💰 السعر وطرق التواصل</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <FormField control={form.control} name="priceEGP" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>السعر (ج.م)</FormLabel>
+                  <FormControl>
+                    <Input type="number" placeholder="مثال: 500" {...field} data-testid="input-price" />
+                  </FormControl>
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="whatsappNumber" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>رقم الواتساب</FormLabel>
+                  <FormControl>
+                    <Input placeholder="01xxxxxxxxx" {...field} dir="ltr" data-testid="input-whatsapp" />
+                  </FormControl>
+                </FormItem>
+              )} />
+            </div>
+            <FormField control={form.control} name="paymentLink" render={({ field }) => (
+              <FormItem>
+                <FormLabel>رابط الدفع المباشر (اختياري)</FormLabel>
+                <FormControl>
+                  <Input placeholder="https://payment.example.com/pay" {...field} dir="ltr" />
+                </FormControl>
+              </FormItem>
+            )} />
+          </div>
+
           <FormField control={form.control} name="targetRegion" render={({ field }) => (
             <FormItem>
               <FormLabel>المنطقة الجغرافية (اختياري)</FormLabel>
