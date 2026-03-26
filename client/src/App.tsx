@@ -61,7 +61,7 @@ function Router() {
       {/* Footer */}
       <footer className="border-t py-8 bg-muted/20">
         <div className="container px-4 text-center text-sm text-muted-foreground">
-          <p>© {new Date().getFullYear()} Souq Ads. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} Souq Ads Network. All rights reserved.</p>
         </div>
       </footer>
     </div>

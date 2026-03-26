@@ -12,7 +12,7 @@ interface LanguageContextType {
 
 const translations = {
   ar: {
-    'app.name': 'منصة الإعلانات الذكية',
+    'app.name': 'شبكة سوق للإعلانات',
     'nav.home': 'الرئيسية',
     'nav.ads': 'الإعلانات',
     'nav.create': 'إنشاء إعلان',
@@ -34,7 +34,7 @@ const translations = {
     'common.view': 'عرض التفاصيل',
   },
   en: {
-    'app.name': 'Smart Ads Platform',
+    'app.name': 'Souq Ads Network',
     'nav.home': 'Home',
     'nav.ads': 'Advertisements',
     'nav.create': 'Create Ad',
