@@ -1,7 +1,7 @@
 import { useAuth } from "@/hooks/use-auth";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation } from "wouter";
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,9 +19,6 @@ import { EditReelDialog } from "@/components/EditReelDialog";
 
 export default function MyContent() {
   const { user, isLoading: authLoading } = useAuth();
-  const [, setLocation] = useLocation();
-  const [editingAd, setEditingAd] = useState<any | null>(null);
-  const [editingReel, setEditingReel] = useState<any | null>(null);
 
   if (authLoading) return (
     <div className="flex justify-center items-center min-h-[60vh]">
@@ -53,6 +50,8 @@ export default function MyContent() {
 function AuthenticatedContent({ user }: { user: any }) {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [editingAd, setEditingAd] = useState<any | null>(null);
+  const [editingReel, setEditingReel] = useState<any | null>(null);
 
   const { data: allAds = [], isLoading: adsLoading } = useQuery<any[]>({
     queryKey: ["/api/ads"],
