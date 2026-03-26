@@ -1,13 +1,12 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Loader2, X } from "lucide-react";
+import { Loader2, X, Upload, Image as ImageIcon, Music } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { UploadZone } from "@/components/UploadZone";
 
 interface Reel {
   id: number;
@@ -31,9 +30,69 @@ export function EditReelDialog({ reel, open, onClose }: EditReelDialogProps) {
   const [description, setDescription] = useState(reel.description ?? "");
   const [videoUrl, setVideoUrl] = useState(reel.videoUrl ?? "");
   const [audioUrl, setAudioUrl] = useState(reel.audioUrl ?? "");
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [uploadingAudio, setUploadingAudio] = useState(false);
+
+  const mediaFileRef = useRef<HTMLInputElement>(null);
+  const audioFileRef = useRef<HTMLInputElement>(null);
 
   const isImage = (url: string) => /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif)(\?|$)/i.test(url);
   const isJsonArray = (url: string) => { try { const v = JSON.parse(url); return Array.isArray(v); } catch { return false; } };
+
+  const uploadFile = async (file: File): Promise<string> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch("/api/upload", { method: "POST", body: fd, credentials: "include" });
+    if (!res.ok) throw new Error("فشل الرفع");
+    const data = await res.json();
+    return data.url as string;
+  };
+
+  const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    e.target.value = "";
+    setUploadingMedia(true);
+    try {
+      const urls = await Promise.all(files.map(uploadFile));
+      if (urls.length === 1) setVideoUrl(urls[0]);
+      else setVideoUrl(JSON.stringify(urls));
+    } catch {
+      toast({ variant: "destructive", title: "فشل رفع الملف" });
+    } finally {
+      setUploadingMedia(false);
+    }
+  };
+
+  const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setUploadingAudio(true);
+    try {
+      setAudioUrl(await uploadFile(file));
+    } catch {
+      toast({ variant: "destructive", title: "فشل رفع الصوت" });
+    } finally {
+      setUploadingAudio(false);
+    }
+  };
+
+  const mediaPreview = () => {
+    if (!videoUrl) return null;
+    if (isJsonArray(videoUrl)) {
+      const imgs: string[] = JSON.parse(videoUrl);
+      return (
+        <div className="grid grid-cols-3 gap-1 rounded-xl overflow-hidden">
+          {imgs.slice(0, 6).map((src, i) => (
+            <img key={i} src={src} alt="" className="aspect-square object-cover w-full" />
+          ))}
+        </div>
+      );
+    }
+    if (isImage(videoUrl)) return <img src={videoUrl} alt="preview" className="w-full max-h-48 object-contain rounded-xl border" />;
+    return <video src={videoUrl} controls className="w-full max-h-48 rounded-xl border" />;
+  };
 
   const updateMut = useMutation({
     mutationFn: async () => {
@@ -55,28 +114,12 @@ export function EditReelDialog({ reel, open, onClose }: EditReelDialogProps) {
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/reels'] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reels"] });
       toast({ title: "✅ تم تعديل الريل بنجاح!" });
       onClose();
     },
     onError: (e: any) => toast({ variant: "destructive", title: "فشل التعديل", description: e.message }),
   });
-
-  const mediaPreview = () => {
-    if (!videoUrl) return null;
-    if (isJsonArray(videoUrl)) {
-      const imgs: string[] = JSON.parse(videoUrl);
-      return (
-        <div className="grid grid-cols-3 gap-1 rounded-xl overflow-hidden">
-          {imgs.slice(0, 6).map((src, i) => (
-            <img key={i} src={src} alt="" className="aspect-square object-cover w-full" />
-          ))}
-        </div>
-      );
-    }
-    if (isImage(videoUrl)) return <img src={videoUrl} alt="preview" className="w-full max-h-48 object-contain rounded-xl border" />;
-    return <video src={videoUrl} controls className="w-full max-h-48 rounded-xl border" />;
-  };
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -125,12 +168,16 @@ export function EditReelDialog({ reel, open, onClose }: EditReelDialogProps) {
                 </button>
               </div>
             ) : (
-              <UploadZone
-                value={videoUrl}
-                onChange={url => setVideoUrl(url)}
-                accept="image/*,video/*"
-                label="ارفع صورة أو فيديو جديد"
-              />
+              <div
+                onClick={() => mediaFileRef.current?.click()}
+                className="border-2 border-dashed border-muted-foreground/30 rounded-xl p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all"
+              >
+                {uploadingMedia
+                  ? <><Loader2 className="w-6 h-6 animate-spin mx-auto text-primary" /><p className="text-xs text-muted-foreground mt-2">جاري الرفع...</p></>
+                  : <><ImageIcon className="w-8 h-8 mx-auto text-muted-foreground mb-2" /><p className="text-sm font-medium">ارفع صورة أو فيديو</p><p className="text-xs text-muted-foreground">يمكن رفع أكثر من صورة</p></>
+                }
+                <input ref={mediaFileRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={handleMediaUpload} />
+              </div>
             )}
           </div>
 
@@ -140,23 +187,22 @@ export function EditReelDialog({ reel, open, onClose }: EditReelDialogProps) {
             {audioUrl ? (
               <div className="flex items-center gap-2 bg-green-500/10 rounded-lg p-2">
                 <audio src={audioUrl} controls className="flex-1 h-8" />
-                <button onClick={() => setAudioUrl("")} className="w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center hover:bg-red-600">✕</button>
+                <button
+                  onClick={() => setAudioUrl("")}
+                  className="w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center hover:bg-red-600"
+                >✕</button>
               </div>
             ) : (
-              <UploadZone
-                value={audioUrl}
-                onChange={url => setAudioUrl(url)}
-                accept="audio/*"
-                label="ارفع ملف صوتي (MP3)"
-              />
-            )}
-            {!audioUrl && (
-              <Input
-                placeholder="أو رابط مباشر لملف صوتي mp3..."
-                dir="ltr"
-                className="text-sm"
-                onChange={e => setAudioUrl(e.target.value.trim())}
-              />
+              <div
+                onClick={() => audioFileRef.current?.click()}
+                className="border-2 border-dashed border-muted-foreground/30 rounded-xl p-4 text-center cursor-pointer hover:border-green-500/50 hover:bg-green-500/5 transition-all"
+              >
+                {uploadingAudio
+                  ? <><Loader2 className="w-5 h-5 animate-spin mx-auto text-green-500" /><p className="text-xs text-muted-foreground mt-1">جاري رفع الصوت...</p></>
+                  : <><Music className="w-6 h-6 mx-auto text-muted-foreground mb-1" /><p className="text-sm">ارفع ملف صوتي (MP3)</p></>
+                }
+                <input ref={audioFileRef} type="file" accept="audio/*" className="hidden" onChange={handleAudioUpload} />
+              </div>
             )}
           </div>
 

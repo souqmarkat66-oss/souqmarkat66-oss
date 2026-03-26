@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown, Image as ImageIcon, Film, Music, ChevronLeft, ChevronRight, Pause } from "lucide-react";
+import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown, Image as ImageIcon, Film, Music, ChevronLeft, ChevronRight, Pause, Pencil, Trash2 } from "lucide-react";
+import { EditReelDialog } from "@/components/EditReelDialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiRequest } from "@/lib/queryClient";
 import { useTTS } from "@/hooks/use-tts";
@@ -54,7 +55,13 @@ function speakEgyptian(text: string) {
   window.speechSynthesis.speak(utterance);
 }
 
-function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
+function ReelCard({ reel, isActive, isOwner, onEdit, onDelete }: {
+  reel: Reel;
+  isActive: boolean;
+  isOwner?: boolean;
+  onEdit?: () => void;
+  onDelete?: () => void;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [liked, setLiked] = useState(false);
@@ -408,6 +415,33 @@ function ReelCard({ reel, isActive }: { reel: Reel; isActive: boolean }) {
           </div>
           <span className="text-white text-xs font-bold">{muted ? 'صوت' : 'كتم'}</span>
         </button>
+
+        {/* Owner-only: Edit & Delete */}
+        {isOwner && (
+          <>
+            <button
+              onClick={onEdit}
+              className="flex flex-col items-center gap-1"
+              data-testid={`btn-edit-reel-feed-${reel.id}`}
+            >
+              <div className="w-10 h-10 rounded-full bg-blue-500/80 flex items-center justify-center text-white hover:bg-blue-600/90 transition-colors">
+                <Pencil className="w-5 h-5" />
+              </div>
+              <span className="text-white text-xs font-bold">تعديل</span>
+            </button>
+
+            <button
+              onClick={() => { if (confirm("هل تريد حذف هذا الريل؟")) onDelete?.(); }}
+              className="flex flex-col items-center gap-1"
+              data-testid={`btn-delete-reel-feed-${reel.id}`}
+            >
+              <div className="w-10 h-10 rounded-full bg-red-500/80 flex items-center justify-center text-white hover:bg-red-600/90 transition-colors">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <span className="text-white text-xs font-bold">حذف</span>
+            </button>
+          </>
+        )}
       </div>
 
       {/* Comments Sheet */}
@@ -849,11 +883,22 @@ function CreateReelDialog() {
 
 export default function Reels() {
   const [activeIndex, setActiveIndex] = useState(0);
+  const [editingReel, setEditingReel] = useState<Reel | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const { data: user } = useQuery<any>({ queryKey: ['/api/auth/user'] });
   const { data: reels = [], isLoading } = useQuery<Reel[]>({
     queryKey: ['/api/reels'],
     queryFn: () => fetch('/api/reels', { credentials: 'include' }).then(r => r.json()),
+  });
+
+  const deleteReelMut = useMutation({
+    mutationFn: (id: number) => fetch(`/api/reels/${id}`, { method: 'DELETE', credentials: 'include' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/reels'] });
+      toast({ title: '🗑 تم حذف الريل' });
+    },
   });
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -891,7 +936,14 @@ export default function Reels() {
         onScroll={handleScroll}
       >
         {reels.map((reel, i) => (
-          <ReelCard key={reel.id} reel={reel} isActive={i === activeIndex} />
+          <ReelCard
+            key={reel.id}
+            reel={reel}
+            isActive={i === activeIndex}
+            isOwner={!!user && reel.userId === user.id}
+            onEdit={() => setEditingReel(reel)}
+            onDelete={() => deleteReelMut.mutate(reel.id)}
+          />
         ))}
       </div>
 
@@ -908,6 +960,14 @@ export default function Reels() {
       )}
 
       {user && <CreateReelDialog />}
+
+      {editingReel && (
+        <EditReelDialog
+          reel={editingReel}
+          open={!!editingReel}
+          onClose={() => setEditingReel(null)}
+        />
+      )}
     </div>
   );
 }
