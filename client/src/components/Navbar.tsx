@@ -98,8 +98,8 @@ export function Navbar() {
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <a href="/api/login">
-              <Button size="sm" className="gap-2 bg-primary text-white">
+            <a href="/login">
+              <Button size="sm" className="gap-2 bg-primary text-white" data-testid="btn-nav-login">
                 <LogIn className="w-4 h-4" /> {t('nav.login')}
               </Button>
             </a>

@@ -20,6 +20,7 @@ import Campaigns from "@/pages/Campaigns";
 import AdminPanel from "@/pages/AdminPanel";
 import Revenue from "@/pages/Revenue";
 import Reels from "@/pages/Reels";
+import Login from "@/pages/Login";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -70,7 +71,7 @@ function Router() {
               <Route path="/admin">
                 <ProtectedRoute component={AdminPanel} />
               </Route>
-              <Route path="/login" component={() => { window.location.href = "/api/login"; return null; }} />
+              <Route path="/login" component={Login} />
               <Route component={NotFound} />
             </Switch>
           </main>
