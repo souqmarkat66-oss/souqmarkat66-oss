@@ -91,7 +91,7 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete }: {
   });
 
   const likeMutation = useMutation({
-    mutationFn: () => apiRequest('/api/likes', 'POST', { targetType: 'reel', targetId: reel.id }),
+    mutationFn: () => apiRequest('POST', '/api/likes', { targetType: 'reel', targetId: reel.id }),
     onSuccess: (data: any) => {
       setLiked(data.liked);
       setLocalLikes(prev => data.liked ? prev + 1 : Math.max(0, prev - 1));
@@ -99,7 +99,7 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete }: {
   });
 
   const commentMutation = useMutation({
-    mutationFn: () => apiRequest('/api/comments', 'POST', { targetType: 'reel', targetId: reel.id, content: comment }),
+    mutationFn: () => apiRequest('POST', '/api/comments', { targetType: 'reel', targetId: reel.id, content: comment }),
     onSuccess: () => {
       setComment("");
       queryClient.invalidateQueries({ queryKey: ['/api/comments/reel', reel.id] });
@@ -519,7 +519,7 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
   const hasMedia = finalVideoUrl.trim() !== "" && finalVideoUrl !== "[]";
 
   const createMutation = useMutation({
-    mutationFn: () => apiRequest('/api/reels', 'POST', {
+    mutationFn: () => apiRequest('POST', '/api/reels', {
       title,
       description,
       videoUrl: finalVideoUrl,
