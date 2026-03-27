@@ -1,0 +1,29 @@
+Security and Privacy Scanner
+Beta
+Run a scan to check for potential security risks and privacy leaks in your application. Scans are typically complete within minutes. Learn more
+10 potential vulnerabilities found.
+Last ran on
+ 
+12:29 midnight, Mar 28, 2026
+Security
+Outdated dependencies have known vulnerabilities
+There are dependencies that have vulnerabilities and may need to be updated.
+These dependencies can be updated automatically.
+minimatch@9.0.5 -> 9.0.7
+minimatch@9.0.5 -> 9.0.6
+minimatch@9.0.5 -> 9.0.7
+picomatch@2.3.1 -> 2.3.2
+picomatch@4.0.3 -> 4.0.4
+rollup@4.53.5 -> 4.59.0
+Security
+JWT token detected in source code. Avoid hardcoding tokens directly in your code, even if they are public or anonymous keys. Instead, use environment variables to store and access tokens at runtime. If you need the actual token values to make this work properly, ask me to provide them through Replit's secret system.
+Security
+A gitleaks JWT credential detected. Avoid hardcoding credentials directly in connection strings as this creates security risks. Instead, use environment variables to store and access credentials at runtime. If you need the actual credential values to make this work properly, ask me to provide them through Replit's secret system.
+Security
+JWT token detected in source code. Avoid hardcoding tokens directly in your code, even if they are public or anonymous keys. Instead, use environment variables to store and access tokens at runtime. If you need the actual token values to make this work properly, ask me to provide them through Replit's secret system.
+Security
+A gitleaks JWT credential detected. Avoid hardcoding credentials directly in connection strings as this creates security risks. Instead, use environment variables to store and access credentials at runtime. If you need the actual credential values to make this work properly, ask me to provide them through Replit's secret system.
+Vulnerability scans are enabled by the following Replit partners:
+Security scans are powered by Semgrep Community Edition.
+Privacy scans are powered by HoundDog.ai.
+Security scanning powered by Semgrep and privacy scanning powered by HoundDog.ai , both running locally on Replit
