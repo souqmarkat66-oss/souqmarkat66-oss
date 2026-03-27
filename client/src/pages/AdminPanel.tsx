@@ -1,16 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import {
   Users, BarChart2, Flag, Megaphone, Radio, CheckCircle, XCircle,
   AlertTriangle, TrendingUp, Eye, Banknote, Settings, Loader2,
-  ShieldAlert, Tv, Film, ShieldX, VideoOff
+  ShieldAlert, Tv, Film, ShieldX, VideoOff, Search, Edit2, Save, X
 } from "lucide-react";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
@@ -82,6 +83,28 @@ export default function AdminPanel() {
   });
 
   const [settingsForm, setSettingsForm] = useState<Record<string, string>>({});
+  const [adsSearch, setAdsSearch] = useState("");
+  const [adsSearchInput, setAdsSearchInput] = useState("");
+  const [editingAd, setEditingAd] = useState<any>(null);
+  const [editForm, setEditForm] = useState<{ title?: string; priceEGP?: string; status?: string }>({});
+
+  const { data: adminAds = [], refetch: refetchAds } = useQuery<any[]>({
+    queryKey: ["/api/admin/ads", adsSearch],
+    queryFn: () => fetch(`/api/admin/ads?search=${encodeURIComponent(adsSearch)}`, { credentials: "include" }).then(r => r.json()),
+    enabled: isAdmin,
+  });
+
+  const adUpdateMutation = useMutation({
+    mutationFn: ({ id, data }: any) =>
+      fetch(`/api/admin/ads/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data), credentials: "include" }).then(r => r.json()),
+    onSuccess: () => {
+      refetchAds();
+      setEditingAd(null);
+      setEditForm({});
+      toast({ title: "✅ تم تحديث الإعلان" });
+    },
+    onError: () => toast({ title: "❌ فشل التحديث", variant: "destructive" }),
+  });
 
   const reportMutation = useMutation({
     mutationFn: ({ id, status, adminNote }: any) =>
@@ -180,8 +203,9 @@ export default function AdminPanel() {
         </div>
       )}
 
-      <Tabs defaultValue="settings">
+      <Tabs defaultValue="ads">
         <TabsList className="mb-6 flex-wrap gap-1 h-auto">
+          <TabsTrigger value="ads" className="gap-1.5"><Megaphone className="w-4 h-4" /> الإعلانات</TabsTrigger>
           <TabsTrigger value="settings" className="gap-1.5"><Settings className="w-4 h-4" /> الإعدادات</TabsTrigger>
           <TabsTrigger value="payments" className="gap-1.5"><Banknote className="w-4 h-4" /> طلبات السحب</TabsTrigger>
           <TabsTrigger value="reports" className="gap-1.5"><Flag className="w-4 h-4" /> البلاغات</TabsTrigger>
@@ -190,6 +214,145 @@ export default function AdminPanel() {
           <TabsTrigger value="fraud" className="gap-1.5 text-red-500"><ShieldX className="w-4 h-4" /> كشف الاحتيال</TabsTrigger>
           <TabsTrigger value="streams" className="gap-1.5 text-orange-500"><VideoOff className="w-4 h-4" /> مراقبة البث</TabsTrigger>
         </TabsList>
+
+        {/* ADS MANAGEMENT */}
+        <TabsContent value="ads">
+          <Card className="rounded-2xl mb-4">
+            <CardContent className="p-4">
+              <div className="flex gap-2">
+                <Input
+                  placeholder="🔍 ابحث عن إعلان بالاسم أو الوصف..."
+                  value={adsSearchInput}
+                  onChange={e => setAdsSearchInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && setAdsSearch(adsSearchInput)}
+                  data-testid="input-ads-search"
+                  className="flex-1"
+                />
+                <Button onClick={() => setAdsSearch(adsSearchInput)} data-testid="btn-ads-search">
+                  <Search className="w-4 h-4 me-1" /> بحث
+                </Button>
+                {adsSearch && (
+                  <Button variant="outline" onClick={() => { setAdsSearch(""); setAdsSearchInput(""); }}>
+                    <X className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
+              {adsSearch && <p className="text-xs text-muted-foreground mt-2">نتائج البحث عن: <strong>{adsSearch}</strong></p>}
+            </CardContent>
+          </Card>
+
+          <div className="space-y-3">
+            {adminAds.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Megaphone className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p>لا توجد إعلانات</p>
+              </div>
+            ) : adminAds.map((ad: any) => (
+              <Card key={ad.id} className="rounded-xl" data-testid={`admin-ad-${ad.id}`}>
+                <CardContent className="p-4">
+                  {editingAd === ad.id ? (
+                    /* EDIT MODE */
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Badge variant="outline" className="text-xs">تعديل #{ad.id}</Badge>
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground">العنوان</label>
+                        <Input
+                          value={editForm.title ?? ad.title}
+                          onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}
+                          className="mt-1"
+                          data-testid={`input-edit-title-${ad.id}`}
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs text-muted-foreground">السعر (ج.م)</label>
+                          <Input
+                            type="number" step="0.5"
+                            value={editForm.priceEGP ?? (ad.price_egp || '')}
+                            onChange={e => setEditForm(f => ({ ...f, priceEGP: e.target.value }))}
+                            placeholder="0"
+                            className="mt-1"
+                            data-testid={`input-edit-price-${ad.id}`}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground">الحالة</label>
+                          <Select
+                            value={editForm.status ?? ad.status}
+                            onValueChange={v => setEditForm(f => ({ ...f, status: v }))}
+                          >
+                            <SelectTrigger className="mt-1" data-testid={`select-edit-status-${ad.id}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="active">✅ نشط</SelectItem>
+                              <SelectItem value="paused">⏸️ متوقف</SelectItem>
+                              <SelectItem value="rejected">❌ مرفوض</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <Button
+                          size="sm" className="gap-1 bg-green-500 hover:bg-green-600 text-white"
+                          disabled={adUpdateMutation.isPending}
+                          onClick={() => adUpdateMutation.mutate({ id: ad.id, data: editForm })}
+                          data-testid={`btn-save-ad-${ad.id}`}
+                        >
+                          {adUpdateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                          حفظ
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => { setEditingAd(null); setEditForm({}); }}>
+                          <X className="w-3 h-3 me-1" /> إلغاء
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* VIEW MODE */
+                    <div className="flex items-center gap-3">
+                      {ad.media_url && ad.media_type === 'image' && (
+                        <img src={ad.media_url} alt="" className="w-14 h-14 rounded-xl object-cover bg-muted flex-shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className="font-bold truncate">{ad.title}</span>
+                          <Badge className={`text-xs ${ad.status === 'active' ? 'bg-green-500' : ad.status === 'paused' ? 'bg-yellow-500' : 'bg-red-500'} text-white`}>
+                            {ad.status === 'active' ? 'نشط' : ad.status === 'paused' ? 'متوقف' : ad.status}
+                          </Badge>
+                        </div>
+                        <div className="flex gap-3 text-xs text-muted-foreground flex-wrap">
+                          <span>#{ad.id}</span>
+                          {ad.price_egp && <span className="font-medium text-green-600">{ad.price_egp} ج.م</span>}
+                          <span>مشاهدات: {ad.views_count || 0}</span>
+                          <span>إعجابات: {ad.likes_count || 0}</span>
+                          <span>{ad.created_at ? format(new Date(ad.created_at), 'dd/MM/yyyy', { locale: ar }) : ''}</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <Button
+                          size="sm" variant="outline" className="gap-1 text-xs"
+                          onClick={() => { setEditingAd(ad.id); setEditForm({ title: ad.title, priceEGP: ad.price_egp || '', status: ad.status }); }}
+                          data-testid={`btn-edit-ad-${ad.id}`}
+                        >
+                          <Edit2 className="w-3 h-3" /> تعديل
+                        </Button>
+                        <Button
+                          size="sm" variant={ad.status === 'active' ? 'destructive' : 'default'} className="text-xs"
+                          onClick={() => adUpdateMutation.mutate({ id: ad.id, data: { status: ad.status === 'active' ? 'paused' : 'active' } })}
+                          data-testid={`btn-toggle-ad-${ad.id}`}
+                        >
+                          {ad.status === 'active' ? '⏸️ إيقاف' : '▶️ تفعيل'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
 
         {/* PLATFORM SETTINGS */}
         <TabsContent value="settings">

@@ -751,6 +751,45 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Admin: get all ads with search
+  app.get("/api/admin/ads", isAuthenticated, requireAdmin, async (req, res) => {
+    try {
+      const search = req.query.search as string || '';
+      let result;
+      if (search) {
+        result = await db.execute(
+          sql`SELECT * FROM ads WHERE title ILIKE ${'%' + search + '%'} OR description ILIKE ${'%' + search + '%'} ORDER BY created_at DESC LIMIT 50`
+        );
+      } else {
+        result = await db.execute(sql`SELECT * FROM ads ORDER BY created_at DESC LIMIT 50`);
+      }
+      res.json(result.rows);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Admin: update ad
+  app.put("/api/admin/ads/:id", isAuthenticated, requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+      const { status, priceEGP, title } = req.body;
+      if (status !== undefined) {
+        await db.execute(sql`UPDATE ads SET status = ${status} WHERE id = ${id}`);
+      }
+      if (priceEGP !== undefined) {
+        await db.execute(sql`UPDATE ads SET price_egp = ${Number(priceEGP)} WHERE id = ${id}`);
+      }
+      if (title !== undefined) {
+        await db.execute(sql`UPDATE ads SET title = ${title} WHERE id = ${id}`);
+      }
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   // Admin: fraud stats summary
   app.get("/api/admin/fraud-stats", isAuthenticated, requireAdmin, async (_req, res) => {
     try {
