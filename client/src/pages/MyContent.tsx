@@ -10,7 +10,7 @@ import { AdCard } from "@/components/AdCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   PlusCircle, Video, Image, Play, Eye, Heart, Trash2, Edit, Pencil,
-  LayoutGrid, Radio, User, LogIn, MessageSquare
+  LayoutGrid, Radio, User, LogIn, MessageSquare, RefreshCw, Clock, Bookmark
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -83,6 +83,21 @@ function AuthenticatedContent({ user }: { user: any }) {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/reels"] }); toast({ title: "تم حذف الريل" }); },
   });
 
+  const { data: favorites = [] } = useQuery<any[]>({
+    queryKey: ["/api/favorites"],
+    queryFn: () => fetch("/api/favorites", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const removeFavMut = useMutation({
+    mutationFn: (adId: number) => apiRequest("POST", `/api/favorites/${adId}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/favorites"] }); toast({ title: "تم الإزالة من المفضلة" }); },
+  });
+
+  const renewAdMut = useMutation({
+    mutationFn: (id: number) => apiRequest("POST", `/api/ads/${id}/renew`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/ads"] }); toast({ title: "✅ تم تجديد الإعلان 30 يوماً!" }); },
+  });
+
   return (
     <div className="container px-4 py-10 max-w-5xl" dir="rtl">
       {/* Profile Header */}
@@ -117,21 +132,26 @@ function AuthenticatedContent({ user }: { user: any }) {
 
       {/* Tabs */}
       <Tabs defaultValue="ads" dir="rtl">
-        <TabsList className="mb-6 h-11 rounded-xl">
-          <TabsTrigger value="ads" className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-white rounded-lg">
-            <LayoutGrid className="w-4 h-4" />
+        <TabsList className="mb-6 h-11 rounded-xl flex-wrap gap-1">
+          <TabsTrigger value="ads" className="gap-1.5 data-[state=active]:bg-primary data-[state=active]:text-white rounded-lg text-xs">
+            <LayoutGrid className="w-3.5 h-3.5" />
             إعلاناتي
-            {myAds.length > 0 && <Badge className="h-5 min-w-[20px] text-[10px] bg-white/20">{myAds.length}</Badge>}
+            {myAds.length > 0 && <Badge className="h-4 min-w-[16px] text-[9px] bg-white/20">{myAds.length}</Badge>}
           </TabsTrigger>
-          <TabsTrigger value="reels" className="gap-2 data-[state=active]:bg-red-500 data-[state=active]:text-white rounded-lg">
-            <Video className="w-4 h-4" />
+          <TabsTrigger value="favorites" className="gap-1.5 data-[state=active]:bg-red-500 data-[state=active]:text-white rounded-lg text-xs">
+            <Bookmark className="w-3.5 h-3.5" />
+            المفضلة
+            {favorites.length > 0 && <Badge className="h-4 min-w-[16px] text-[9px] bg-white/20">{favorites.length}</Badge>}
+          </TabsTrigger>
+          <TabsTrigger value="reels" className="gap-1.5 data-[state=active]:bg-red-500 data-[state=active]:text-white rounded-lg text-xs">
+            <Video className="w-3.5 h-3.5" />
             ريلزي
-            {myReels.length > 0 && <Badge className="h-5 min-w-[20px] text-[10px] bg-white/20">{myReels.length}</Badge>}
+            {myReels.length > 0 && <Badge className="h-4 min-w-[16px] text-[9px] bg-white/20">{myReels.length}</Badge>}
           </TabsTrigger>
-          <TabsTrigger value="streams" className="gap-2 data-[state=active]:bg-blue-500 data-[state=active]:text-white rounded-lg">
-            <Radio className="w-4 h-4" />
+          <TabsTrigger value="streams" className="gap-1.5 data-[state=active]:bg-blue-500 data-[state=active]:text-white rounded-lg text-xs">
+            <Radio className="w-3.5 h-3.5" />
             بثي المباشر
-            {myStreams.length > 0 && <Badge className="h-5 min-w-[20px] text-[10px] bg-white/20">{myStreams.length}</Badge>}
+            {myStreams.length > 0 && <Badge className="h-4 min-w-[16px] text-[9px] bg-white/20">{myStreams.length}</Badge>}
           </TabsTrigger>
         </TabsList>
 
@@ -175,17 +195,68 @@ function AuthenticatedContent({ user }: { user: any }) {
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  <div className="mt-2 flex items-center justify-between px-1">
+                  <div className="mt-2 flex items-center justify-between px-1 flex-wrap gap-1">
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1"><Eye className="w-3 h-3" />{ad.viewsCount || 0}</span>
                       <span className="flex items-center gap-1"><Heart className="w-3 h-3" />{ad.likesCount || 0}</span>
                       <span className="flex items-center gap-1"><MessageSquare className="w-3 h-3" />{ad.commentsCount || 0}</span>
                     </div>
-                    <Badge variant={ad.status === "active" ? "default" : "secondary"} className="text-[10px] h-5">
-                      {ad.status === "active" ? "✅ نشط" : ad.status}
-                    </Badge>
+                    <div className="flex items-center gap-1.5">
+                      <Badge variant={ad.status === "active" ? "default" : "secondary"} className="text-[10px] h-5">
+                        {ad.status === "active" ? "✅ نشط" : ad.status}
+                      </Badge>
+                      <button
+                        onClick={() => renewAdMut.mutate(ad.id)}
+                        disabled={renewAdMut.isPending}
+                        className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-600 hover:bg-blue-100 transition-colors"
+                        title="تجديد الإعلان 30 يوماً"
+                        data-testid={`btn-renew-ad-${ad.id}`}
+                      >
+                        <RefreshCw className="w-2.5 h-2.5" /> تجديد
+                      </button>
+                    </div>
                   </div>
                 </div>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* Favorites */}
+        <TabsContent value="favorites">
+          {favorites.length === 0 ? (
+            <EmptyState
+              emoji="❤️"
+              title="لا توجد إعلانات في مفضلتك بعد"
+              desc="اضغط على قلب أي إعلان لحفظه هنا"
+              action={<Link href="/ads"><Button variant="outline" className="gap-2"><Bookmark className="w-4 h-4" />تصفح الإعلانات</Button></Link>}
+            />
+          ) : (
+            <div className="space-y-3">
+              {favorites.map((fav: any) => (
+                <Link key={fav.id} href={`/ads/${fav.ad_id}`}>
+                  <Card className="hover:border-primary/40 transition-all cursor-pointer rounded-2xl">
+                    <CardContent className="p-4 flex items-center gap-4">
+                      {fav.media_url && (
+                        <img src={fav.media_url} alt={fav.title} className="w-16 h-16 object-cover rounded-xl flex-shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-bold text-sm line-clamp-1">{fav.title}</h3>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          {fav.price_egp > 0 && <span className="text-xs font-bold text-green-600">{fav.price_egp?.toLocaleString()} ج.م</span>}
+                          {fav.target_region && <Badge variant="secondary" className="text-[10px]">📍 {fav.target_region}</Badge>}
+                        </div>
+                      </div>
+                      <button
+                        onClick={e => { e.preventDefault(); e.stopPropagation(); removeFavMut.mutate(fav.ad_id); }}
+                        className="w-8 h-8 rounded-full bg-red-50 dark:bg-red-900/20 text-red-500 flex items-center justify-center hover:bg-red-100 transition-colors flex-shrink-0"
+                        data-testid={`btn-remove-fav-${fav.ad_id}`}
+                      >
+                        <Heart className="w-4 h-4 fill-current" />
+                      </button>
+                    </CardContent>
+                  </Card>
+                </Link>
               ))}
             </div>
           )}

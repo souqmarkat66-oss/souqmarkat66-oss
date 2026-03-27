@@ -75,6 +75,36 @@ async function runMigrations() {
       const code = `PUB-${ch.id}-${Math.random().toString(36).substring(2,6).toUpperCase()}`;
       await db.execute(sql`UPDATE channels SET publisher_code = ${code} WHERE id = ${ch.id} AND publisher_code IS NULL`);
     }
+    // New tables
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS favorites (
+      id SERIAL PRIMARY KEY,
+      user_id VARCHAR NOT NULL,
+      ad_id INTEGER NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(user_id, ad_id)
+    )`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS ratings (
+      id SERIAL PRIMARY KEY,
+      user_id VARCHAR NOT NULL,
+      user_name TEXT NOT NULL,
+      target_type TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      rating INTEGER NOT NULL,
+      review TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(user_id, target_type, target_id)
+    )`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS offers (
+      id SERIAL PRIMARY KEY,
+      from_user_id VARCHAR NOT NULL,
+      from_user_name TEXT NOT NULL,
+      ad_id INTEGER NOT NULL,
+      offer_amount_egp REAL NOT NULL,
+      message TEXT,
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP`);
     console.log("Migrations applied successfully");
   } catch (e: any) {
     console.error("Migration warning:", e.message);

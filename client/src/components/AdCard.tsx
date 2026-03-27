@@ -5,7 +5,7 @@ import { useLanguage } from "./LanguageProvider";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square } from "lucide-react";
+import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square, Heart } from "lucide-react";
 import { format } from "date-fns";
 import { ar, enUS } from "date-fns/locale";
 import { useAuth } from "@/hooks/use-auth";
@@ -14,16 +14,34 @@ import { useToast } from "@/hooks/use-toast";
 import { useTTS } from "@/hooks/use-tts";
 import { motion } from "framer-motion";
 import { LikeCommentBar } from "./LikeCommentBar";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 
 export function AdCard({ ad, index }: { ad: Ad; index: number }) {
   const { t, language } = useLanguage();
   const { user } = useAuth();
   const { mutate: deleteAd } = useDeleteAd();
   const { toast } = useToast();
+  const qc = useQueryClient();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
   const tts = useTTS();
+
+  const { data: favData } = useQuery<{ favorited: boolean }>({
+    queryKey: ["/api/favorites", ad.id, "check"],
+    queryFn: () => fetch(`/api/favorites/${ad.id}/check`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!user,
+  });
+
+  const favMutation = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/favorites/${ad.id}`),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["/api/favorites", ad.id, "check"] });
+      qc.invalidateQueries({ queryKey: ["/api/favorites"] });
+      toast({ title: data.favorited ? "❤️ أُضيف للمفضلة!" : "تم الإزالة من المفضلة" });
+    },
+  });
 
   const isOwner = user?.id === ad.userId;
   const isVideo = ad.mediaType === 'video';
@@ -161,6 +179,21 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
               {ad.language === 'ar' ? '🇸🇦 عربي' : '🇺🇸 EN'}
             </Badge>
           </div>
+
+          {/* Favorite button */}
+          {user && (
+            <button
+              onClick={e => { e.preventDefault(); e.stopPropagation(); favMutation.mutate(); }}
+              className={`absolute top-3 start-3 w-8 h-8 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-90 ${
+                favData?.favorited
+                  ? 'bg-red-500 text-white'
+                  : 'bg-white/80 backdrop-blur text-gray-500 hover:text-red-500'
+              }`}
+              data-testid={`btn-favorite-${ad.id}`}
+            >
+              <Heart className={`w-4 h-4 ${favData?.favorited ? 'fill-current' : ''}`} />
+            </button>
+          )}
 
           {/* View button on hover (for non-video or image) */}
           {!isVideo && (

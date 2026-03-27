@@ -340,3 +340,51 @@ export const directMessages = pgTable("direct_messages", {
 });
 
 export type DirectMessage = typeof directMessages.$inferSelect;
+
+// ============================================================
+// FAVORITES TABLE
+// ============================================================
+export const favorites = pgTable("favorites", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  adId: integer("ad_id").references(() => ads.id).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type Favorite = typeof favorites.$inferSelect;
+
+// ============================================================
+// RATINGS TABLE
+// ============================================================
+export const ratings = pgTable("ratings", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  userName: text("user_name").notNull(),
+  targetType: text("target_type", { enum: ["ad", "user"] }).notNull(),
+  targetId: text("target_id").notNull(),
+  rating: integer("rating").notNull(),
+  review: text("review"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertRatingSchema = createInsertSchema(ratings).omit({ id: true, createdAt: true });
+export type Rating = typeof ratings.$inferSelect;
+export type InsertRating = z.infer<typeof insertRatingSchema>;
+
+// ============================================================
+// OFFERS TABLE
+// ============================================================
+export const offers = pgTable("offers", {
+  id: serial("id").primaryKey(),
+  fromUserId: varchar("from_user_id").references(() => users.id).notNull(),
+  fromUserName: text("from_user_name").notNull(),
+  adId: integer("ad_id").references(() => ads.id).notNull(),
+  offerAmountEGP: real("offer_amount_egp").notNull(),
+  message: text("message"),
+  status: text("status", { enum: ["pending", "accepted", "rejected"] }).default("pending"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertOfferSchema = createInsertSchema(offers).omit({ id: true, createdAt: true, status: true });
+export type Offer = typeof offers.$inferSelect;
+export type InsertOffer = z.infer<typeof insertOfferSchema>;

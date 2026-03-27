@@ -1427,5 +1427,190 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ================================================================
+  // FAVORITES
+  // ================================================================
+  app.get("/api/favorites", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const result = await db.execute(
+        sql`SELECT f.*, a.title, a.media_url, a.media_type, a.price_egp, a.target_region
+            FROM favorites f JOIN ads a ON f.ad_id = a.id
+            WHERE f.user_id = ${userId} ORDER BY f.created_at DESC`
+      );
+      res.json(result.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/favorites/:adId/check", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const adId = parseInt(req.params.adId);
+    try {
+      const result = await db.execute(
+        sql`SELECT id FROM favorites WHERE user_id = ${userId} AND ad_id = ${adId}`
+      );
+      res.json({ favorited: result.rows.length > 0 });
+    } catch { res.json({ favorited: false }); }
+  });
+
+  app.post("/api/favorites/:adId", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const adId = parseInt(req.params.adId);
+    try {
+      const existing = await db.execute(
+        sql`SELECT id FROM favorites WHERE user_id = ${userId} AND ad_id = ${adId}`
+      );
+      if (existing.rows.length > 0) {
+        await db.execute(sql`DELETE FROM favorites WHERE user_id = ${userId} AND ad_id = ${adId}`);
+        res.json({ favorited: false });
+      } else {
+        await db.execute(sql`INSERT INTO favorites (user_id, ad_id) VALUES (${userId}, ${adId})`);
+        res.json({ favorited: true });
+      }
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ================================================================
+  // RATINGS
+  // ================================================================
+  app.get("/api/ratings/:targetType/:targetId", async (req, res) => {
+    const { targetType, targetId } = req.params;
+    try {
+      const result = await db.execute(
+        sql`SELECT * FROM ratings WHERE target_type = ${targetType} AND target_id = ${targetId} ORDER BY created_at DESC`
+      );
+      const avgResult = await db.execute(
+        sql`SELECT AVG(rating) as avg, COUNT(*) as count FROM ratings WHERE target_type = ${targetType} AND target_id = ${targetId}`
+      );
+      res.json({ ratings: result.rows, avg: parseFloat(avgResult.rows[0]?.avg as string || '0'), count: parseInt(avgResult.rows[0]?.count as string || '0') });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/ratings", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const userName = `${req.user.claims.first_name || ''} ${req.user.claims.last_name || ''}`.trim() || 'مستخدم';
+    const { targetType, targetId, rating, review } = req.body;
+    if (!rating || rating < 1 || rating > 5) return res.status(400).json({ message: "تقييم غير صالح (1-5)" });
+    try {
+      await db.execute(
+        sql`INSERT INTO ratings (user_id, user_name, target_type, target_id, rating, review)
+            VALUES (${userId}, ${userName}, ${targetType}, ${String(targetId)}, ${rating}, ${review || null})
+            ON CONFLICT (user_id, target_type, target_id) DO UPDATE SET rating = ${rating}, review = ${review || null}`
+      );
+      res.status(201).json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ================================================================
+  // PRICE OFFERS
+  // ================================================================
+  app.get("/api/offers/ad/:adId", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const adId = parseInt(req.params.adId);
+    try {
+      const adCheck = await db.execute(sql`SELECT user_id FROM ads WHERE id = ${adId}`);
+      if (!adCheck.rows.length) return res.status(404).json({ message: "الإعلان غير موجود" });
+      const isOwner = (adCheck.rows[0] as any).user_id === userId;
+      if (!isOwner) return res.status(403).json({ message: "غير مصرح" });
+      const result = await db.execute(
+        sql`SELECT * FROM offers WHERE ad_id = ${adId} ORDER BY created_at DESC`
+      );
+      res.json(result.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/offers", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const userName = `${req.user.claims.first_name || ''} ${req.user.claims.last_name || ''}`.trim() || 'مشتري';
+    const { adId, offerAmountEGP, message } = req.body;
+    if (!adId || !offerAmountEGP) return res.status(400).json({ message: "بيانات ناقصة" });
+    try {
+      const adCheck = await db.execute(sql`SELECT user_id, title FROM ads WHERE id = ${adId}`);
+      if (!adCheck.rows.length) return res.status(404).json({ message: "الإعلان غير موجود" });
+      const ad = adCheck.rows[0] as any;
+      if (ad.user_id === userId) return res.status(400).json({ message: "لا يمكنك إرسال عرض على إعلانك" });
+      await db.execute(
+        sql`INSERT INTO offers (from_user_id, from_user_name, ad_id, offer_amount_egp, message)
+            VALUES (${userId}, ${userName}, ${adId}, ${offerAmountEGP}, ${message || null})`
+      );
+      await createNotification(
+        ad.user_id, "system",
+        "💰 عرض سعر جديد!",
+        `${userName} يقدم عرض ${offerAmountEGP} ج.م على إعلانك "${ad.title}"`,
+        `/ads/${adId}`
+      );
+      res.status(201).json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.patch("/api/offers/:id", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const offerId = parseInt(req.params.id);
+    const { status } = req.body;
+    if (!["accepted", "rejected"].includes(status)) return res.status(400).json({ message: "حالة غير صالحة" });
+    try {
+      const offer = await db.execute(
+        sql`SELECT o.*, a.user_id as ad_owner, a.title FROM offers o JOIN ads a ON o.ad_id = a.id WHERE o.id = ${offerId}`
+      );
+      if (!offer.rows.length) return res.status(404).json({ message: "العرض غير موجود" });
+      const row = offer.rows[0] as any;
+      if (row.ad_owner !== userId) return res.status(403).json({ message: "غير مصرح" });
+      await db.execute(sql`UPDATE offers SET status = ${status} WHERE id = ${offerId}`);
+      await createNotification(
+        row.from_user_id, "system",
+        status === "accepted" ? "✅ تم قبول عرضك!" : "❌ تم رفض عرضك",
+        `عرضك على "${row.title}" ${status === "accepted" ? "تم قبوله من البائع" : "تم رفضه"}`,
+        `/ads/${row.ad_id}`
+      );
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ================================================================
+  // AD VIEW INCREMENT
+  // ================================================================
+  app.post("/api/ads/:id/view", async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+      await db.execute(sql`UPDATE ads SET views_count = COALESCE(views_count, 0) + 1 WHERE id = ${id}`);
+      res.json({ ok: true });
+    } catch { res.json({ ok: false }); }
+  });
+
+  // ================================================================
+  // SIMILAR ADS
+  // ================================================================
+  app.get("/api/ads/:id/similar", async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+      const ad = await db.execute(sql`SELECT target_region, language FROM ads WHERE id = ${id}`);
+      if (!ad.rows.length) return res.json([]);
+      const { target_region, language } = ad.rows[0] as any;
+      const similar = await db.execute(
+        sql`SELECT * FROM ads WHERE id != ${id} AND status = 'active'
+            AND (target_region = ${target_region} OR language = ${language})
+            ORDER BY created_at DESC LIMIT 4`
+      );
+      res.json(similar.rows);
+    } catch { res.json([]); }
+  });
+
+  // ================================================================
+  // AD RENEW
+  // ================================================================
+  app.post("/api/ads/:id/renew", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const id = parseInt(req.params.id);
+    try {
+      const ad = await db.execute(sql`SELECT user_id FROM ads WHERE id = ${id}`);
+      if (!ad.rows.length) return res.status(404).json({ message: "الإعلان غير موجود" });
+      if ((ad.rows[0] as any).user_id !== userId && !isAdminUser(req)) return res.status(403).json({ message: "غير مصرح" });
+      await db.execute(
+        sql`UPDATE ads SET expires_at = NOW() + INTERVAL '30 days', status = 'active' WHERE id = ${id}`
+      );
+      res.json({ ok: true, message: "تم تجديد الإعلان لمدة 30 يوماً" });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   return httpServer;
 }
