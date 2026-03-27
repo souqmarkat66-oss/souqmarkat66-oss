@@ -13,10 +13,11 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, BarChart2, Eye, MousePointer, Code, Pause, Play, TrendingUp, MapPin, Loader2, Copy, CheckCheck } from "lucide-react";
+import { Plus, BarChart2, Eye, MousePointer, Code, Pause, Play, TrendingUp, MapPin, Loader2, Copy, CheckCheck, Download, Megaphone } from "lucide-react";
 import { UploadZone } from "@/components/UploadZone";
 import { EgyptTargetingMap } from "@/components/EgyptTargetingMap";
 import type { AdCampaign } from "@shared/schema";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
 
 const EGYPT_REGIONS = [
   "القاهرة", "الجيزة", "الإسكندرية", "الدقهلية", "الشرقية", "المنوفية",
@@ -393,16 +394,58 @@ export default function Campaigns() {
         </DialogContent>
       </Dialog>
 
-      {/* Analytics Dialog — Dedicated Cost Report */}
+      {/* Analytics Dialog — Detailed Cost Report with Charts */}
       <Dialog open={!!analyticsCampaign} onOpenChange={() => setAnalyticsCampaign(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-lg">
-              <BarChart2 className="w-5 h-5 text-yellow-500" />
-              تقرير تكلفة الإعلان الممول
-            </DialogTitle>
+            <div className="flex items-center justify-between">
+              <DialogTitle className="flex items-center gap-2 text-lg">
+                <BarChart2 className="w-5 h-5 text-yellow-500" />
+                تقرير الإعلان الممول المفصّل
+              </DialogTitle>
+              {analyticsCampaign && (
+                <Button
+                  size="sm" variant="outline"
+                  className="gap-1.5 text-xs"
+                  onClick={() => {
+                    const a = analyticsCampaign;
+                    const spent = a.spentEGP || 0;
+                    const budget = a.budgetEGP || 0;
+                    const csv = [
+                      ["تقرير الإعلان الممول — سوق للإعلانات"],
+                      [""],
+                      ["اسم الحملة", a.name],
+                      ["الحالة", a.status],
+                      [""],
+                      ["المشاهدات", a.impressions || 0],
+                      ["النقرات", a.clicks || 0],
+                      ["نسبة النقر CTR", `${a.ctr || 0}%`],
+                      ["تكلفة الألف مشاهدة CPM", `${a.cpmEGP || 15} ج.م`],
+                      ["تكلفة النقرة CPC", `${a.cpcEGP || 0} ج.م`],
+                      [""],
+                      ["الميزانية الكلية", `${budget.toFixed(2)} ج.م`],
+                      ["المُنفَق", `${spent.toFixed(2)} ج.م`],
+                      ["المتبقي", `${Math.max(0, budget - spent).toFixed(2)} ج.م`],
+                      ["نسبة الاستهلاك", `${budget > 0 ? ((spent / budget) * 100).toFixed(1) : 0}%`],
+                      [""],
+                      ["المناطق المستهدفة", (a.targetRegions as string[] || []).join("، ")],
+                    ].map(r => r.join(",")).join("\n");
+                    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.href = url; link.download = `تقرير-${a.name}.csv`;
+                    link.click(); URL.revokeObjectURL(url);
+                  }}
+                >
+                  <Download className="w-3 h-3" /> تصدير CSV
+                </Button>
+              )}
+            </div>
             {analyticsCampaign && (
-              <p className="text-sm text-muted-foreground mt-1">📢 {analyticsCampaign.name}</p>
+              <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
+                <Megaphone className="w-3.5 h-3.5 text-yellow-500" /> {analyticsCampaign.name}
+                <Badge className={`${statusColor[analyticsCampaign.status || 'pending']} text-white text-xs`}>{statusLabel[analyticsCampaign.status || 'pending']}</Badge>
+              </p>
             )}
           </DialogHeader>
           {analyticsCampaign && (() => {
@@ -415,6 +458,16 @@ export default function Campaigns() {
             const ctr = analyticsCampaign.ctr || 0;
             const cpc = analyticsCampaign.cpcEGP || 0;
             const cpm = analyticsCampaign.cpmEGP || 15;
+
+            const barData = [
+              { name: "مشاهدات", value: impressions, fill: "#3b82f6" },
+              { name: "نقرات", value: clicks, fill: "#8b5cf6" },
+            ];
+            const pieData = [
+              { name: "مُنفَق", value: spent, fill: "#f59e0b" },
+              { name: "متبقي", value: remaining, fill: "#e5e7eb" },
+            ];
+
             return (
               <div className="space-y-5 mt-2" dir="rtl">
                 {/* Budget Gauge */}
@@ -424,18 +477,15 @@ export default function Campaigns() {
                     <span className="text-2xl font-extrabold text-yellow-600 dark:text-yellow-400">{pct.toFixed(1)}%</span>
                   </div>
                   <div className="w-full bg-yellow-100 dark:bg-yellow-900/40 rounded-full h-3 mb-3 overflow-hidden">
-                    <div
-                      className={`h-3 rounded-full transition-all ${pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-yellow-500' : 'bg-green-500'}`}
-                      style={{ width: `${pct}%` }}
-                    />
+                    <div className={`h-3 rounded-full transition-all ${pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${pct}%` }} />
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-center text-xs">
                     <div className="bg-white/60 dark:bg-black/20 rounded-xl p-2">
-                      <div className="font-extrabold text-base text-foreground">{spent.toFixed(2)}</div>
+                      <div className="font-extrabold text-base text-yellow-600">{spent.toFixed(2)}</div>
                       <div className="text-muted-foreground">مُنفَق (ج.م)</div>
                     </div>
                     <div className="bg-white/60 dark:bg-black/20 rounded-xl p-2">
-                      <div className="font-extrabold text-base text-foreground">{budget.toFixed(2)}</div>
+                      <div className="font-extrabold text-base">{budget.toFixed(2)}</div>
                       <div className="text-muted-foreground">الميزانية (ج.م)</div>
                     </div>
                     <div className="bg-white/60 dark:bg-black/20 rounded-xl p-2">
@@ -445,24 +495,53 @@ export default function Campaigns() {
                   </div>
                 </div>
 
-                {/* Performance Metrics */}
+                {/* Charts Row */}
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Bar Chart — Impressions vs Clicks */}
+                  <div className="bg-muted/30 rounded-2xl p-4 border border-border">
+                    <p className="text-xs font-bold mb-3 text-muted-foreground">📊 المشاهدات مقابل النقرات</p>
+                    <ResponsiveContainer width="100%" height={140}>
+                      <BarChart data={barData} barSize={32}>
+                        <XAxis dataKey="name" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={35} />
+                        <Tooltip formatter={(v: number) => v.toLocaleString()} />
+                        <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                          {barData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  {/* Pie Chart — Budget Distribution */}
+                  <div className="bg-muted/30 rounded-2xl p-4 border border-border">
+                    <p className="text-xs font-bold mb-3 text-muted-foreground">💰 توزيع الميزانية (ج.م)</p>
+                    <ResponsiveContainer width="100%" height={140}>
+                      <PieChart>
+                        <Pie data={pieData} cx="50%" cy="50%" innerRadius={35} outerRadius={55} dataKey="value">
+                          {pieData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                        </Pie>
+                        <Tooltip formatter={(v: number) => `${Number(v).toFixed(2)} ج.م`} />
+                        <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Metrics Grid */}
                 <div>
-                  <p className="text-xs font-bold text-muted-foreground mb-2 uppercase tracking-wide">مؤشرات الأداء</p>
-                  <div className="grid grid-cols-2 gap-2">
+                  <p className="text-xs font-bold text-muted-foreground mb-2">مؤشرات الأداء التفصيلية</p>
+                  <div className="grid grid-cols-3 gap-2">
                     {[
-                      { icon: "👁️", label: "المشاهدات", value: impressions.toLocaleString(), color: "bg-blue-50 dark:bg-blue-950/30 border-blue-100 dark:border-blue-900/40" },
-                      { icon: "🖱️", label: "النقرات", value: clicks.toLocaleString(), color: "bg-purple-50 dark:bg-purple-950/30 border-purple-100 dark:border-purple-900/40" },
-                      { icon: "📊", label: "نسبة النقر (CTR)", value: `${ctr}%`, color: "bg-green-50 dark:bg-green-950/30 border-green-100 dark:border-green-900/40" },
-                      { icon: "💰", label: "تكلفة الألف مشاهدة (CPM)", value: `${cpm} ج.م`, color: "bg-orange-50 dark:bg-orange-950/30 border-orange-100 dark:border-orange-900/40" },
-                      { icon: "🎯", label: "تكلفة النقرة (CPC)", value: `${cpc} ج.م`, color: "bg-red-50 dark:bg-red-950/30 border-red-100 dark:border-red-900/40" },
-                      { icon: "📈", label: "متوسط التكلفة / يوم", value: `— ج.م`, color: "bg-muted border-border" },
+                      { icon: "👁️", label: "المشاهدات", value: impressions.toLocaleString(), bg: "bg-blue-50 dark:bg-blue-950/30" },
+                      { icon: "🖱️", label: "النقرات", value: clicks.toLocaleString(), bg: "bg-purple-50 dark:bg-purple-950/30" },
+                      { icon: "📊", label: "CTR", value: `${ctr}%`, bg: "bg-green-50 dark:bg-green-950/30" },
+                      { icon: "💰", label: "CPM", value: `${cpm} ج.م`, bg: "bg-orange-50 dark:bg-orange-950/30" },
+                      { icon: "🎯", label: "CPC", value: `${cpc} ج.م`, bg: "bg-red-50 dark:bg-red-950/30" },
+                      { icon: "📈", label: "الكفاءة", value: clicks > 0 ? "جيدة ✅" : "لا نقرات", bg: "bg-muted" },
                     ].map(m => (
-                      <div key={m.label} className={`rounded-xl p-3 border ${m.color} flex items-center gap-3`}>
-                        <span className="text-xl">{m.icon}</span>
-                        <div>
-                          <div className="font-bold text-sm">{m.value}</div>
-                          <div className="text-xs text-muted-foreground">{m.label}</div>
-                        </div>
+                      <div key={m.label} className={`rounded-xl p-3 ${m.bg} text-center`}>
+                        <div className="text-lg mb-1">{m.icon}</div>
+                        <div className="font-bold text-sm">{m.value}</div>
+                        <div className="text-xs text-muted-foreground">{m.label}</div>
                       </div>
                     ))}
                   </div>
@@ -471,7 +550,7 @@ export default function Campaigns() {
                 {/* Target Regions */}
                 {(analyticsCampaign.targetRegions as string[] | null)?.length > 0 && (
                   <div>
-                    <p className="text-xs font-bold text-muted-foreground mb-2 uppercase tracking-wide">📍 المناطق المستهدفة</p>
+                    <p className="text-xs font-bold text-muted-foreground mb-2">📍 المناطق المستهدفة</p>
                     <div className="flex flex-wrap gap-1.5">
                       {(analyticsCampaign.targetRegions as string[]).map((r: string) => (
                         <Badge key={r} variant="secondary" className="text-xs">{r}</Badge>
@@ -480,10 +559,15 @@ export default function Campaigns() {
                   </div>
                 )}
 
-                {/* Payment reminder */}
-                <div className="bg-muted/50 rounded-xl p-3 border border-border text-xs text-muted-foreground">
-                  💳 لزيادة الميزانية أو تجديد الحملة، تواصل معنا عبر:
-                  <span className="font-bold text-foreground"> Vodafone Cash: 01098553911</span>
+                {/* Boost / Renew CTA */}
+                <div className="bg-gradient-to-r from-yellow-50 to-amber-50 dark:from-yellow-950/20 dark:to-amber-950/10 rounded-2xl p-4 border border-yellow-200/50 dark:border-yellow-800/30">
+                  <p className="text-sm font-bold mb-1 flex items-center gap-2"><Megaphone className="w-4 h-4 text-yellow-600" /> زيادة الميزانية أو تجديد الإعلان؟</p>
+                  <p className="text-xs text-muted-foreground mb-3">تواصل معنا بعد الدفع وسيتم تفعيل الحملة خلال دقائق</p>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <span className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-3 py-1.5 rounded-full font-bold">📱 Vodafone Cash: 01098553911</span>
+                    <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-3 py-1.5 rounded-full font-bold">📱 Etisalat: 01126665741</span>
+                    <span className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 px-3 py-1.5 rounded-full font-bold">💳 InstaPay: 01285558567</span>
+                  </div>
                 </div>
               </div>
             );
