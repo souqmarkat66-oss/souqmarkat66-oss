@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
-import { PlusCircle, LayoutGrid, Video, Image, Search } from "lucide-react";
+import { PlusCircle, LayoutGrid, Video, Search, Megaphone, ExternalLink, Star } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
@@ -22,6 +22,18 @@ export default function Ads() {
     queryKey: ["/api/ads"],
     queryFn: () => fetch("/api/ads").then(r => r.json()),
   });
+
+  const { data: sponsoredAd } = useQuery<any>({
+    queryKey: ["/api/campaigns/random"],
+    queryFn: () => fetch("/api/campaigns/random").then(r => r.ok ? r.json() : null),
+    retry: false,
+  });
+
+  const handleSponsoredClick = async () => {
+    if (!sponsoredAd) return;
+    await fetch(`/api/campaigns/${sponsoredAd.id}/click`, { method: "POST" });
+    if (sponsoredAd.targetUrl) window.open(sponsoredAd.targetUrl, "_blank");
+  };
 
   const filtered = ads.filter(ad => {
     const matchSearch = !search || 
@@ -81,6 +93,63 @@ export default function Ads() {
           ))}
         </div>
       </div>
+
+      {/* Sponsored Ad */}
+      {sponsoredAd && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-8"
+          data-testid="sponsored-ad-banner"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
+            <span className="text-sm font-semibold text-yellow-600 dark:text-yellow-400">إعلان ممول مميز</span>
+            <div className="flex-1 h-px bg-yellow-200 dark:bg-yellow-800" />
+          </div>
+          <div
+            onClick={handleSponsoredClick}
+            className="relative rounded-2xl overflow-hidden border-2 border-yellow-400/60 bg-gradient-to-l from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20 cursor-pointer hover:border-yellow-500 transition-all hover:shadow-lg hover:shadow-yellow-200/50 dark:hover:shadow-yellow-900/30 group"
+            data-testid="sponsored-ad-card"
+          >
+            <div className="absolute top-3 right-3 z-10">
+              <Badge className="bg-yellow-500 text-white border-0 text-xs font-bold px-3 gap-1 shadow-md">
+                <Megaphone className="w-3 h-3" /> ممول
+              </Badge>
+            </div>
+            <div className="flex flex-col md:flex-row gap-0">
+              {sponsoredAd.mediaUrl && (
+                <div className="md:w-72 flex-shrink-0">
+                  {sponsoredAd.mediaType === "video" ? (
+                    <video src={sponsoredAd.mediaUrl} className="w-full h-48 md:h-full object-cover" muted autoPlay loop playsInline />
+                  ) : (
+                    <img src={sponsoredAd.mediaUrl} alt={sponsoredAd.name} className="w-full h-48 md:h-full object-cover" />
+                  )}
+                </div>
+              )}
+              <div className="flex-1 p-6 flex flex-col justify-center">
+                <h3 className="text-xl font-bold mb-2 group-hover:text-yellow-700 dark:group-hover:text-yellow-300 transition-colors">
+                  {sponsoredAd.name}
+                </h3>
+                {sponsoredAd.description && (
+                  <p className="text-muted-foreground text-sm mb-4 line-clamp-2">{sponsoredAd.description}</p>
+                )}
+                <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
+                  <span className="flex items-center gap-1">👁️ {(sponsoredAd.impressions || 0).toLocaleString()} مشاهدة</span>
+                  {sponsoredAd.targetRegions?.length > 0 && (
+                    <span className="flex items-center gap-1">📍 {sponsoredAd.targetRegions.slice(0, 2).join("، ")}</span>
+                  )}
+                </div>
+                {sponsoredAd.targetUrl && (
+                  <Button size="sm" className="w-fit gap-2 bg-yellow-500 hover:bg-yellow-600 text-white border-0">
+                    <ExternalLink className="w-3 h-3" /> زيارة الرابط
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      )}
 
       {/* Content tabs */}
       <div className="flex gap-3 mb-6">
