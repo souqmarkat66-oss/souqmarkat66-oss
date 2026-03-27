@@ -2,6 +2,8 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
 
 const app = express();
 const httpServer = createServer(app);
@@ -59,7 +61,21 @@ app.use((req, res, next) => {
   next();
 });
 
+async function runMigrations() {
+  try {
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS order_number TEXT UNIQUE`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS ad_id INTEGER`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_lat REAL`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_lng REAL`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_radius_km REAL`);
+    console.log("Migrations applied successfully");
+  } catch (e: any) {
+    console.error("Migration warning:", e.message);
+  }
+}
+
 (async () => {
+  await runMigrations();
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
