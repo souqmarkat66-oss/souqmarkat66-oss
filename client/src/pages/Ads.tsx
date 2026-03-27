@@ -97,54 +97,110 @@ export default function Ads() {
       {/* Sponsored Ad */}
       {sponsoredAd && (
         <motion.div
-          initial={{ opacity: 0, y: -10 }}
+          initial={{ opacity: 0, y: -16 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
+          transition={{ duration: 0.5 }}
+          className="mb-10"
           data-testid="sponsored-ad-banner"
         >
+          {/* Label */}
           <div className="flex items-center gap-2 mb-3">
-            <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
-            <span className="text-sm font-semibold text-yellow-600 dark:text-yellow-400">إعلان ممول مميز</span>
-            <div className="flex-1 h-px bg-yellow-200 dark:bg-yellow-800" />
+            <div className="flex items-center gap-1.5 bg-gradient-to-r from-yellow-500 to-amber-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-md shadow-yellow-300/40">
+              <Star className="w-3 h-3 fill-white" />
+              إعلان ممول مميز
+            </div>
+            <div className="flex-1 h-px bg-gradient-to-r from-yellow-300/60 to-transparent dark:from-yellow-700/40" />
+            <span className="text-xs text-muted-foreground">Sponsored</span>
           </div>
+
+          {/* Card */}
           <div
             onClick={handleSponsoredClick}
-            className="relative rounded-2xl overflow-hidden border-2 border-yellow-400/60 bg-gradient-to-l from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20 cursor-pointer hover:border-yellow-500 transition-all hover:shadow-lg hover:shadow-yellow-200/50 dark:hover:shadow-yellow-900/30 group"
+            className="relative rounded-3xl overflow-hidden cursor-pointer group"
+            style={{ boxShadow: "0 0 0 2px #f59e0b44, 0 8px 40px 0 #f59e0b22" }}
             data-testid="sponsored-ad-card"
           >
-            <div className="absolute top-3 right-3 z-10">
-              <Badge className="bg-yellow-500 text-white border-0 text-xs font-bold px-3 gap-1 shadow-md">
-                <Megaphone className="w-3 h-3" /> ممول
-              </Badge>
-            </div>
-            <div className="flex flex-col md:flex-row gap-0">
+            {/* Gradient background */}
+            <div className="absolute inset-0 bg-gradient-to-br from-amber-50 via-yellow-50 to-orange-50 dark:from-yellow-950/40 dark:via-amber-950/30 dark:to-orange-950/20" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,#fbbf2422,transparent_60%)]" />
+
+            {/* Shine effect on hover */}
+            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-[linear-gradient(105deg,transparent_40%,#ffffff18_50%,transparent_60%)]" />
+
+            <div className="relative flex flex-col md:flex-row">
+              {/* Media */}
               {sponsoredAd.mediaUrl && (
-                <div className="md:w-72 flex-shrink-0">
+                <div className="md:w-80 flex-shrink-0 overflow-hidden">
                   {sponsoredAd.mediaType === "video" ? (
-                    <video src={sponsoredAd.mediaUrl} className="w-full h-48 md:h-full object-cover" muted autoPlay loop playsInline />
+                    <video
+                      src={sponsoredAd.mediaUrl}
+                      className="w-full h-52 md:h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                      muted autoPlay loop playsInline
+                    />
                   ) : (
-                    <img src={sponsoredAd.mediaUrl} alt={sponsoredAd.name} className="w-full h-48 md:h-full object-cover" />
+                    <img
+                      src={sponsoredAd.mediaUrl}
+                      alt={sponsoredAd.name}
+                      className="w-full h-52 md:h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                    />
                   )}
+                  {/* Gold overlay strip */}
+                  <div className="absolute top-0 right-0 bottom-0 w-1 bg-gradient-to-b from-yellow-400 via-amber-500 to-orange-400 md:block hidden" />
                 </div>
               )}
-              <div className="flex-1 p-6 flex flex-col justify-center">
-                <h3 className="text-xl font-bold mb-2 group-hover:text-yellow-700 dark:group-hover:text-yellow-300 transition-colors">
-                  {sponsoredAd.name}
-                </h3>
-                {sponsoredAd.description && (
-                  <p className="text-muted-foreground text-sm mb-4 line-clamp-2">{sponsoredAd.description}</p>
-                )}
-                <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
-                  <span className="flex items-center gap-1">👁️ {(sponsoredAd.impressions || 0).toLocaleString()} مشاهدة</span>
-                  {sponsoredAd.targetRegions?.length > 0 && (
-                    <span className="flex items-center gap-1">📍 {sponsoredAd.targetRegions.slice(0, 2).join("، ")}</span>
+
+              {/* Content */}
+              <div className="flex-1 p-7 flex flex-col justify-between">
+                <div>
+                  {/* Top badges */}
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="inline-flex items-center gap-1.5 bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 text-xs font-bold px-3 py-1 rounded-full border border-yellow-400/40">
+                      <Megaphone className="w-3 h-3" /> ممـوّل
+                    </span>
+                    {sponsoredAd.targetRegions?.length > 0 && (
+                      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground bg-muted px-2.5 py-1 rounded-full">
+                        📍 {sponsoredAd.targetRegions.slice(0, 2).join("، ")}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Title */}
+                  <h3 className="text-2xl font-extrabold mb-2 leading-snug group-hover:text-yellow-600 dark:group-hover:text-yellow-400 transition-colors duration-300">
+                    {sponsoredAd.name}
+                  </h3>
+
+                  {/* Description */}
+                  {sponsoredAd.description && (
+                    <p className="text-muted-foreground text-sm leading-relaxed line-clamp-2 mb-5">
+                      {sponsoredAd.description}
+                    </p>
                   )}
+
+                  {/* Stats row */}
+                  <div className="flex items-center gap-5 text-sm mb-6">
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <span className="w-7 h-7 rounded-full bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center text-base">👁️</span>
+                      <span><strong className="text-foreground">{(sponsoredAd.impressions || 0).toLocaleString()}</strong> مشاهدة</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <span className="w-7 h-7 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-base">🎯</span>
+                      <span><strong className="text-foreground">{(sponsoredAd.clicks || 0).toLocaleString()}</strong> نقرة</span>
+                    </div>
+                  </div>
                 </div>
-                {sponsoredAd.targetUrl && (
-                  <Button size="sm" className="w-fit gap-2 bg-yellow-500 hover:bg-yellow-600 text-white border-0">
-                    <ExternalLink className="w-3 h-3" /> زيارة الرابط
-                  </Button>
-                )}
+
+                {/* CTA Button */}
+                <div className="flex items-center gap-3">
+                  {sponsoredAd.targetUrl && (
+                    <Button
+                      size="default"
+                      className="gap-2 bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-600 hover:to-amber-600 text-white border-0 shadow-lg shadow-yellow-400/30 hover:shadow-yellow-400/50 transition-all hover:-translate-y-0.5 font-bold"
+                    >
+                      <ExternalLink className="w-4 h-4" /> زيارة الآن
+                    </Button>
+                  )}
+                  <span className="text-xs text-muted-foreground/60">إعلان مدفوع • سوق للإعلانات</span>
+                </div>
               </div>
             </div>
           </div>
