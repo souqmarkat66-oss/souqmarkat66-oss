@@ -393,41 +393,101 @@ export default function Campaigns() {
         </DialogContent>
       </Dialog>
 
-      {/* Analytics Dialog */}
+      {/* Analytics Dialog — Dedicated Cost Report */}
       <Dialog open={!!analyticsCampaign} onOpenChange={() => setAnalyticsCampaign(null)}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>تقرير الحملة: {analyticsCampaign?.name}</DialogTitle></DialogHeader>
-          {analyticsCampaign && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { label: "إجمالي المشاهدات", value: (analyticsCampaign.impressions || 0).toLocaleString() },
-                  { label: "إجمالي النقرات", value: (analyticsCampaign.clicks || 0).toLocaleString() },
-                  { label: "نسبة النقر (CTR)", value: `${analyticsCampaign.ctr || 0}%` },
-                  { label: "سعر الألف مشاهدة", value: `${analyticsCampaign.cpmEGP || 15} ج.م` },
-                  { label: "تكلفة النقرة (CPC)", value: `${analyticsCampaign.cpcEGP || 0} ج.م` },
-                  { label: "إجمالي الإنفاق", value: `${(analyticsCampaign.spentEGP || 0).toFixed(2)} ج.م` },
-                  { label: "الميزانية الكلية", value: `${(analyticsCampaign.budgetEGP || 0).toFixed(2)} ج.م` },
-                  { label: "الميزانية المتبقية", value: `${Math.max(0, (analyticsCampaign.budgetEGP || 0) - (analyticsCampaign.spentEGP || 0)).toFixed(2)} ج.م` },
-                ].map(m => (
-                  <div key={m.label} className="bg-muted rounded-xl p-3">
-                    <div className="text-xs text-muted-foreground">{m.label}</div>
-                    <div className="text-base font-bold mt-0.5">{m.value}</div>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <BarChart2 className="w-5 h-5 text-yellow-500" />
+              تقرير تكلفة الإعلان الممول
+            </DialogTitle>
+            {analyticsCampaign && (
+              <p className="text-sm text-muted-foreground mt-1">📢 {analyticsCampaign.name}</p>
+            )}
+          </DialogHeader>
+          {analyticsCampaign && (() => {
+            const spent = analyticsCampaign.spentEGP || 0;
+            const budget = analyticsCampaign.budgetEGP || 0;
+            const remaining = Math.max(0, budget - spent);
+            const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
+            const impressions = analyticsCampaign.impressions || 0;
+            const clicks = analyticsCampaign.clicks || 0;
+            const ctr = analyticsCampaign.ctr || 0;
+            const cpc = analyticsCampaign.cpcEGP || 0;
+            const cpm = analyticsCampaign.cpmEGP || 15;
+            return (
+              <div className="space-y-5 mt-2" dir="rtl">
+                {/* Budget Gauge */}
+                <div className="bg-gradient-to-br from-yellow-50 to-amber-50 dark:from-yellow-950/30 dark:to-amber-950/20 rounded-2xl p-4 border border-yellow-200/60 dark:border-yellow-800/40">
+                  <div className="flex justify-between items-end mb-2">
+                    <span className="text-sm font-bold">الميزانية المستهلكة</span>
+                    <span className="text-2xl font-extrabold text-yellow-600 dark:text-yellow-400">{pct.toFixed(1)}%</span>
                   </div>
-                ))}
-              </div>
-              {(analyticsCampaign.targetRegions as string[] | null)?.length > 0 && (
+                  <div className="w-full bg-yellow-100 dark:bg-yellow-900/40 rounded-full h-3 mb-3 overflow-hidden">
+                    <div
+                      className={`h-3 rounded-full transition-all ${pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="bg-white/60 dark:bg-black/20 rounded-xl p-2">
+                      <div className="font-extrabold text-base text-foreground">{spent.toFixed(2)}</div>
+                      <div className="text-muted-foreground">مُنفَق (ج.م)</div>
+                    </div>
+                    <div className="bg-white/60 dark:bg-black/20 rounded-xl p-2">
+                      <div className="font-extrabold text-base text-foreground">{budget.toFixed(2)}</div>
+                      <div className="text-muted-foreground">الميزانية (ج.م)</div>
+                    </div>
+                    <div className="bg-white/60 dark:bg-black/20 rounded-xl p-2">
+                      <div className={`font-extrabold text-base ${remaining < budget * 0.2 ? 'text-red-500' : 'text-green-600'}`}>{remaining.toFixed(2)}</div>
+                      <div className="text-muted-foreground">متبقي (ج.م)</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Performance Metrics */}
                 <div>
-                  <p className="text-xs font-bold mb-2">المناطق المستهدفة:</p>
-                  <div className="flex flex-wrap gap-1">
-                    {(analyticsCampaign.targetRegions as string[]).map((r: string) => (
-                      <Badge key={r} variant="secondary" className="text-xs">{r}</Badge>
+                  <p className="text-xs font-bold text-muted-foreground mb-2 uppercase tracking-wide">مؤشرات الأداء</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { icon: "👁️", label: "المشاهدات", value: impressions.toLocaleString(), color: "bg-blue-50 dark:bg-blue-950/30 border-blue-100 dark:border-blue-900/40" },
+                      { icon: "🖱️", label: "النقرات", value: clicks.toLocaleString(), color: "bg-purple-50 dark:bg-purple-950/30 border-purple-100 dark:border-purple-900/40" },
+                      { icon: "📊", label: "نسبة النقر (CTR)", value: `${ctr}%`, color: "bg-green-50 dark:bg-green-950/30 border-green-100 dark:border-green-900/40" },
+                      { icon: "💰", label: "تكلفة الألف مشاهدة (CPM)", value: `${cpm} ج.م`, color: "bg-orange-50 dark:bg-orange-950/30 border-orange-100 dark:border-orange-900/40" },
+                      { icon: "🎯", label: "تكلفة النقرة (CPC)", value: `${cpc} ج.م`, color: "bg-red-50 dark:bg-red-950/30 border-red-100 dark:border-red-900/40" },
+                      { icon: "📈", label: "متوسط التكلفة / يوم", value: `— ج.م`, color: "bg-muted border-border" },
+                    ].map(m => (
+                      <div key={m.label} className={`rounded-xl p-3 border ${m.color} flex items-center gap-3`}>
+                        <span className="text-xl">{m.icon}</span>
+                        <div>
+                          <div className="font-bold text-sm">{m.value}</div>
+                          <div className="text-xs text-muted-foreground">{m.label}</div>
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
-              )}
-            </div>
-          )}
+
+                {/* Target Regions */}
+                {(analyticsCampaign.targetRegions as string[] | null)?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-bold text-muted-foreground mb-2 uppercase tracking-wide">📍 المناطق المستهدفة</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(analyticsCampaign.targetRegions as string[]).map((r: string) => (
+                        <Badge key={r} variant="secondary" className="text-xs">{r}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Payment reminder */}
+                <div className="bg-muted/50 rounded-xl p-3 border border-border text-xs text-muted-foreground">
+                  💳 لزيادة الميزانية أو تجديد الحملة، تواصل معنا عبر:
+                  <span className="font-bold text-foreground"> Vodafone Cash: 01098553911</span>
+                </div>
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </div>

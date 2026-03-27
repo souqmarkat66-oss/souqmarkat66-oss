@@ -207,6 +207,17 @@ export default function Ads() {
         </motion.div>
       )}
 
+      {/* Regular Ads Separator */}
+      {sponsoredAd && (
+        <div className="flex items-center gap-3 mb-6">
+          <div className="flex-1 h-px bg-border" />
+          <span className="text-xs font-semibold text-muted-foreground px-3 py-1 rounded-full bg-muted border border-border">
+            📋 الإعلانات العادية
+          </span>
+          <div className="flex-1 h-px bg-border" />
+        </div>
+      )}
+
       {/* Content tabs */}
       <div className="flex gap-3 mb-6">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
