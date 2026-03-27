@@ -109,6 +109,7 @@ export const channels = pgTable("channels", {
   earningsEGP: real("earnings_egp").default(0),
   walletNumber: text("wallet_number"),
   walletType: text("wallet_type", { enum: ["vodafone", "etisalat", "instapay", "souq"] }),
+  publisherCode: text("publisher_code").unique(),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

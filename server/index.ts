@@ -68,6 +68,13 @@ async function runMigrations() {
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_lat REAL`);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_lng REAL`);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_radius_km REAL`);
+    await db.execute(sql`ALTER TABLE channels ADD COLUMN IF NOT EXISTS publisher_code TEXT UNIQUE`);
+    // Auto-generate publisher codes for channels that don't have one
+    const channels = await db.execute(sql`SELECT id FROM channels WHERE publisher_code IS NULL`);
+    for (const ch of channels.rows as any[]) {
+      const code = `PUB-${ch.id}-${Math.random().toString(36).substring(2,6).toUpperCase()}`;
+      await db.execute(sql`UPDATE channels SET publisher_code = ${code} WHERE id = ${ch.id} AND publisher_code IS NULL`);
+    }
     console.log("Migrations applied successfully");
   } catch (e: any) {
     console.error("Migration warning:", e.message);

@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Radio, CheckCircle, Plus, Bell, Megaphone, Film, Play } from "lucide-react";
+import { Users, Radio, CheckCircle, Plus, Bell, Megaphone, Film, Play, Copy, CheckCheck, TrendingUp, DollarSign } from "lucide-react";
+import { useState } from "react";
+import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
 import { AdCard } from "@/components/AdCard";
 import type { Channel, LiveStream, Ad } from "@shared/schema";
@@ -61,6 +63,16 @@ export default function ChannelPage() {
   });
 
   const isOwner = user && channel?.userId === user.id;
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  const handleCopyCode = () => {
+    if (channel?.publisherCode) {
+      navigator.clipboard.writeText(channel.publisherCode);
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 2000);
+      toast({ title: "✅ تم نسخ كود الناشر!" });
+    }
+  };
 
   if (!isValidId) return <div className="container py-12 text-center"><h2 className="text-2xl">رقم القناة غير صحيح</h2></div>;
   if (isLoading) return <div className="container py-12"><Skeleton className="h-64 rounded-2xl" /></div>;
@@ -140,6 +152,65 @@ export default function ChannelPage() {
 
         {channel.description && (
           <p className="text-muted-foreground mb-8 max-w-2xl">{channel.description}</p>
+        )}
+
+        {/* ── PUBLISHER CODE (Owner Only) ──────────────────────── */}
+        {isOwner && channel.publisherCode && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
+            <Card className="border-2 border-yellow-400/50 bg-gradient-to-br from-yellow-50 to-amber-50 dark:from-yellow-950/30 dark:to-amber-950/20 rounded-2xl overflow-hidden">
+              <CardContent className="p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-8 h-8 rounded-full bg-yellow-500/20 flex items-center justify-center">
+                    <Megaphone className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm">كود الناشر الخاص بك</h3>
+                    <p className="text-xs text-muted-foreground">شارك هذا الكود مع المعلنين لعرض إعلاناتهم على قناتك</p>
+                  </div>
+                </div>
+
+                {/* Publisher Code Display */}
+                <div className="flex items-center gap-3 bg-background/80 dark:bg-background/40 rounded-xl p-3 border border-yellow-200/60 dark:border-yellow-800/40 mb-4">
+                  <code className="flex-1 text-lg font-bold tracking-widest text-yellow-700 dark:text-yellow-400 font-mono">
+                    {channel.publisherCode}
+                  </code>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleCopyCode}
+                    className="gap-1.5 border-yellow-400/50 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 shrink-0"
+                    data-testid="btn-copy-publisher-code"
+                  >
+                    {codeCopied ? <CheckCheck className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    {codeCopied ? "تم النسخ!" : "نسخ"}
+                  </Button>
+                </div>
+
+                {/* Stats Row */}
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="bg-white/60 dark:bg-black/20 rounded-xl p-2.5">
+                    <TrendingUp className="w-4 h-4 mx-auto mb-1 text-blue-500" />
+                    <div className="text-sm font-bold">{(channel.viewsCount || 0).toLocaleString()}</div>
+                    <div className="text-xs text-muted-foreground">مشاهدة</div>
+                  </div>
+                  <div className="bg-white/60 dark:bg-black/20 rounded-xl p-2.5">
+                    <DollarSign className="w-4 h-4 mx-auto mb-1 text-green-500" />
+                    <div className="text-sm font-bold">{(channel.earningsEGP || 0).toFixed(2)}</div>
+                    <div className="text-xs text-muted-foreground">أرباح (ج.م)</div>
+                  </div>
+                  <div className="bg-white/60 dark:bg-black/20 rounded-xl p-2.5">
+                    <Users className="w-4 h-4 mx-auto mb-1 text-purple-500" />
+                    <div className="text-sm font-bold">{(channel.subscriberCount || 0).toLocaleString()}</div>
+                    <div className="text-xs text-muted-foreground">مشترك</div>
+                  </div>
+                </div>
+
+                <p className="text-xs text-muted-foreground mt-3 text-center">
+                  💰 نسبة أرباحك من الإعلانات: <strong className="text-yellow-600 dark:text-yellow-400">60%</strong> من كل مشاهدة
+                </p>
+              </CardContent>
+            </Card>
+          </motion.div>
         )}
 
         {/* ── CHANNEL ADS ─────────────────────────────────────── */}
