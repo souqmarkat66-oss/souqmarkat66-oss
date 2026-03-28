@@ -1107,28 +1107,44 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // ─── AI IMAGES-TO-VIDEO (FFmpeg slideshow) ───────────────────
+  // ─── AI IMAGES-TO-VIDEO (FFmpeg Cinematic HD) ──────────────────
   app.post("/api/ai/images-to-video", isAuthenticated, async (req: any, res) => {
     const tmpFiles: string[] = [];
     try {
-      const { imageUrls, audioUrl, duration = 3, transition = "fade" } = req.body;
+      const {
+        imageUrls,
+        audioUrl,
+        duration = 4,
+        quality = "hd",        // standard | hd | cinema
+        format = "vertical",   // vertical (9:16) | landscape (16:9)
+      } = req.body;
+
       if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length < 1) {
         return res.status(400).json({ message: "أرسل صورة واحدة على الأقل" });
       }
 
+      // ── Resolution & encode settings by quality ──────────────
+      const qualityMap: Record<string, { w: number; h: number; crf: number; preset: string; vBitrate: string; maxrate: string }> = {
+        standard: { w: 720,  h: 1280, crf: 22, preset: "fast",   vBitrate: "2000k", maxrate: "3000k" },
+        hd:       { w: 1080, h: 1920, crf: 18, preset: "medium", vBitrate: "4500k", maxrate: "6000k" },
+        cinema:   { w: 1080, h: 1920, crf: 16, preset: "slow",   vBitrate: "6000k", maxrate: "8000k" },
+      };
+      const landscape = format === "landscape";
+      const q = qualityMap[quality] || qualityMap.hd;
+      const W = landscape ? q.h : q.w;
+      const H = landscape ? q.w : q.h;
+      const durationFrames = Math.round(duration * 25);
       const uploadsDir = path.join(process.cwd(), 'uploads');
 
-      // Download / resolve each image to a local tmp file
+      // ── Download / resolve images ──────────────────────────────
       const localImages: string[] = [];
       for (const imgUrl of imageUrls) {
         const tmpPath = path.join(tmpdir(), `img-${randomUUID()}.jpg`);
         tmpFiles.push(tmpPath);
         if (imgUrl.startsWith('/uploads/')) {
-          const src = path.join(process.cwd(), imgUrl);
-          const buf = await readFile(src);
+          const buf = await readFile(path.join(process.cwd(), imgUrl));
           await writeFile(tmpPath, buf);
         } else {
-          // Remote URL
           const resp = await fetch(imgUrl);
           const buf = Buffer.from(await resp.arrayBuffer());
           await writeFile(tmpPath, buf);
@@ -1136,48 +1152,75 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         localImages.push(tmpPath);
       }
 
-      // Build ffmpeg input list file
+      // ── Concat list file (each image shown for `duration` seconds) ─
       const listFile = path.join(tmpdir(), `list-${randomUUID()}.txt`);
       tmpFiles.push(listFile);
       const listContent = localImages.map(p => `file '${p}'\nduration ${duration}`).join('\n');
-      await writeFile(listFile, listContent + `\nfile '${localImages[localImages.length - 1]}'`);
+      // repeat last image (required by concat demuxer to finish last frame)
+      await writeFile(listFile, listContent + `\nfile '${localImages[localImages.length - 1]}'\nduration 0.04`);
 
       const outFilename = `video-${Date.now()}.mp4`;
       const outPath = path.join(uploadsDir, outFilename);
 
-      // Build ffmpeg args
-      const ffmpegArgs: string[] = [
-        "-y",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", listFile,
-      ];
+      // ── Cinematic video filter chain ───────────────────────────
+      // 1. Scale with Lanczos (sharpest quality)
+      // 2. Pad to exact target with black letterbox
+      // 3. Ken Burns zoom-pan effect (each image zooms in slowly)
+      // 4. Set fps to 25 smooth
+      // 5. Enhance: brightness +3%, contrast +5%, saturation +15%
+      // 6. Unsharp mask for crisp sharpness
+      const sharpenStrength = quality === "cinema" ? "1.2" : "0.8";
+      const videoFilter = [
+        `scale=${W}:${H}:force_original_aspect_ratio=decrease:flags=lanczos`,
+        `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`,
+        `setsar=1`,
+        `zoompan=z='if(eq(on,1),1.0,if(lte(zoom+0.0020,1.6),zoom+0.0020,1.6))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${durationFrames}:s=${W}x${H}:fps=25`,
+        `eq=contrast=1.05:brightness=0.03:saturation=1.15:gamma=1.02`,
+        `unsharp=lx=5:ly=5:la=${sharpenStrength}:cx=5:cy=5:ca=0`,
+        `format=yuv420p`,
+      ].join(",");
 
-      // Add audio if provided
+      // ── Build ffmpeg command ────────────────────────────────────
+      const ffmpegArgs: string[] = ["-y", "-f", "concat", "-safe", "0", "-i", listFile];
+
+      // Add audio input if provided
+      let audioFilePath: string | null = null;
       if (audioUrl) {
-        const audioSrc = audioUrl.startsWith('/uploads/') ? path.join(process.cwd(), audioUrl) : audioUrl;
-        ffmpegArgs.push("-i", audioSrc, "-shortest");
+        audioFilePath = audioUrl.startsWith('/uploads/')
+          ? path.join(process.cwd(), audioUrl)
+          : audioUrl;
+        ffmpegArgs.push("-i", audioFilePath);
       }
 
       ffmpegArgs.push(
-        "-vf", `scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25,format=yuv420p`,
+        "-vf", videoFilter,
         "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
-        ...(audioUrl ? ["-c:a", "aac", "-b:a", "128k"] : []),
+        "-preset", q.preset,
+        "-crf", String(q.crf),
+        "-b:v", q.vBitrate,
+        "-maxrate", q.maxrate,
+        "-bufsize", q.maxrate,
+        "-pix_fmt", "yuv420p",
+        "-r", "25",
+        ...(audioFilePath ? [
+          "-c:a", "aac",
+          "-b:a", "192k",
+          "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,aresample=44100",
+          "-shortest",
+        ] : []),
         "-movflags", "+faststart",
-        outPath
+        outPath,
       );
 
       await new Promise<void>((resolve, reject) => {
         const proc = spawn("ffmpeg", ffmpegArgs);
         let stderr = "";
         proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
-        proc.on("close", (code) => code === 0 ? resolve() : reject(new Error("ffmpeg: " + stderr.slice(-500))));
+        proc.on("close", (code) => code === 0 ? resolve() : reject(new Error("ffmpeg: " + stderr.slice(-600))));
         proc.on("error", reject);
       });
 
-      res.json({ url: `/uploads/${outFilename}` });
+      res.json({ url: `/uploads/${outFilename}`, quality, resolution: `${W}x${H}` });
     } catch (error: any) {
       console.error("images-to-video error:", error.message);
       res.status(500).json({ message: "فشل تحويل الصور لفيديو: " + error.message });

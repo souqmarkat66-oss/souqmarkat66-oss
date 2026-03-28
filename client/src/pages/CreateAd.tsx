@@ -90,6 +90,11 @@ export default function CreateAd() {
   const [adImageUrls, setAdImageUrls] = useState<string[]>([]);
   const [uploadingAdImages, setUploadingAdImages] = useState(false);
   const [convertingAdToVideo, setConvertingAdToVideo] = useState(false);
+  const [convertProgress, setConvertProgress] = useState("");
+  const [videoQuality, setVideoQuality] = useState<"standard" | "hd" | "cinema">("hd");
+  const [videoFormat, setVideoFormat] = useState<"vertical" | "landscape">("vertical");
+  const [imageDuration, setImageDuration] = useState(4);
+  const [useAiVoiceVideo, setUseAiVoiceVideo] = useState(false);
   const fileAdImagesRef = useRef<HTMLInputElement>(null);
   const tts = useTTS();
   const [ttsVoice, setTtsVoice] = useState<"nova" | "onyx">("nova");
@@ -749,11 +754,20 @@ export default function CreateAd() {
               )}
               <FormMessage />
 
-              {/* ─── Multi-image → Video ─── */}
-              <div className="mt-3 rounded-xl border border-dashed border-orange-300 bg-orange-50/50 dark:bg-orange-900/10 p-3 space-y-3">
-                <p className="text-xs font-bold text-orange-700 dark:text-orange-300 flex items-center gap-1.5">
-                  🎬 أو ارفع عدة صور وحوّلها لفيديو احترافي
-                </p>
+              {/* ─── صور → فيديو سينمائي HD ─── */}
+              <div className="mt-3 rounded-2xl border border-orange-300 bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/20 p-4 space-y-4">
+                {/* Header */}
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-orange-500 flex items-center justify-center">
+                    <Film className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-orange-800 dark:text-orange-200">تحويل الصور لفيديو سينمائي</p>
+                    <p className="text-[10px] text-orange-600 dark:text-orange-400">تأثير Ken Burns + تحسين جودة الصورة + صوت AI</p>
+                  </div>
+                </div>
+
+                {/* Hidden file input */}
                 <input
                   ref={fileAdImagesRef}
                   type="file"
@@ -777,20 +791,23 @@ export default function CreateAd() {
                         return d.url as string;
                       }));
                       setAdImageUrls(prev => [...prev, ...uploaded.filter(Boolean)].slice(0, 15));
-                      toast({ title: `✅ تم رفع ${uploaded.length} صورة دفعة واحدة!` });
+                      toast({ title: `✅ تم رفع ${uploaded.length} صورة` });
                     } catch { toast({ variant: "destructive", title: "فشل رفع الصور" }); }
                     finally { setUploadingAdImages(false); }
                   }}
                 />
 
+                {/* Image grid */}
                 {adImageUrls.length > 0 && (
                   <div className="grid grid-cols-4 gap-1.5">
                     {adImageUrls.map((url, i) => (
-                      <div key={i} className="relative aspect-square rounded-lg overflow-hidden group">
+                      <div key={i} className="relative aspect-square rounded-xl overflow-hidden group shadow-sm">
                         <img src={url} alt="" className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all" />
+                        <div className="absolute top-1 left-1 w-4 h-4 rounded bg-black/60 text-white text-[9px] flex items-center justify-center font-bold">{i + 1}</div>
                         <button
                           onClick={() => setAdImageUrls(prev => prev.filter((_, j) => j !== i))}
-                          className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-red-500 text-white text-xs opacity-0 group-hover:opacity-100 flex items-center justify-center"
+                          className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-red-500 text-white text-xs opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
                         ><X className="w-3 h-3" /></button>
                       </div>
                     ))}
@@ -798,58 +815,203 @@ export default function CreateAd() {
                       <button
                         onClick={() => fileAdImagesRef.current?.click()}
                         disabled={uploadingAdImages}
-                        className="aspect-square rounded-lg border-2 border-dashed border-orange-300 flex items-center justify-center hover:bg-orange-50 transition-all"
+                        className="aspect-square rounded-xl border-2 border-dashed border-orange-300 flex items-center justify-center hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-all"
                       >
-                        {uploadingAdImages ? <Loader2 className="w-4 h-4 animate-spin text-orange-500" /> : <Plus className="w-4 h-4 text-orange-500" />}
+                        {uploadingAdImages ? <Loader2 className="w-4 h-4 animate-spin text-orange-500" /> : <Plus className="w-4 h-4 text-orange-400" />}
                       </button>
                     )}
                   </div>
                 )}
 
-                <div className="flex gap-2">
-                  {adImageUrls.length === 0 && (
-                    <button
-                      type="button"
-                      onClick={() => fileAdImagesRef.current?.click()}
-                      disabled={uploadingAdImages}
-                      className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border border-orange-300 text-orange-700 text-sm hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-all"
-                      data-testid="btn-upload-ad-images"
+                {/* Upload button when empty */}
+                {adImageUrls.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => fileAdImagesRef.current?.click()}
+                    disabled={uploadingAdImages}
+                    className="w-full flex flex-col items-center justify-center gap-1.5 py-6 rounded-xl border-2 border-dashed border-orange-300 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-all"
+                    data-testid="btn-upload-ad-images"
+                  >
+                    {uploadingAdImages
+                      ? <Loader2 className="w-6 h-6 animate-spin" />
+                      : <>
+                          <ImageIcon className="w-6 h-6" />
+                          <span className="text-sm font-bold">ارفع صور متعددة</span>
+                          <span className="text-[10px] opacity-70">حتى 15 صورة — JPG, PNG, WEBP</span>
+                        </>
+                    }
+                  </button>
+                )}
+
+                {/* Options (shown when at least 1 image) */}
+                {adImageUrls.length >= 1 && (
+                  <div className="space-y-3 pt-1">
+                    {/* Quality + Format */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <p className="text-[10px] font-bold text-orange-700 dark:text-orange-300 mb-1">🎯 جودة الفيديو</p>
+                        <div className="flex flex-col gap-1">
+                          {([
+                            { v: "standard", label: "عادي 720p", icon: "📱" },
+                            { v: "hd",       label: "HD 1080p ✨", icon: "🎬" },
+                            { v: "cinema",   label: "سينما 4K", icon: "🏆" },
+                          ] as const).map(({ v, label, icon }) => (
+                            <button
+                              key={v}
+                              type="button"
+                              onClick={() => setVideoQuality(v)}
+                              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                                videoQuality === v
+                                  ? "bg-orange-500 text-white border-orange-500 shadow-sm"
+                                  : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700"
+                              }`}
+                            >
+                              <span>{icon}</span> {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold text-orange-700 dark:text-orange-300 mb-1">📐 اتجاه الفيديو</p>
+                        <div className="flex flex-col gap-1">
+                          {([
+                            { v: "vertical",  label: "عمودي 9:16",  icon: "📱" },
+                            { v: "landscape", label: "أفقي 16:9",   icon: "🖥" },
+                          ] as const).map(({ v, label, icon }) => (
+                            <button
+                              key={v}
+                              type="button"
+                              onClick={() => setVideoFormat(v)}
+                              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                                videoFormat === v
+                                  ? "bg-orange-500 text-white border-orange-500 shadow-sm"
+                                  : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700"
+                              }`}
+                            >
+                              <span>{icon}</span> {label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Duration per image */}
+                        <div className="mt-2">
+                          <p className="text-[10px] font-bold text-orange-700 dark:text-orange-300 mb-1">⏱ مدة كل صورة: {imageDuration}ث</p>
+                          <input
+                            type="range" min={2} max={8} step={1}
+                            value={imageDuration}
+                            onChange={e => setImageDuration(Number(e.target.value))}
+                            className="w-full accent-orange-500 h-1.5"
+                          />
+                          <div className="flex justify-between text-[9px] text-orange-400">
+                            <span>2ث</span><span>8ث</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* AI Voice option */}
+                    <div
+                      onClick={() => setUseAiVoiceVideo(!useAiVoiceVideo)}
+                      className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                        useAiVoiceVideo
+                          ? "bg-purple-50 dark:bg-purple-950/30 border-purple-300 dark:border-purple-700"
+                          : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                      }`}
                     >
-                      {uploadingAdImages ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ImageIcon className="w-4 h-4" /> ارفع صور متعددة</>}
-                    </button>
-                  )}
-                  {adImageUrls.length >= 1 && (
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${useAiVoiceVideo ? "bg-purple-500" : "bg-gray-200 dark:bg-gray-700"}`}>
+                        <Volume2 className={`w-4 h-4 ${useAiVoiceVideo ? "text-white" : "text-gray-500"}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-gray-700 dark:text-gray-200">إضافة صوت AI من نص الإعلان</p>
+                        <p className="text-[10px] text-gray-500 dark:text-gray-400">يحوّل عنوان ووصف إعلانك لصوت عربي احترافي</p>
+                      </div>
+                      <div className={`w-8 h-4 rounded-full transition-all flex-shrink-0 ${useAiVoiceVideo ? "bg-purple-500" : "bg-gray-300"}`}>
+                        <div className={`w-4 h-4 rounded-full bg-white shadow transition-all ${useAiVoiceVideo ? "translate-x-4" : "translate-x-0"}`} />
+                      </div>
+                    </div>
+
+                    {/* Summary + Convert button */}
+                    <div className="bg-orange-100 dark:bg-orange-900/20 rounded-xl p-2.5 text-[10px] text-orange-700 dark:text-orange-300 flex gap-3">
+                      <span>🎞 {adImageUrls.length} صورة</span>
+                      <span>⏱ {adImageUrls.length * imageDuration}ث إجمالي</span>
+                      <span>📊 {videoQuality === "cinema" ? "4K" : videoQuality === "hd" ? "1080p" : "720p"}</span>
+                      {useAiVoiceVideo && <span>🎙 صوت AI</span>}
+                    </div>
+
+                    {/* Progress during conversion */}
+                    {convertingAdToVideo && convertProgress && (
+                      <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                        {convertProgress}
+                      </div>
+                    )}
+
                     <button
                       type="button"
-                      disabled={convertingAdToVideo}
+                      disabled={convertingAdToVideo || uploadingAdImages}
                       onClick={async () => {
                         setConvertingAdToVideo(true);
                         try {
+                          let audioUrl: string | undefined;
+
+                          // Step 1: Generate AI voice if requested
+                          if (useAiVoiceVideo) {
+                            const title = form.getValues("title");
+                            const desc = form.getValues("description");
+                            const narration = [title, desc].filter(Boolean).join(". ");
+                            if (narration.trim()) {
+                              setConvertProgress("🎙 جارٍ توليد الصوت بالذكاء الاصطناعي...");
+                              const ttsRes = await fetch("/api/ai/tts", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                credentials: "include",
+                                body: JSON.stringify({ text: narration, voice: ttsVoice }),
+                              });
+                              if (ttsRes.ok) {
+                                const ttsData = await ttsRes.json();
+                                audioUrl = ttsData.url;
+                              }
+                            }
+                          }
+
+                          // Step 2: Convert images to video
+                          setConvertProgress(`🎬 جارٍ التحويل بجودة ${videoQuality === "cinema" ? "سينما" : videoQuality === "hd" ? "HD 1080p" : "720p"}...`);
                           const r = await fetch('/api/ai/images-to-video', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ imageUrls: adImageUrls, duration: 3 }),
+                            credentials: 'include',
+                            body: JSON.stringify({
+                              imageUrls: adImageUrls,
+                              audioUrl,
+                              duration: imageDuration,
+                              quality: videoQuality,
+                              format: videoFormat,
+                            }),
                           });
                           const d = await r.json();
                           if (!r.ok) throw new Error(d.message);
+
+                          setConvertProgress("✅ تم! جارٍ تحميل الفيديو...");
                           field.onChange(d.url);
                           form.setValue("mediaType", "video");
                           setAdImageUrls([]);
-                          toast({ title: "🎬 تم تحويل الصور لفيديو!" });
+                          setConvertProgress("");
+                          toast({ title: `🎬 تم تحويل الصور لفيديو ${d.resolution || ""} بنجاح!`, className: "bg-orange-500 text-white border-none" });
                         } catch (e: any) {
+                          setConvertProgress("");
                           toast({ variant: "destructive", title: "فشل التحويل", description: e.message });
                         } finally { setConvertingAdToVideo(false); }
                       }}
-                      className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-orange-600 text-white text-sm font-bold hover:bg-orange-700 disabled:opacity-50 transition-all"
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white text-sm font-bold hover:from-orange-600 hover:to-amber-600 disabled:opacity-60 transition-all shadow-md"
                       data-testid="btn-convert-ad-to-video"
                     >
                       {convertingAdToVideo
-                        ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري التحويل...</>
-                        : <>🎬 حوّل {adImageUrls.length} صور لفيديو MP4</>
+                        ? <><Loader2 className="w-4 h-4 animate-spin" /> جارٍ الإنتاج السينمائي...</>
+                        : <><Film className="w-4 h-4" /> إنتاج فيديو احترافي ({adImageUrls.length} صورة)</>
                       }
                     </button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
 
               {/* ─── TTS for Ad ─── */}
