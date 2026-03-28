@@ -4,9 +4,10 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Heart, MessageCircle, Share2, Flag, Send, Mic, MicOff, Volume2, Play, Square } from "lucide-react";
+import { Heart, MessageCircle, Flag, Send, Mic, MicOff, Volume2, Play, Square } from "lucide-react";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
+import { ShareMenu } from "@/components/ShareMenu";
 
 interface Props {
   targetType: "ad" | "stream";
@@ -186,13 +187,14 @@ export function LikeCommentBar({ targetType, targetId, initialLikes = 0, showCom
             <span className="text-sm">{comments.length || ""}</span>
           </Button>
         )}
-        <Button
-          onClick={() => { navigator.clipboard.writeText(window.location.origin + `/${targetType}s/${targetId}`); toast({ title: "تم نسخ الرابط!" }); }}
-          variant="ghost" size="sm" className="gap-1.5 h-8 px-3 rounded-full"
+        <ShareMenu
+          url={`/${targetType}s/${targetId}`}
+          title={targetType === "ad" ? "شوف الإعلان ده على سوق" : "شاهد البث المباشر على سوق"}
+          variant="ghost"
+          size="sm"
+          className="h-8 px-3"
           data-testid={`btn-share-${targetType}-${targetId}`}
-        >
-          <Share2 className="w-4 h-4" />
-        </Button>
+        />
         {user && (
           <Button
             onClick={() => reportMutation.mutate()}
