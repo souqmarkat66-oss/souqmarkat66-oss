@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -10,10 +10,11 @@ import { ar } from "date-fns/locale";
 import { ShareMenu } from "@/components/ShareMenu";
 
 interface Props {
-  targetType: "ad" | "stream";
+  targetType: "ad" | "stream" | "reel";
   targetId: number;
   initialLikes?: number;
   showComments?: boolean;
+  ownerId?: string;
 }
 
 function speakArabic(text: string) {
@@ -57,7 +58,93 @@ function VoicePlayer({ url }: { url: string }) {
   );
 }
 
-export function LikeCommentBar({ targetType, targetId, initialLikes = 0, showComments = true }: Props) {
+function VoiceReplyOwner({ toUserId, toName }: { toUserId: string; toName: string }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [recording, setRecording] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const recRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const start = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      chunksRef.current = [];
+      const mimes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+      const mimeType = mimes.find(m => MediaRecorder.isTypeSupported(m)) || '';
+      const ext = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+      const rec = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+      rec.ondataavailable = ev => { if (ev.data.size > 0) chunksRef.current.push(ev.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        if (timerRef.current) clearInterval(timerRef.current);
+        setSeconds(0);
+        const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' });
+        if (blob.size < 100) { toast({ variant: "destructive", title: "التسجيل قصير جداً" }); return; }
+        setUploading(true);
+        try {
+          const fd = new FormData();
+          fd.append("file", blob, `voice-reply-${Date.now()}.${ext}`);
+          const upRes = await fetch("/api/upload", { method: "POST", body: fd, credentials: "include" });
+          if (!upRes.ok) throw new Error("فشل رفع الصوت");
+          const { url: voiceUrl } = await upRes.json();
+          await fetch("/api/messages", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ toUserId, message: "🎤 رد صوتي", isVoice: true, voiceUrl }),
+            credentials: "include",
+          });
+          qc.invalidateQueries({ queryKey: ["/api/messages"] });
+          toast({ title: `✅ تم إرسال الرد الصوتي إلى ${toName}!` });
+        } catch {
+          toast({ variant: "destructive", title: "فشل إرسال الرد" });
+        } finally { setUploading(false); }
+      };
+      rec.start(200);
+      recRef.current = rec;
+      setRecording(true);
+      setSeconds(0);
+      timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
+    } catch {
+      toast({ variant: "destructive", title: "لا يمكن الوصول للميكروفون" });
+    }
+  };
+
+  const stop = () => {
+    const r = recRef.current;
+    if (r && r.state !== "inactive") r.stop();
+    setRecording(false);
+    if (timerRef.current) clearInterval(timerRef.current);
+  };
+
+  return (
+    <span className="inline-flex items-center">
+      {recording ? (
+        <button
+          onClick={stop}
+          className="flex items-center gap-1 bg-red-100 dark:bg-red-950/30 text-red-600 rounded-full px-2 py-0.5 text-[10px] font-medium animate-pulse transition-colors"
+          data-testid="btn-stop-owner-voice-reply"
+        >
+          <MicOff className="w-2.5 h-2.5" /> إرسال ({seconds}ث)
+        </button>
+      ) : (
+        <button
+          onClick={start}
+          disabled={uploading}
+          className="flex items-center gap-1 bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-400 rounded-full px-2 py-0.5 text-[10px] font-medium hover:bg-green-200 dark:hover:bg-green-950/50 transition-colors disabled:opacity-50"
+          data-testid="btn-owner-voice-reply"
+        >
+          {uploading ? <Send className="w-2.5 h-2.5 animate-pulse" /> : <Mic className="w-2.5 h-2.5" />}
+          {uploading ? "جارٍ الإرسال..." : "رد بصوتك"}
+        </button>
+      )}
+    </span>
+  );
+}
+
+export function LikeCommentBar({ targetType, targetId, initialLikes = 0, showComments = true, ownerId }: Props) {
   const { user } = useAuth();
   const { toast } = useToast();
   const [showChat, setShowChat] = useState(false);
@@ -283,7 +370,13 @@ export function LikeCommentBar({ targetType, targetId, initialLikes = 0, showCom
 
                   {/* Voice comment with audio player */}
                   {c.isVoiceComment && c.voiceText ? (
-                    <VoicePlayer url={c.voiceText} />
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <VoicePlayer url={c.voiceText} />
+                      {/* Owner can reply with voice to the commenter */}
+                      {user && ownerId && user.id === ownerId && c.userId !== user.id && (
+                        <VoiceReplyOwner toUserId={c.userId} toName={c.userName || "المستخدم"} />
+                      )}
+                    </span>
                   ) : (
                     <>
                       <span className="text-foreground/90">{c.content}</span>

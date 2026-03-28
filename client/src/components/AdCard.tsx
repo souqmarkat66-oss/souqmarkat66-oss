@@ -244,7 +244,7 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
             </div>
           </div>
 
-          <LikeCommentBar targetType="ad" targetId={ad.id} initialLikes={ad.likesCount || 0} />
+          <LikeCommentBar targetType="ad" targetId={ad.id} initialLikes={ad.likesCount || 0} ownerId={ad.userId} />
 
           {/* 🔊 Listen (TTS) button */}
           {user && (

@@ -105,6 +105,10 @@ async function runMigrations() {
       created_at TIMESTAMP DEFAULT NOW()
     )`);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS voice_url TEXT`);
+    await db.execute(sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS sender_user_id VARCHAR`);
+    await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_voice BOOLEAN DEFAULT FALSE`);
+    await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS voice_url TEXT`);
     console.log("Migrations applied successfully");
   } catch (e: any) {
     console.error("Migration warning:", e.message);

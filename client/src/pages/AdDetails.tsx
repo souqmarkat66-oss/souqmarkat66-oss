@@ -687,7 +687,7 @@ export default function AdDetails() {
 
               {/* Like/Comment */}
               <div className="mt-6">
-                <LikeCommentBar targetType="ad" targetId={ad.id} initialLikes={ad.likesCount || 0} />
+                <LikeCommentBar targetType="ad" targetId={ad.id} initialLikes={ad.likesCount || 0} ownerId={ad.userId} />
               </div>
 
               {/* ── RATINGS SECTION ── */}

@@ -431,10 +431,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // SOCIAL FEATURES - LIKES & COMMENTS
   // ================================================================
   // Helper: create notification silently
-  async function createNotification(userId: string, type: string, title: string, body: string, link?: string) {
+  async function createNotification(userId: string, type: string, title: string, body: string, link?: string, voiceUrl?: string, senderUserId?: string) {
     try {
       await db.execute(
-        sql`INSERT INTO notifications (user_id, type, title, body, link) VALUES (${userId}, ${type}, ${title}, ${body}, ${link ?? null})`
+        sql`INSERT INTO notifications (user_id, type, title, body, link, voice_url, sender_user_id)
+            VALUES (${userId}, ${type}, ${title}, ${body}, ${link ?? null}, ${voiceUrl ?? null}, ${senderUserId ?? null})`
       );
     } catch {}
   }
@@ -487,7 +488,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const comment = await storage.createComment(input);
       // Notify content owner
       try {
-        const { targetType, targetId } = req.body;
+        const { targetType, targetId, isVoiceComment, voiceText } = req.body;
         let ownerRow: any = null; let link = "";
         if (targetType === "ad") {
           const r = await db.execute(sql`SELECT user_id FROM ads WHERE id = ${targetId}`);
@@ -495,9 +496,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         } else if (targetType === "reel") {
           const r = await db.execute(sql`SELECT user_id FROM reels WHERE id = ${targetId}`);
           ownerRow = r.rows[0]; link = `/reels`;
+        } else if (targetType === "stream") {
+          const r = await db.execute(sql`SELECT user_id FROM live_streams WHERE id = ${targetId}`);
+          ownerRow = r.rows[0]; link = `/streams/${targetId}`;
         }
         if (ownerRow && ownerRow.user_id !== userId) {
-          await createNotification(ownerRow.user_id, "comment", "تعليق جديد 💬", `${userName}: ${String(req.body.content).slice(0, 60)}`, link);
+          const isVoice = isVoiceComment && !!voiceText;
+          const title = isVoice ? "🎤 تعليق صوتي جديد" : "تعليق جديد 💬";
+          const body = isVoice ? `${userName}: أرسل تعليقاً صوتياً` : `${userName}: ${String(req.body.content).slice(0, 60)}`;
+          await createNotification(ownerRow.user_id, "comment", title, body, link,
+            isVoice ? voiceText : undefined,
+            isVoice ? userId : undefined
+          );
         }
       } catch {}
       res.status(201).json(comment);
@@ -1320,7 +1330,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/messages", isAuthenticated, async (req: any, res) => {
     const fromUserId = req.user.claims.sub;
-    const { toUserId, message, adId } = req.body;
+    const { toUserId, message, adId, isVoice, voiceUrl } = req.body;
     if (!toUserId || !message) return res.status(400).json({ message: "Missing required fields" });
     // Anti-spam: max 10 messages per minute per user
     try {
@@ -1331,13 +1341,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(429).json({ message: "الرسائل كثيرة جداً، انتظر قليلاً" });
       }
       const result = await db.execute(
-        sql`INSERT INTO direct_messages (from_user_id, to_user_id, ad_id, message)
-            VALUES (${fromUserId}, ${toUserId}, ${adId ?? null}, ${message})
+        sql`INSERT INTO direct_messages (from_user_id, to_user_id, ad_id, message, is_voice, voice_url)
+            VALUES (${fromUserId}, ${toUserId}, ${adId ?? null}, ${message}, ${isVoice ?? false}, ${voiceUrl ?? null})
             RETURNING *`
       );
       // Send notification to recipient
       const senderName = req.user.claims?.first_name || "مستخدم";
-      await createNotification(toUserId, "comment", "رسالة جديدة 📩", `${senderName}: ${String(message).slice(0, 60)}`, `/messages`);
+      const msgTitle = isVoice ? "🎤 رسالة صوتية جديدة" : "رسالة جديدة 📩";
+      const msgBody = isVoice ? `${senderName}: أرسل رسالة صوتية` : `${senderName}: ${String(message).slice(0, 60)}`;
+      await createNotification(toUserId, "comment", msgTitle, msgBody, `/messages`,
+        isVoice ? voiceUrl : undefined, fromUserId);
       res.status(201).json(result.rows[0]);
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });

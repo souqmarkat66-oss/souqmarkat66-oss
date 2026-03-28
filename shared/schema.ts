@@ -320,6 +320,8 @@ export const notifications = pgTable("notifications", {
   title: text("title").notNull(),
   body: text("body").notNull(),
   link: text("link"),
+  voiceUrl: text("voice_url"),
+  senderUserId: varchar("sender_user_id"),
   isRead: boolean("is_read").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -335,6 +337,8 @@ export const directMessages = pgTable("direct_messages", {
   toUserId: varchar("to_user_id").references(() => users.id).notNull(),
   adId: integer("ad_id"),
   message: text("message").notNull(),
+  isVoice: boolean("is_voice").default(false),
+  voiceUrl: text("voice_url"),
   isRead: boolean("is_read").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
