@@ -152,10 +152,14 @@ export function LikeCommentBar({ targetType, targetId, initialLikes = 0, showCom
   const [localLikes, setLocalLikes] = useState(initialLikes);
   const [liked, setLiked] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [waveLevel, setWaveLevel] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const waveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const holdingRef = useRef(false);
 
   const { data: comments = [], refetch } = useQuery<any[]>({
     queryKey: ["/api/comments", targetType, targetId],
@@ -200,69 +204,68 @@ export function LikeCommentBar({ targetType, targetId, initialLikes = 0, showCom
     likeMutation.mutate();
   };
 
-  const startRecording = async () => {
+  // ─── اضغط وتكلم (Press & Hold) ─────────────────────────────
+  const handleMicPress = async (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
     if (!user) { window.location.href = "/api/login"; return; }
+    if (holdingRef.current || isRecording) return;
+    holdingRef.current = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       chunksRef.current = [];
-
-      // كشف أفضل نوع صوت مدعوم في المتصفح
       const mimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
       const mimeType = mimeTypes.find(m => MediaRecorder.isTypeSupported(m)) || '';
       const ext = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('ogg') ? 'ogg' : 'webm';
-
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
-      recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.ondataavailable = ev => { if (ev.data.size > 0) chunksRef.current.push(ev.data); };
       recorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
         if (timerRef.current) clearInterval(timerRef.current);
-        setRecordingSeconds(0);
-
+        if (waveRef.current) clearInterval(waveRef.current);
+        setRecordingSeconds(0); setWaveLevel(0);
         const finalType = recorder.mimeType || 'audio/webm';
         const blob = new Blob(chunksRef.current, { type: finalType });
-
-        if (blob.size < 100) {
-          toast({ variant: "destructive", title: "التسجيل قصير جداً" });
+        if (blob.size < 300) {
+          toast({ title: "اضغط مطولاً للتسجيل 🎤" });
           return;
         }
-
-        // رفع ملف الصوت
+        setIsUploading(true);
         const formData = new FormData();
         formData.append("file", blob, `voice-${Date.now()}.${ext}`);
         try {
           const res = await fetch("/api/upload", { method: "POST", body: formData, credentials: "include" });
-          if (!res.ok) throw new Error(`فشل الرفع: ${res.status}`);
+          if (!res.ok) throw new Error(`${res.status}`);
           const data = await res.json();
-          if (!data.url) throw new Error("لم يتم رفع الصوت");
+          if (!data.url) throw new Error("no url");
           commentMutation.mutate({ content: "🎤 تعليق صوتي", isVoiceComment: true, voiceText: data.url });
-          toast({ title: "✅ تم حفظ التعليق الصوتي!" });
-        } catch (err: any) {
-          // احتياطي: حفظه كتعليق نصي
+        } catch {
           commentMutation.mutate({ content: "🎤 تعليق صوتي" });
-          toast({ title: "تم حفظ التعليق (بدون صوت)" });
-        }
+        } finally { setIsUploading(false); }
       };
-      recorder.start(200);
+      recorder.start(100);
       mediaRecorderRef.current = recorder;
       setIsRecording(true);
       setRecordingSeconds(0);
       timerRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000);
+      waveRef.current = setInterval(() => setWaveLevel(Math.random()), 150);
     } catch (err: any) {
-      if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
-        toast({ variant: "destructive", title: "❌ الإذن مرفوض", description: "اسمح للمتصفح بالوصول للميكروفون من الإعدادات" });
+      holdingRef.current = false;
+      if (err?.name === 'NotAllowedError') {
+        toast({ variant: "destructive", title: "❌ اسمح للمتصفح بالميكروفون", description: "الإعدادات ← الموقع ← السماح بالميكروفون" });
       } else {
-        toast({ variant: "destructive", title: "لا يمكن الوصول للميكروفون", description: err?.message });
+        toast({ variant: "destructive", title: "تعذّر تشغيل الميكروفون" });
       }
     }
   };
 
-  const stopRecording = () => {
-    const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== "inactive") {
-      recorder.stop();
-    }
+  const handleMicRelease = () => {
+    if (!holdingRef.current) return;
+    holdingRef.current = false;
     setIsRecording(false);
     if (timerRef.current) clearInterval(timerRef.current);
+    if (waveRef.current) clearInterval(waveRef.current);
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") recorder.stop();
   };
 
   return (
@@ -310,47 +313,91 @@ export function LikeCommentBar({ targetType, targetId, initialLikes = 0, showCom
       {showChat && showComments && (
         <div className="mt-3 space-y-3">
           {user && (
-            <div className="flex gap-2">
-              {/* Recording indicator */}
-              {isRecording ? (
-                <div className="flex-1 flex items-center gap-2 h-9 px-3 rounded-full border border-destructive bg-destructive/5 text-destructive text-sm font-medium animate-pulse">
-                  <span className="w-2 h-2 rounded-full bg-destructive inline-block" />
-                  جارٍ التسجيل... {recordingSeconds}ث
+            <div className="space-y-2">
+              {/* Recording / Upload status bar */}
+              {(isRecording || isUploading) && (
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-2xl text-sm font-medium transition-all ${
+                  isUploading
+                    ? "bg-blue-50 dark:bg-blue-950/30 text-blue-600 border border-blue-200 dark:border-blue-800"
+                    : "bg-red-50 dark:bg-red-950/30 text-red-600 border border-red-200 dark:border-red-800"
+                }`}>
+                  {isUploading ? (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-blue-500 animate-ping inline-block" />
+                      <span>جارٍ إرسال الرسالة الصوتية...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse inline-block" />
+                      <span>🎤 جارٍ التسجيل... {recordingSeconds}ث</span>
+                      {/* Waveform bars */}
+                      <div className="flex items-end gap-0.5 h-4 ms-1">
+                        {[0.3, 0.7, 0.5, 1, 0.6, 0.8, 0.4].map((base, i) => (
+                          <div
+                            key={i}
+                            className="w-1 bg-red-500 rounded-full transition-all duration-100"
+                            style={{ height: `${Math.max(20, (base * waveLevel + base * 0.5) * 100)}%` }}
+                          />
+                        ))}
+                      </div>
+                      <span className="text-xs opacity-70 ms-auto">ارفع إصبعك للإرسال</span>
+                    </>
+                  )}
                 </div>
-              ) : (
+              )}
+
+              {/* Text input + mic button + send */}
+              <div className="flex gap-2">
                 <Input
                   value={commentText}
                   onChange={e => setCommentText(e.target.value)}
-                  placeholder="أضف تعليقاً..."
+                  placeholder="أضف تعليقاً أو اضغط مطولاً 🎤"
                   className="flex-1 h-9 text-sm rounded-full"
                   onKeyDown={e => e.key === 'Enter' && commentText.trim() && commentMutation.mutate({ content: commentText })}
                   data-testid="input-comment"
+                  disabled={isRecording || isUploading}
                 />
-              )}
 
-              {/* Voice Record Button */}
-              <Button
-                size="sm"
-                variant={isRecording ? "destructive" : "outline"}
-                onClick={isRecording ? stopRecording : startRecording}
-                className={`h-9 w-9 p-0 rounded-full ${isRecording ? 'animate-pulse' : ''}`}
-                title={isRecording ? "إرسال التسجيل" : "تعليق صوتي"}
-                data-testid="btn-voice-comment"
-              >
-                {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              </Button>
+                {/* 🎤 Press & Hold mic button */}
+                <button
+                  onMouseDown={handleMicPress}
+                  onMouseUp={handleMicRelease}
+                  onMouseLeave={handleMicRelease}
+                  onTouchStart={handleMicPress}
+                  onTouchEnd={handleMicRelease}
+                  onTouchCancel={handleMicRelease}
+                  disabled={isUploading || commentMutation.isPending}
+                  className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 transition-all select-none touch-none
+                    ${isRecording
+                      ? "bg-red-500 text-white shadow-lg shadow-red-300 dark:shadow-red-900 scale-110"
+                      : "bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30"
+                    } disabled:opacity-50`}
+                  title="اضغط مطولاً للتسجيل الصوتي"
+                  data-testid="btn-voice-comment"
+                >
+                  {isRecording
+                    ? <span className="text-base animate-pulse">🎙️</span>
+                    : <Mic className="w-4 h-4" />
+                  }
+                </button>
 
-              {/* Send Text Button */}
-              {!isRecording && (
+                {/* Send Text Button */}
                 <Button
                   size="sm"
-                  onClick={() => commentMutation.mutate({ content: commentText })}
-                  disabled={!commentText.trim() || commentMutation.isPending}
+                  onClick={() => commentText.trim() && commentMutation.mutate({ content: commentText })}
+                  disabled={!commentText.trim() || commentMutation.isPending || isRecording || isUploading}
                   className="h-9 w-9 p-0 rounded-full"
                   data-testid="btn-send-comment"
                 >
                   <Send className="w-4 h-4" />
                 </Button>
+              </div>
+
+              {/* Hint */}
+              {!isRecording && !isUploading && (
+                <p className="text-[10px] text-muted-foreground text-center">
+                  اضغط مطولاً على 🎤 للتسجيل الصوتي مباشرة من تليفونك
+                </p>
               )}
             </div>
           )}
