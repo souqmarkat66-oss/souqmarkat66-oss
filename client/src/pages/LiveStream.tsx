@@ -10,15 +10,24 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Radio, Users, Heart, Send, MicOff, VideoOff, PhoneOff,
   Mic, Video, Share2, Eye, MessageCircle, Monitor, Camera,
-  Settings, Wifi, WifiOff, Maximize, RotateCcw, Volume2
+  Settings, Wifi, WifiOff, Maximize, RotateCcw, Volume2, X
 } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import type { LiveStream as LiveStreamType } from "@shared/schema";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
+import { ShareMenu } from "@/components/ShareMenu";
 
-interface ChatMsg { id: number; userName: string; message: string; timestamp: string; }
+interface ChatMsg {
+  id: number;
+  userName: string;
+  message: string;
+  timestamp: string;
+  isVoice?: boolean;
+  voiceUrl?: string;
+  isOwner?: boolean;
+}
 
 const QUALITY_PRESETS = {
   "1080p": { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 }, frameRate: { ideal: 30, max: 30 } },
@@ -75,6 +84,17 @@ export default function LiveStream() {
   const [isFullscreen, setIsFullscreen]     = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const statsIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ─── Voice Chat Recording (Press & Hold) ───────────────────
+  const [chatIsRecording, setChatIsRecording] = useState(false);
+  const [chatIsUploading, setChatIsUploading] = useState(false);
+  const [chatRecordSeconds, setChatRecordSeconds] = useState(0);
+  const [chatWaveLevel, setChatWaveLevel]   = useState(0);
+  const chatHoldingRef    = useRef(false);
+  const chatRecorderRef   = useRef<MediaRecorder | null>(null);
+  const chatChunksRef     = useRef<BlobPart[]>([]);
+  const chatTimerRef      = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chatWaveRef       = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { data: stream, isLoading } = useQuery<LiveStreamType>({
     queryKey: ["/api/streams", Number(id)],
@@ -163,17 +183,26 @@ export default function LiveStream() {
         }
         mediaStream = screenStream;
       } else {
-        mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            ...QUALITY_PRESETS[quality],
-            deviceId: selectedCamera ? { exact: selectedCamera } : undefined,
-            facingMode: "user",
-          },
-          audio: {
-            ...HIGH_QUALITY_AUDIO,
-            deviceId: selectedMic ? { exact: selectedMic } : undefined,
-          },
-        });
+        // Mobile-first: try ideal deviceId (not exact) to avoid "OverconstrainedError"
+        // then fallback to just facingMode if that also fails
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              ...QUALITY_PRESETS[quality],
+              ...(selectedCamera ? { deviceId: { ideal: selectedCamera } } : { facingMode: { ideal: "user" } }),
+            },
+            audio: {
+              ...HIGH_QUALITY_AUDIO,
+              ...(selectedMic ? { deviceId: { ideal: selectedMic } } : {}),
+            },
+          });
+        } catch {
+          // Ultimate fallback: any available camera/mic (works on all phones)
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "user" },
+            audio: HIGH_QUALITY_AUDIO,
+          });
+        }
       }
 
       localStreamRef.current = mediaStream;
@@ -304,9 +333,78 @@ export default function LiveStream() {
     socketRef.current?.emit("chat-message", {
       streamId: id, userId: user.id,
       userName: user.firstName || "مستخدم",
-      message: chatInput.trim()
+      message: chatInput.trim(),
+      isOwner: stream?.userId === user.id,
     });
     setChatInput("");
+  };
+
+  // ─── Voice Chat: Press & Hold ───────────────────────────────
+  const handleChatMicPress = async (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    if (!user) { window.location.href = "/api/login"; return; }
+    if (chatHoldingRef.current || chatIsRecording) return;
+    chatHoldingRef.current = true;
+    try {
+      const stream2 = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      chatChunksRef.current = [];
+      const mimeTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
+      const mimeType = mimeTypes.find(m => MediaRecorder.isTypeSupported(m)) || "";
+      const ext = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
+      const recorder = new MediaRecorder(stream2, mimeType ? { mimeType } : {});
+      recorder.ondataavailable = ev => { if (ev.data.size > 0) chatChunksRef.current.push(ev.data); };
+      recorder.onstop = async () => {
+        stream2.getTracks().forEach(t => t.stop());
+        if (chatTimerRef.current) clearInterval(chatTimerRef.current);
+        if (chatWaveRef.current) clearInterval(chatWaveRef.current);
+        setChatRecordSeconds(0); setChatWaveLevel(0);
+        const blob = new Blob(chatChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        if (blob.size < 300) { toast({ title: "اضغط مطولاً للتسجيل 🎤" }); return; }
+        setChatIsUploading(true);
+        const formData = new FormData();
+        formData.append("file", blob, `voice-${Date.now()}.${ext}`);
+        try {
+          const res = await fetch("/api/upload", { method: "POST", body: formData, credentials: "include" });
+          if (!res.ok) throw new Error(`${res.status}`);
+          const data = await res.json();
+          if (!data.url) throw new Error("no url");
+          socketRef.current?.emit("chat-message", {
+            streamId: id,
+            userId: user!.id,
+            userName: user!.firstName || "مستخدم",
+            message: "🎤 رسالة صوتية",
+            isVoice: true,
+            voiceUrl: data.url,
+            isOwner: stream?.userId === user!.id,
+          });
+        } catch {
+          toast({ variant: "destructive", title: "فشل إرسال الصوت" });
+        } finally { setChatIsUploading(false); }
+      };
+      recorder.start(100);
+      chatRecorderRef.current = recorder;
+      setChatIsRecording(true);
+      setChatRecordSeconds(0);
+      chatTimerRef.current = setInterval(() => setChatRecordSeconds(s => s + 1), 1000);
+      chatWaveRef.current = setInterval(() => setChatWaveLevel(Math.random()), 150);
+    } catch (err: any) {
+      chatHoldingRef.current = false;
+      if (err?.name === "NotAllowedError") {
+        toast({ variant: "destructive", title: "❌ اسمح للمتصفح بالميكروفون" });
+      } else {
+        toast({ variant: "destructive", title: "تعذّر تشغيل الميكروفون" });
+      }
+    }
+  };
+
+  const handleChatMicRelease = () => {
+    if (!chatHoldingRef.current) return;
+    chatHoldingRef.current = false;
+    setChatIsRecording(false);
+    if (chatTimerRef.current) clearInterval(chatTimerRef.current);
+    if (chatWaveRef.current) clearInterval(chatWaveRef.current);
+    const rec = chatRecorderRef.current;
+    if (rec && rec.state !== "inactive") rec.stop();
   };
 
   const handleLike = () => {
@@ -463,13 +561,17 @@ export default function LiveStream() {
                     <PhoneOff className="w-5 h-5" /> إنهاء البث
                   </button>
 
-                  {/* Share */}
-                  <button
-                    onClick={() => { navigator.clipboard.writeText(window.location.href.replace("mode=broadcast", "")); toast({ title: "تم نسخ رابط البث!" }); }}
-                    className="w-12 h-12 rounded-full bg-white/20 backdrop-blur text-white hover:bg-white/30 flex items-center justify-center transition"
-                  >
-                    <Share2 className="w-5 h-5" />
-                  </button>
+                  {/* Share — social platforms */}
+                  <div onClick={e => e.stopPropagation()}>
+                    <ShareMenu
+                      url={window.location.href.replace("mode=broadcast", "")}
+                      title={`بث مباشر: ${stream?.title || "بث مباشر على سوق"}`}
+                      description={stream?.description || ""}
+                      variant="default"
+                      className="w-12 h-12 rounded-full bg-white/20 backdrop-blur text-white hover:bg-white/30 flex items-center justify-center transition p-0"
+                      data-testid="btn-broadcast-share"
+                    />
+                  </div>
                 </div>
               </div>
             )}
@@ -486,9 +588,17 @@ export default function LiveStream() {
                 <Heart className={`w-4 h-4 ${liked ? "fill-current text-red-400" : ""}`} />
                 {likesCount.toLocaleString()}
               </Button>
-              <Button variant="outline" size="sm" className="gap-2 rounded-full" onClick={() => { navigator.clipboard.writeText(window.location.href); toast({ title: "تم نسخ الرابط!" }); }}>
-                <Share2 className="w-4 h-4" /> مشاركة
-              </Button>
+              <div onClick={e => e.stopPropagation()}>
+                <ShareMenu
+                  url={window.location.href.replace("mode=broadcast", "")}
+                  title={stream?.title || "بث مباشر على سوق"}
+                  description={stream?.description || ""}
+                  variant="outline"
+                  size="sm"
+                  label="مشاركة"
+                  data-testid="btn-stream-share"
+                />
+              </div>
             </div>
           </div>
 
@@ -598,33 +708,109 @@ export default function LiveStream() {
               )}
               {messages.map((msg, i) => (
                 <div key={i} className="group flex items-start gap-2">
-                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 mt-0.5">
-                    {msg.userName[0]}
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 mt-0.5 ${msg.isOwner ? "bg-red-500" : "bg-gradient-to-br from-primary to-secondary"}`}>
+                    {msg.isOwner ? "🎙" : msg.userName[0]}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <span className="text-[11px] font-bold text-primary">{msg.userName} </span>
-                    <span className="text-sm text-foreground break-words">{msg.message}</span>
+                    <span className={`text-[11px] font-bold ${msg.isOwner ? "text-red-500" : "text-primary"}`}>
+                      {msg.userName}{msg.isOwner ? " 🔴" : ""}{" "}
+                    </span>
+                    {msg.isVoice && msg.voiceUrl ? (
+                      <span className="flex items-center gap-1 flex-wrap mt-0.5">
+                        <span className="text-[10px] text-muted-foreground">🎤</span>
+                        <audio
+                          controls
+                          src={msg.voiceUrl}
+                          className="h-6 max-w-[160px]"
+                          style={{ height: 24 }}
+                        />
+                        {/* Owner can reply with voice to this voice message */}
+                        {user && stream?.userId === user.id && !msg.isOwner && (
+                          <button
+                            onMouseDown={handleChatMicPress}
+                            onMouseUp={handleChatMicRelease}
+                            onMouseLeave={handleChatMicRelease}
+                            onTouchStart={handleChatMicPress}
+                            onTouchEnd={handleChatMicRelease}
+                            onTouchCancel={handleChatMicRelease}
+                            className="text-[9px] px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 border border-red-200 dark:border-red-800 select-none touch-none hover:bg-red-200 transition-all"
+                          >
+                            {chatIsRecording ? "🔴 جارٍ..." : "رد بصوتك"}
+                          </button>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="text-sm text-foreground break-words">{msg.message}</span>
+                    )}
                   </div>
                 </div>
               ))}
               <div ref={chatEndRef} />
             </div>
 
-            <div className="p-3 border-t bg-muted/10">
+            {/* Voice Recording Status */}
+            {(chatIsRecording || chatIsUploading) && (
+              <div className={`mx-3 mb-1 flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium ${
+                chatIsUploading
+                  ? "bg-blue-50 dark:bg-blue-950/30 text-blue-600 border border-blue-200"
+                  : "bg-red-50 dark:bg-red-950/30 text-red-600 border border-red-200"
+              }`}>
+                {chatIsUploading ? (
+                  <><span className="w-2 h-2 rounded-full bg-blue-500 animate-ping inline-block" /> جارٍ إرسال الصوت...</>
+                ) : (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse inline-block" />
+                    🎤 {chatRecordSeconds}ث — ارفع إصبعك للإرسال
+                    <div className="flex items-end gap-0.5 h-3 ms-1">
+                      {[0.3, 0.7, 0.5, 1, 0.6].map((b, j) => (
+                        <div key={j} className="w-0.5 bg-red-500 rounded-full transition-all duration-100"
+                          style={{ height: `${Math.max(20, (b * chatWaveLevel + b * 0.5) * 100)}%` }} />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            <div className="p-3 border-t bg-muted/10 space-y-2">
               {user ? (
-                <div className="flex gap-2">
-                  <Input
-                    value={chatInput}
-                    onChange={e => setChatInput(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendChat()}
-                    placeholder="رسالة..."
-                    className="flex-1 h-9 text-sm rounded-full"
-                    maxLength={200}
-                  />
-                  <Button size="sm" onClick={sendChat} disabled={!chatInput.trim()} className="h-9 w-9 p-0 rounded-full">
-                    <Send className="w-4 h-4" />
-                  </Button>
-                </div>
+                <>
+                  <div className="flex gap-1.5">
+                    <Input
+                      value={chatInput}
+                      onChange={e => setChatInput(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendChat()}
+                      placeholder="رسالة أو 🎤 اضغط مطولاً..."
+                      className="flex-1 h-9 text-sm rounded-full"
+                      maxLength={200}
+                      disabled={chatIsRecording || chatIsUploading}
+                    />
+                    {/* 🎤 Press & Hold Mic */}
+                    <button
+                      onMouseDown={handleChatMicPress}
+                      onMouseUp={handleChatMicRelease}
+                      onMouseLeave={handleChatMicRelease}
+                      onTouchStart={handleChatMicPress}
+                      onTouchEnd={handleChatMicRelease}
+                      onTouchCancel={handleChatMicRelease}
+                      disabled={chatIsUploading}
+                      className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 transition-all select-none touch-none ${
+                        chatIsRecording
+                          ? "bg-red-500 text-white scale-110 shadow-lg shadow-red-300"
+                          : "bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30"
+                      } disabled:opacity-50`}
+                      title="اضغط مطولاً للتسجيل الصوتي"
+                      data-testid="btn-stream-voice"
+                    >
+                      {chatIsRecording ? <span className="text-sm animate-pulse">🎙️</span> : <Mic className="w-4 h-4" />}
+                    </button>
+                    {/* Send Text */}
+                    <Button size="sm" onClick={sendChat} disabled={!chatInput.trim() || chatIsRecording} className="h-9 w-9 p-0 rounded-full">
+                      <Send className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  <p className="text-[9px] text-muted-foreground text-center">اضغط مطولاً على 🎤 للتسجيل مباشرة من تليفونك</p>
+                </>
               ) : (
                 <a href="/login">
                   <Button variant="outline" size="sm" className="w-full text-xs rounded-full">سجل دخول للمشاركة في الدردشة</Button>

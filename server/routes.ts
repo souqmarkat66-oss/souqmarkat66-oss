@@ -96,7 +96,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       io.to(`stream:${streamId}`).emit("viewer-count", count);
     });
 
-    socket.on("chat-message", (data: { streamId: string; userId: string; userName: string; message: string; isVoice?: boolean }) => {
+    socket.on("chat-message", (data: { streamId: string; userId: string; userName: string; message: string; isVoice?: boolean; voiceUrl?: string; isOwner?: boolean }) => {
       const msg = { ...data, timestamp: new Date().toISOString(), id: Date.now() };
       io.to(`stream:${data.streamId}`).emit("chat-message", msg);
       storage.createChatMessage({
