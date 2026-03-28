@@ -95,6 +95,8 @@ export default function CreateAd() {
   const [videoFormat, setVideoFormat] = useState<"vertical" | "landscape">("vertical");
   const [imageDuration, setImageDuration] = useState(4);
   const [useAiVoiceVideo, setUseAiVoiceVideo] = useState(false);
+  const [scriptTtsAudioUrl, setScriptTtsAudioUrl] = useState<string>("");
+  const [generatingScriptAudio, setGeneratingScriptAudio] = useState(false);
   const fileAdImagesRef = useRef<HTMLInputElement>(null);
   const tts = useTTS();
   const [ttsVoice, setTtsVoice] = useState<"nova" | "onyx">("nova");
@@ -500,6 +502,136 @@ export default function CreateAd() {
                               </p>
                             </div>
                           )}
+
+                          {/* ── زرار تحويل نص السكريبت → صوت AI → فيديو ── */}
+                          <div className="border-t pt-3 space-y-2">
+                            <p className="text-[11px] font-bold text-muted-foreground flex items-center gap-1.5">
+                              <span className="text-purple-500">✨</span> تحويل نص السكريبت لصوت احترافي
+                            </p>
+
+                            {/* Voice gender selector */}
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setTtsVoice("nova")}
+                                className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition-all ${ttsVoice === "nova" ? "bg-pink-500 text-white border-pink-500" : "bg-white dark:bg-gray-800 border-gray-200 text-gray-600"}`}
+                              >👩 صوت أنثى</button>
+                              <button
+                                type="button"
+                                onClick={() => setTtsVoice("onyx")}
+                                className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition-all ${ttsVoice === "onyx" ? "bg-blue-600 text-white border-blue-600" : "bg-white dark:bg-gray-800 border-gray-200 text-gray-600"}`}
+                              >👨 صوت ذكر</button>
+                            </div>
+
+                            {/* Generate script audio button */}
+                            <button
+                              type="button"
+                              disabled={generatingScriptAudio}
+                              onClick={async () => {
+                                // جمع كل نصوص المشاهد والتعليق الصوتي
+                                const parts: string[] = [];
+                                if (videoScript.voiceover) parts.push(videoScript.voiceover);
+                                if (videoScript.scenes) {
+                                  videoScript.scenes.forEach((sc: any) => {
+                                    if (sc.narration) parts.push(sc.narration);
+                                  });
+                                }
+                                if (videoScript.callToAction) {
+                                  const cta = typeof videoScript.callToAction === 'string'
+                                    ? videoScript.callToAction
+                                    : videoScript.callToAction?.text || videoScript.callToAction?.description || '';
+                                  if (cta) parts.push(cta);
+                                }
+                                const fullText = parts.join(". ");
+                                if (!fullText.trim()) {
+                                  toast({ variant: "destructive", title: "لا يوجد نص في السكريبت" });
+                                  return;
+                                }
+                                setGeneratingScriptAudio(true);
+                                try {
+                                  const res = await fetch("/api/ai/tts", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    credentials: "include",
+                                    body: JSON.stringify({ text: fullText, voice: ttsVoice }),
+                                  });
+                                  if (!res.ok) throw new Error((await res.json()).message);
+                                  const data = await res.json();
+                                  setScriptTtsAudioUrl(data.url);
+                                  toast({ title: "🎙 تم توليد الصوت من نص السكريبت!" });
+                                } catch (e: any) {
+                                  toast({ variant: "destructive", title: "فشل توليد الصوت", description: e.message });
+                                } finally { setGeneratingScriptAudio(false); }
+                              }}
+                              className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-gradient-to-r from-purple-500 to-violet-600 text-white text-xs font-bold hover:from-purple-600 hover:to-violet-700 disabled:opacity-60 transition-all"
+                              data-testid="btn-script-to-audio"
+                            >
+                              {generatingScriptAudio
+                                ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> جارٍ توليد الصوت من النص...</>
+                                : <><Volume2 className="w-3.5 h-3.5" /> حوّل نص السكريبت لصوت AI</>
+                              }
+                            </button>
+
+                            {/* Audio preview + use in video */}
+                            {scriptTtsAudioUrl && (
+                              <div className="bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-xl p-3 space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-purple-600 text-xs font-bold flex-1">🎵 الصوت جاهز — استمع أو استخدمه في الفيديو</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setScriptTtsAudioUrl("")}
+                                    className="w-5 h-5 rounded-full bg-purple-200 dark:bg-purple-800 flex items-center justify-center hover:bg-red-200"
+                                  ><X className="w-3 h-3 text-purple-600" /></button>
+                                </div>
+                                <audio controls src={scriptTtsAudioUrl} className="w-full h-8" style={{ height: 32 }} />
+                                <button
+                                  type="button"
+                                  disabled={adImageUrls.length === 0 || convertingAdToVideo}
+                                  onClick={async () => {
+                                    if (adImageUrls.length === 0) {
+                                      toast({ title: "⚠ ارفع صوراً أولاً من قسم الصور" });
+                                      return;
+                                    }
+                                    setConvertingAdToVideo(true);
+                                    try {
+                                      setConvertProgress("🎬 جارٍ إنتاج الفيديو السينمائي بصوت السكريبت...");
+                                      const r = await fetch('/api/ai/images-to-video', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        credentials: 'include',
+                                        body: JSON.stringify({
+                                          imageUrls: adImageUrls,
+                                          audioUrl: scriptTtsAudioUrl,
+                                          duration: imageDuration,
+                                          quality: videoQuality,
+                                          format: videoFormat,
+                                        }),
+                                      });
+                                      const d = await r.json();
+                                      if (!r.ok) throw new Error(d.message);
+                                      form.setValue("mediaUrl", d.url);
+                                      form.setValue("mediaType", "video");
+                                      setAdImageUrls([]);
+                                      setConvertProgress("");
+                                      toast({ title: `🎬 تم إنتاج الفيديو بصوت السكريبت! (${d.resolution || ""})`, className: "bg-purple-500 text-white border-none" });
+                                    } catch (e: any) {
+                                      setConvertProgress("");
+                                      toast({ variant: "destructive", title: "فشل إنتاج الفيديو", description: e.message });
+                                    } finally { setConvertingAdToVideo(false); }
+                                  }}
+                                  className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-purple-500 text-white text-xs font-bold hover:opacity-90 disabled:opacity-50 transition-all"
+                                  data-testid="btn-script-audio-to-video"
+                                >
+                                  {convertingAdToVideo
+                                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {convertProgress || "جارٍ الإنتاج..."}</>
+                                    : adImageUrls.length > 0
+                                      ? <><Film className="w-3.5 h-3.5" /> أنتج الفيديو بهذا الصوت ({adImageUrls.length} صورة)</>
+                                      : <><ImageIcon className="w-3.5 h-3.5" /> ارفع صوراً من الأسفل ثم اضغط هنا</>
+                                  }
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </motion.div>
                     )}
@@ -909,7 +1041,20 @@ export default function CreateAd() {
                       </div>
                     </div>
 
-                    {/* AI Voice option */}
+                    {/* Script audio ready banner */}
+                    {scriptTtsAudioUrl && (
+                      <div className="flex items-center gap-2 bg-purple-50 dark:bg-purple-950/30 border border-purple-300 dark:border-purple-700 rounded-xl px-3 py-2">
+                        <span className="text-purple-600 text-lg">🎙</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-purple-700 dark:text-purple-300">صوت السكريبت جاهز!</p>
+                          <p className="text-[10px] text-purple-500">سيُضاف تلقائياً للفيديو عند الإنتاج</p>
+                        </div>
+                        <audio controls src={scriptTtsAudioUrl} className="h-7 w-28 flex-shrink-0" />
+                      </div>
+                    )}
+
+                    {/* AI Voice option (from ad text) — only show when no script audio */}
+                    {!scriptTtsAudioUrl && (
                     <div
                       onClick={() => setUseAiVoiceVideo(!useAiVoiceVideo)}
                       className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-all ${
@@ -929,13 +1074,19 @@ export default function CreateAd() {
                         <div className={`w-4 h-4 rounded-full bg-white shadow transition-all ${useAiVoiceVideo ? "translate-x-4" : "translate-x-0"}`} />
                       </div>
                     </div>
+                    )}
 
                     {/* Summary + Convert button */}
-                    <div className="bg-orange-100 dark:bg-orange-900/20 rounded-xl p-2.5 text-[10px] text-orange-700 dark:text-orange-300 flex gap-3">
+                    <div className="bg-orange-100 dark:bg-orange-900/20 rounded-xl p-2.5 text-[10px] text-orange-700 dark:text-orange-300 flex flex-wrap gap-3">
                       <span>🎞 {adImageUrls.length} صورة</span>
                       <span>⏱ {adImageUrls.length * imageDuration}ث إجمالي</span>
-                      <span>📊 {videoQuality === "cinema" ? "4K" : videoQuality === "hd" ? "1080p" : "720p"}</span>
-                      {useAiVoiceVideo && <span>🎙 صوت AI</span>}
+                      <span>📊 {videoQuality === "cinema" ? "سينما" : videoQuality === "hd" ? "1080p HD" : "720p"}</span>
+                      {scriptTtsAudioUrl
+                        ? <span className="text-purple-600 font-bold">🎙 صوت السكريبت</span>
+                        : useAiVoiceVideo
+                          ? <span>🎙 صوت نص الإعلان</span>
+                          : <span>🔇 بدون صوت</span>
+                      }
                     </div>
 
                     {/* Progress during conversion */}
@@ -954,8 +1105,11 @@ export default function CreateAd() {
                         try {
                           let audioUrl: string | undefined;
 
-                          // Step 1: Generate AI voice if requested
-                          if (useAiVoiceVideo) {
+                          // الأولوية: صوت السكريبت > صوت نص الإعلان > بدون صوت
+                          if (scriptTtsAudioUrl) {
+                            audioUrl = scriptTtsAudioUrl;
+                            setConvertProgress("🎙 جارٍ دمج صوت السكريبت مع الفيديو...");
+                          } else if (useAiVoiceVideo) {
                             const title = form.getValues("title");
                             const desc = form.getValues("description");
                             const narration = [title, desc].filter(Boolean).join(". ");
@@ -974,8 +1128,8 @@ export default function CreateAd() {
                             }
                           }
 
-                          // Step 2: Convert images to video
-                          setConvertProgress(`🎬 جارٍ التحويل بجودة ${videoQuality === "cinema" ? "سينما" : videoQuality === "hd" ? "HD 1080p" : "720p"}...`);
+                          // إنتاج الفيديو السينمائي
+                          setConvertProgress(`🎬 جارٍ الإنتاج بجودة ${videoQuality === "cinema" ? "سينما" : videoQuality === "hd" ? "HD 1080p" : "720p"}...`);
                           const r = await fetch('/api/ai/images-to-video', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -996,7 +1150,8 @@ export default function CreateAd() {
                           form.setValue("mediaType", "video");
                           setAdImageUrls([]);
                           setConvertProgress("");
-                          toast({ title: `🎬 تم تحويل الصور لفيديو ${d.resolution || ""} بنجاح!`, className: "bg-orange-500 text-white border-none" });
+                          const withAudio = audioUrl ? " بصوت AI 🎙" : "";
+                          toast({ title: `🎬 تم إنتاج الفيديو ${d.resolution || ""}${withAudio} بنجاح!`, className: "bg-orange-500 text-white border-none" });
                         } catch (e: any) {
                           setConvertProgress("");
                           toast({ variant: "destructive", title: "فشل التحويل", description: e.message });
