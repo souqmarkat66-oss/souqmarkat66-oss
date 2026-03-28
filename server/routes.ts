@@ -372,6 +372,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const stream = await storage.getLiveStream(Number(req.params.id));
     if (!stream || stream.userId !== req.user.claims.sub) return res.status(403).json({ message: "Forbidden" });
     const updated = await storage.updateLiveStream(Number(req.params.id), { status: 'live', startedAt: new Date() });
+
+    // ── Notify all channel followers that the stream is live ──────────────
+    (async () => {
+      try {
+        const broadcasterName = req.user.claims?.first_name || "المذيع";
+        const streamLink = `/streams/${stream.id}`;
+        const notifTitle = `📡 ${broadcasterName} بدأ بثاً مباشراً!`;
+        const notifBody = stream.title ? `"${stream.title}" — شاهد الآن` : "انضم الآن للبث المباشر";
+        // Get all followers of this channel
+        if (stream.channelId) {
+          const followerRows = await db.execute(
+            sql`SELECT follower_id FROM follows WHERE channel_id = ${stream.channelId}`
+          );
+          const followerIds: string[] = (followerRows.rows as any[]).map((r: any) => r.follower_id);
+          for (const followerId of followerIds) {
+            if (followerId !== req.user.claims.sub) {
+              await createNotification(followerId, "system", notifTitle, notifBody, streamLink);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[Stream Notify Followers] Error:', e);
+      }
+    })();
+
     // AI Moderation — async, non-blocking
     (async () => {
       try {

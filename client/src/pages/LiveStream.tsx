@@ -82,6 +82,7 @@ export default function LiveStream() {
   const [selectedCamera, setSelectedCamera] = useState<string>("");
   const [selectedMic, setSelectedMic]       = useState<string>("");
   const [isFullscreen, setIsFullscreen]     = useState(false);
+  const [showSharePanel, setShowSharePanel] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const statsIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -216,6 +217,23 @@ export default function LiveStream() {
 
       socket.emit("broadcaster", id);
       await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" });
+
+      // Inform broadcaster that followers were notified
+      if (stream?.channelId) {
+        const chRes = await fetch(`/api/channels/${stream.channelId}`).catch(() => null);
+        if (chRes?.ok) {
+          const ch = await chRes.json();
+          const followerCount = ch?.subscriberCount || 0;
+          if (followerCount > 0) {
+            toast({
+              title: `🔔 تم إشعار ${followerCount} متابع`,
+              description: "تم إرسال إشعار للمتابعين بأنك بدأت البث المباشر",
+            });
+          } else {
+            toast({ title: "✅ البث مباشر الآن! شارك الرابط لتصل لجمهور أكبر 📡" });
+          }
+        }
+      }
 
       socket.on("watcher", async (watcherId: string) => {
         const pc = createPeer(socket, watcherId);
@@ -561,20 +579,67 @@ export default function LiveStream() {
                     <PhoneOff className="w-5 h-5" /> إنهاء البث
                   </button>
 
-                  {/* Share — social platforms */}
-                  <div onClick={e => e.stopPropagation()}>
-                    <ShareMenu
-                      url={window.location.href.replace("mode=broadcast", "")}
-                      title={`بث مباشر: ${stream?.title || "بث مباشر على سوق"}`}
-                      description={stream?.description || ""}
-                      variant="default"
-                      className="w-12 h-12 rounded-full bg-white/20 backdrop-blur text-white hover:bg-white/30 flex items-center justify-center transition p-0"
-                      data-testid="btn-broadcast-share"
-                    />
-                  </div>
+                  {/* Share Button — toggles share panel */}
+                  <button
+                    onClick={() => setShowSharePanel(v => !v)}
+                    className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg ${showSharePanel ? "bg-white text-gray-900 scale-110" : "bg-white/20 backdrop-blur text-white hover:bg-white/30"}`}
+                    title="شارك البث"
+                    data-testid="btn-broadcast-share"
+                  >
+                    <Share2 className="w-5 h-5" />
+                  </button>
                 </div>
               </div>
             )}
+
+            {/* ── Share Panel (slides up from bottom of video) ── */}
+            {showSharePanel && (() => {
+              const shareUrl = window.location.href.replace("?mode=broadcast", "").replace("&mode=broadcast", "");
+              const shareTitle = encodeURIComponent(stream?.title || "بث مباشر على سوق");
+              const shareUrlEnc = encodeURIComponent(shareUrl);
+              const platforms = [
+                { name: "واتساب", color: "bg-[#25D366] text-white", href: `https://api.whatsapp.com/send?text=${shareTitle}%20${shareUrlEnc}`, icon: "💬" },
+                { name: "فيسبوك", color: "bg-[#1877F2] text-white", href: `https://www.facebook.com/sharer/sharer.php?u=${shareUrlEnc}`, icon: "👥" },
+                { name: "تيليجرام", color: "bg-[#229ED9] text-white", href: `https://t.me/share/url?url=${shareUrlEnc}&text=${shareTitle}`, icon: "✈️" },
+                { name: "تويتر X", color: "bg-black text-white", href: `https://twitter.com/intent/tweet?url=${shareUrlEnc}&text=${shareTitle}`, icon: "𝕏" },
+              ];
+              return (
+                <div className="absolute bottom-0 inset-x-0 bg-black/90 backdrop-blur-md p-4 rounded-b-3xl z-30">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-white font-bold text-sm flex items-center gap-2">
+                      <Share2 className="w-4 h-4 text-red-400" /> شارك البث المباشر
+                    </p>
+                    <button onClick={() => setShowSharePanel(false)} className="text-white/60 hover:text-white transition-colors">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {/* Social Platforms */}
+                  <div className="grid grid-cols-4 gap-2 mb-3">
+                    {platforms.map(p => (
+                      <a key={p.name} href={p.href} target="_blank" rel="noopener noreferrer"
+                        onClick={() => setShowSharePanel(false)}
+                        className={`${p.color} flex flex-col items-center gap-1.5 rounded-xl py-2.5 px-1 text-center transition-opacity hover:opacity-90`}
+                      >
+                        <span className="text-xl leading-none">{p.icon}</span>
+                        <span className="text-[10px] font-semibold">{p.name}</span>
+                      </a>
+                    ))}
+                  </div>
+                  {/* Copyable URL */}
+                  <div className="flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
+                    <span className="text-white/70 text-xs truncate flex-1 font-mono">{shareUrl}</span>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(shareUrl); toast({ title: "✅ تم نسخ رابط البث!" }); setShowSharePanel(false); }}
+                      className="bg-primary text-white text-xs px-3 py-1.5 rounded-lg font-bold whitespace-nowrap hover:bg-primary/90 transition-colors"
+                      data-testid="btn-copy-stream-link"
+                    >نسخ الرابط</button>
+                  </div>
+                  <p className="text-white/40 text-[10px] text-center mt-2">
+                    سيصل إشعار لكل متابعيك تلقائياً عند بدء البث 🔔
+                  </p>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Stream Info */}
