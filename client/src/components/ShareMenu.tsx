@@ -82,88 +82,97 @@ export function ShareMenu({
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant={variant}
-          size={size}
-          className={`gap-1.5 rounded-full ${className}`}
-          data-testid={testId}
-          onClick={e => { e.preventDefault(); e.stopPropagation(); }}
+    /* wrapper div يوقف انتشار الضغطة للكارد من غير ما يأثر على الـ Popover */
+    <div
+      onClick={e => { e.preventDefault(); e.stopPropagation(); }}
+      className="inline-flex"
+    >
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant={variant}
+            size={size}
+            className={`gap-1.5 rounded-full ${className}`}
+            data-testid={testId}
+          >
+            <Share2 className="w-4 h-4" />
+            {label && <span className="text-sm">{label}</span>}
+          </Button>
+        </PopoverTrigger>
+
+        <PopoverContent
+          className="w-72 p-3 rounded-2xl shadow-xl border border-border/50 z-50"
+          align="end"
+          sideOffset={6}
+          onClick={e => e.stopPropagation()}
         >
-          <Share2 className="w-4 h-4" />
-          {label && <span className="text-sm">{label}</span>}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        className="w-72 p-3 rounded-2xl shadow-xl border border-border/50"
-        align="end"
-        sideOffset={6}
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Header */}
-        <p className="text-sm font-bold text-foreground mb-1 flex items-center gap-1.5">
-          <Share2 className="w-4 h-4 text-primary" /> شارك الإعلان
-        </p>
-        {/* Truncated URL */}
-        <div className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-2 mb-3">
-          <ExternalLink className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-          <span className="text-xs text-muted-foreground truncate flex-1">{fullUrl}</span>
+          {/* Header */}
+          <p className="text-sm font-bold text-foreground mb-1 flex items-center gap-1.5">
+            <Share2 className="w-4 h-4 text-primary" />
+            شارك على
+          </p>
+
+          {/* Platforms grid */}
+          <div className="grid grid-cols-4 gap-2 mb-3">
+            {platforms.map(p => (
+              <a
+                key={p.name}
+                href={p.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setOpen(false)}
+                className={`flex flex-col items-center gap-1.5 rounded-xl p-2.5 transition-colors cursor-pointer ${p.color}`}
+                data-testid={`btn-share-${p.name}`}
+              >
+                {p.icon}
+                <span className="text-[10px] font-semibold leading-none text-center">{p.name}</span>
+              </a>
+            ))}
+          </div>
+
+          {/* URL display + copy */}
+          <div className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-2 mb-2">
+            <ExternalLink className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <span className="text-xs text-muted-foreground truncate flex-1">{fullUrl}</span>
+            <button
+              onClick={copyLink}
+              className="shrink-0 text-primary hover:text-primary/80 transition-colors"
+              title="نسخ الرابط"
+              data-testid="btn-copy-link"
+            >
+              {copied
+                ? <Check className="w-4 h-4 text-green-500" />
+                : <Copy className="w-4 h-4" />}
+            </button>
+          </div>
+
+          {/* Copy full button */}
           <button
             onClick={copyLink}
-            className="shrink-0 text-primary hover:text-primary/80 transition-colors"
-            title="نسخ الرابط"
-            data-testid="btn-copy-link"
+            className={`w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold border transition-all ${
+              copied
+                ? "bg-green-500 text-white border-green-500"
+                : "bg-primary text-primary-foreground hover:bg-primary/90 border-primary"
+            }`}
+            data-testid="btn-copy-link-full"
           >
             {copied
-              ? <Check className="w-4 h-4 text-green-500" />
-              : <Copy className="w-4 h-4" />
-            }
+              ? <><Check className="w-4 h-4" /> تم النسخ!</>
+              : <><Copy className="w-4 h-4" /> نسخ الرابط</>}
           </button>
-        </div>
 
-        {/* Platforms grid */}
-        <div className="grid grid-cols-4 gap-1 mb-3">
-          {platforms.map(p => (
-            <a
-              key={p.name}
-              href={p.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setOpen(false)}
-              className={`flex flex-col items-center gap-1 rounded-xl p-2 transition-colors cursor-pointer ${p.color}`}
-              data-testid={`btn-share-${p.name}`}
+          {/* Native share (mobile only) */}
+          {typeof navigator !== "undefined" && "share" in navigator && (
+            <button
+              onClick={nativeShare}
+              className="mt-2 w-full flex items-center justify-center gap-2 rounded-xl py-2 text-sm font-medium border border-border hover:bg-muted/50 transition-all"
+              data-testid="btn-native-share"
             >
-              {p.icon}
-              <span className="text-[10px] font-medium leading-none">{p.name}</span>
-            </a>
-          ))}
-        </div>
-
-        {/* Copy full button */}
-        <button
-          onClick={copyLink}
-          className={`w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold border transition-all ${
-            copied
-              ? "bg-green-500 text-white border-green-500"
-              : "bg-primary text-primary-foreground hover:bg-primary/90 border-primary"
-          }`}
-          data-testid="btn-copy-link-full"
-        >
-          {copied ? <><Check className="w-4 h-4" /> تم النسخ!</> : <><Copy className="w-4 h-4" /> نسخ الرابط</>}
-        </button>
-
-        {/* Native share (mobile) */}
-        {typeof navigator !== "undefined" && 'share' in navigator && (
-          <button
-            onClick={nativeShare}
-            className="mt-2 w-full flex items-center justify-center gap-2 rounded-xl py-2 text-sm font-medium border border-border hover:bg-muted/50 transition-all"
-            data-testid="btn-native-share"
-          >
-            <Share2 className="w-4 h-4" /> مشاركة عبر التطبيقات
-          </button>
-        )}
-      </PopoverContent>
-    </Popover>
+              <Share2 className="w-4 h-4" /> مشاركة عبر التطبيقات
+            </button>
+          )}
+        </PopoverContent>
+      </Popover>
+    </div>
   );
 }

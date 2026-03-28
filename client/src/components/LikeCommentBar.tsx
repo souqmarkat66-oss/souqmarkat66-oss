@@ -118,41 +118,54 @@ export function LikeCommentBar({ targetType, targetId, initialLikes = 0, showCom
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       chunksRef.current = [];
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+
+      // كشف أفضل نوع صوت مدعوم في المتصفح
+      const mimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+      const mimeType = mimeTypes.find(m => MediaRecorder.isTypeSupported(m)) || '';
+      const ext = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
       recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       recorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
         if (timerRef.current) clearInterval(timerRef.current);
         setRecordingSeconds(0);
 
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const finalType = recorder.mimeType || 'audio/webm';
+        const blob = new Blob(chunksRef.current, { type: finalType });
+
         if (blob.size < 100) {
           toast({ variant: "destructive", title: "التسجيل قصير جداً" });
           return;
         }
 
-        // Upload audio file
+        // رفع ملف الصوت
         const formData = new FormData();
-        formData.append("file", blob, `voice-${Date.now()}.webm`);
+        formData.append("file", blob, `voice-${Date.now()}.${ext}`);
         try {
           const res = await fetch("/api/upload", { method: "POST", body: formData, credentials: "include" });
+          if (!res.ok) throw new Error(`فشل الرفع: ${res.status}`);
           const data = await res.json();
           if (!data.url) throw new Error("لم يتم رفع الصوت");
-          // Save as voice comment with audio URL
           commentMutation.mutate({ content: "🎤 تعليق صوتي", isVoiceComment: true, voiceText: data.url });
+          toast({ title: "✅ تم حفظ التعليق الصوتي!" });
         } catch (err: any) {
-          toast({ variant: "destructive", title: "فشل رفع الصوت", description: err.message });
+          // احتياطي: حفظه كتعليق نصي
+          commentMutation.mutate({ content: "🎤 تعليق صوتي" });
+          toast({ title: "تم حفظ التعليق (بدون صوت)" });
         }
       };
       recorder.start(200);
       mediaRecorderRef.current = recorder;
       setIsRecording(true);
-
-      // Timer counter
       setRecordingSeconds(0);
       timerRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000);
-    } catch {
-      toast({ variant: "destructive", title: "لا يمكن الوصول للميكروفون" });
+    } catch (err: any) {
+      if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
+        toast({ variant: "destructive", title: "❌ الإذن مرفوض", description: "اسمح للمتصفح بالوصول للميكروفون من الإعدادات" });
+      } else {
+        toast({ variant: "destructive", title: "لا يمكن الوصول للميكروفون", description: err?.message });
+      }
     }
   };
 
