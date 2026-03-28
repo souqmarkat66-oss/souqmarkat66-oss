@@ -538,7 +538,7 @@ export default function CreateAd() {
                 <Select onValueChange={field.onChange} defaultValue={field.value}>
                   <FormControl><SelectTrigger data-testid="select-language"><SelectValue /></SelectTrigger></FormControl>
                   <SelectContent>
-                    <SelectItem value="ar">🇸🇦 العربية</SelectItem>
+                    <SelectItem value="ar">🇪🇬 العربية</SelectItem>
                     <SelectItem value="en">🇺🇸 English</SelectItem>
                   </SelectContent>
                 </Select>

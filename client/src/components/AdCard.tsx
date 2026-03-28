@@ -176,7 +176,7 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
           {/* Language badge */}
           <div className="absolute top-3 end-3 flex gap-2">
             <Badge variant="secondary" className="bg-background/90 backdrop-blur-md text-foreground shadow-sm px-3 py-1 rounded-full border-none font-medium text-xs">
-              {ad.language === 'ar' ? '🇸🇦 عربي' : '🇺🇸 EN'}
+              {ad.language === 'ar' ? '🇪🇬 عربي' : '🇺🇸 EN'}
             </Badge>
           </div>
 

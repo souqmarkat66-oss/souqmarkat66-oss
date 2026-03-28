@@ -232,7 +232,7 @@ export default function Campaigns() {
                             else form.setValue("targetLanguages", current.filter(l => l !== lang));
                           }}
                         />
-                        {lang === 'ar' ? '🇸🇦 عربي' : '🇺🇸 إنجليزي'}
+                        {lang === 'ar' ? '🇪🇬 عربي' : '🇺🇸 إنجليزي'}
                       </label>
                     ))}
                   </div>

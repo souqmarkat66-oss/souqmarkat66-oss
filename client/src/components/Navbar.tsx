@@ -110,7 +110,7 @@ export function Navbar() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setLanguage('ar')} className="gap-2">🇸🇦 العربية</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setLanguage('ar')} className="gap-2">🇪🇬 العربية</DropdownMenuItem>
               <DropdownMenuItem onClick={() => setLanguage('en')} className="gap-2">🇺🇸 English</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

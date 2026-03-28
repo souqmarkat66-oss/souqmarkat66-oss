@@ -638,7 +638,7 @@ export default function AdDetails() {
               <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                 <div className="flex items-center gap-2">
                   <Badge variant="outline" className="border-primary/20 text-primary bg-primary/5">
-                    {ad.language === 'ar' ? '🇸🇦 عربي' : '🇺🇸 English'}
+                    {ad.language === 'ar' ? '🇪🇬 عربي' : '🇺🇸 English'}
                   </Badge>
                   {ad.targetRegion && (
                     <Badge variant="secondary" className="text-xs">📍 {ad.targetRegion}</Badge>
