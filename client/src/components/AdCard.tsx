@@ -5,7 +5,7 @@ import { useLanguage } from "./LanguageProvider";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square, Heart } from "lucide-react";
+import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square, Heart, Star } from "lucide-react";
 import { format } from "date-fns";
 import { ar, enUS } from "date-fns/locale";
 import { useAuth } from "@/hooks/use-auth";
@@ -16,6 +16,85 @@ import { motion } from "framer-motion";
 import { LikeCommentBar } from "./LikeCommentBar";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+
+// ── Quick Rating Component (inline, no navigation needed) ─────────────────
+function QuickRating({
+  adId, ratingData, userId, onRated,
+}: {
+  adId: number;
+  ratingData?: { avg: number; count: number };
+  userId?: string;
+  onRated: () => void;
+}) {
+  const { toast } = useToast();
+  const [hovered, setHovered] = useState(0);
+  const [myRating, setMyRating] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const handleRate = async (star: number) => {
+    if (!userId) { window.location.href = "/api/login"; return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/ratings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ targetType: "ad", targetId: adId, rating: star }),
+      });
+      if (res.ok) {
+        setMyRating(star);
+        setDone(true);
+        onRated();
+        toast({ title: `⭐ تم تقييمك بـ ${star} نجوم!` });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "فشل التقييم" });
+    } finally { setSubmitting(false); }
+  };
+
+  const displayAvg = ratingData?.avg ?? 0;
+  const displayCount = ratingData?.count ?? 0;
+
+  return (
+    <div className="flex items-center gap-1.5 mt-2" onClick={e => { e.preventDefault(); e.stopPropagation(); }}>
+      {/* Stars */}
+      {[1, 2, 3, 4, 5].map(i => {
+        const isFilled = userId && !done ? (hovered || myRating) >= i : i <= Math.round(displayAvg);
+        return (
+          <button
+            key={i}
+            disabled={submitting || done}
+            onClick={() => handleRate(i)}
+            onMouseEnter={() => !done && setHovered(i)}
+            onMouseLeave={() => !done && setHovered(0)}
+            className="focus:outline-none disabled:cursor-default transition-transform hover:scale-110"
+            data-testid={`btn-rate-${adId}-${i}`}
+          >
+            <Star
+              className={`w-3.5 h-3.5 transition-colors ${
+                isFilled ? "fill-yellow-400 text-yellow-400" : "text-gray-200 dark:text-gray-700"
+              }`}
+            />
+          </button>
+        );
+      })}
+
+      {/* Avg + count OR prompt */}
+      {displayCount > 0 ? (
+        <>
+          <span className="text-xs font-bold text-yellow-600 dark:text-yellow-400">{displayAvg.toFixed(1)}</span>
+          <span className="text-xs text-muted-foreground">({displayCount})</span>
+        </>
+      ) : (
+        <span className="text-[10px] text-muted-foreground/60 ms-0.5">
+          {done ? "شكراً!" : userId ? "قيّم الإعلان" : "لا يوجد تقييم"}
+        </span>
+      )}
+      {done && <span className="text-[10px] text-green-600 font-bold">✓ تم</span>}
+    </div>
+  );
+}
 
 export function AdCard({ ad, index }: { ad: Ad; index: number }) {
   const { t, language } = useLanguage();
@@ -42,6 +121,12 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
       qc.invalidateQueries({ queryKey: ["/api/favorites"] });
       toast({ title: data.favorited ? "❤️ أُضيف للمفضلة!" : "تم الإزالة من المفضلة" });
     },
+  });
+
+  const { data: ratingData } = useQuery<{ avg: number; count: number }>({
+    queryKey: ["/api/ratings/ad", ad.id],
+    queryFn: () => fetch(`/api/ratings/ad/${ad.id}`).then(r => r.json()),
+    staleTime: 60_000,
   });
 
   const isOwner = user?.id === ad.userId;
@@ -227,6 +312,9 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
               </span>
             </div>
           )}
+
+          {/* ⭐ Star Rating — Quick Rate from Card */}
+          <QuickRating adId={ad.id} ratingData={ratingData} userId={user?.id} onRated={() => qc.invalidateQueries({ queryKey: ["/api/ratings/ad", ad.id] })} />
 
           <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/40">
             <div className="flex items-center text-xs text-muted-foreground/80 gap-1.5">

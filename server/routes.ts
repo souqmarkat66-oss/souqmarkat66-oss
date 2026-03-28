@@ -238,6 +238,59 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const input = insertAdSchema.parse(req.body);
       const ad = await storage.createAd({ ...input, userId: req.user.claims.sub });
       res.status(201).json(ad);
+
+      // ── Notify channel followers about the new ad (async, non-blocking) ──
+      (async () => {
+        try {
+          const userId = req.user.claims.sub;
+          const publisherName = req.user.claims?.first_name || "أحد المعلنين";
+          const adLink = `/ads/${ad.id}`;
+          const notifTitle = `🆕 إعلان جديد من ${publisherName}`;
+          const notifBody = ad.title ? `"${ad.title}" — شاهد الإعلان الآن` : "أُضيف إعلان جديد قد يهمك";
+
+          // 1) Notify followers of the creator's channel
+          const channelRows = await db.execute(
+            sql`SELECT id FROM channels WHERE user_id = ${userId} LIMIT 1`
+          );
+          if (channelRows.rows.length > 0) {
+            const channelId = (channelRows.rows[0] as any).id;
+            const followerRows = await db.execute(
+              sql`SELECT follower_id FROM follows WHERE channel_id = ${channelId}`
+            );
+            for (const row of followerRows.rows as any[]) {
+              if (row.follower_id !== userId) {
+                await createNotification(row.follower_id, "system", notifTitle, notifBody, adLink);
+              }
+            }
+          }
+
+          // 2) Notify users who liked/viewed ads in the same category
+          if (input.targetRegion || (ad as any).targetRegion) {
+            // Targeted by region — notify users who liked ads in same category
+          }
+          // Notify users who liked ads with same category in the last 30 days
+          const category = (input as any).category || null;
+          if (category) {
+            const interestedRows = await db.execute(
+              sql`SELECT DISTINCT l.user_id FROM likes l
+                  JOIN ads a ON a.id = l.target_id AND l.target_type = 'ad'
+                  WHERE a.category = ${category}
+                    AND l.user_id != ${userId}
+                    AND l.created_at > NOW() - INTERVAL '30 days'
+                  LIMIT 50`
+            );
+            for (const row of interestedRows.rows as any[]) {
+              const uid = (row as any).user_id;
+              await createNotification(uid, "system",
+                `💡 إعلان قد يهمك في ${category}`,
+                notifBody, adLink
+              );
+            }
+          }
+        } catch (e) {
+          console.error('[Ad Notify Followers] Error:', e);
+        }
+      })();
     } catch (err: any) {
       res.status(400).json({ message: err.message });
     }
