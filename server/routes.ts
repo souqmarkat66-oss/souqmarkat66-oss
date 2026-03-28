@@ -313,6 +313,82 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ================================================================
+  // AD BOOST NOTIFY — Owner notifies followers & interested users
+  // Rate limited: max once every 24h per ad
+  // ================================================================
+  app.post("/api/ads/:id/boost-notify", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const adId = parseInt(req.params.id);
+    try {
+      const ad = await storage.getAd(adId);
+      if (!ad) return res.status(404).json({ message: "الإعلان غير موجود" });
+      if (ad.userId !== userId) return res.status(403).json({ message: "غير مصرح" });
+
+      // Rate limit: check last boost time
+      const lastBoost = await db.execute(
+        sql`SELECT created_at FROM notifications
+            WHERE link = ${`/ads/${adId}`} AND title LIKE '%🚀%'
+            ORDER BY created_at DESC LIMIT 1`
+      );
+      if (lastBoost.rows.length > 0) {
+        const last = new Date((lastBoost.rows[0] as any).created_at);
+        const hoursAgo = (Date.now() - last.getTime()) / 3_600_000;
+        if (hoursAgo < 24) {
+          const hoursLeft = Math.ceil(24 - hoursAgo);
+          return res.status(429).json({ message: `يمكنك تعزيز الإعلان مرة كل 24 ساعة. الوقت المتبقي: ${hoursLeft} ساعة` });
+        }
+      }
+
+      const publisherName = req.user.claims?.first_name || "معلن";
+      const adLink = `/ads/${adId}`;
+      const notifTitle = `🚀 ${publisherName} يعزز إعلانه!`;
+      const notifBody = ad.title ? `"${ad.title}" — لا تفوّته!` : "عرض مميز قد يهمك";
+      let notifiedCount = 0;
+
+      // 1) Followers of the creator's channel
+      const channelRows = await db.execute(
+        sql`SELECT id FROM channels WHERE user_id = ${userId} LIMIT 1`
+      );
+      if (channelRows.rows.length > 0) {
+        const channelId = (channelRows.rows[0] as any).id;
+        const followerRows = await db.execute(
+          sql`SELECT follower_id FROM follows WHERE channel_id = ${channelId}`
+        );
+        for (const row of followerRows.rows as any[]) {
+          const fid = (row as any).follower_id;
+          if (fid !== userId) {
+            await createNotification(fid, "system", notifTitle, notifBody, adLink);
+            notifiedCount++;
+          }
+        }
+      }
+
+      // 2) Users who liked similar ads (by category) in last 60 days
+      const category = (ad as any).category || null;
+      if (category) {
+        const interestedRows = await db.execute(
+          sql`SELECT DISTINCT l.user_id FROM likes l
+              JOIN ads a ON a.id = l.target_id AND l.target_type = 'ad'
+              WHERE a.category = ${category}
+                AND l.user_id != ${userId}
+                AND l.created_at > NOW() - INTERVAL '60 days'
+              LIMIT 100`
+        );
+        for (const row of interestedRows.rows as any[]) {
+          const uid = (row as any).user_id;
+          await createNotification(uid, "system",
+            `💡 عرض في ${category} قد يهمك`, notifBody, adLink);
+          notifiedCount++;
+        }
+      }
+
+      res.json({ ok: true, notifiedCount });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ================================================================
   // CHANNELS ROUTES (isolated)
   // ================================================================
   app.get("/api/channels", async (req, res) => {

@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ArrowLeft, Calendar, Share2, PhoneCall, CreditCard, Banknote, MessageCircle, ExternalLink, CheckCircle, Volume2, VolumeX, Play, ChevronLeft, ChevronRight, Smartphone, Download, AlertTriangle, User, Heart, QrCode, Star, Tag, RefreshCw } from "lucide-react";
+import { ArrowLeft, Calendar, Share2, PhoneCall, CreditCard, Banknote, MessageCircle, ExternalLink, CheckCircle, Volume2, VolumeX, Play, ChevronLeft, ChevronRight, Smartphone, Download, AlertTriangle, User, Heart, QrCode, Star, Tag, RefreshCw, Zap, Loader2 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
@@ -527,6 +527,8 @@ export default function AdDetails() {
   const [myRating, setMyRating] = useState(0);
   const [myReview, setMyReview] = useState("");
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  const [boosting, setBoosting]   = useState(false);
+  const [boosted, setBoosted]     = useState(false);
 
   // Increment view count on page load
   useEffect(() => {
@@ -566,6 +568,30 @@ export default function AdDetails() {
       toast({ title: data.favorited ? "❤️ أُضيف للمفضلة!" : "تم الإزالة من المفضلة" });
     },
   });
+
+  const handleBoost = async () => {
+    if (!user) { window.location.href = "/api/login"; return; }
+    setBoosting(true);
+    try {
+      const res = await fetch(`/api/ads/${id}/boost-notify`, { method: "POST", credentials: "include" });
+      const data = await res.json();
+      if (res.status === 429) {
+        toast({ variant: "destructive", title: "⏳ حد التعزيز", description: data.message });
+      } else if (res.ok) {
+        setBoosted(true);
+        toast({
+          title: "🚀 تم التعزيز!",
+          description: data.notifiedCount > 0
+            ? `وصل إشعار لـ ${data.notifiedCount} متابع ومهتم — ستزيد مشاهداتك قريباً`
+            : "سيصل إشعار لمتابعيك والمهتمين بالفئة",
+        });
+      } else {
+        toast({ variant: "destructive", title: data.message || "فشل التعزيز" });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "خطأ في الاتصال" });
+    } finally { setBoosting(false); }
+  };
 
   const ratingMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/ratings", { targetType: "ad", targetId: id, rating: myRating, review: myReview }),
@@ -675,6 +701,26 @@ export default function AdDetails() {
                     label="مشاركة"
                     data-testid="btn-share-ad"
                   />
+                  {/* 🚀 Boost — Ad Owner Only */}
+                  {user?.id === ad.userId && (
+                    <button
+                      onClick={handleBoost}
+                      disabled={boosting || boosted}
+                      className={`flex items-center gap-1.5 h-7 px-3 rounded-full text-xs font-bold border transition-all ${
+                        boosted
+                          ? "bg-green-500 text-white border-green-500"
+                          : "bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 border-orange-300 dark:border-orange-700"
+                      } disabled:opacity-60`}
+                      data-testid="btn-boost-ad-details"
+                    >
+                      {boosting
+                        ? <><Loader2 className="w-3 h-3 animate-spin" /> جارٍ...</>
+                        : boosted
+                        ? <>✓ أُرسل</>
+                        : <><Zap className="w-3 h-3" /> عزّز 🚀</>
+                      }
+                    </button>
+                  )}
                   {/* QR Code */}
                   <Button variant="outline" size="sm" className="gap-1.5 h-7 rounded-full text-xs" onClick={() => setQrOpen(true)}>
                     <QrCode className="w-3 h-3" /> QR

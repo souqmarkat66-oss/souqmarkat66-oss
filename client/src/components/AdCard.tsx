@@ -5,7 +5,7 @@ import { useLanguage } from "./LanguageProvider";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square, Heart, Star } from "lucide-react";
+import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square, Heart, Star, Zap } from "lucide-react";
 import { format } from "date-fns";
 import { ar, enUS } from "date-fns/locale";
 import { useAuth } from "@/hooks/use-auth";
@@ -16,6 +16,7 @@ import { motion } from "framer-motion";
 import { LikeCommentBar } from "./LikeCommentBar";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { ShareMenu } from "./ShareMenu";
 
 // ── Quick Rating Component (inline, no navigation needed) ─────────────────
 function QuickRating({
@@ -107,6 +108,8 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
   const [muted, setMuted] = useState(true);
   const tts = useTTS();
   const [cardVoice, setCardVoice] = useState<"nova" | "onyx">("nova");
+  const [boosting, setBoosting]   = useState(false);
+  const [boosted, setBoosted]     = useState(false);
 
   const { data: favData } = useQuery<{ favorited: boolean }>({
     queryKey: ["/api/favorites", ad.id, "check"],
@@ -175,6 +178,33 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
         onSuccess: () => toast({ title: "تم الحذف" }),
       });
     }
+  };
+
+  const handleBoost = async (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!user) { window.location.href = "/api/login"; return; }
+    setBoosting(true);
+    try {
+      const res = await fetch(`/api/ads/${ad.id}/boost-notify`, {
+        method: "POST", credentials: "include",
+      });
+      const data = await res.json();
+      if (res.status === 429) {
+        toast({ variant: "destructive", title: "⏳ حد التعزيز", description: data.message });
+      } else if (res.ok) {
+        setBoosted(true);
+        toast({
+          title: `🚀 تم إرسال الإشعار!`,
+          description: data.notifiedCount > 0
+            ? `وصل لـ ${data.notifiedCount} متابع ومهتم`
+            : "سيصل لمتابعيك والمهتمين",
+        });
+      } else {
+        toast({ variant: "destructive", title: data.message || "فشل التعزيز" });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "خطأ في الاتصال" });
+    } finally { setBoosting(false); }
   };
 
   const hasMedia = ad.mediaUrl && ad.mediaUrl.trim() !== "";
@@ -333,6 +363,42 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
           </div>
 
           <LikeCommentBar targetType="ad" targetId={ad.id} initialLikes={ad.likesCount || 0} ownerId={ad.userId} />
+
+          {/* ── Share & Boost Row ────────────────────────────── */}
+          <div className="flex items-center gap-2 mt-2" onClick={e => { e.preventDefault(); e.stopPropagation(); }}>
+            {/* Share on social platforms */}
+            <ShareMenu
+              url={`/ads/${ad.id}`}
+              title={ad.title}
+              description={ad.description || ""}
+              variant="outline"
+              size="sm"
+              label="شير"
+              className="flex-1 justify-center text-xs"
+              data-testid={`btn-share-ad-${ad.id}`}
+            />
+
+            {/* 🚀 Boost — Ad Owner Only */}
+            {isOwner && (
+              <button
+                onClick={handleBoost}
+                disabled={boosting || boosted}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex-1 justify-center ${
+                  boosted
+                    ? "bg-green-500 text-white border-green-500"
+                    : "bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 border-orange-300 dark:border-orange-700"
+                } disabled:opacity-60`}
+                data-testid={`btn-boost-ad-${ad.id}`}
+              >
+                {boosting
+                  ? <><Loader2 className="w-3 h-3 animate-spin" /> جارٍ...</>
+                  : boosted
+                  ? <>✓ أُرسل الإشعار</>
+                  : <><Zap className="w-3 h-3" /> عزّز الإعلان 🚀</>
+                }
+              </button>
+            )}
+          </div>
 
           {/* 🔊 Listen (TTS) button */}
           {user && (
