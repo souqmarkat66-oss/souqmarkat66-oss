@@ -27,6 +27,7 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
   const tts = useTTS();
+  const [cardVoice, setCardVoice] = useState<"nova" | "onyx">("nova");
 
   const { data: favData } = useQuery<{ favorited: boolean }>({
     queryKey: ["/api/favorites", ad.id, "check"],
@@ -247,31 +248,46 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
 
           {/* 🔊 Listen (TTS) button */}
           {user && (
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (tts.playing) { tts.stop(); return; }
-                const text = `${ad.title}. ${ad.description || ''}`;
-                tts.generate(text, "nova", true).catch(() =>
-                  toast({ variant: "destructive", title: "فشل تشغيل الصوت", description: "تأكد من اتصالك بالإنترنت" })
-                );
-              }}
-              disabled={tts.loading}
-              className={`mt-2 w-full flex items-center justify-center gap-2 rounded-full py-2 text-sm font-bold border transition-all ${
-                tts.playing
-                  ? 'bg-red-50 dark:bg-red-900/20 border-red-200 text-red-600 hover:bg-red-100'
-                  : 'bg-primary/5 border-primary/20 text-primary hover:bg-primary/10'
-              }`}
-              data-testid={`btn-listen-ad-${ad.id}`}
-            >
-              {tts.loading
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري التوليد...</>
-                : tts.playing
-                ? <><Square className="w-3.5 h-3.5 fill-current" /> إيقاف</>
-                : <><Headphones className="w-4 h-4" /> استمع بالعربي 🎙</>
-              }
-            </button>
+            <div className="mt-2 space-y-1.5" onClick={e => { e.preventDefault(); e.stopPropagation(); }}>
+              {/* Gender toggle */}
+              {!tts.playing && !tts.loading && (
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => setCardVoice("nova")}
+                    className={`flex-1 text-xs py-1 rounded-full border font-bold transition-all ${cardVoice === "nova" ? "bg-pink-500 text-white border-pink-500" : "border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400"}`}
+                    data-testid={`btn-female-${ad.id}`}
+                  >👩 أنثى</button>
+                  <button
+                    onClick={() => setCardVoice("onyx")}
+                    className={`flex-1 text-xs py-1 rounded-full border font-bold transition-all ${cardVoice === "onyx" ? "bg-blue-600 text-white border-blue-600" : "border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400"}`}
+                    data-testid={`btn-male-${ad.id}`}
+                  >👨 ذكر</button>
+                </div>
+              )}
+              <button
+                onClick={() => {
+                  if (tts.playing) { tts.stop(); return; }
+                  const text = `${ad.title}. ${ad.description || ''}`;
+                  tts.generate(text, cardVoice, true).catch(() =>
+                    toast({ variant: "destructive", title: "فشل تشغيل الصوت", description: "تأكد من اتصالك بالإنترنت" })
+                  );
+                }}
+                disabled={tts.loading}
+                className={`w-full flex items-center justify-center gap-2 rounded-full py-2 text-sm font-bold border transition-all ${
+                  tts.playing
+                    ? 'bg-red-50 dark:bg-red-900/20 border-red-200 text-red-600 hover:bg-red-100'
+                    : 'bg-primary/5 border-primary/20 text-primary hover:bg-primary/10'
+                }`}
+                data-testid={`btn-listen-ad-${ad.id}`}
+              >
+                {tts.loading
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري التوليد...</>
+                  : tts.playing
+                  ? <><Square className="w-3.5 h-3.5 fill-current" /> إيقاف</>
+                  : <><Headphones className="w-4 h-4" /> استمع بالعربي 🎙</>
+                }
+              </button>
+            </div>
           )}
 
           {/* WhatsApp CTA */}

@@ -511,6 +511,7 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const tts = useTTS();
+  const [ttsVoice, setTtsVoice] = useState<"nova" | "onyx">("nova");
 
   // Computed final videoUrl value to store
   const finalVideoUrl = mediaTypeTab === 'image'
@@ -822,6 +823,27 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
                 <p className="text-xs font-bold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
                   🎙 توليد صوت بالذكاء الاصطناعي
                 </p>
+                {/* Voice gender selector */}
+                {!tts.audioUrl && (
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTtsVoice("nova")}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold border transition-all ${ttsVoice === "nova" ? "bg-pink-500 text-white border-pink-500" : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700"}`}
+                      data-testid="btn-voice-female"
+                    >
+                      👩 صوت أنثى
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTtsVoice("onyx")}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold border transition-all ${ttsVoice === "onyx" ? "bg-blue-600 text-white border-blue-600" : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700"}`}
+                      data-testid="btn-voice-male"
+                    >
+                      👨 صوت ذكر
+                    </button>
+                  </div>
+                )}
                 {tts.audioUrl ? (
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-2 bg-green-500/10 rounded-lg p-2">
@@ -845,7 +867,7 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
                         ? `${title}. ${description}`
                         : title;
                       try {
-                        await tts.generate(text, "nova", true);
+                        await tts.generate(text, ttsVoice, true);
                       } catch {
                         toast({ variant: "destructive", title: "فشل توليد الصوت", description: "تأكد من اتصالك" });
                       }
@@ -855,7 +877,7 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
                   >
                     {tts.loading
                       ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري التوليد بالذكاء الاصطناعي...</>
-                      : <>🎤 حوّل النص لصوت عربي مصري</>
+                      : <>{ttsVoice === "nova" ? "👩" : "👨"} حوّل النص لصوت عربي مصري</>
                     }
                   </button>
                 )}

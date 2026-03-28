@@ -92,6 +92,7 @@ export default function CreateAd() {
   const [convertingAdToVideo, setConvertingAdToVideo] = useState(false);
   const fileAdImagesRef = useRef<HTMLInputElement>(null);
   const tts = useTTS();
+  const [ttsVoice, setTtsVoice] = useState<"nova" | "onyx">("nova");
 
   // Auto-advance cinema slideshow
   useEffect(() => {
@@ -855,6 +856,27 @@ export default function CreateAd() {
               {(form.watch("title")?.length >= 2) && (
                 <div className="mt-3 rounded-xl bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border border-purple-200/50 p-3 space-y-2">
                   <p className="text-xs font-bold text-purple-700 dark:text-purple-300">🎙 تحويل النص لصوت (للريلز والإعلانات)</p>
+                  {/* Voice gender selector */}
+                  {!tts.audioUrl && (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTtsVoice("nova")}
+                        className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold border transition-all ${ttsVoice === "nova" ? "bg-pink-500 text-white border-pink-500" : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700"}`}
+                        data-testid="btn-voice-female"
+                      >
+                        👩 صوت أنثى
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTtsVoice("onyx")}
+                        className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold border transition-all ${ttsVoice === "onyx" ? "bg-blue-600 text-white border-blue-600" : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700"}`}
+                        data-testid="btn-voice-male"
+                      >
+                        👨 صوت ذكر
+                      </button>
+                    </div>
+                  )}
                   {tts.audioUrl ? (
                     <div className="flex items-center gap-2">
                       <audio src={tts.audioUrl} controls className="flex-1 h-8" />
@@ -866,13 +888,13 @@ export default function CreateAd() {
                       disabled={tts.loading}
                       onClick={async () => {
                         const text = [form.getValues("title"), form.getValues("description")].filter(Boolean).join(". ");
-                        try { await tts.generate(text, "nova", true); }
+                        try { await tts.generate(text, ttsVoice, true); }
                         catch { toast({ variant: "destructive", title: "فشل توليد الصوت" }); }
                       }}
                       className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-purple-600 text-white text-sm font-bold hover:bg-purple-700 disabled:opacity-50"
                       data-testid="btn-ad-tts"
                     >
-                      {tts.loading ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري التوليد...</> : <>🎤 حوّل النص لصوت عربي مصري</>}
+                      {tts.loading ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري التوليد...</> : <>{ttsVoice === "nova" ? "👩" : "👨"} حوّل النص لصوت عربي مصري</>}
                     </button>
                   )}
                 </div>
