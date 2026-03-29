@@ -17,7 +17,8 @@ import {
   CheckCircle, XCircle, Loader2, ShieldAlert, Search, Edit2, Save, X,
   ArrowUpRight, ArrowDownLeft, Trash2, PauseCircle, PlayCircle, Send,
   AlertTriangle, Activity, Menu, ChevronLeft, VideoOff, PieChart,
-  Star, MessageSquare, Clock, BanIcon, UserCheck
+  Star, MessageSquare, Clock, BanIcon, UserCheck, FolderOpen, FileImage,
+  FileVideo, File, Lock, Phone, Mail, Shield, RefreshCw
 } from "lucide-react";
 
 const ADMIN_ID = "54219806";
@@ -36,6 +37,7 @@ const NAV = [
   { key: "fraud",          label: "كشف الاحتيال",         icon: ShieldX,         color: "text-red-500" },
   { key: "revenue",        label: "الإيرادات",            icon: DollarSign,      color: "text-emerald-400" },
   { key: "broadcast",      label: "إشعارات جماعية",       icon: Bell,            color: "text-cyan-400" },
+  { key: "media",          label: "مكتبة الملفات",         icon: FolderOpen,      color: "text-lime-400" },
   { key: "settings",       label: "إعدادات المنصة",       icon: Settings,        color: "text-gray-400" },
   { key: "activity",       label: "سجل النشاط",           icon: Activity,        color: "text-slate-400" },
 ];
@@ -190,6 +192,7 @@ export default function AdminPanel() {
           {section === "fraud"      && <FraudSection />}
           {section === "revenue"    && <RevenueSection />}
           {section === "broadcast"  && <BroadcastSection logAction={logAction} />}
+          {section === "media"      && <MediaSection logAction={logAction} />}
           {section === "settings"   && <SettingsSection logAction={logAction} />}
           {section === "activity"   && <ActivitySection />}
         </div>
@@ -305,6 +308,16 @@ function UsersSection({ logAction }: { logAction: any }) {
     },
   });
 
+  const resetPassword = useMutation({
+    mutationFn: (id: string) =>
+      fetch(`/api/admin/users/${id}/reset-password`, { method: "POST", credentials: "include" }).then(r => r.json()),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      toast({ title: "🔑 تم مسح كلمة المرور — سيُطلب من المستخدم إعداد كلمة جديدة" });
+      logAction("reset_password", id);
+    },
+  });
+
   return (
     <div className="space-y-4">
       <div className="flex gap-2">
@@ -326,10 +339,14 @@ function UsersSection({ logAction }: { logAction: any }) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-sm">{u.first_name} {u.last_name}</span>
-                    {u.is_banned && <span className="text-xs bg-red-500/15 text-red-600 border border-red-500/30 rounded-full px-2 py-0.5">محظور</span>}
-                    {u.id === ADMIN_ID && <span className="text-xs bg-primary/15 text-primary border border-primary/30 rounded-full px-2 py-0.5">أدمن</span>}
+                    {u.is_banned && <span className="text-xs bg-red-500/15 text-red-600 border border-red-500/30 rounded-full px-2 py-0.5">🚫 محظور</span>}
+                    {u.id === ADMIN_ID && <span className="text-xs bg-primary/15 text-primary border border-primary/30 rounded-full px-2 py-0.5">👑 أدمن</span>}
+                    {!u.has_password && u.id !== ADMIN_ID && <span className="text-xs bg-yellow-500/15 text-yellow-600 border border-yellow-500/30 rounded-full px-2 py-0.5">⚠️ بدون كلمة مرور</span>}
                   </div>
-                  <div className="text-xs text-muted-foreground truncate">{u.email}</div>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5 flex-wrap">
+                    {u.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{u.email}</span>}
+                    {u.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{u.phone}</span>}
+                  </div>
                   <div className="flex gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
                     <span>📢 {u.ads_count} إعلان</span>
                     <span>📺 {u.channels_count} قناة</span>
@@ -339,14 +356,25 @@ function UsersSection({ logAction }: { logAction: any }) {
                   </div>
                 </div>
                 {u.id !== ADMIN_ID && (
-                  <Button
-                    size="sm" variant={u.is_banned ? "outline" : "destructive"} className="gap-1 text-xs flex-shrink-0"
-                    disabled={updateUser.isPending}
-                    onClick={() => updateUser.mutate({ id: u.id, data: { isBanned: !u.is_banned } })}
-                    data-testid={`btn-ban-${u.id}`}
-                  >
-                    {u.is_banned ? <><UserCheck className="w-3 h-3" /> رفع الحظر</> : <><BanIcon className="w-3 h-3" /> حظر</>}
-                  </Button>
+                  <div className="flex gap-1.5 flex-shrink-0 flex-col sm:flex-row">
+                    <Button
+                      size="sm" variant="outline" className="gap-1 text-xs"
+                      disabled={resetPassword.isPending}
+                      onClick={() => { if (confirm(`إعادة تعيين كلمة مرور ${u.first_name}؟`)) resetPassword.mutate(u.id); }}
+                      data-testid={`btn-reset-pwd-${u.id}`}
+                      title="إعادة تعيين كلمة المرور"
+                    >
+                      <Lock className="w-3 h-3" />
+                    </Button>
+                    <Button
+                      size="sm" variant={u.is_banned ? "outline" : "destructive"} className="gap-1 text-xs"
+                      disabled={updateUser.isPending}
+                      onClick={() => updateUser.mutate({ id: u.id, data: { isBanned: !u.is_banned } })}
+                      data-testid={`btn-ban-${u.id}`}
+                    >
+                      {u.is_banned ? <><UserCheck className="w-3 h-3" /> رفع الحظر</> : <><BanIcon className="w-3 h-3" /> حظر</>}
+                    </Button>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -1184,6 +1212,119 @@ function SettingsSection({ logAction }: { logAction: any }) {
         حفظ الإعدادات
       </Button>
       <p className="text-xs text-muted-foreground text-center">تغيير سعر CPM يؤثر على الحملات الجديدة فقط</p>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MEDIA LIBRARY
+// ═══════════════════════════════════════════════════════════════
+function MediaSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const [search, setSearch] = useState("");
+  const [searchQ, setSearchQ] = useState("");
+
+  const { data: files = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ["/api/admin/files", searchQ],
+    queryFn: () => fetch("/api/admin/files", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const deleteFile = useMutation({
+    mutationFn: (id: number) => fetch(`/api/files/${id}`, { method: "DELETE", credentials: "include" }).then(r => r.json()),
+    onSuccess: (_, id) => { refetch(); toast({ title: "🗑️ تم حذف الملف" }); logAction("delete_file", `file#${id}`); },
+    onError: () => toast({ title: "❌ فشل الحذف", variant: "destructive" }),
+  });
+
+  const filtered = files.filter(f =>
+    !searchQ || f.original_name?.toLowerCase().includes(searchQ.toLowerCase()) ||
+    f.first_name?.toLowerCase().includes(searchQ.toLowerCase()) ||
+    f.email?.toLowerCase().includes(searchQ.toLowerCase())
+  );
+
+  const totalSize = files.reduce((s, f) => s + Number(f.file_size || 0), 0);
+  const images = files.filter(f => f.mime_type?.startsWith("image/")).length;
+  const videos = files.filter(f => f.mime_type?.startsWith("video/")).length;
+
+  function FileIcon({ mime }: { mime: string }) {
+    if (mime?.startsWith("image/")) return <FileImage className="w-5 h-5 text-blue-400" />;
+    if (mime?.startsWith("video/")) return <FileVideo className="w-5 h-5 text-pink-400" />;
+    return <File className="w-5 h-5 text-gray-400" />;
+  }
+
+  function formatBytes(b: number) {
+    if (b < 1024) return `${b} B`;
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+    return `${(b / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard icon={FolderOpen}  label="إجمالي الملفات"  value={files.length}                color="text-lime-500" />
+        <StatCard icon={FileImage}   label="صور"             value={images}                      color="text-blue-500" />
+        <StatCard icon={FileVideo}   label="فيديوهات"        value={videos}                      color="text-pink-500" />
+        <StatCard icon={File}        label="الحجم الكلي"     value={formatBytes(totalSize)}      color="text-orange-500" />
+      </div>
+
+      {/* Search */}
+      <div className="flex gap-2">
+        <Input placeholder="🔍 ابحث باسم الملف أو المستخدم..." value={search}
+          onChange={e => setSearch(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && setSearchQ(search)} className="flex-1" />
+        <Button onClick={() => setSearchQ(search)}><Search className="w-4 h-4 me-1" />بحث</Button>
+        {searchQ && <Button variant="outline" onClick={() => { setSearchQ(""); setSearch(""); }}><X className="w-4 h-4" /></Button>}
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((f: any) => (
+            <Card key={f.id} className="rounded-xl" data-testid={`file-${f.id}`}>
+              <CardContent className="p-3 flex items-center gap-3">
+                {/* Preview */}
+                <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  {f.mime_type?.startsWith("image/")
+                    ? <img src={f.url} alt="" className="w-full h-full object-cover rounded-lg" />
+                    : <FileIcon mime={f.mime_type} />
+                  }
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm truncate">{f.original_name || f.filename}</div>
+                  <div className="flex gap-3 text-xs text-muted-foreground flex-wrap mt-0.5">
+                    <span>{formatBytes(Number(f.file_size || 0))}</span>
+                    <span>{f.mime_type}</span>
+                    {(f.first_name || f.email) && (
+                      <span className="flex items-center gap-1">
+                        <Users className="w-3 h-3" />
+                        {f.first_name ? `${f.first_name}` : f.email}
+                      </span>
+                    )}
+                    <span>{f.created_at ? format(new Date(f.created_at), "dd/MM/yy HH:mm", { locale: ar }) : ""}</span>
+                  </div>
+                </div>
+                <div className="flex gap-1.5 flex-shrink-0">
+                  <a href={f.url} target="_blank" rel="noreferrer">
+                    <Button size="sm" variant="outline" className="text-xs"><Eye className="w-3 h-3 me-1" />عرض</Button>
+                  </a>
+                  <Button size="sm" variant="destructive" className="text-xs"
+                    disabled={deleteFile.isPending}
+                    onClick={() => { if (confirm("حذف الملف نهائياً؟")) deleteFile.mutate(f.id); }}>
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+          {filtered.length === 0 && !isLoading && (
+            <div className="text-center py-16 text-muted-foreground">
+              <FolderOpen className="w-12 h-12 mx-auto mb-3 opacity-20" />
+              <p>لا توجد ملفات</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

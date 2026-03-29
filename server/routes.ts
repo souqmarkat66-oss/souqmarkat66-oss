@@ -1381,12 +1381,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ================================================================
   app.get("/api/admin/stats", isAuthenticated, requireAdmin, async (req: any, res) => {
     const stats = await storage.getStats();
-    res.json(stats);
-  });
-
-  app.get("/api/admin/users", isAuthenticated, requireAdmin, async (req: any, res) => {
-    const users = await storage.getAllUsers();
-    res.json(users);
+    const [usersRow] = await db.execute(sql`SELECT COUNT(*) as cnt FROM users`);
+    res.json({ ...stats, totalUsers: Number((usersRow as any).cnt || 0) });
   });
 
   app.get("/api/admin/reports", isAuthenticated, requireAdmin, async (req: any, res) => {
@@ -1552,8 +1548,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned boolean DEFAULT false`);
       await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role text DEFAULT 'user'`);
     } catch {}
-    await db.execute(sql`UPDATE users SET is_banned = ${isBanned ?? false}, role = ${role ?? 'user'} WHERE id = ${req.params.id}`);
+    if (typeof isBanned !== 'undefined') {
+      await db.execute(sql`UPDATE users SET is_banned = ${isBanned} WHERE id = ${req.params.id}`);
+    }
+    if (role) {
+      await db.execute(sql`UPDATE users SET role = ${role} WHERE id = ${req.params.id}`);
+    }
     res.json({ success: true });
+  });
+
+  app.post("/api/admin/users/:id/reset-password", isAuthenticated, requireAdmin, async (req: any, res) => {
+    await db.execute(sql`UPDATE users SET password_hash = NULL WHERE id = ${req.params.id}`);
+    res.json({ success: true, message: "تم مسح كلمة المرور - سيُطلب من المستخدم إعداد كلمة مرور جديدة" });
   });
 
   app.get("/api/admin/users", isAuthenticated, requireAdmin, async (req: any, res) => {
@@ -1564,16 +1570,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const search = req.query.search as string || '';
     const rows = await db.execute(sql`
       SELECT u.id, u.email, u.first_name, u.last_name, u.profile_image_url, u.created_at,
+             COALESCE(u.phone, '') as phone,
              COALESCE(u.is_banned, false) as is_banned,
              COALESCE(u.role, 'user') as role,
+             CASE WHEN u.password_hash IS NOT NULL THEN true ELSE false END as has_password,
              (SELECT COUNT(*) FROM ads WHERE user_id = u.id) as ads_count,
              (SELECT COUNT(*) FROM channels WHERE user_id = u.id) as channels_count,
              (SELECT COUNT(*) FROM reels WHERE user_id = u.id) as reels_count,
              (SELECT COALESCE(SUM(amount_egp),0) FROM revenue_transactions WHERE user_id = u.id AND type = 'earning') as total_earnings
       FROM users u
-      WHERE (${search} = '' OR u.email ILIKE ${'%' + search + '%'} OR u.first_name ILIKE ${'%' + search + '%'} OR u.last_name ILIKE ${'%' + search + '%'})
+      WHERE (${search} = '' OR u.email ILIKE ${'%' + search + '%'} OR u.first_name ILIKE ${'%' + search + '%'} OR u.last_name ILIKE ${'%' + search + '%'} OR COALESCE(u.phone,'') ILIKE ${'%' + search + '%'})
       ORDER BY u.created_at DESC
-      LIMIT 100`);
+      LIMIT 200`);
     res.json(rows.rows);
   });
 
