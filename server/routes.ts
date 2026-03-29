@@ -459,7 +459,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ================================================================
-  // AD BOOST NOTIFY — Owner notifies followers & interested users
+  // AD BOOST NOTIFY — Paid reach: notifies ALL users (up to 1000)
   // Rate limited: max once every 30 days per ad. Admin can enable/disable + set price.
   // ================================================================
   app.post("/api/ads/:id/boost-notify", isAuthenticated, async (req: any, res) => {
