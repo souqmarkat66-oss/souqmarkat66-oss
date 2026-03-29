@@ -361,7 +361,7 @@ export default function LiveStream() {
   // ─── Voice Chat: Press & Hold ───────────────────────────────
   const handleChatMicPress = async (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
-    if (!user) { window.location.href = "/api/login"; return; }
+    if (!user) { window.location.href = "/login"; return; }
     if (chatHoldingRef.current || chatIsRecording) return;
     chatHoldingRef.current = true;
     try {

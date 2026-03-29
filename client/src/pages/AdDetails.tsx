@@ -570,7 +570,7 @@ export default function AdDetails() {
   });
 
   const handleBoost = async () => {
-    if (!user) { window.location.href = "/api/login"; return; }
+    if (!user) { window.location.href = "/login"; return; }
     setBoosting(true);
     try {
       const res = await fetch(`/api/ads/${id}/boost-notify`, { method: "POST", credentials: "include" });

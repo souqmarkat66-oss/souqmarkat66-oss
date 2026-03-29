@@ -34,7 +34,7 @@ function QuickRating({
   const [done, setDone] = useState(false);
 
   const handleRate = async (star: number) => {
-    if (!userId) { window.location.href = "/api/login"; return; }
+    if (!userId) { window.location.href = "/login"; return; }
     setSubmitting(true);
     try {
       const res = await fetch("/api/ratings", {
@@ -182,7 +182,7 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
 
   const handleBoost = async (e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
-    if (!user) { window.location.href = "/api/login"; return; }
+    if (!user) { window.location.href = "/login"; return; }
     setBoosting(true);
     try {
       const res = await fetch(`/api/ads/${ad.id}/boost-notify`, {

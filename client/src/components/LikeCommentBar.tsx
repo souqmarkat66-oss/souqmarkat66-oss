@@ -200,14 +200,14 @@ export function LikeCommentBar({ targetType, targetId, initialLikes = 0, showCom
   });
 
   const handleLike = () => {
-    if (!user) { window.location.href = "/api/login"; return; }
+    if (!user) { window.location.href = "/login"; return; }
     likeMutation.mutate();
   };
 
   // ─── اضغط وتكلم (Press & Hold) ─────────────────────────────
   const handleMicPress = async (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
-    if (!user) { window.location.href = "/api/login"; return; }
+    if (!user) { window.location.href = "/login"; return; }
     if (holdingRef.current || isRecording) return;
     holdingRef.current = true;
     try {

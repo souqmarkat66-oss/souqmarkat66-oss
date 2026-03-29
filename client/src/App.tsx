@@ -38,7 +38,7 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
       <Loader2 className="w-8 h-8 animate-spin text-primary" />
     </div>
   );
-  if (!user) { window.location.href = "/api/login"; return null; }
+  if (!user) { window.location.href = "/login"; return null; }
   return <Component />;
 }
 

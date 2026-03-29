@@ -3,7 +3,8 @@ import { createServer, type Server } from "http";
 import { Server as SocketServer } from "socket.io";
 import { storage } from "./storage";
 import { z } from "zod";
-import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
+import { setupAuth } from "./replit_integrations/auth";
+import { isAuthenticated, registerCustomAuthRoutes } from "./customAuth";
 import { registerImageRoutes, openai } from "./replit_integrations/image";
 import { textToSpeech } from "./replit_integrations/audio";
 import { spawn } from "child_process";
@@ -57,7 +58,7 @@ async function checkAiCredits(req: any, res: any, next: any) {
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   await setupAuth(app);
-  registerAuthRoutes(app);
+  registerCustomAuthRoutes(app);
   registerImageRoutes(app);
 
   // ── DB Migrations (safe — ADD COLUMN IF NOT EXISTS) ──

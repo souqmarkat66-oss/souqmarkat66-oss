@@ -24,6 +24,12 @@ Preferred communication style: Arabic/bilingual, everyday language.
 - **Real-time**: Socket.IO for WebRTC signaling + live chat
 - **File Uploads**: Multer (direct file upload to /uploads directory)
 - **AI**: OpenAI via Replit AI Integrations
+- **Authentication**: Custom email/phone + password auth (`server/customAuth.ts`)
+  - bcryptjs for password hashing
+  - express-session for session storage (PostgreSQL via connect-pg-simple)
+  - Routes: `POST /api/auth/login`, `POST /api/auth/register`, `POST /api/auth/set-password`, `GET /api/auth/user`, `POST /api/auth/logout`
+  - Fallback: Replit passport session for backward compatibility during migration
+  - First-login flow: accounts without password_hash get prompted to set one
 
 ### Data Storage
 - **Database**: PostgreSQL via Drizzle ORM
