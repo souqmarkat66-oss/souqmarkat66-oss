@@ -209,6 +209,18 @@ export function registerCustomAuthRoutes(app: Express) {
     }
   });
 
+  // ── PATCH /api/auth/me/interests ───────────────────────────────
+  app.patch("/api/auth/me/interests", async (req: Request, res: Response) => {
+    const u = (req.session as any).customUser;
+    const userId: string | undefined = u?.id || (req as any).user?.claims?.sub;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const { interests } = req.body;
+    if (!Array.isArray(interests)) return res.status(400).json({ message: "interests must be array" });
+    const interestsStr = interests.filter(Boolean).join(",");
+    await db.execute(sql`UPDATE users SET interests = ${interestsStr} WHERE id = ${userId}`);
+    res.json({ ok: true });
+  });
+
   // ── GET/POST /api/logout ────────────────────────────────────────
   const doLogout = (req: Request, res: Response) => {
     req.session.destroy(() => {});

@@ -57,6 +57,7 @@ export const ads = pgTable("ads", {
   targetLat: real("target_lat"),
   targetLng: real("target_lng"),
   targetRadiusKm: real("target_radius_km"),
+  targetInterests: text("target_interests"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

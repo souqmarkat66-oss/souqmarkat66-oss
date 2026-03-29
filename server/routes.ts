@@ -433,6 +433,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               }
             }
           }
+
+          // 3) Notify users whose interests overlap with the ad's targetInterests
+          const targetInterests = ad.targetInterests ?? "";
+          if (targetInterests.trim().length > 0) {
+            const interestsArray = targetInterests.split(",").map((i) => i.trim()).filter(Boolean);
+            // Build a Postgres array literal to use with the && overlap operator
+            const pgArray = `{${interestsArray.map((i) => `"${i.replace(/"/g, "")}"`).join(",")}}`;
+            const interestUsers = await db.execute(
+              sql`SELECT id FROM users
+                  WHERE interests IS NOT NULL
+                    AND interests <> ''
+                    AND string_to_array(interests, ',') && ${pgArray}::text[]
+                    AND id != ${userId}
+                  LIMIT 500`
+            );
+            const interestTitle = `💡 إعلان يناسب اهتماماتك من ${publisherName}`;
+            for (const row of interestUsers.rows as any[]) {
+              const uid = (row as any).id;
+              if (!notifiedUsers.has(uid)) {
+                await createNotification(uid, "system", interestTitle, notifBody, adLink);
+                notifiedUsers.add(uid);
+              }
+            }
+          }
         } catch (e) {
           console.error('[Ad Notify] Error:', e);
         }
@@ -2160,7 +2184,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const { userId } = req.params;
     try {
       const [userRow, adsRow, channelRow] = await Promise.all([
-        db.execute(sql`SELECT id, first_name, last_name, profile_image_url, created_at FROM users WHERE id = ${userId}`),
+        db.execute(sql`SELECT id, first_name, last_name, profile_image_url, created_at, interests FROM users WHERE id = ${userId}`),
         db.execute(sql`SELECT COUNT(*) as count, SUM(views_count) as views, SUM(likes_count) as likes FROM ads WHERE user_id = ${userId} AND status = 'active'`),
         db.execute(sql`SELECT * FROM channels WHERE user_id = ${userId} LIMIT 1`),
       ]);
@@ -2370,10 +2394,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ================================================================
   // AD VIEW INCREMENT
   // ================================================================
-  app.post("/api/ads/:id/view", async (req, res) => {
+  app.post("/api/ads/:id/view", async (req: any, res) => {
     const id = parseInt(req.params.id);
     try {
       await db.execute(sql`UPDATE ads SET views_count = COALESCE(views_count, 0) + 1 WHERE id = ${id}`);
+      // If viewer is authenticated and ad has targetInterests, learn their interests
+      const viewerId: string | undefined = req.session?.customUser?.id || req.user?.claims?.sub;
+      if (viewerId) {
+        const adRow = await db.execute(
+          sql`SELECT target_interests FROM ads WHERE id = ${id} AND target_interests IS NOT NULL AND target_interests <> '' LIMIT 1`
+        );
+        if (adRow.rows.length > 0) {
+          const adInterests = (adRow.rows[0] as any).target_interests as string;
+          // Merge new interests into user's existing interests (deduplicated)
+          await db.execute(sql`
+            UPDATE users
+            SET interests = (
+              SELECT STRING_AGG(DISTINCT elem, ',')
+              FROM unnest(
+                string_to_array(COALESCE(interests, '') || ',' || ${adInterests}, ',')
+              ) AS elem
+              WHERE trim(elem) <> ''
+            )
+            WHERE id = ${viewerId}
+          `);
+        }
+      }
       res.json({ ok: true });
     } catch { res.json({ ok: false }); }
   });
@@ -2384,13 +2430,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/ads/:id/similar", async (req, res) => {
     const id = parseInt(req.params.id);
     try {
-      const ad = await db.execute(sql`SELECT target_region, language FROM ads WHERE id = ${id}`);
+      const ad = await db.execute(
+        sql`SELECT target_region, language, target_interests FROM ads WHERE id = ${id}`
+      );
       if (!ad.rows.length) return res.json([]);
-      const { target_region, language } = ad.rows[0] as any;
+      const { target_region, language, target_interests } = ad.rows[0] as any;
+      // Match by shared interests first, then fall back to region/language
       const similar = await db.execute(
         sql`SELECT * FROM ads WHERE id != ${id} AND status = 'active'
-            AND (target_region = ${target_region} OR language = ${language})
-            ORDER BY created_at DESC LIMIT 4`
+            AND (
+              (
+                target_interests IS NOT NULL AND target_interests <> ''
+                AND ${target_interests ?? ""}::text <> ''
+                AND string_to_array(target_interests, ',') &&
+                    string_to_array(${target_interests ?? ""}, ',')
+              )
+              OR target_region = ${target_region}
+              OR language = ${language}
+            )
+            ORDER BY created_at DESC LIMIT 6`
       );
       res.json(similar.rows);
     } catch { res.json([]); }

@@ -110,6 +110,27 @@ async function runMigrations() {
     await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_voice BOOLEAN DEFAULT FALSE`);
     await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS voice_url TEXT`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS governorate TEXT`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_interests TEXT`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS interests TEXT`);
+    // Backfill users.interests from their own ads' target_interests
+    await db.execute(sql`
+      UPDATE users u
+      SET interests = (
+        SELECT STRING_AGG(DISTINCT trim(elem), ',')
+        FROM ads a,
+             LATERAL unnest(string_to_array(a.target_interests, ',')) AS elem
+        WHERE a.user_id = u.id
+          AND a.target_interests IS NOT NULL
+          AND a.target_interests <> ''
+      )
+      WHERE u.interests IS NULL
+        AND EXISTS (
+          SELECT 1 FROM ads a2
+          WHERE a2.user_id = u.id
+            AND a2.target_interests IS NOT NULL
+            AND a2.target_interests <> ''
+        )
+    `);
     // Backfill users.governorate from their most recent ad's target_region
     await db.execute(sql`
       UPDATE users u

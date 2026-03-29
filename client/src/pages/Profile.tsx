@@ -5,14 +5,29 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AdCard } from "@/components/AdCard";
-import { User, MessageCircle, LayoutGrid, Eye, Heart, Tv, Star, Shield, AlertTriangle } from "lucide-react";
+import { MessageCircle, LayoutGrid, Eye, Heart, Tv, Star, Shield, AlertTriangle, Sparkles } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
+
+const ALL_INTERESTS = [
+  { id: "tech", label: "تقنية وإلكترونيات", emoji: "📱" },
+  { id: "fashion", label: "ملابس وأزياء", emoji: "👗" },
+  { id: "food", label: "طعام ومطاعم", emoji: "🍕" },
+  { id: "real_estate", label: "عقارات", emoji: "🏠" },
+  { id: "cars", label: "سيارات", emoji: "🚗" },
+  { id: "health", label: "صحة وجمال", emoji: "💊" },
+  { id: "education", label: "تعليم ودورات", emoji: "📚" },
+  { id: "travel", label: "سياحة وسفر", emoji: "✈️" },
+  { id: "sports", label: "رياضة ولياقة", emoji: "⚽" },
+  { id: "finance", label: "مال وأعمال", emoji: "💰" },
+  { id: "kids", label: "أطفال وعائلة", emoji: "👶" },
+  { id: "gaming", label: "ألعاب ترفيه", emoji: "🎮" },
+];
 
 export default function Profile() {
   const [, params] = useRoute("/profile/:userId");
@@ -22,6 +37,7 @@ export default function Profile() {
   const qc = useQueryClient();
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
+  const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
 
   const targetUserId = params?.userId || user?.id;
   const isOwn = user?.id === targetUserId;
@@ -30,6 +46,20 @@ export default function Profile() {
     queryKey: ["/api/profile", targetUserId],
     queryFn: () => fetch(`/api/profile/${targetUserId}`, { credentials: "include" }).then(r => r.json()),
     enabled: !!targetUserId,
+  });
+
+  useEffect(() => {
+    if (profile?.user?.interests && isOwn) {
+      setSelectedInterests(profile.user.interests.split(",").filter(Boolean));
+    }
+  }, [profile?.user?.interests, isOwn]);
+
+  const interestsMutation = useMutation({
+    mutationFn: (interests: string[]) => apiRequest("PATCH", "/api/auth/me/interests", { interests }),
+    onSuccess: () => {
+      toast({ title: "✅ تم حفظ اهتماماتك" });
+      qc.invalidateQueries({ queryKey: ["/api/profile", targetUserId] });
+    },
   });
 
   const { data: userAds = [] } = useQuery<any[]>({
@@ -161,6 +191,46 @@ export default function Profile() {
           </div>
         ))}
       </div>
+
+      {/* Interests Section — only for profile owner */}
+      {isOwn && (
+        <div className="bg-card border border-border/60 rounded-2xl p-5 mb-6" dir="rtl">
+          <div className="flex items-center gap-2 mb-3">
+            <Sparkles className="w-4 h-4 text-primary" />
+            <h2 className="font-bold text-sm">اهتماماتك — يُستخدم لتخصيص الإعلانات التي تصلك</h2>
+          </div>
+          <div className="flex flex-wrap gap-2 mb-4">
+            {ALL_INTERESTS.map(({ id, label, emoji }) => {
+              const active = selectedInterests.includes(id);
+              return (
+                <button
+                  key={id}
+                  data-testid={`interest-${id}`}
+                  onClick={() => setSelectedInterests(prev =>
+                    active ? prev.filter(i => i !== id) : [...prev, id]
+                  )}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all
+                    ${active
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                      : "bg-background text-muted-foreground border-border/60 hover:border-primary/40"
+                    }`}
+                >
+                  <span>{emoji}</span> {label}
+                </button>
+              );
+            })}
+          </div>
+          <Button
+            size="sm"
+            className="gap-2"
+            onClick={() => interestsMutation.mutate(selectedInterests)}
+            disabled={interestsMutation.isPending}
+            data-testid="btn-save-interests"
+          >
+            {interestsMutation.isPending ? "جاري الحفظ..." : "حفظ الاهتمامات"}
+          </Button>
+        </div>
+      )}
 
       {/* Ads Grid */}
       <div className="mb-4 flex items-center gap-2">
