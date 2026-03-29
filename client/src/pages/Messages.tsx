@@ -1,12 +1,15 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { MessageCircle, Send, ArrowRight, User, Mic, MicOff, Play, Square } from "lucide-react";
+import {
+  MessageCircle, Send, ArrowRight, User, Mic, MicOff,
+  Play, Square, Copy, CornerUpLeft, X, Check, CheckCheck
+} from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
-import { format } from "date-fns";
+import { format, isToday, isYesterday } from "date-fns";
 import { ar } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 
@@ -28,10 +31,41 @@ function VoicePlayer({ url }: { url: string }) {
         data-testid="btn-play-voice-dm"
       >
         {playing ? <Square className="w-3 h-3 fill-current" /> : <Play className="w-3 h-3 fill-current" />}
-        {playing ? "إيقاف" : "استمع للرسالة الصوتية 🎤"}
+        {playing ? "إيقاف" : "🎤 رسالة صوتية"}
       </button>
     </span>
   );
+}
+
+function formatMsgTime(dateStr: string) {
+  try {
+    const d = new Date(dateStr);
+    if (isToday(d)) return format(d, "h:mm a", { locale: ar });
+    if (isYesterday(d)) return "الأمس " + format(d, "h:mm a", { locale: ar });
+    return format(d, "dd/MM h:mm a", { locale: ar });
+  } catch { return ""; }
+}
+
+function formatConvTime(dateStr: string) {
+  try {
+    const d = new Date(dateStr);
+    if (isToday(d)) return format(d, "h:mm a", { locale: ar });
+    if (isYesterday(d)) return "الأمس";
+    return format(d, "dd/MM", { locale: ar });
+  } catch { return ""; }
+}
+
+function partnerName(conv: any) {
+  const first = conv.partner_first_name || "";
+  const last  = conv.partner_last_name  || "";
+  const full  = `${first} ${last}`.trim();
+  return full || conv.partner_id?.slice(0, 8) + "...";
+}
+
+function partnerInitials(conv: any) {
+  const first = conv.partner_first_name || conv.partner_id?.[0] || "؟";
+  const last  = conv.partner_last_name?.[0] || "";
+  return (first[0] + last).toUpperCase();
 }
 
 export default function Messages() {
@@ -39,13 +73,19 @@ export default function Messages() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [activePartner, setActivePartner] = useState<string | null>(null);
+  const [activePartnerInfo, setActivePartnerInfo] = useState<any | null>(null);
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [uploading, setUploading] = useState(false);
+  const [replyTo, setReplyTo] = useState<any | null>(null);
+  const [contextMsg, setContextMsg] = useState<any | null>(null);
+  const [copied, setCopied] = useState(false);
   const recRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const { data: conversations = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/messages"],
@@ -54,20 +94,31 @@ export default function Messages() {
     refetchInterval: 5000,
   });
 
-  const { data: thread = [] } = useQuery<any[]>({
+  const { data: threadData } = useQuery<{ messages: any[]; partner: any }>({
     queryKey: ["/api/messages", activePartner],
-    queryFn: () => fetch(`/api/messages/${activePartner}`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () =>
+      fetch(`/api/messages/${activePartner}`, { credentials: "include" }).then(r => r.json()),
     enabled: !!activePartner,
     refetchInterval: 3000,
   });
 
+  const thread = threadData?.messages || [];
+  const partnerData = threadData?.partner || null;
+
+  // Scroll to bottom when thread loads / new message arrives
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [thread.length]);
+
   const sendMutation = useMutation({
-    mutationFn: (payload: { message: string; isVoice?: boolean; voiceUrl?: string }) =>
+    mutationFn: (payload: { message: string; isVoice?: boolean; voiceUrl?: string; replyToId?: number; replyToText?: string }) =>
       apiRequest("POST", "/api/messages", { toUserId: activePartner, ...payload }),
     onSuccess: () => {
       setText("");
+      setReplyTo(null);
       qc.invalidateQueries({ queryKey: ["/api/messages", activePartner] });
       qc.invalidateQueries({ queryKey: ["/api/messages"] });
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     },
   });
 
@@ -94,7 +145,6 @@ export default function Messages() {
           if (!upRes.ok) throw new Error("فشل رفع الصوت");
           const { url: voiceUrl } = await upRes.json();
           sendMutation.mutate({ message: "🎤 رسالة صوتية", isVoice: true, voiceUrl });
-          toast({ title: "✅ تم إرسال الرسالة الصوتية!" });
         } catch {
           toast({ variant: "destructive", title: "فشل إرسال الرسالة الصوتية" });
         } finally { setUploading(false); }
@@ -116,71 +166,133 @@ export default function Messages() {
     if (timerRef.current) clearInterval(timerRef.current);
   };
 
+  const handleReply = (msg: any) => {
+    setReplyTo(msg);
+    setContextMsg(null);
+    inputRef.current?.focus();
+  };
+
+  const handleCopy = (msg: any) => {
+    navigator.clipboard.writeText(msg.message || "");
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+    setContextMsg(null);
+  };
+
+  const sendText = () => {
+    if (!text.trim()) return;
+    sendMutation.mutate({
+      message: text,
+      replyToId: replyTo?.id,
+      replyToText: replyTo?.message,
+    });
+  };
+
   if (!user) return (
     <div className="container px-4 py-20 text-center" dir="rtl">
       <p className="text-muted-foreground">يجب تسجيل الدخول أولاً</p>
     </div>
   );
 
+  const displayName = partnerData
+    ? `${partnerData.first_name || ""} ${partnerData.last_name || ""}`.trim() || "مستخدم"
+    : activePartner?.slice(0, 10) + "...";
+
   return (
-    <div className="container px-4 py-8 max-w-5xl" dir="rtl">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+    <div
+      className="container px-2 sm:px-4 py-4 sm:py-8 max-w-5xl"
+      dir="rtl"
+      onClick={() => contextMsg && setContextMsg(null)}
+    >
+      {/* Page Header */}
+      <div className="flex items-center gap-3 mb-4 sm:mb-6">
+        <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
           <MessageCircle className="w-5 h-5" />
         </div>
         <div>
-          <h1 className="text-2xl font-black">الرسائل المباشرة</h1>
+          <h1 className="text-xl sm:text-2xl font-black">الرسائل المباشرة</h1>
           <p className="text-xs text-muted-foreground">تواصل مع البائعين والمشترين مباشرةً</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-[520px]">
-        {/* Conversations Sidebar */}
-        <div className="border border-border/60 rounded-2xl overflow-hidden flex flex-col">
+      <div className={`grid gap-3 ${activePartner ? "grid-cols-1 md:grid-cols-3" : "grid-cols-1 md:grid-cols-3"} h-[580px]`}>
+
+        {/* ── Conversations Sidebar ──────────────────────── */}
+        <div className={`border border-border/60 rounded-2xl overflow-hidden flex flex-col
+          ${activePartner ? "hidden md:flex" : "flex"}`}>
           <div className="px-4 py-3 border-b bg-muted/30">
-            <p className="font-bold text-sm">المحادثات</p>
+            <p className="font-bold text-sm">المحادثات ({conversations.length})</p>
           </div>
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto divide-y divide-border/20">
             {isLoading ? (
               <div className="space-y-3 p-3">
-                {[1,2,3].map(i => <Skeleton key={i} className="h-14 rounded-xl" />)}
+                {[1,2,3].map(i => <Skeleton key={i} className="h-16 rounded-xl" />)}
               </div>
             ) : conversations.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-10">
-                <MessageCircle className="w-10 h-10 mb-2 opacity-20" />
-                <p className="text-sm">لا توجد رسائل بعد</p>
-                <p className="text-xs mt-1 text-center px-4">ابدأ محادثة من صفحة أي إعلان</p>
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-10 px-4">
+                <MessageCircle className="w-10 h-10 mb-3 opacity-20" />
+                <p className="text-sm font-medium">لا توجد رسائل بعد</p>
+                <p className="text-xs mt-1 text-center">ابدأ محادثة من صفحة أي إعلان</p>
               </div>
             ) : (
-              conversations.map((conv: any) => (
-                <button
-                  key={conv.partner_id}
-                  onClick={() => setActivePartner(conv.partner_id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 border-b border-border/30 text-right hover:bg-muted/30 transition-colors ${activePartner === conv.partner_id ? "bg-primary/5 border-r-2 border-r-primary" : ""}`}
-                >
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                    <User className="w-5 h-5 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-1">
-                      <p className="font-bold text-xs truncate">{conv.partner_id?.slice(0, 8)}...</p>
-                      {!conv.is_read && conv.from_user_id !== user.id && (
-                        <span className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />
-                      )}
+              conversations.map((conv: any) => {
+                const isActive = activePartner === conv.partner_id;
+                const hasUnread = !conv.is_read && conv.from_user_id !== user.id;
+                return (
+                  <button
+                    key={conv.partner_id}
+                    onClick={() => {
+                      setActivePartner(conv.partner_id);
+                      setActivePartnerInfo(conv);
+                      setReplyTo(null);
+                      setContextMsg(null);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 text-right transition-colors
+                      ${isActive ? "bg-primary/8 border-r-[3px] border-r-primary" : "hover:bg-muted/40"}`}
+                    data-testid={`conv-${conv.partner_id}`}
+                  >
+                    {/* Avatar */}
+                    <div className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold
+                      ${isActive ? "bg-primary text-white" : "bg-primary/10 text-primary"}`}>
+                      {conv.partner_avatar
+                        ? <img src={conv.partner_avatar} alt="" className="w-full h-full rounded-full object-cover" />
+                        : partnerInitials(conv)
+                      }
                     </div>
-                    <p className="text-xs text-muted-foreground truncate">{conv.message}</p>
-                  </div>
-                </button>
-              ))
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1">
+                        <p className={`text-sm truncate ${hasUnread ? "font-bold" : "font-medium"}`}>
+                          {partnerName(conv)}
+                        </p>
+                        <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                          {formatConvTime(conv.created_at)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <p className={`text-xs truncate flex-1 ${hasUnread ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                          {conv.from_user_id === user.id ? "أنت: " : ""}
+                          {conv.message?.startsWith("🎤") ? "🎤 رسالة صوتية" : conv.message}
+                        </p>
+                        {hasUnread && <span className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
             )}
           </div>
         </div>
 
-        {/* Chat Thread */}
-        <div className="md:col-span-2 border border-border/60 rounded-2xl overflow-hidden flex flex-col">
+        {/* ── Chat Thread ───────────────────────────────── */}
+        <div className={`md:col-span-2 border border-border/60 rounded-2xl overflow-hidden flex flex-col
+          ${activePartner ? "flex" : "hidden md:flex"}`}>
+
           {!activePartner ? (
             <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
-              <MessageCircle className="w-16 h-16 mb-3 opacity-10" />
+              <div className="w-20 h-20 rounded-2xl bg-muted flex items-center justify-center mb-4">
+                <MessageCircle className="w-10 h-10 opacity-20" />
+              </div>
               <p className="text-sm font-medium">اختر محادثة من القائمة</p>
               <p className="text-xs mt-1">أو ابدأ محادثة جديدة من صفحة إعلان</p>
             </div>
@@ -188,60 +300,174 @@ export default function Messages() {
             <>
               {/* Thread Header */}
               <div className="px-4 py-3 border-b bg-muted/30 flex items-center gap-3">
-                <button onClick={() => setActivePartner(null)} className="md:hidden">
+                <button
+                  onClick={() => { setActivePartner(null); setActivePartnerInfo(null); }}
+                  className="md:hidden p-1 rounded-lg hover:bg-muted"
+                >
                   <ArrowRight className="w-4 h-4" />
                 </button>
-                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                  <User className="w-4 h-4 text-primary" />
+                {/* Avatar */}
+                <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-bold flex-shrink-0">
+                  {partnerData?.profile_image_url
+                    ? <img src={partnerData.profile_image_url} alt="" className="w-full h-full rounded-full object-cover" />
+                    : (displayName[0] || "؟").toUpperCase()
+                  }
                 </div>
-                <p className="font-bold text-sm">{activePartner.slice(0, 12)}...</p>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-sm truncate">{displayName}</p>
+                  <p className="text-xs text-muted-foreground">نشط مؤخراً</p>
+                </div>
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {thread.map((msg: any) => {
+              <div
+                className="flex-1 overflow-y-auto p-4 space-y-1"
+                onClick={() => setContextMsg(null)}
+              >
+                {thread.length === 0 && (
+                  <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                    ابدأ المحادثة...
+                  </div>
+                )}
+                {thread.map((msg: any, idx: number) => {
                   const isMine = msg.from_user_id === user.id;
+                  const showDate = idx === 0 || (
+                    new Date(thread[idx - 1].created_at).toDateString() !== new Date(msg.created_at).toDateString()
+                  );
+                  const isContextOpen = contextMsg?.id === msg.id;
+
                   return (
-                    <div key={msg.id} className={`flex ${isMine ? "justify-start" : "justify-end"}`}>
-                      <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${isMine ? "bg-primary text-white rounded-br-sm" : "bg-muted rounded-bl-sm"}`}>
-                        {msg.is_voice && msg.voice_url ? (
-                          <VoicePlayer url={msg.voice_url} />
-                        ) : (
-                          <p className="text-sm leading-relaxed">{msg.message}</p>
-                        )}
-                        <p className={`text-[10px] mt-1 ${isMine ? "text-white/60" : "text-muted-foreground"}`}>
-                          {msg.created_at && format(new Date(msg.created_at), "h:mm a", { locale: ar })}
-                        </p>
+                    <div key={msg.id}>
+                      {/* Date separator */}
+                      {showDate && (
+                        <div className="flex items-center gap-3 my-3">
+                          <div className="flex-1 h-px bg-border" />
+                          <span className="text-[10px] text-muted-foreground bg-background px-2">
+                            {isToday(new Date(msg.created_at)) ? "اليوم"
+                              : isYesterday(new Date(msg.created_at)) ? "الأمس"
+                              : format(new Date(msg.created_at), "dd MMMM yyyy", { locale: ar })}
+                          </span>
+                          <div className="flex-1 h-px bg-border" />
+                        </div>
+                      )}
+
+                      {/* Message row */}
+                      <div className={`flex ${isMine ? "justify-start" : "justify-end"} group mb-1`}>
+                        {/* Context menu (click on msg) */}
+                        <div className="relative">
+                          {/* Bubble */}
+                          <div
+                            onClick={e => { e.stopPropagation(); setContextMsg(isContextOpen ? null : msg); }}
+                            className={`max-w-[75%] rounded-2xl px-4 py-2.5 cursor-pointer select-text
+                              ${isMine
+                                ? "bg-primary text-white rounded-br-sm"
+                                : "bg-muted text-foreground rounded-bl-sm"}
+                              ${isContextOpen ? "ring-2 ring-primary/40" : ""}
+                            `}
+                            data-testid={`msg-bubble-${msg.id}`}
+                          >
+                            {/* Reply-to preview */}
+                            {msg.reply_to_text && (
+                              <div className={`text-[10px] mb-1.5 px-2 py-1 rounded-lg border-r-2
+                                ${isMine ? "border-white/50 bg-white/10 text-white/70" : "border-primary bg-primary/5 text-muted-foreground"}`}>
+                                <CornerUpLeft className="w-2.5 h-2.5 inline ml-1 opacity-70" />
+                                {msg.reply_to_text?.slice(0, 60)}{msg.reply_to_text?.length > 60 ? "..." : ""}
+                              </div>
+                            )}
+
+                            {/* Content */}
+                            {msg.is_voice && msg.voice_url ? (
+                              <VoicePlayer url={msg.voice_url} />
+                            ) : (
+                              <p className="text-sm leading-relaxed break-words">{msg.message}</p>
+                            )}
+
+                            {/* Time + read */}
+                            <div className={`flex items-center gap-1 justify-end mt-1`}>
+                              <span className={`text-[10px] ${isMine ? "text-white/60" : "text-muted-foreground"}`}>
+                                {formatMsgTime(msg.created_at)}
+                              </span>
+                              {isMine && (
+                                msg.is_read
+                                  ? <CheckCheck className="w-3 h-3 text-white/80" />
+                                  : <Check className="w-3 h-3 text-white/50" />
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Context popup */}
+                          {isContextOpen && (
+                            <div
+                              className={`absolute z-20 bottom-full mb-1 flex gap-1 shadow-lg rounded-xl border bg-background p-1
+                                ${isMine ? "left-0" : "right-0"}`}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <button
+                                onClick={() => handleReply(msg)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-xs font-medium transition-colors"
+                                data-testid={`btn-reply-${msg.id}`}
+                              >
+                                <CornerUpLeft className="w-3.5 h-3.5" /> رد
+                              </button>
+                              {!msg.is_voice && (
+                                <button
+                                  onClick={() => handleCopy(msg)}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-xs font-medium transition-colors"
+                                  data-testid={`btn-copy-${msg.id}`}
+                                >
+                                  {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                                  {copied ? "تم" : "نسخ"}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
                 })}
+                <div ref={bottomRef} />
               </div>
+
+              {/* Reply-to bar */}
+              {replyTo && (
+                <div className="px-4 py-2 border-t border-primary/20 bg-primary/5 flex items-center gap-2">
+                  <CornerUpLeft className="w-4 h-4 text-primary flex-shrink-0" />
+                  <p className="text-xs text-muted-foreground flex-1 truncate">
+                    {replyTo.message?.slice(0, 80)}{replyTo.message?.length > 80 ? "..." : ""}
+                  </p>
+                  <button onClick={() => setReplyTo(null)} className="p-1 hover:bg-muted rounded-lg">
+                    <X className="w-3.5 h-3.5 text-muted-foreground" />
+                  </button>
+                </div>
+              )}
 
               {/* Input */}
               <div className="p-3 border-t border-border/40 flex gap-2">
                 {recording ? (
                   <div className="flex-1 h-10 flex items-center gap-2 rounded-xl border border-destructive bg-destructive/5 px-3 text-destructive text-sm font-medium animate-pulse">
-                    <span className="w-2 h-2 rounded-full bg-destructive inline-block" />
-                    جارٍ التسجيل... {recSeconds}ث — اضغط إيقاف لإرسال
+                    <span className="w-2 h-2 rounded-full bg-destructive inline-block animate-ping" />
+                    جارٍ التسجيل... {recSeconds}ث
                   </div>
                 ) : (
                   <Input
+                    ref={inputRef}
                     value={text}
                     onChange={e => setText(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && text.trim() && sendMutation.mutate({ message: text })}
-                    placeholder="اكتب رسالتك..."
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && text.trim()) { e.preventDefault(); sendText(); } }}
+                    placeholder={replyTo ? "اكتب ردك..." : "اكتب رسالتك..."}
                     className="flex-1 h-10"
                     dir="rtl"
                     data-testid="input-message"
-                    disabled={uploading}
+                    disabled={uploading || sendMutation.isPending}
                   />
                 )}
-                {/* Voice button */}
+
+                {/* Voice */}
                 <Button
                   size="sm"
                   variant={recording ? "destructive" : "outline"}
-                  className={`h-10 w-10 p-0 rounded-full ${recording ? "animate-pulse" : ""}`}
+                  className={`h-10 w-10 p-0 rounded-full flex-shrink-0 ${recording ? "animate-pulse" : ""}`}
                   onClick={recording ? stopRecording : startRecording}
                   disabled={uploading}
                   title={recording ? "إيقاف وإرسال" : "رسالة صوتية"}
@@ -249,15 +475,19 @@ export default function Messages() {
                 >
                   {recording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </Button>
-                {/* Send text button */}
+
+                {/* Send */}
                 {!recording && (
                   <Button
-                    size="sm" className="h-10 w-10 p-0"
-                    onClick={() => text.trim() && sendMutation.mutate({ message: text })}
+                    size="sm" className="h-10 w-10 p-0 flex-shrink-0"
+                    onClick={sendText}
                     disabled={!text.trim() || sendMutation.isPending || uploading}
                     data-testid="btn-send-message"
                   >
-                    <Send className="w-4 h-4" />
+                    {sendMutation.isPending
+                      ? <span className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin" />
+                      : <Send className="w-4 h-4" />
+                    }
                   </Button>
                 )}
               </div>

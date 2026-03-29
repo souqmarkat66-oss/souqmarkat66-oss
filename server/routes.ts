@@ -1979,15 +1979,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/messages", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
     try {
-      // Get all conversation partners
       const result = await db.execute(
-        sql`SELECT DISTINCT ON (partner_id)
-              partner_id,
-              message,
-              created_at,
-              is_read,
-              from_user_id,
-              ad_id
+        sql`SELECT DISTINCT ON (sub.partner_id)
+              sub.partner_id,
+              sub.message,
+              sub.created_at,
+              sub.is_read,
+              sub.from_user_id,
+              sub.ad_id,
+              u.first_name as partner_first_name,
+              u.last_name  as partner_last_name,
+              u.profile_image_url as partner_avatar
             FROM (
               SELECT
                 CASE WHEN from_user_id = ${userId} THEN to_user_id ELSE from_user_id END as partner_id,
@@ -1996,7 +1998,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               WHERE from_user_id = ${userId} OR to_user_id = ${userId}
               ORDER BY created_at DESC
             ) sub
-            ORDER BY partner_id, created_at DESC`
+            LEFT JOIN users u ON u.id = sub.partner_id
+            ORDER BY sub.partner_id, sub.created_at DESC`
       );
       res.json(result.rows);
     } catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -2006,25 +2009,39 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const userId = req.user.claims.sub;
     const { partnerId } = req.params;
     try {
+      // Get partner info
+      const partnerInfo = await db.execute(
+        sql`SELECT id, first_name, last_name, profile_image_url FROM users WHERE id = ${partnerId} LIMIT 1`
+      );
       const result = await db.execute(
-        sql`SELECT * FROM direct_messages
-            WHERE (from_user_id = ${userId} AND to_user_id = ${partnerId})
-               OR (from_user_id = ${partnerId} AND to_user_id = ${userId})
-            ORDER BY created_at ASC LIMIT 100`
+        sql`SELECT dm.*,
+              sender.first_name as sender_first_name,
+              sender.last_name  as sender_last_name,
+              sender.profile_image_url as sender_avatar
+            FROM direct_messages dm
+            LEFT JOIN users sender ON sender.id = dm.from_user_id
+            WHERE (dm.from_user_id = ${userId} AND dm.to_user_id = ${partnerId})
+               OR (dm.from_user_id = ${partnerId} AND dm.to_user_id = ${userId})
+            ORDER BY dm.created_at ASC LIMIT 200`
       );
       // Mark as read
       await db.execute(
         sql`UPDATE direct_messages SET is_read = true
             WHERE to_user_id = ${userId} AND from_user_id = ${partnerId} AND is_read = false`
       );
-      res.json(result.rows);
+      res.json({ messages: result.rows, partner: partnerInfo.rows[0] || null });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   app.post("/api/messages", isAuthenticated, async (req: any, res) => {
     const fromUserId = req.user.claims.sub;
-    const { toUserId, message, adId, isVoice, voiceUrl } = req.body;
+    const { toUserId, message, adId, isVoice, voiceUrl, replyToId, replyToText } = req.body;
     if (!toUserId || !message) return res.status(400).json({ message: "Missing required fields" });
+    // Ensure reply_to columns exist
+    try {
+      await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS reply_to_id integer`);
+      await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS reply_to_text text`);
+    } catch {}
     // Anti-spam: max 10 messages per minute per user
     try {
       const spamCheck = await db.execute(
@@ -2034,8 +2051,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(429).json({ message: "الرسائل كثيرة جداً، انتظر قليلاً" });
       }
       const result = await db.execute(
-        sql`INSERT INTO direct_messages (from_user_id, to_user_id, ad_id, message, is_voice, voice_url)
-            VALUES (${fromUserId}, ${toUserId}, ${adId ?? null}, ${message}, ${isVoice ?? false}, ${voiceUrl ?? null})
+        sql`INSERT INTO direct_messages (from_user_id, to_user_id, ad_id, message, is_voice, voice_url, reply_to_id, reply_to_text)
+            VALUES (${fromUserId}, ${toUserId}, ${adId ?? null}, ${message}, ${isVoice ?? false}, ${voiceUrl ?? null},
+                    ${replyToId ?? null}, ${replyToText ?? null})
             RETURNING *`
       );
       // Send notification to recipient
