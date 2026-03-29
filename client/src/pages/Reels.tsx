@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown, Image as ImageIcon, Film, Music, ChevronLeft, ChevronRight, Pause, Pencil, Trash2, ArrowRight } from "lucide-react";
+import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown, Image as ImageIcon, Film, Music, ChevronLeft, ChevronRight, Pause, Pencil, Trash2, ArrowRight, Mic, MicOff, Send, Square } from "lucide-react";
 import { useLocation } from "wouter";
 import { EditReelDialog } from "@/components/EditReelDialog";
 import { AdWidget } from "@/components/AdWidget";
@@ -58,6 +58,30 @@ function speakEgyptian(text: string) {
   window.speechSynthesis.speak(utterance);
 }
 
+// ── Mini audio player for voice comments in Reels ──────────────
+function ReelVoicePlayer({ url }: { url: string }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const toggle = () => {
+    const a = audioRef.current;
+    if (!a) return;
+    if (playing) { a.pause(); a.currentTime = 0; setPlaying(false); }
+    else { a.play().then(() => setPlaying(true)).catch(() => {}); }
+  };
+  return (
+    <span className="inline-flex items-center gap-1 mt-0.5">
+      <audio ref={audioRef} src={url} onEnded={() => setPlaying(false)} className="hidden" />
+      <button
+        onClick={toggle}
+        className="inline-flex items-center gap-1.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-full px-3 py-1 text-xs font-medium transition-colors"
+        data-testid="btn-play-reel-voice"
+      >
+        {playing ? <><Square className="w-3 h-3 fill-current" /> إيقاف</> : <><Play className="w-3 h-3 fill-current" /> استمع 🎤</>}
+      </button>
+    </span>
+  );
+}
+
 function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded }: {
   reel: Reel;
   isActive: boolean;
@@ -80,6 +104,18 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded }: {
   const [audioMuted, setAudioMuted] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
+
+  // Voice recording state
+  const [isRecording, setIsRecording]     = useState(false);
+  const [isUploading, setIsUploading]     = useState(false);
+  const [recSeconds, setRecSeconds]       = useState(0);
+  const [waveLevel, setWaveLevel]         = useState(0);
+  const recRef     = useRef<MediaRecorder | null>(null);
+  const chunksRef  = useRef<BlobPart[]>([]);
+  const timerRef2  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const waveRef2   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const holdingRef = useRef(false);
 
   // Parse media
   const urls = parseMediaUrls(reel.videoUrl);
@@ -102,12 +138,71 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded }: {
   });
 
   const commentMutation = useMutation({
-    mutationFn: () => apiRequest('POST', '/api/comments', { targetType: 'reel', targetId: reel.id, content: comment }),
+    mutationFn: (payload: { content: string; isVoiceComment?: boolean; voiceText?: string }) =>
+      apiRequest('POST', '/api/comments', { targetType: 'reel', targetId: reel.id, ...payload }),
     onSuccess: () => {
       setComment("");
       queryClient.invalidateQueries({ queryKey: ['/api/comments/reel', reel.id] });
     }
   });
+
+  // ── Press & Hold voice recording ──────────────────────────
+  const handleMicPress = async (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    if (!user) { window.location.href = "/login"; return; }
+    if (holdingRef.current || isRecording) return;
+    holdingRef.current = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      chunksRef.current = [];
+      const mimes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+      const mimeType = mimes.find(m => MediaRecorder.isTypeSupported(m)) || '';
+      const ext = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+      const rec = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+      rec.ondataavailable = ev => { if (ev.data.size > 0) chunksRef.current.push(ev.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        if (timerRef2.current) clearInterval(timerRef2.current);
+        if (waveRef2.current) clearInterval(waveRef2.current);
+        setRecSeconds(0); setWaveLevel(0);
+        const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' });
+        if (blob.size < 300) { toast({ title: "اضغط مطولاً للتسجيل 🎤" }); return; }
+        setIsUploading(true);
+        const fd = new FormData();
+        fd.append("file", blob, `voice-reel-${Date.now()}.${ext}`);
+        try {
+          const res = await fetch("/api/upload", { method: "POST", body: fd, credentials: "include" });
+          const data = await res.json();
+          commentMutation.mutate({ content: "🎤 تعليق صوتي", isVoiceComment: true, voiceText: data.url });
+        } catch {
+          commentMutation.mutate({ content: "🎤 تعليق صوتي" });
+        } finally { setIsUploading(false); }
+      };
+      rec.start(100);
+      recRef.current = rec;
+      setIsRecording(true);
+      setRecSeconds(0);
+      timerRef2.current = setInterval(() => setRecSeconds(s => s + 1), 1000);
+      waveRef2.current = setInterval(() => setWaveLevel(Math.random()), 150);
+    } catch (err: any) {
+      holdingRef.current = false;
+      if (err?.name === 'NotAllowedError') {
+        toast({ variant: "destructive", title: "اسمح للمتصفح بالميكروفون", description: "الإعدادات ← الموقع ← السماح بالميكروفون" });
+      } else {
+        toast({ variant: "destructive", title: "تعذّر تشغيل الميكروفون" });
+      }
+    }
+  };
+
+  const handleMicRelease = () => {
+    if (!holdingRef.current) return;
+    holdingRef.current = false;
+    setIsRecording(false);
+    if (timerRef2.current) clearInterval(timerRef2.current);
+    if (waveRef2.current) clearInterval(waveRef2.current);
+    const rec = recRef.current;
+    if (rec && rec.state !== "inactive") rec.stop();
+  };
 
   // Sync video muted state via ref (React muted prop bug)
   useEffect(() => {
@@ -453,38 +548,124 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded }: {
         {showComments && (
           <motion.div
             initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-            className="absolute bottom-0 left-0 right-0 bg-background rounded-t-2xl p-4 max-h-96 flex flex-col"
+            className="absolute bottom-0 left-0 right-0 bg-background rounded-t-2xl p-4 max-h-[22rem] flex flex-col z-30"
           >
-            <h4 className="font-bold text-sm mb-3">التعليقات</h4>
+            {/* Header */}
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-bold text-sm">التعليقات</h4>
+              <button onClick={() => setShowComments(false)} className="text-muted-foreground hover:text-foreground transition">
+                <Square className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Comments list */}
             <div className="flex-1 overflow-y-auto space-y-2 mb-3">
+              {comments.length === 0 && (
+                <p className="text-center text-xs text-muted-foreground py-4">لا توجد تعليقات — كن أول من يعلّق!</p>
+              )}
               {comments.map((c: any) => (
                 <div key={c.id} className="flex items-start gap-2">
                   <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold flex-shrink-0">
                     {c.userName?.[0] || '?'}
                   </div>
-                  <div>
-                    <span className="text-xs font-bold">{c.userName}</span>
-                    <p className="text-sm">{c.content}</p>
-                    <button
-                      onClick={() => speakEgyptian(c.content)}
-                      className="text-xs text-primary flex items-center gap-1 mt-1"
-                    >
-                      <Volume2 className="w-3 h-3" /> استمع
-                    </button>
+                  <div className="flex-1 bg-muted/40 rounded-2xl px-3 py-2">
+                    <span className="text-xs font-bold text-primary">{c.userName} </span>
+                    {c.isVoiceComment && c.voiceText ? (
+                      <ReelVoicePlayer url={c.voiceText} />
+                    ) : (
+                      <>
+                        <span className="text-sm">{c.content}</span>
+                        {c.content && (
+                          <button
+                            onClick={() => speakEgyptian(c.content)}
+                            className="ms-2 text-muted-foreground hover:text-primary transition"
+                            title="استمع"
+                          >
+                            <Volume2 className="w-3 h-3 inline" />
+                          </button>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
-            <div className="flex gap-2">
-              <Input
-                value={comment} onChange={e => setComment(e.target.value)}
-                placeholder="اكتب تعليقاً..." className="flex-1 text-sm"
-                data-testid="input-reel-comment"
-              />
-              <Button size="sm" onClick={() => commentMutation.mutate()} disabled={!comment.trim() || commentMutation.isPending}>
-                {commentMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "أرسل"}
-              </Button>
-            </div>
+
+            {/* Recording status */}
+            {(isRecording || isUploading) && (
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-2xl text-xs font-medium mb-2 ${
+                isUploading
+                  ? "bg-blue-50 dark:bg-blue-950/30 text-blue-600 border border-blue-200"
+                  : "bg-red-50 dark:bg-red-950/30 text-red-600 border border-red-200"
+              }`}>
+                {isUploading ? (
+                  <><span className="w-2 h-2 rounded-full bg-blue-500 animate-ping inline-block" /> جارٍ إرسال الصوت...</>
+                ) : (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse inline-block" />
+                    🎤 {recSeconds}ث — ارفع إصبعك للإرسال
+                    <div className="flex items-end gap-0.5 h-4 ms-1">
+                      {[0.3,0.7,0.5,1,0.6].map((b,i) => (
+                        <div key={i} className="w-1 bg-red-400 rounded-full transition-all duration-100"
+                          style={{ height: `${Math.max(20,(b*waveLevel+b*0.5)*100)}%` }} />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Input row */}
+            {user ? (
+              <>
+                <div className="flex gap-2">
+                  <Input
+                    value={comment}
+                    onChange={e => setComment(e.target.value)}
+                    placeholder="اكتب أو اضغط مطولاً 🎤"
+                    className="flex-1 h-9 text-sm rounded-full"
+                    onKeyDown={e => e.key === 'Enter' && comment.trim() && commentMutation.mutate({ content: comment })}
+                    disabled={isRecording || isUploading}
+                    data-testid="input-reel-comment"
+                  />
+                  {/* 🎤 Press & Hold mic */}
+                  <button
+                    onMouseDown={handleMicPress}
+                    onMouseUp={handleMicRelease}
+                    onMouseLeave={handleMicRelease}
+                    onTouchStart={handleMicPress}
+                    onTouchEnd={handleMicRelease}
+                    onTouchCancel={handleMicRelease}
+                    disabled={isUploading || commentMutation.isPending}
+                    className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 select-none touch-none transition-all
+                      ${isRecording ? "bg-red-500 text-white scale-110 shadow-lg shadow-red-300" : "bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30"}
+                      disabled:opacity-50`}
+                    data-testid="btn-reel-voice-comment"
+                  >
+                    {isRecording ? <span className="text-base animate-pulse">🎙️</span> : <Mic className="w-4 h-4" />}
+                  </button>
+                  {/* Send text */}
+                  <Button
+                    size="sm"
+                    onClick={() => comment.trim() && commentMutation.mutate({ content: comment })}
+                    disabled={!comment.trim() || commentMutation.isPending || isRecording || isUploading}
+                    className="h-9 w-9 p-0 rounded-full"
+                    data-testid="btn-send-reel-comment"
+                  >
+                    {commentMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  </Button>
+                </div>
+                {!isRecording && !isUploading && (
+                  <p className="text-[10px] text-muted-foreground text-center mt-1.5">
+                    اضغط مطولاً على 🎤 للتسجيل الصوتي مباشرة
+                  </p>
+                )}
+              </>
+            ) : (
+              <a href="/login">
+                <Button variant="outline" size="sm" className="w-full text-xs rounded-full">سجل دخول للتعليق</Button>
+              </a>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
