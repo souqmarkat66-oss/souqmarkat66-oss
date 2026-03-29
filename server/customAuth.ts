@@ -186,6 +186,28 @@ export function registerCustomAuthRoutes(app: Express) {
     }
   });
 
+  // ── POST /api/auth/forgot-password ─────────────────────────────
+  app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
+    const { email, phone } = req.body;
+    if (!email && !phone)
+      return res.status(400).json({ message: "البريد الإلكتروني أو رقم الهاتف مطلوب" });
+    try {
+      const result = await db.execute(
+        sql`SELECT id, email, phone, first_name FROM users
+            WHERE (LOWER(email) = LOWER(${email || ""}) OR phone = ${phone || ""})
+            LIMIT 1`
+      );
+      const user: any = result.rows[0];
+      // For security, always respond the same even if user not found
+      if (!user) return res.status(200).json({ message: "first_login", userId: null, notFound: true });
+      // Clear password to force reset
+      await db.execute(sql`UPDATE users SET password_hash = NULL WHERE id = ${user.id}`);
+      return res.json({ message: "first_login", userId: user.id, firstName: user.first_name });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   // ── GET/POST /api/logout ────────────────────────────────────────
   const doLogout = (req: Request, res: Response) => {
     req.session.destroy(() => {});

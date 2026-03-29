@@ -37,7 +37,7 @@ const ROLES = [
   },
 ];
 
-type Screen = "welcome" | "login" | "register" | "set-password";
+type Screen = "welcome" | "login" | "register" | "set-password" | "forgot";
 
 export default function Login() {
   const { user, login, register, setPassword } = useAuth();
@@ -66,6 +66,10 @@ export default function Login() {
   const [newPw1, setNewPw1] = useState("");
   const [newPw2, setNewPw2] = useState("");
   const [showNewPw, setShowNewPw] = useState(false);
+
+  // Forgot password
+  const [forgotIdentifier, setForgotIdentifier] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -117,6 +121,32 @@ export default function Login() {
       await setPassword.mutateAsync({ userId: firstLoginUserId, password: newPw1 });
     } catch (err: any) {
       toast({ variant: "destructive", title: err?.message || "فشل تعيين كلمة المرور" });
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!forgotIdentifier.trim()) return toast({ variant: "destructive", title: "أدخل البريد الإلكتروني أو رقم الهاتف" });
+    setForgotLoading(true);
+    try {
+      const isEmail = forgotIdentifier.includes("@");
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(isEmail ? { email: forgotIdentifier } : { phone: forgotIdentifier }),
+      });
+      const json = await res.json();
+      if (json.notFound || !json.userId) {
+        toast({ variant: "destructive", title: "البريد الإلكتروني أو رقم الهاتف غير مسجل" });
+        return;
+      }
+      setFirstLoginUserId(json.userId);
+      setScreen("set-password");
+      toast({ title: `مرحباً ${json.firstName || ""}، عيّن كلمة مرور جديدة` });
+    } catch {
+      toast({ variant: "destructive", title: "حدث خطأ، حاول مجدداً" });
+    } finally {
+      setForgotLoading(false);
     }
   };
 
@@ -297,6 +327,9 @@ export default function Login() {
                 <button onClick={() => setScreen("register")} className="text-primary hover:underline">
                   ليس لديك حساب؟ سجّل الآن
                 </button>
+                <button onClick={() => setScreen("forgot")} className="text-muted-foreground hover:text-primary hover:underline text-xs">
+                  نسيت كلمة المرور؟
+                </button>
               </div>
             </div>
           </div>
@@ -414,7 +447,7 @@ export default function Login() {
               </div>
               <div>
                 <h2 className="text-lg font-bold">تعيين كلمة المرور</h2>
-                <p className="text-xs text-muted-foreground">أول مرة تسجّل دخولك — عيّن كلمة مرور لحسابك</p>
+                <p className="text-xs text-muted-foreground">عيّن كلمة مرور جديدة لحسابك — ستُحفظ وتُستخدم في المرات القادمة</p>
               </div>
             </div>
 
@@ -465,6 +498,63 @@ export default function Login() {
                 }
                 تأكيد وتسجيل الدخول
               </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════ */}
+        {/* FORGOT PASSWORD SCREEN */}
+        {/* ══════════════════════════════════════════════════════ */}
+        {screen === "forgot" && (
+          <div className="bg-card border border-border/60 rounded-3xl p-6 sm:p-8 shadow-xl">
+            <div className="flex items-center gap-2 mb-6">
+              <button onClick={() => setScreen("login")} className="p-1 rounded-lg hover:bg-muted transition-colors">
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+              <div>
+                <h2 className="text-xl font-bold">إعادة تعيين كلمة المرور</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">أدخل البريد الإلكتروني أو رقم الهاتف المسجّل</p>
+              </div>
+            </div>
+
+            <div className="p-3 mb-4 bg-blue-500/10 border border-blue-500/20 rounded-xl text-sm text-blue-600">
+              💡 <strong>ملاحظة:</strong> إذا كنت سجّلت حسابك قبلاً عبر Replit أو Google، أدخل إيميلك هنا وستتمكن من تعيين كلمة مرور جديدة
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-semibold mb-1.5 block">البريد الإلكتروني أو رقم الهاتف</label>
+                <div className="relative">
+                  <Mail className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    value={forgotIdentifier}
+                    onChange={e => setForgotIdentifier(e.target.value)}
+                    placeholder="example@email.com أو 01XXXXXXXXX"
+                    className="pr-9 h-11"
+                    dir="ltr"
+                    data-testid="input-forgot-identifier"
+                    onKeyDown={e => e.key === "Enter" && handleForgotPassword()}
+                  />
+                </div>
+              </div>
+
+              <Button
+                size="lg" className="w-full h-12 gap-2 rounded-xl"
+                onClick={handleForgotPassword}
+                disabled={forgotLoading || !forgotIdentifier.trim()}
+                data-testid="btn-forgot-submit"
+              >
+                {forgotLoading
+                  ? <span className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  : <KeyRound className="w-4 h-4" />
+                }
+                إعادة تعيين كلمة المرور
+              </Button>
+
+              <p className="text-center text-sm text-muted-foreground">
+                تذكرت كلمة المرور؟{" "}
+                <button onClick={() => setScreen("login")} className="text-primary hover:underline font-medium">سجّل الدخول</button>
+              </p>
             </div>
           </div>
         )}
