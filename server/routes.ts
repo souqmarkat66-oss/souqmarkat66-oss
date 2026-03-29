@@ -667,6 +667,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         `/admin`
       );
 
+      // Send DM (from admin) to user with receipt
+      const receiptMsg =
+        `🧾 إيصال تعزيز إعلان\n` +
+        `━━━━━━━━━━━━━━━━━\n` +
+        `📋 رقم الطلب: ${orderNumber}\n` +
+        `📢 رقم الإعلان: #${adId}\n` +
+        `💰 المبلغ: ${amount || 0} ج.م\n` +
+        `🔑 مرجع الدفع: ${paymentRef}\n` +
+        `⏳ الحالة: قيد المراجعة\n` +
+        `━━━━━━━━━━━━━━━━━\n` +
+        `سيتم تأكيد التعزيز خلال 24 ساعة ✅`;
+
+      await db.execute(sql`
+        INSERT INTO direct_messages (from_user_id, to_user_id, ad_id, message, is_voice)
+        VALUES (${ADMIN_USER_ID}, ${userId}, ${adId}, ${receiptMsg}, false)
+      `);
+
       res.json({ ok: true, orderNumber, adId, amount: amount || 0 });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
@@ -712,18 +729,45 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             );
           }
         }
-        // Notify user
+        // Notify user via push/bell
         await createNotification(order.user_id, "system",
           `✅ تم تأكيد تعزيز إعلانك`,
           `رقم الطلب ${order.order_number} — تمت الموافقة وبدأ التعزيز!`,
           `/ads/${order.ad_id}`
         );
+        // DM confirmation to user
+        const confirmMsg =
+          `✅ تم تأكيد طلب التعزيز\n` +
+          `━━━━━━━━━━━━━━━━━\n` +
+          `📋 رقم الطلب: ${order.order_number}\n` +
+          `📢 رقم الإعلان: #${order.ad_id}\n` +
+          `💰 المبلغ: ${order.amount} ج.م\n` +
+          `🚀 الحالة: تم التأكيد — الإعلان يصل للناس الآن!\n` +
+          `━━━━━━━━━━━━━━━━━\n` +
+          `شكراً لثقتك في سوق ماركات 🙏`;
+        await db.execute(sql`
+          INSERT INTO direct_messages (from_user_id, to_user_id, ad_id, message, is_voice)
+          VALUES (${ADMIN_USER_ID}, ${order.user_id}, ${order.ad_id}, ${confirmMsg}, false)
+        `);
       } else if (status === 'rejected') {
         await createNotification(order.user_id, "system",
           `❌ طلب التعزيز مرفوض`,
           `رقم الطلب ${order.order_number} — للاستفسار تواصل مع الإدارة.`,
           `/ads/${order.ad_id}`
         );
+        // DM rejection to user
+        const rejectMsg =
+          `❌ تم رفض طلب التعزيز\n` +
+          `━━━━━━━━━━━━━━━━━\n` +
+          `📋 رقم الطلب: ${order.order_number}\n` +
+          `📢 رقم الإعلان: #${order.ad_id}\n` +
+          `💰 المبلغ: ${order.amount} ج.م\n` +
+          `━━━━━━━━━━━━━━━━━\n` +
+          `للاستفسار تواصل مع الإدارة مباشرة.`;
+        await db.execute(sql`
+          INSERT INTO direct_messages (from_user_id, to_user_id, ad_id, message, is_voice)
+          VALUES (${ADMIN_USER_ID}, ${order.user_id}, ${order.ad_id}, ${rejectMsg}, false)
+        `);
       }
 
       res.json({ ok: true });

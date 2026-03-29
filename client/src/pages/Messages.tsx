@@ -379,7 +379,7 @@ export default function Messages() {
                             {msg.is_voice && msg.voice_url ? (
                               <VoicePlayer url={msg.voice_url} />
                             ) : (
-                              <p className="text-sm leading-relaxed break-words">{msg.message}</p>
+                              <p className="text-sm leading-relaxed break-words whitespace-pre-line">{msg.message}</p>
                             )}
 
                             {/* Time + read */}
