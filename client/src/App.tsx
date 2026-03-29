@@ -24,6 +24,7 @@ import Reels from "@/pages/Reels";
 import Login from "@/pages/Login";
 import MyContent from "@/pages/MyContent";
 import EmbedGuide from "@/pages/EmbedGuide";
+import MediaLibrary from "@/pages/MediaLibrary";
 import Messages from "@/pages/Messages";
 import Profile from "@/pages/Profile";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
@@ -85,6 +86,9 @@ function Router() {
               </Route>
               <Route path="/login" component={Login} />
               <Route path="/my-content" component={MyContent} />
+              <Route path="/media-library">
+                <ProtectedRoute component={MediaLibrary} />
+              </Route>
               <Route path="/embed-guide" component={EmbedGuide} />
               <Route path="/messages">
                 <ProtectedRoute component={Messages} />
@@ -205,6 +209,7 @@ function AppFooter() {
               <li><a href="/channels" className="hover:text-foreground transition-colors">القنوات</a></li>
               <li><a href="/reels" className="hover:text-foreground transition-colors">الريلز</a></li>
               <li><a href="/campaigns" className="hover:text-foreground transition-colors">الحملات الإعلانية</a></li>
+              <li><a href="/media-library" className="hover:text-foreground transition-colors">مكتبة الوسائط</a></li>
               <li><a href="/revenue" className="hover:text-foreground transition-colors">الإيرادات</a></li>
               <li><a href="/embed-guide" className="hover:text-foreground transition-colors font-bold text-primary">دليل ربط الإعلانات</a></li>
             </ul>

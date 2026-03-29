@@ -14,7 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, Loader2, Film, Volume2, ImageIcon, AlertCircle, CreditCard, Plus, X, Music } from "lucide-react";
+import { Sparkles, Loader2, Film, Volume2, ImageIcon, AlertCircle, CreditCard, Plus, X, Music, FolderOpen } from "lucide-react";
+import MediaPickerModal from "@/components/MediaPickerModal";
 import { UploadZone } from "@/components/UploadZone";
 import { motion, AnimatePresence } from "framer-motion";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -86,6 +87,7 @@ export default function CreateAd() {
   const [targetInterests, setTargetInterests] = useState<string[]>([]);
   const [targetAges, setTargetAges] = useState<string[]>([]);
   const [locationTarget, setLocationTarget] = useState<{ lat: number; lng: number; radiusKm: number } | null>(null);
+  const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
   // Multi-image to video
   const [adImageUrls, setAdImageUrls] = useState<string[]>([]);
   const [uploadingAdImages, setUploadingAdImages] = useState(false);
@@ -872,6 +874,12 @@ export default function CreateAd() {
             <FormItem>
               <FormLabel>الصورة / الفيديو</FormLabel>
               <UploadZone value={field.value} onChange={field.onChange} label="ارفع صورة أو فيديو مباشرة" />
+              <div className="flex items-center gap-2 mt-2">
+                <Button type="button" variant="outline" size="sm" className="gap-1.5 h-9" onClick={() => setMediaLibraryOpen(true)} data-testid="btn-open-media-library">
+                  <FolderOpen className="w-4 h-4 text-primary" /> اختر من المكتبة
+                </Button>
+                {field.value && <Button type="button" variant="ghost" size="sm" className="h-9 text-xs text-red-500 hover:text-red-600" onClick={() => field.onChange("")}>✕ إزالة</Button>}
+              </div>
               {!field.value && (
                 <>
                   <div className="flex items-center gap-2 mt-2">
@@ -1250,6 +1258,17 @@ export default function CreateAd() {
           </Button>
         </form>
       </Form>
+
+      {/* Media Library Picker Modal */}
+      <MediaPickerModal
+        open={mediaLibraryOpen}
+        onClose={() => setMediaLibraryOpen(false)}
+        onSelect={(url, type) => {
+          form.setValue("mediaUrl", url);
+          form.setValue("mediaType", type);
+          setMediaLibraryOpen(false);
+        }}
+      />
     </div>
   );
 }

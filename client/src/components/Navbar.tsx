@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { NotificationBell } from "./NotificationBell";
 import {
   LogIn, LogOut, PlusCircle, Globe, LayoutGrid, Megaphone,
-  Radio, BarChart2, ShieldCheck, DollarSign, Menu, X, Tv, UserCircle2, MessageSquare, Receipt
+  Radio, BarChart2, ShieldCheck, DollarSign, Menu, X, Tv, UserCircle2, MessageSquare, Receipt, FolderOpen
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -22,6 +22,7 @@ const navLinks = (user: any) => [
   ...(user ? [
     { href: "/my-content", label: "محتواي", icon: UserCircle2 },
     { href: "/create", label: "إعلان جديد", icon: PlusCircle },
+    { href: "/media-library", label: "المكتبة", icon: FolderOpen },
     { href: "/campaigns", label: "الحملات", icon: BarChart2 },
     { href: "/revenue", label: "الإيرادات", icon: DollarSign },
     { href: "/payments", label: "المدفوعات", icon: Receipt },

@@ -13,8 +13,9 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, BarChart2, Eye, MousePointer, Code, Pause, Play, TrendingUp, MapPin, Loader2, Copy, CheckCheck, Download, Megaphone } from "lucide-react";
+import { Plus, BarChart2, Eye, MousePointer, Code, Pause, Play, TrendingUp, MapPin, Loader2, Copy, CheckCheck, Download, Megaphone, FolderOpen } from "lucide-react";
 import { UploadZone } from "@/components/UploadZone";
+import MediaPickerModal from "@/components/MediaPickerModal";
 import { EgyptTargetingMap } from "@/components/EgyptTargetingMap";
 import type { AdCampaign } from "@shared/schema";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
@@ -80,6 +81,7 @@ export default function Campaigns() {
   const [mapRegions, setMapRegions] = useState<string[]>([]);
   const [mapInterests, setMapInterests] = useState<string[]>([]);
   const [mapAges, setMapAges] = useState<string[]>([]);
+  const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
 
   const { data: campaigns = [], isLoading } = useQuery<AdCampaign[]>({
     queryKey: ["/api/campaigns"],
@@ -201,7 +203,18 @@ export default function Campaigns() {
                 <FormField control={form.control} name="mediaUrl" render={({ field }) => (
                   <FormItem><FormLabel>صورة / فيديو الإعلان</FormLabel>
                     <UploadZone value={field.value} onChange={field.onChange} />
-                    {!field.value && <FormControl><Input placeholder="أو أدخل رابطاً..." className="mt-2" onChange={e => field.onChange(e.target.value)} /></FormControl>}
+                    <div className="flex gap-2 mt-2">
+                      {!field.value && <FormControl><Input placeholder="أو أدخل رابطاً..." onChange={e => field.onChange(e.target.value)} /></FormControl>}
+                      <Button type="button" variant="outline" size="sm" className="gap-1.5 flex-shrink-0 h-10" onClick={() => setMediaLibraryOpen(true)} data-testid="btn-open-media-library">
+                        <FolderOpen className="w-4 h-4" /> اختر من المكتبة
+                      </Button>
+                    </div>
+                    {field.value && (
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs text-muted-foreground truncate flex-1">{field.value}</span>
+                        <Button type="button" variant="ghost" size="sm" className="h-7 text-xs text-red-500" onClick={() => field.onChange("")}>✕ إزالة</Button>
+                      </div>
+                    )}
                   </FormItem>
                 )} />
 
@@ -621,6 +634,13 @@ export default function Campaigns() {
           })()}
         </DialogContent>
       </Dialog>
+
+      {/* Media Library Picker */}
+      <MediaPickerModal
+        open={mediaLibraryOpen}
+        onClose={() => setMediaLibraryOpen(false)}
+        onSelect={(url) => { form.setValue("mediaUrl", url); setMediaLibraryOpen(false); }}
+      />
     </div>
   );
 }

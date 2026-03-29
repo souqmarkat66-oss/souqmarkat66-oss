@@ -167,6 +167,34 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(files);
   });
 
+  app.delete("/api/files/:id", isAuthenticated, async (req: any, res) => {
+    const { uploadedFiles } = await import("@shared/schema");
+    const { eq, and } = await import("drizzle-orm");
+    const userId = req.user.claims.sub;
+    const fileId = Number(req.params.id);
+    const [file] = await db.select().from(uploadedFiles).where(and(eq(uploadedFiles.id, fileId), eq(uploadedFiles.userId, userId)));
+    if (!file) return res.status(404).json({ message: "File not found" });
+    // delete from disk
+    try {
+      const filePath = path.join(process.cwd(), "uploads", file.filename);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch {}
+    await db.delete(uploadedFiles).where(eq(uploadedFiles.id, fileId));
+    res.json({ success: true });
+  });
+
+  // Admin: all files across platform
+  app.get("/api/admin/files", isAuthenticated, requireAdmin, async (_req, res) => {
+    const { uploadedFiles } = await import("@shared/schema");
+    const { desc } = await import("drizzle-orm");
+    const rows = await db.execute(sql`
+      SELECT uf.*, u.first_name, u.last_name, u.email
+      FROM uploaded_files uf
+      LEFT JOIN users u ON u.id = uf.user_id
+      ORDER BY uf.created_at DESC LIMIT 500`);
+    res.json(rows.rows);
+  });
+
   // ================================================================
   // PLATFORM SETTINGS (Admin only)
   // ================================================================
