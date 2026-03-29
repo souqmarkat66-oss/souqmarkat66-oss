@@ -34,6 +34,7 @@ const NAV = [
   { key: "streams",        label: "البث المباشر",          icon: Radio,           color: "text-red-400" },
   { key: "campaigns",      label: "الحملات الإعلانية",    icon: BarChart2,       color: "text-teal-400" },
   { key: "payments",       label: "طلبات السحب",          icon: Banknote,        color: "text-green-400" },
+  { key: "boostorders",    label: "طلبات التعزيز",         icon: Zap,             color: "text-orange-400" },
   { key: "reports",        label: "البلاغات",             icon: Flag,            color: "text-yellow-400" },
   { key: "fraud",          label: "كشف الاحتيال",         icon: ShieldX,         color: "text-red-500" },
   { key: "revenue",        label: "الإيرادات",            icon: DollarSign,      color: "text-emerald-400" },
@@ -189,6 +190,7 @@ export default function AdminPanel() {
           {section === "streams"    && <StreamsSection logAction={logAction} />}
           {section === "campaigns"  && <CampaignsSection logAction={logAction} />}
           {section === "payments"   && <PaymentsSection logAction={logAction} />}
+          {section === "boostorders" && <BoostOrdersSection logAction={logAction} />}
           {section === "reports"    && <ReportsSection logAction={logAction} />}
           {section === "fraud"      && <FraudSection />}
           {section === "revenue"    && <RevenueSection />}
@@ -1455,6 +1457,124 @@ function ActivitySection() {
                   ))}
                 </div>
               )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ── 🚀 Boost Orders Section ──────────────────────────────────────
+function BoostOrdersSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data: orders = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/boost/orders"],
+    queryFn: () => fetch("/api/boost/orders", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const updateOrder = async (id: number, status: string) => {
+    const res = await fetch(`/api/boost/orders/${id}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    if (res.ok) {
+      qc.invalidateQueries({ queryKey: ["/api/boost/orders"] });
+      toast({ title: status === "confirmed" ? "✅ تم تأكيد التعزيز وبدأ الوصول!" : "❌ تم رفض الطلب" });
+      logAction(status === "confirmed" ? "boost_confirm" : "boost_reject", `order_${id}`, "");
+    } else {
+      toast({ variant: "destructive", title: "فشل تحديث الطلب" });
+    }
+  };
+
+  const pending = orders.filter((o: any) => o.status === "pending");
+  const done    = orders.filter((o: any) => o.status !== "pending");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 mb-4">
+        <Zap className="w-5 h-5 text-orange-500" />
+        <h2 className="font-bold text-lg">طلبات التعزيز المدفوع</h2>
+        {pending.length > 0 && (
+          <span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pending.length} معلق</span>
+        )}
+      </div>
+
+      {isLoading && <div className="text-center py-12 text-muted-foreground">جارٍ التحميل...</div>}
+
+      {!isLoading && pending.length === 0 && done.length === 0 && (
+        <Card className="rounded-2xl border border-border/50">
+          <CardContent className="py-12 text-center text-muted-foreground">
+            <Zap className="w-10 h-10 mx-auto mb-3 opacity-30" />
+            لا يوجد طلبات تعزيز حتى الآن
+          </CardContent>
+        </Card>
+      )}
+
+      {pending.length > 0 && (
+        <Card className="rounded-2xl border border-orange-200 dark:border-orange-800">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base text-orange-600">🕐 طلبات قيد المراجعة ({pending.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {pending.map((o: any) => (
+              <div key={o.id} className="flex items-center gap-3 p-3 rounded-xl bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-xs font-bold text-orange-700 dark:text-orange-400" data-testid={`text-order-number-${o.id}`}>{o.order_number}</span>
+                    <span className="text-xs text-muted-foreground">إعلان #{o.ad_id}</span>
+                    <span className="text-xs font-bold text-green-600">{o.amount} ج.م</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    {o.first_name} {o.last_name} — مرجع: <span className="font-mono font-bold">{o.payment_ref}</span>
+                  </div>
+                  {o.ad_title && <div className="text-xs text-muted-foreground">"{o.ad_title}"</div>}
+                  <div className="text-xs text-muted-foreground">{o.created_at ? format(new Date(o.created_at), "dd/MM HH:mm", { locale: ar }) : ""}</div>
+                </div>
+                <div className="flex flex-col gap-1.5 flex-shrink-0">
+                  <button
+                    onClick={() => updateOrder(o.id, "confirmed")}
+                    className="px-3 py-1.5 rounded-lg bg-green-500 hover:bg-green-600 text-white text-xs font-bold transition-all flex items-center gap-1"
+                    data-testid={`btn-confirm-boost-${o.id}`}
+                  >
+                    <CheckCircle className="w-3 h-3" /> تأكيد ✓
+                  </button>
+                  <button
+                    onClick={() => updateOrder(o.id, "rejected")}
+                    className="px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-bold transition-all flex items-center gap-1"
+                    data-testid={`btn-reject-boost-${o.id}`}
+                  >
+                    <XCircle className="w-3 h-3" /> رفض ✗
+                  </button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {done.length > 0 && (
+        <Card className="rounded-2xl border border-border/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base text-muted-foreground">سجل الطلبات المكتملة</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {done.slice(0, 30).map((o: any) => (
+              <div key={o.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-muted/30 border border-border/40">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-xs">{o.order_number}</span>
+                    <span className="text-xs text-muted-foreground">إعلان #{o.ad_id}</span>
+                    <span className="font-bold text-xs">{o.amount} ج.م</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">{o.first_name} {o.last_name} — {o.payment_ref}</div>
+                </div>
+                <StatusBadge status={o.status === "confirmed" ? "approved" : o.status === "rejected" ? "rejected" : "pending"} />
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}

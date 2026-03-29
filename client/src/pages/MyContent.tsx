@@ -66,6 +66,7 @@ function AuthenticatedContent({ user }: { user: any }) {
   const [boostedIds, setBoostedIds]       = useState<Set<number>>(new Set());
   const [boostPayDialog, setBoostPayDialog] = useState<{ adId: number; msg: string } | null>(null);
   const [boostPayRef, setBoostPayRef]     = useState("");
+  const [boostReceipt, setBoostReceipt]   = useState<{ orderNumber: string; adId: number; amount: number } | null>(null);
 
   useEffect(() => {
     fetch("/api/boost/settings").then(r => r.json()).then(setBoostSettings).catch(() => {});
@@ -74,12 +75,31 @@ function AuthenticatedContent({ user }: { user: any }) {
   const handleBoost = async (adId: number, paymentRef?: string) => {
     setBoostingId(adId);
     try {
-      const body = paymentRef ? JSON.stringify({ payment_ref: paymentRef }) : undefined;
+      // If there's a paymentRef, create a formal order (pending admin confirmation)
+      if (paymentRef) {
+        const res = await fetch("/api/boost/pay-order", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ adId, paymentRef, amount: boostSettings?.price ?? 0 }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setBoostPayDialog(null);
+          setBoostPayRef("");
+          setBoostReceipt({ orderNumber: data.orderNumber, adId, amount: data.amount });
+        } else {
+          toast({ variant: "destructive", title: data.message || "فشل إنشاء الطلب" });
+        }
+        return;
+      }
+
+      // Free boost attempt
       const res = await fetch(`/api/ads/${adId}/boost-notify`, {
         method: "POST",
         credentials: "include",
-        headers: body ? { "Content-Type": "application/json" } : {},
-        body,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (res.status === 402 && data.requiresPayment) {
@@ -89,8 +109,6 @@ function AuthenticatedContent({ user }: { user: any }) {
         toast({ variant: "destructive", title: "⏳ حد التعزيز", description: data.message });
       } else if (res.ok) {
         setBoostedIds(prev => new Set(prev).add(adId));
-        setBoostPayDialog(null);
-        setBoostPayRef("");
         toast({
           title: "🚀 تم تعزيز الإعلان!",
           description: data.notifiedCount > 0
@@ -498,7 +516,7 @@ function AuthenticatedContent({ user }: { user: any }) {
             <p className="text-sm text-muted-foreground">{boostPayDialog?.msg}</p>
             <div className="bg-orange-50 dark:bg-orange-950/20 rounded-xl p-3 text-center border border-orange-200 dark:border-orange-800">
               <p className="text-2xl font-black text-orange-600">{boostSettings?.price} ج.م</p>
-              <p className="text-xs text-muted-foreground mt-1">تعزيز فوري — إشعار لآلاف المستخدمين 📣</p>
+              <p className="text-xs text-muted-foreground mt-1">إعلانك سيصل لآلاف المستخدمين 📣</p>
             </div>
             <div className="space-y-2">
               <p className="text-xs font-semibold text-muted-foreground">ادفع عبر:</p>
@@ -521,6 +539,9 @@ function AuthenticatedContent({ user }: { user: any }) {
                 data-testid="input-boost-pay-ref-mycontent"
               />
             </div>
+            <p className="text-xs text-muted-foreground bg-yellow-50 dark:bg-yellow-950/20 rounded-lg p-2 border border-yellow-200 dark:border-yellow-800">
+              📋 بعد التأكيد ستحصل على <strong>رقم طلب</strong> يُرسل للإدارة — سيتم تأكيد التعزيز خلال 24 ساعة
+            </p>
             <button
               disabled={!boostPayRef.trim() || boostingId === boostPayDialog?.adId}
               onClick={() => boostPayDialog && handleBoost(boostPayDialog.adId, boostPayRef.trim())}
@@ -528,9 +549,50 @@ function AuthenticatedContent({ user }: { user: any }) {
               data-testid="btn-confirm-boost-payment-mycontent"
             >
               {boostingId === boostPayDialog?.adId
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> جارٍ...</>
-                : <><Zap className="w-4 h-4" /> تأكيد الدفع وتعزيز الإعلان</>
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> جارٍ إنشاء الطلب...</>
+                : <><Zap className="w-4 h-4" /> تأكيد الدفع واحجز طلبك</>
               }
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── 🧾 Boost Order Receipt Dialog ── */}
+      <Dialog open={!!boostReceipt} onOpenChange={open => { if (!open) setBoostReceipt(null); }}>
+        <DialogContent dir="rtl" className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2 text-green-600">
+              ✅ تم استلام طلبك بنجاح
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="bg-green-50 dark:bg-green-950/20 rounded-xl p-4 border border-green-200 dark:border-green-800 space-y-3 text-sm">
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">رقم الطلب</span>
+                <span className="font-mono font-black text-green-700 dark:text-green-400 text-base" data-testid="text-boost-order-number">{boostReceipt?.orderNumber}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">رقم الإعلان</span>
+                <span className="font-bold" data-testid="text-boost-ad-id">#{boostReceipt?.adId}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">المبلغ</span>
+                <span className="font-bold text-orange-600">{boostReceipt?.amount} ج.م</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">الحالة</span>
+                <span className="bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 px-2 py-0.5 rounded-full text-xs font-bold">قيد المراجعة</span>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground text-center">
+              📬 تم إرسال الطلب للإدارة — ستصلك إشعاراً بالتأكيد خلال 24 ساعة
+            </p>
+            <button
+              onClick={() => setBoostReceipt(null)}
+              className="w-full py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white font-bold text-sm transition-all"
+              data-testid="btn-close-boost-receipt"
+            >
+              حسناً، شكراً
             </button>
           </div>
         </DialogContent>

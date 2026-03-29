@@ -580,13 +580,18 @@ export default function LiveStream() {
   };
 
   // ─── Voice Chat: Press & Hold ───────────────────────────────
-  const handleChatMicPress = async (e: React.MouseEvent | React.TouchEvent) => {
+  const handleChatMicPress = async (e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
     e.preventDefault();
     if (!user) { window.location.href = "/login"; return; }
     if (chatHoldingRef.current || chatIsRecording) return;
     chatHoldingRef.current = true;
     try {
       const stream2 = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      // User may have released while permission dialog was open
+      if (!chatHoldingRef.current) {
+        stream2.getTracks().forEach(t => t.stop());
+        return;
+      }
       chatChunksRef.current = [];
       const mimeTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
       const mimeType = mimeTypes.find(m => MediaRecorder.isTypeSupported(m)) || "";
@@ -637,7 +642,8 @@ export default function LiveStream() {
     }
   };
 
-  const handleChatMicRelease = () => {
+  const handleChatMicRelease = (e?: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
+    e?.preventDefault();
     if (!chatHoldingRef.current) return;
     chatHoldingRef.current = false;
     setChatIsRecording(false);
@@ -1210,13 +1216,13 @@ export default function LiveStream() {
                         {/* Owner can reply with voice to this voice message */}
                         {user && stream?.userId === user.id && !msg.isOwner && (
                           <button
-                            onMouseDown={handleChatMicPress}
-                            onMouseUp={handleChatMicRelease}
-                            onMouseLeave={handleChatMicRelease}
-                            onTouchStart={handleChatMicPress}
-                            onTouchEnd={handleChatMicRelease}
-                            onTouchCancel={handleChatMicRelease}
-                            className="text-[9px] px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 border border-red-200 dark:border-red-800 select-none touch-none hover:bg-red-200 transition-all"
+                            onPointerDown={handleChatMicPress}
+                            onPointerUp={handleChatMicRelease}
+                            onPointerLeave={handleChatMicRelease}
+                            onPointerCancel={handleChatMicRelease}
+                            onContextMenu={e => e.preventDefault()}
+                            style={{ touchAction: "none", userSelect: "none" }}
+                            className="text-[9px] px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 border border-red-200 dark:border-red-800 hover:bg-red-200 transition-all"
                           >
                             {chatIsRecording ? "🔴 جارٍ..." : "رد بصوتك"}
                           </button>
@@ -1268,16 +1274,16 @@ export default function LiveStream() {
                       maxLength={200}
                       disabled={chatIsRecording || chatIsUploading}
                     />
-                    {/* 🎤 Press & Hold Mic */}
+                    {/* 🎤 Press & Hold Mic — pointer events cover mouse & touch */}
                     <button
-                      onMouseDown={handleChatMicPress}
-                      onMouseUp={handleChatMicRelease}
-                      onMouseLeave={handleChatMicRelease}
-                      onTouchStart={handleChatMicPress}
-                      onTouchEnd={handleChatMicRelease}
-                      onTouchCancel={handleChatMicRelease}
+                      onPointerDown={handleChatMicPress}
+                      onPointerUp={handleChatMicRelease}
+                      onPointerLeave={handleChatMicRelease}
+                      onPointerCancel={handleChatMicRelease}
+                      onContextMenu={e => e.preventDefault()}
                       disabled={chatIsUploading}
-                      className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 transition-all select-none touch-none ${
+                      style={{ touchAction: "none", userSelect: "none" }}
+                      className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
                         chatIsRecording
                           ? "bg-red-500 text-white scale-110 shadow-lg shadow-red-300"
                           : "bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30"

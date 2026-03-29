@@ -637,6 +637,99 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // AD BOOST NOTIFY — Paid reach: notifies ALL users (up to 1000)
   // Rate limited: max once every 30 days per ad. Admin can enable/disable + set price.
   // ================================================================
+  // POST /api/boost/pay-order — create payment order, notify admin, return order number
+  app.post("/api/boost/pay-order", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const { adId, paymentRef, amount } = req.body;
+    if (!adId || !paymentRef) return res.status(400).json({ message: "بيانات ناقصة" });
+    try {
+      const ad = await storage.getAd(parseInt(adId));
+      if (!ad) return res.status(404).json({ message: "الإعلان غير موجود" });
+      if (ad.userId !== userId) return res.status(403).json({ message: "غير مصرح" });
+
+      // Generate unique order number: BOOST-{adId}-{timestamp last 6 digits}
+      const ts = Date.now().toString().slice(-6);
+      const orderNumber = `BOOST-${adId}-${ts}`;
+
+      // Save order in DB
+      await db.execute(sql`
+        INSERT INTO boost_orders (order_number, ad_id, user_id, amount, payment_ref, status)
+        VALUES (${orderNumber}, ${adId}, ${userId}, ${amount || 0}, ${paymentRef}, 'pending')
+      `);
+
+      // Notify admin
+      const userName = req.user.claims?.first_name || "مستخدم";
+      await createNotification(
+        ADMIN_USER_ID,
+        "system",
+        `💳 طلب تعزيز جديد #${orderNumber}`,
+        `${userName} دفع ${amount || 0} ج.م لتعزيز إعلان رقم ${adId} — مرجع الدفع: ${paymentRef}. تحقق وأكّد.`,
+        `/admin`
+      );
+
+      res.json({ ok: true, orderNumber, adId, amount: amount || 0 });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // GET /api/boost/orders — admin: list all boost orders
+  app.get("/api/boost/orders", isAuthenticated, async (req: any, res) => {
+    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
+    try {
+      const rows = await db.execute(sql`
+        SELECT bo.*, u.first_name, u.last_name, a.title AS ad_title
+        FROM boost_orders bo
+        LEFT JOIN users u ON u.id = bo.user_id
+        LEFT JOIN ads a ON a.id = bo.ad_id
+        ORDER BY bo.created_at DESC LIMIT 100
+      `);
+      res.json(rows.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // PATCH /api/boost/orders/:id — admin: confirm or reject
+  app.patch("/api/boost/orders/:id", isAuthenticated, async (req: any, res) => {
+    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
+    const { status } = req.body; // 'confirmed' | 'rejected'
+    try {
+      const orderRow = await db.execute(sql`SELECT * FROM boost_orders WHERE id = ${req.params.id} LIMIT 1`);
+      const order = (orderRow.rows[0] as any);
+      if (!order) return res.status(404).json({ message: "الطلب غير موجود" });
+
+      await db.execute(sql`UPDATE boost_orders SET status = ${status} WHERE id = ${req.params.id}`);
+
+      if (status === 'confirmed') {
+        // Actually run the boost
+        const ad = await storage.getAd(order.ad_id);
+        if (ad) {
+          const allRows = await db.execute(sql`SELECT id FROM users WHERE id != ${order.user_id} LIMIT 1000`);
+          for (const row of allRows.rows as any[]) {
+            await createNotification(row.id, "system",
+              `🚀 إعلان مميز: ${ad.title}`,
+              `✨ عرض مميز لا تفوّته — شاهده الآن!`,
+              `/ads/${order.ad_id}`
+            );
+          }
+        }
+        // Notify user
+        await createNotification(order.user_id, "system",
+          `✅ تم تأكيد تعزيز إعلانك`,
+          `رقم الطلب ${order.order_number} — تمت الموافقة وبدأ التعزيز!`,
+          `/ads/${order.ad_id}`
+        );
+      } else if (status === 'rejected') {
+        await createNotification(order.user_id, "system",
+          `❌ طلب التعزيز مرفوض`,
+          `رقم الطلب ${order.order_number} — للاستفسار تواصل مع الإدارة.`,
+          `/ads/${order.ad_id}`
+        );
+      }
+
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   // GET boost settings (public — so the button can show price)
   app.get("/api/boost/settings", async (_req, res) => {
     try {

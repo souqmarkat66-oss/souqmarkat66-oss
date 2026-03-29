@@ -122,6 +122,16 @@ async function runMigrations() {
       auth TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
     )`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS boost_orders (
+      id SERIAL PRIMARY KEY,
+      order_number VARCHAR NOT NULL UNIQUE,
+      ad_id INTEGER NOT NULL,
+      user_id VARCHAR NOT NULL,
+      amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+      payment_ref VARCHAR NOT NULL,
+      status VARCHAR NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
     // Generate VAPID keys for push notifications if not present
     const vapidCheck = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'vapid_public_key' LIMIT 1`);
     if (vapidCheck.rows.length === 0) {

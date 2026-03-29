@@ -147,13 +147,18 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded }: {
   });
 
   // ── Press & Hold voice recording ──────────────────────────
-  const handleMicPress = async (e: React.MouseEvent | React.TouchEvent) => {
+  const handleMicPress = async (e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
     e.preventDefault();
     if (!user) { window.location.href = "/login"; return; }
     if (holdingRef.current || isRecording) return;
     holdingRef.current = true;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      // User may have released finger while permission dialog was open
+      if (!holdingRef.current) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
       chunksRef.current = [];
       const mimes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
       const mimeType = mimes.find(m => MediaRecorder.isTypeSupported(m)) || '';
@@ -194,7 +199,8 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded }: {
     }
   };
 
-  const handleMicRelease = () => {
+  const handleMicRelease = (e?: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
+    e?.preventDefault();
     if (!holdingRef.current) return;
     holdingRef.current = false;
     setIsRecording(false);
@@ -628,16 +634,16 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded }: {
                     disabled={isRecording || isUploading}
                     data-testid="input-reel-comment"
                   />
-                  {/* 🎤 Press & Hold mic */}
+                  {/* 🎤 Press & Hold mic — pointer events cover both mouse & touch */}
                   <button
-                    onMouseDown={handleMicPress}
-                    onMouseUp={handleMicRelease}
-                    onMouseLeave={handleMicRelease}
-                    onTouchStart={handleMicPress}
-                    onTouchEnd={handleMicRelease}
-                    onTouchCancel={handleMicRelease}
+                    onPointerDown={handleMicPress}
+                    onPointerUp={handleMicRelease}
+                    onPointerLeave={handleMicRelease}
+                    onPointerCancel={handleMicRelease}
+                    onContextMenu={e => e.preventDefault()}
                     disabled={isUploading || commentMutation.isPending}
-                    className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 select-none touch-none transition-all
+                    style={{ touchAction: "none", userSelect: "none" }}
+                    className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 transition-all
                       ${isRecording ? "bg-red-500 text-white scale-110 shadow-lg shadow-red-300" : "bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30"}
                       disabled:opacity-50`}
                     data-testid="btn-reel-voice-comment"
