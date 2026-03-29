@@ -239,29 +239,39 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ valid: hashed === stored });
   });
 
+  // Recover PIN: verify email/phone + password → auto-generate new PIN
   app.post("/api/admin/pin/recover", isAuthenticated, requireAdmin, async (req: any, res) => {
-    const { input } = req.body; // email or phone
-    const emailRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'admin_recovery_email' LIMIT 1`);
-    const phoneRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'admin_recovery_phone' LIMIT 1`);
-    const storedEmail = (emailRow.rows[0] as any)?.value || "";
-    const storedPhone = (phoneRow.rows[0] as any)?.value || "";
-    const match = input && (input === storedEmail || input === storedPhone);
-    if (!match) return res.status(401).json({ message: "البيانات غير مطابقة، تحقق من الإيميل أو رقم التليفون" });
-    // allow reset — return a one-time token stored in memory
-    const token = Math.random().toString(36).substring(2, 10).toUpperCase();
-    (global as any).__adminResetToken = token;
-    setTimeout(() => { (global as any).__adminResetToken = null; }, 15 * 60 * 1000); // 15 min
-    res.json({ success: true, resetToken: token });
-  });
-
-  app.post("/api/admin/pin/reset", isAuthenticated, requireAdmin, async (req: any, res) => {
-    const { newPin, resetToken } = req.body;
-    if (!resetToken || resetToken !== (global as any).__adminResetToken) return res.status(401).json({ message: "رمز الاسترداد غير صحيح أو منتهي" });
-    if (!newPin || newPin.length < 4) return res.status(400).json({ message: "PIN لازم يكون 4 أرقام على الأقل" });
+    const { input, password } = req.body; // email or phone + password
+    if (!input || !password) return res.status(400).json({ message: "أدخل الإيميل أو التليفون وكلمة السر" });
+    // Find admin user by email or phone
+    const userRow = await db.execute(sql`SELECT id, email, phone, password_hash FROM users WHERE (email = ${input} OR phone = ${input}) LIMIT 1`);
+    const user = userRow.rows[0] as any;
+    if (!user) return res.status(401).json({ message: "لم يتم العثور على الحساب" });
+    // Verify password
+    const bcrypt = await import("bcryptjs");
+    const valid = user.password_hash && await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(401).json({ message: "كلمة السر غير صحيحة" });
+    // Auto-generate new 6-digit PIN
     const { createHash } = await import("crypto");
+    const newPin = String(Math.floor(100000 + Math.random() * 900000));
     const hashed = createHash("sha256").update(newPin).digest("hex");
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('admin_pin', ${hashed}) ON CONFLICT (key) DO UPDATE SET value = ${hashed}`);
-    (global as any).__adminResetToken = null;
+    res.json({ success: true, pin: newPin });
+  });
+
+  // Change admin password
+  app.post("/api/admin/change-password", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ message: "أدخل كلمة السر الحالية والجديدة" });
+    if (newPassword.length < 6) return res.status(400).json({ message: "كلمة السر الجديدة لازم تكون 6 أحرف على الأقل" });
+    const userId = req.user.claims.sub;
+    const userRow = await db.execute(sql`SELECT password_hash FROM users WHERE id = ${userId} LIMIT 1`);
+    const user = userRow.rows[0] as any;
+    const bcrypt = await import("bcryptjs");
+    const valid = user?.password_hash && await bcrypt.compare(currentPassword, user.password_hash);
+    if (!valid) return res.status(401).json({ message: "كلمة السر الحالية غير صحيحة" });
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await db.execute(sql`UPDATE users SET password_hash = ${newHash} WHERE id = ${userId}`);
     res.json({ success: true });
   });
 
