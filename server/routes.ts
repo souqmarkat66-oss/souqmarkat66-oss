@@ -429,7 +429,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               // Users who liked ads targeting this region
               const likers = await db.execute(
                 sql`SELECT DISTINCT l.user_id FROM likes l
-                    JOIN ads a ON a.id::text = l.target_id AND l.target_type = 'ad'
+                    JOIN ads a ON a.id = l.target_id AND l.target_type = 'ad'
                     WHERE a.target_region ILIKE ${'%' + region + '%'}
                       AND l.user_id != ${userId}
                     LIMIT 150`
