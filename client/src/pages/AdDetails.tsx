@@ -141,8 +141,9 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
         <a
           href={`https://wa.me/2${ad.whatsappNumber.replace(/^0/, '')}?text=مرحباً، رأيت إعلانك "${ad.title}" على شبكة سوق للإعلانات`}
           target="_blank" rel="noopener noreferrer"
+          onClick={() => fetch(`/api/ads/${ad.id}/whatsapp-click`, { method: "POST" }).catch(() => {})}
         >
-          <Button className="w-full gap-2 bg-green-500 hover:bg-green-600 text-white rounded-2xl h-12">
+          <Button className="w-full gap-2 bg-green-500 hover:bg-green-600 text-white rounded-2xl h-12" data-testid="btn-whatsapp">
             <MessageCircle className="w-5 h-5" />
             تواصل عبر واتساب {ad.whatsappNumber}
           </Button>
@@ -536,6 +537,22 @@ export default function AdDetails() {
       fetch(`/api/ads/${id}/view`, { method: "POST" }).catch(() => {});
     }
   }, [id]);
+
+  // SEO meta tags
+  useEffect(() => {
+    if (!ad) return;
+    document.title = `${ad.title} | شبكة سوق للإعلانات`;
+    let desc = document.querySelector('meta[name="description"]') as HTMLMetaElement | null;
+    if (!desc) { desc = document.createElement("meta"); desc.name = "description"; document.head.appendChild(desc); }
+    desc.content = (ad.description || "").substring(0, 160);
+    let og = document.querySelector('meta[property="og:title"]') as HTMLMetaElement | null;
+    if (!og) { og = document.createElement("meta"); og.setAttribute("property","og:title"); document.head.appendChild(og); }
+    og.content = ad.title;
+    let ogImg = document.querySelector('meta[property="og:image"]') as HTMLMetaElement | null;
+    if (!ogImg) { ogImg = document.createElement("meta"); ogImg.setAttribute("property","og:image"); document.head.appendChild(ogImg); }
+    ogImg.content = ad.mediaUrl || "";
+    return () => { document.title = "شبكة سوق للإعلانات"; };
+  }, [ad]);
 
   const { data: favCheck } = useQuery<{ favorited: boolean }>({
     queryKey: ["/api/favorites", id, "check"],

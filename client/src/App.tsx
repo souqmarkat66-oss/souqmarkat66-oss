@@ -30,6 +30,8 @@ import Profile from "@/pages/Profile";
 import MyDashboard from "@/pages/MyDashboard";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import { GlobalAssistant } from "@/components/GlobalAssistant";
+import { PushSetup } from "@/components/PushSetup";
+import { InterestOnboarding } from "@/components/InterestOnboarding";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -59,6 +61,8 @@ function Router() {
         <div className="flex flex-col min-h-screen font-sans">
           <Navbar />
           <GlobalAssistant />
+          <PushSetup />
+          <InterestOnboarding />
           <main className="flex-1 bg-background">
             <Switch>
               <Route path="/" component={Home} />

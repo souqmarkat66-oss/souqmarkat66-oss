@@ -159,6 +159,7 @@ export default function CreateAd() {
         userId: "temp",
         targetRegion: targetRegions.join(",") || adData.targetRegion || "",
         targetInterests: targetInterests.join(",") || "",
+        targetAges: targetAges.join(",") || "",
         ...(locationTarget ? {
           targetLat: locationTarget.lat,
           targetLng: locationTarget.lng,

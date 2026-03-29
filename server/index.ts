@@ -112,6 +112,26 @@ async function runMigrations() {
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS governorate TEXT`);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_interests TEXT`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS interests TEXT`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_ages TEXT`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS whatsapp_clicks INTEGER DEFAULT 0`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id SERIAL PRIMARY KEY,
+      user_id VARCHAR NOT NULL,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+    // Generate VAPID keys for push notifications if not present
+    const vapidCheck = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'vapid_public_key' LIMIT 1`);
+    if (vapidCheck.rows.length === 0) {
+      const wpModule = await import('web-push');
+      const webpush = (wpModule as any).default || wpModule;
+      const vapidKeys = webpush.generateVAPIDKeys();
+      await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('vapid_public_key', ${vapidKeys.publicKey}) ON CONFLICT (key) DO NOTHING`);
+      await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('vapid_private_key', ${vapidKeys.privateKey}) ON CONFLICT (key) DO NOTHING`);
+      console.log('VAPID keys generated');
+    }
     // Backfill users.interests from their own ads' target_interests
     await db.execute(sql`
       UPDATE users u

@@ -17,6 +17,8 @@ import fs from "fs";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import express from "express";
+import * as webpushModule from "web-push";
+const webpush: typeof webpushModule = (webpushModule as any).default || webpushModule;
 
 // Admin user ID
 const ADMIN_USER_ID = "54219806";
@@ -62,6 +64,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   await setupAuth(app);
   registerCustomAuthRoutes(app);
   registerImageRoutes(app);
+
+  // ── Initialize webpush VAPID keys from DB ──
+  try {
+    const pubRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'vapid_public_key' LIMIT 1`);
+    const privRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'vapid_private_key' LIMIT 1`);
+    if (pubRow.rows.length > 0 && privRow.rows.length > 0) {
+      webpush.setVapidDetails(
+        'mailto:souqmarkat66@gmail.com',
+        (pubRow.rows[0] as any).value,
+        (privRow.rows[0] as any).value
+      );
+    }
+  } catch {}
 
   // ── DB Migrations (safe — ADD COLUMN IF NOT EXISTS) ──
   try {
@@ -344,6 +359,74 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const pricePerCredit = parseFloat(await storage.getSetting('ai_price_per_credit_egp') || '5');
     const balance = await storage.getUserBalanceEGP(userId);
     res.json({ usageCount, freeCredits, pricePerCredit, balance, remaining: Math.max(0, freeCredits - usageCount) });
+  });
+
+  // ================================================================
+  // SEARCH
+  // ================================================================
+  app.get("/api/ads/search", async (req, res) => {
+    const q = ((req.query.q as string) || "").trim();
+    const lang = (req.query.lang as string) || "";
+    if (!q) return res.json([]);
+    try {
+      const pattern = `%${q}%`;
+      let result;
+      if (lang) {
+        result = await db.execute(
+          sql`SELECT * FROM ads
+              WHERE status = 'active'
+                AND language = ${lang}
+                AND (title ILIKE ${pattern} OR description ILIKE ${pattern})
+              ORDER BY created_at DESC LIMIT 30`
+        );
+      } else {
+        result = await db.execute(
+          sql`SELECT * FROM ads
+              WHERE status = 'active'
+                AND (title ILIKE ${pattern} OR description ILIKE ${pattern})
+              ORDER BY created_at DESC LIMIT 30`
+        );
+      }
+      res.json(result.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ================================================================
+  // WEB PUSH NOTIFICATIONS
+  // ================================================================
+  app.get("/api/vapid-public-key", async (_req, res) => {
+    try {
+      const row = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'vapid_public_key' LIMIT 1`);
+      if (row.rows.length === 0) return res.status(503).json({ message: "Push not configured" });
+      res.json({ publicKey: (row.rows[0] as any).value });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/push/subscribe", async (req: any, res) => {
+    const userId: string | undefined = req.session?.customUser?.id || req.user?.claims?.sub;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const { endpoint, keys } = req.body;
+    if (!endpoint || !keys?.p256dh || !keys?.auth) return res.status(400).json({ message: "Invalid subscription" });
+    try {
+      await db.execute(
+        sql`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth)
+            VALUES (${userId}, ${endpoint}, ${keys.p256dh}, ${keys.auth})
+            ON CONFLICT (endpoint) DO UPDATE SET user_id = ${userId}, p256dh = ${keys.p256dh}, auth = ${keys.auth}`
+      );
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.delete("/api/push/subscribe", async (req: any, res) => {
+    const userId: string | undefined = req.session?.customUser?.id || req.user?.claims?.sub;
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const { endpoint } = req.body;
+    if (endpoint) {
+      await db.execute(sql`DELETE FROM push_subscriptions WHERE endpoint = ${endpoint} AND user_id = ${userId}`);
+    } else {
+      await db.execute(sql`DELETE FROM push_subscriptions WHERE user_id = ${userId}`);
+    }
+    res.json({ ok: true });
   });
 
   // ================================================================
@@ -759,6 +842,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         sql`INSERT INTO notifications (user_id, type, title, body, link, voice_url, sender_user_id)
             VALUES (${userId}, ${type}, ${title}, ${body}, ${link ?? null}, ${voiceUrl ?? null}, ${senderUserId ?? null})`
       );
+      // Deliver web push if user has subscriptions
+      const subs = await db.execute(sql`SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ${userId}`);
+      for (const sub of subs.rows as any[]) {
+        webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+          JSON.stringify({ title, body, link: link ?? "/" })
+        ).catch(() => {
+          // Remove expired/invalid subscription silently
+          db.execute(sql`DELETE FROM push_subscriptions WHERE endpoint = ${sub.endpoint}`).catch(() => {});
+        });
+      }
     } catch {}
   }
 
@@ -2420,6 +2514,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           `);
         }
       }
+      res.json({ ok: true });
+    } catch { res.json({ ok: false }); }
+  });
+
+  // ================================================================
+  // WHATSAPP CLICK TRACKING
+  // ================================================================
+  app.post("/api/ads/:id/whatsapp-click", async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+      await db.execute(sql`UPDATE ads SET whatsapp_clicks = COALESCE(whatsapp_clicks, 0) + 1 WHERE id = ${id}`);
       res.json({ ok: true });
     } catch { res.json({ ok: false }); }
   });

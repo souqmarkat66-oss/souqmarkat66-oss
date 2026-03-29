@@ -18,10 +18,19 @@ export default function Ads() {
   const [search, setSearch] = useState("");
   const [selectedCat, setSelectedCat] = useState("الكل");
 
-  const { data: ads = [], isLoading } = useQuery<any[]>({
+  const { data: allAds = [], isLoading: adsLoading } = useQuery<any[]>({
     queryKey: ["/api/ads"],
     queryFn: () => fetch("/api/ads").then(r => r.json()),
   });
+
+  const { data: searchResults = [], isFetching: searchFetching } = useQuery<any[]>({
+    queryKey: ["/api/ads/search", search],
+    queryFn: () => fetch(`/api/ads/search?q=${encodeURIComponent(search)}`).then(r => r.json()),
+    enabled: search.trim().length >= 2,
+  });
+
+  const isLoading = adsLoading;
+  const ads = search.trim().length >= 2 ? searchResults : allAds;
 
   const { data: sponsoredAd } = useQuery<any>({
     queryKey: ["/api/campaigns/random"],
@@ -36,10 +45,8 @@ export default function Ads() {
   };
 
   const filtered = ads.filter(ad => {
-    const matchSearch = !search || 
-      ad.title?.toLowerCase().includes(search.toLowerCase()) ||
-      ad.description?.toLowerCase().includes(search.toLowerCase());
-    return matchSearch;
+    if (selectedCat !== "الكل" && ad.category && !ad.category.includes(selectedCat)) return false;
+    return true;
   });
 
   return (
@@ -68,10 +75,13 @@ export default function Ads() {
             <Input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="ابحث عن إعلان..."
+              placeholder="ابحث عن إعلان... (اكتب 2 حروف فأكثر)"
               className="pr-9 h-10 rounded-xl"
               data-testid="input-search-ads"
             />
+            {searchFetching && (
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground animate-pulse">جاري البحث...</span>
+            )}
           </div>
         </div>
 

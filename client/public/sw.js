@@ -46,7 +46,8 @@ self.addEventListener('fetch', event => {
 
 self.addEventListener('push', event => {
   if (!event.data) return;
-  const data = event.data.json();
+  let data = {};
+  try { data = event.data.json(); } catch { data = { title: 'سوق للإعلانات', body: event.data.text() }; }
   event.waitUntil(
     self.registration.showNotification(data.title || 'سوق للإعلانات', {
       body: data.body || '',
@@ -54,7 +55,7 @@ self.addEventListener('push', event => {
       badge: '/icons/icon-72.png',
       dir: 'rtl',
       lang: 'ar',
-      data: { url: data.url || '/' },
+      data: { url: data.link || data.url || '/' },
     })
   );
 });

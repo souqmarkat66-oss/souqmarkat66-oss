@@ -200,6 +200,16 @@ function AuthenticatedContent({ user }: { user: any }) {
                       <span className="flex items-center gap-1"><Eye className="w-3 h-3" />{ad.viewsCount || 0}</span>
                       <span className="flex items-center gap-1"><Heart className="w-3 h-3" />{ad.likesCount || 0}</span>
                       <span className="flex items-center gap-1"><MessageSquare className="w-3 h-3" />{ad.commentsCount || 0}</span>
+                      {ad.whatsappClicks > 0 && (
+                        <span className="flex items-center gap-1 text-green-600" title="نقرات واتساب">
+                          <span>📱</span>{ad.whatsappClicks}
+                        </span>
+                      )}
+                      {ad.viewsCount > 0 && (
+                        <span className="text-blue-500" title="نسبة النقر للمشاهدة">
+                          CTR: {(((ad.whatsappClicks || 0) / ad.viewsCount) * 100).toFixed(1)}%
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Badge variant={ad.status === "active" ? "default" : "secondary"} className="text-[10px] h-5">

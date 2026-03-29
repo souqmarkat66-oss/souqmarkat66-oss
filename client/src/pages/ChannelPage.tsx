@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Users, Radio, CheckCircle, Plus, Bell, Megaphone, Film, Play, Copy, CheckCheck, TrendingUp, DollarSign, Code2, ChevronDown, ChevronUp, Globe, Monitor } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
 import { AdCard } from "@/components/AdCard";
@@ -62,6 +62,16 @@ export default function ChannelPage() {
       toast({ title: data.following ? "✅ تم الاشتراك!" : "تم إلغاء الاشتراك" });
     },
   });
+
+  // SEO meta tags
+  useEffect(() => {
+    if (!channel) return;
+    document.title = `${channel.name} | شبكة سوق للإعلانات`;
+    let desc = document.querySelector('meta[name="description"]') as HTMLMetaElement | null;
+    if (!desc) { desc = document.createElement("meta"); desc.name = "description"; document.head.appendChild(desc); }
+    desc.content = (channel.description || `قناة ${channel.name} على شبكة سوق`).substring(0, 160);
+    return () => { document.title = "شبكة سوق للإعلانات"; };
+  }, [channel]);
 
   const isOwner = user && channel?.userId === user.id;
   const [codeCopied, setCodeCopied] = useState(false);

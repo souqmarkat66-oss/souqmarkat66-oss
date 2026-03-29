@@ -58,6 +58,8 @@ export const ads = pgTable("ads", {
   targetLng: real("target_lng"),
   targetRadiusKm: real("target_radius_km"),
   targetInterests: text("target_interests"),
+  targetAges: text("target_ages"),
+  whatsappClicks: integer("whatsapp_clicks").default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
