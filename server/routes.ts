@@ -2458,8 +2458,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/messages", isAuthenticated, async (req: any, res) => {
     const fromUserId = req.user.claims.sub;
-    const { toUserId, message, adId, isVoice, voiceUrl, replyToId, replyToText } = req.body;
-    if (!toUserId || !message) return res.status(400).json({ message: "Missing required fields" });
+    const { toUserId, message, adId, isVoice, voiceUrl, imageUrl, isPaymentProof, replyToId, replyToText } = req.body;
+    if (!toUserId || (!message && !imageUrl)) return res.status(400).json({ message: "Missing required fields" });
     // Ensure reply_to columns exist
     try {
       await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS reply_to_id integer`);
@@ -2473,19 +2473,63 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (Number(spamCheck.rows[0]?.count) > 10) {
         return res.status(429).json({ message: "الرسائل كثيرة جداً، انتظر قليلاً" });
       }
+      const msgText = message || (imageUrl ? "📸 إيصال دفع" : "");
       const result = await db.execute(
-        sql`INSERT INTO direct_messages (from_user_id, to_user_id, ad_id, message, is_voice, voice_url, reply_to_id, reply_to_text)
-            VALUES (${fromUserId}, ${toUserId}, ${adId ?? null}, ${message}, ${isVoice ?? false}, ${voiceUrl ?? null},
+        sql`INSERT INTO direct_messages (from_user_id, to_user_id, ad_id, message, is_voice, voice_url, image_url, is_payment_proof, reply_to_id, reply_to_text)
+            VALUES (${fromUserId}, ${toUserId}, ${adId ?? null}, ${msgText}, ${isVoice ?? false}, ${voiceUrl ?? null},
+                    ${imageUrl ?? null}, ${isPaymentProof ?? false},
                     ${replyToId ?? null}, ${replyToText ?? null})
             RETURNING *`
       );
       // Send notification to recipient
       const senderName = req.user.claims?.first_name || "مستخدم";
-      const msgTitle = isVoice ? "🎤 رسالة صوتية جديدة" : "رسالة جديدة 📩";
-      const msgBody = isVoice ? `${senderName}: أرسل رسالة صوتية` : `${senderName}: ${String(message).slice(0, 60)}`;
+      const msgTitle = isVoice ? "🎤 رسالة صوتية جديدة"
+                     : isPaymentProof ? "💳 إيصال دفع جديد"
+                     : "رسالة جديدة 📩";
+      const msgBody  = isVoice ? `${senderName}: أرسل رسالة صوتية`
+                     : isPaymentProof ? `${senderName}: أرسل إيصال دفع للمراجعة`
+                     : `${senderName}: ${String(msgText).slice(0, 60)}`;
       await createNotification(toUserId, "comment", msgTitle, msgBody, `/messages`,
         isVoice ? voiceUrl : undefined, fromUserId);
       res.status(201).json(result.rows[0]);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // POST /api/messages/:id/confirm-payment — admin confirms payment screenshot → activate service
+  app.post("/api/messages/:id/confirm-payment", isAuthenticated, async (req: any, res) => {
+    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
+    try {
+      const msgRow = await db.execute(sql`SELECT * FROM direct_messages WHERE id = ${req.params.id} LIMIT 1`);
+      const msg = msgRow.rows[0] as any;
+      if (!msg) return res.status(404).json({ message: "الرسالة غير موجودة" });
+
+      const userId = msg.from_user_id;
+
+      // Confirmation DM to user
+      const confirmText =
+        `✅ تم تأكيد الدفع وتفعيل الخدمة\n` +
+        `━━━━━━━━━━━━━━━━━\n` +
+        `💰 تم استلام دفعتك بنجاح\n` +
+        `🚀 الخدمة المطلوبة تم تفعيلها فوراً\n` +
+        `━━━━━━━━━━━━━━━━━\n` +
+        `شكراً لثقتك في سوق ماركات 🙏`;
+
+      await db.execute(sql`
+        INSERT INTO direct_messages (from_user_id, to_user_id, message, is_voice, image_url, is_payment_proof)
+        VALUES (${ADMIN_USER_ID}, ${userId}, ${confirmText}, false, null, false)
+      `);
+
+      // Push notification to user
+      await createNotification(userId, "system",
+        "✅ تم تأكيد الدفع",
+        "تم استلام دفعتك وتفعيل الخدمة فوراً!",
+        "/messages"
+      );
+
+      // Mark message as read
+      await db.execute(sql`UPDATE direct_messages SET is_read = true WHERE id = ${req.params.id}`);
+
+      res.json({ ok: true });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 

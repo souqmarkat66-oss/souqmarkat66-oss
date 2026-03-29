@@ -6,12 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   MessageCircle, Send, ArrowRight, User, Mic, MicOff,
-  Play, Square, Copy, CornerUpLeft, X, Check, CheckCheck
+  Play, Square, Copy, CornerUpLeft, X, Check, CheckCheck,
+  ImagePlus, Loader2, ShieldCheck, ZoomIn
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { format, isToday, isYesterday } from "date-fns";
 import { ar } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
+
+const ADMIN_ID = "54219806";
 
 function VoicePlayer({ url }: { url: string }) {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -81,11 +84,16 @@ export default function Messages() {
   const [replyTo, setReplyTo] = useState<any | null>(null);
   const [contextMsg, setContextMsg] = useState<any | null>(null);
   const [copied, setCopied] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [zoomImg, setZoomImg] = useState<string | null>(null);
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const imgInputRef = useRef<HTMLInputElement | null>(null);
 
   const { data: conversations = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/messages"],
@@ -111,16 +119,66 @@ export default function Messages() {
   }, [thread.length]);
 
   const sendMutation = useMutation({
-    mutationFn: (payload: { message: string; isVoice?: boolean; voiceUrl?: string; replyToId?: number; replyToText?: string }) =>
+    mutationFn: (payload: { message?: string; isVoice?: boolean; voiceUrl?: string; imageUrl?: string; isPaymentProof?: boolean; replyToId?: number; replyToText?: string }) =>
       apiRequest("POST", "/api/messages", { toUserId: activePartner, ...payload }),
     onSuccess: () => {
       setText("");
       setReplyTo(null);
+      setImagePreview(null);
+      setImageFile(null);
       qc.invalidateQueries({ queryKey: ["/api/messages", activePartner] });
       qc.invalidateQueries({ queryKey: ["/api/messages"] });
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     },
   });
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      toast({ variant: "destructive", title: "الصورة أكبر من 8MB" }); return;
+    }
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = ev => setImagePreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const sendImage = async () => {
+    if (!imageFile) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", imageFile, imageFile.name);
+      const res = await fetch("/api/upload", { method: "POST", body: fd, credentials: "include" });
+      if (!res.ok) throw new Error("فشل رفع الصورة");
+      const { url } = await res.json();
+      // Mark as payment proof if sending to admin
+      const isPaymentProof = activePartner === ADMIN_ID;
+      sendMutation.mutate({ message: text || "📸 إيصال دفع", imageUrl: url, isPaymentProof });
+    } catch {
+      toast({ variant: "destructive", title: "فشل إرسال الصورة" });
+    } finally { setUploading(false); }
+  };
+
+  const confirmPayment = async (msgId: number) => {
+    setConfirmingId(msgId);
+    try {
+      const res = await fetch(`/api/messages/${msgId}/confirm-payment`, {
+        method: "POST", credentials: "include",
+      });
+      if (res.ok) {
+        toast({ title: "✅ تم تأكيد الدفع وإرسال رسالة التفعيل للمستخدم" });
+        qc.invalidateQueries({ queryKey: ["/api/messages", activePartner] });
+      } else {
+        const d = await res.json();
+        toast({ variant: "destructive", title: d.message || "فشل التأكيد" });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "خطأ في الاتصال" });
+    } finally { setConfirmingId(null); }
+  };
 
   const startRecording = async () => {
     try {
@@ -378,6 +436,44 @@ export default function Messages() {
                             {/* Content */}
                             {msg.is_voice && msg.voice_url ? (
                               <VoicePlayer url={msg.voice_url} />
+                            ) : msg.image_url ? (
+                              <div className="space-y-1.5">
+                                {/* Payment proof badge */}
+                                {msg.is_payment_proof && (
+                                  <div className="flex items-center gap-1 text-[10px] font-bold opacity-80">
+                                    <ShieldCheck className="w-3 h-3" /> إيصال دفع
+                                  </div>
+                                )}
+                                {/* Image */}
+                                <div className="relative group/img rounded-xl overflow-hidden cursor-pointer" onClick={() => setZoomImg(msg.image_url)}>
+                                  <img
+                                    src={msg.image_url}
+                                    alt="إيصال دفع"
+                                    className="max-w-[220px] max-h-[220px] object-cover rounded-xl block"
+                                    data-testid={`img-payment-proof-${msg.id}`}
+                                  />
+                                  <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/20 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-all">
+                                    <ZoomIn className="w-6 h-6 text-white" />
+                                  </div>
+                                </div>
+                                {msg.message && msg.message !== "📸 إيصال دفع" && (
+                                  <p className="text-sm leading-relaxed break-words whitespace-pre-line">{msg.message}</p>
+                                )}
+                                {/* Admin confirm button — shown only if admin is viewing and message is from non-admin */}
+                                {user?.id === ADMIN_ID && msg.from_user_id !== ADMIN_ID && (
+                                  <button
+                                    onClick={e => { e.stopPropagation(); confirmPayment(msg.id); }}
+                                    disabled={confirmingId === msg.id}
+                                    className="mt-1.5 w-full flex items-center justify-center gap-1.5 bg-green-500 hover:bg-green-600 text-white text-xs font-bold rounded-lg px-3 py-1.5 transition-all disabled:opacity-60"
+                                    data-testid={`btn-confirm-payment-${msg.id}`}
+                                  >
+                                    {confirmingId === msg.id
+                                      ? <><Loader2 className="w-3 h-3 animate-spin" /> جارٍ التأكيد...</>
+                                      : <><ShieldCheck className="w-3 h-3" /> تأكيد الدفع وتفعيل الخدمة</>
+                                    }
+                                  </button>
+                                )}
+                              </div>
                             ) : (
                               <p className="text-sm leading-relaxed break-words whitespace-pre-line">{msg.message}</p>
                             )}
@@ -442,6 +538,41 @@ export default function Messages() {
                 </div>
               )}
 
+              {/* Image preview bar */}
+              {imagePreview && (
+                <div className="px-3 py-2 border-t border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/20 flex items-center gap-3">
+                  <div className="relative">
+                    <img src={imagePreview} alt="معاينة" className="w-14 h-14 object-cover rounded-lg border" />
+                    <button
+                      onClick={() => { setImagePreview(null); setImageFile(null); }}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-destructive text-white rounded-full flex items-center justify-center"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-bold text-orange-700 dark:text-orange-400">
+                      {activePartner === ADMIN_ID ? "📸 إيصال دفع — سيُرسَل للإدارة للمراجعة" : "📸 صورة جاهزة للإرسال"}
+                    </p>
+                    <input
+                      value={text}
+                      onChange={e => setText(e.target.value)}
+                      placeholder="ملاحظة اختيارية..."
+                      className="text-xs bg-transparent border-none outline-none w-full text-muted-foreground mt-0.5"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Hidden file input */}
+              <input
+                ref={imgInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleImageSelect}
+              />
+
               {/* Input */}
               <div className="p-3 border-t border-border/40 flex gap-2">
                 {recording ? (
@@ -452,15 +583,36 @@ export default function Messages() {
                 ) : (
                   <Input
                     ref={inputRef}
-                    value={text}
-                    onChange={e => setText(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && text.trim()) { e.preventDefault(); sendText(); } }}
-                    placeholder={replyTo ? "اكتب ردك..." : "اكتب رسالتك..."}
+                    value={imageFile ? "" : text}
+                    onChange={e => !imageFile && setText(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        if (imageFile) sendImage();
+                        else if (text.trim()) sendText();
+                      }
+                    }}
+                    placeholder={imageFile ? "جاهز للإرسال..." : replyTo ? "اكتب ردك..." : "اكتب رسالتك أو أرفق إيصال..."}
                     className="flex-1 h-10"
                     dir="rtl"
                     data-testid="input-message"
-                    disabled={uploading || sendMutation.isPending}
+                    disabled={uploading || sendMutation.isPending || !!imageFile}
                   />
+                )}
+
+                {/* Image attachment */}
+                {!recording && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-10 w-10 p-0 rounded-full flex-shrink-0"
+                    onClick={() => imgInputRef.current?.click()}
+                    disabled={uploading || recording}
+                    title="إرفاق صورة / إيصال دفع"
+                    data-testid="btn-attach-image"
+                  >
+                    <ImagePlus className="w-4 h-4 text-orange-500" />
+                  </Button>
                 )}
 
                 {/* Voice */}
@@ -469,7 +621,7 @@ export default function Messages() {
                   variant={recording ? "destructive" : "outline"}
                   className={`h-10 w-10 p-0 rounded-full flex-shrink-0 ${recording ? "animate-pulse" : ""}`}
                   onClick={recording ? stopRecording : startRecording}
-                  disabled={uploading}
+                  disabled={uploading || !!imageFile}
                   title={recording ? "إيقاف وإرسال" : "رسالة صوتية"}
                   data-testid="btn-voice-record-msg"
                 >
@@ -480,12 +632,12 @@ export default function Messages() {
                 {!recording && (
                   <Button
                     size="sm" className="h-10 w-10 p-0 flex-shrink-0"
-                    onClick={sendText}
-                    disabled={!text.trim() || sendMutation.isPending || uploading}
+                    onClick={imageFile ? sendImage : sendText}
+                    disabled={imageFile ? (uploading || sendMutation.isPending) : (!text.trim() || sendMutation.isPending || uploading)}
                     data-testid="btn-send-message"
                   >
-                    {sendMutation.isPending
-                      ? <span className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin" />
+                    {uploading || sendMutation.isPending
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
                       : <Send className="w-4 h-4" />
                     }
                   </Button>
@@ -495,6 +647,29 @@ export default function Messages() {
           )}
         </div>
       </div>
+
+      {/* 🔍 Image Zoom Lightbox */}
+      {zoomImg && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setZoomImg(null)}
+          data-testid="lightbox-payment-image"
+        >
+          <div className="relative max-w-2xl max-h-[90vh]">
+            <img
+              src={zoomImg}
+              alt="إيصال دفع"
+              className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl"
+            />
+            <button
+              onClick={() => setZoomImg(null)}
+              className="absolute top-2 right-2 w-8 h-8 bg-black/60 hover:bg-black/80 text-white rounded-full flex items-center justify-center"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
