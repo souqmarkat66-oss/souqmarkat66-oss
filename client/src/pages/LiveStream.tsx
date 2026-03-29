@@ -392,7 +392,7 @@ export default function LiveStream() {
     const socket = io({ path: "/socket.io", transports: ["websocket"], upgrade: false });
     socketRef.current = socket;
 
-    socket.emit("join-stream", id);
+    // NOTE: join-stream is emitted AFTER all handlers are registered (see below)
     socket.on("viewer-count", (count: number) => {
       setViewerCount(count);
       if (count > peakViewersRef.current) peakViewersRef.current = count;
@@ -476,14 +476,31 @@ export default function LiveStream() {
 
     // ── VIEWER receives co-host's offer → answers it ──
     socket.on("cohost-offer", async (senderId: string, desc: RTCSessionDescriptionInit) => {
+      // Self-heal: if PC was lost, recreate it
+      if (!coHostPCRef.current) {
+        const pc2 = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+        coHostPCRef.current = pc2;
+        pc2.ontrack = (e) => {
+          if (coHostVideoRef.current && e.streams[0]) {
+            coHostVideoRef.current.srcObject = e.streams[0];
+            setCoHostActive(true);
+            coHostVideoRef.current.muted = false;
+            coHostVideoRef.current.play().catch(() => {
+              if (coHostVideoRef.current) { coHostVideoRef.current.muted = true; coHostVideoRef.current.play().catch(() => {}); }
+            });
+          }
+        };
+        pc2.onicecandidate = (e) => {
+          if (e.candidate) socket.emit("cohost-candidate", senderId, e.candidate);
+        };
+      }
       const pc = coHostPCRef.current;
-      if (!pc) return;
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(desc));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socket.emit("cohost-answer", senderId, pc.localDescription);
-      } catch {}
+      } catch (err) { console.warn("cohost-offer handling failed", err); }
     });
 
     // ── CO-HOST receives viewer's answer → finalises connection ──
@@ -521,6 +538,10 @@ export default function LiveStream() {
       cohostViewerPCsRef.current.clear();
       toast({ title: "👋 انتهت مشاركة الضيف" });
     });
+
+    // ✅ join-stream emitted AFTER all handlers are ready
+    // so cohost-active / viewer-count etc. don't arrive before their handlers
+    socket.emit("join-stream", id);
 
     if (isBroadcast) {
       setupBroadcaster(socket);
