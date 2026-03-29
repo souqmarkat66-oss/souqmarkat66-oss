@@ -92,8 +92,10 @@ export default function LiveStream() {
 
   // ── Co-host states ──────────────────────────────────────────
   const coHostVideoRef    = useRef<HTMLVideoElement>(null);
-  const coHostPCRef       = useRef<RTCPeerConnection | null>(null);
-  const coHostStreamRef   = useRef<MediaStream | null>(null);
+  const coHostPCRef         = useRef<RTCPeerConnection | null>(null);
+  const coHostStreamRef     = useRef<MediaStream | null>(null);
+  const cohostViewerPCsRef  = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const isCoHostRef         = useRef(false);          // ref version (for socket closures)
   const [coHostActive, setCoHostActive]         = useState(false);
   const [coHostName, setCoHostName]             = useState("");
   const [isCoHost, setIsCoHost]                 = useState(false);
@@ -361,7 +363,9 @@ export default function LiveStream() {
     });
   }, [id, createPeer]);
 
-  // ── Co-host helper: connect to co-host as watcher ───────────
+  // ── Connect to co-host as a watcher (viewer/broadcaster side) ──
+  // Only creates the PC and emits watcher event.
+  // All socket signaling is handled in the top-level useEffect handlers below.
   const connectToCoHost = useCallback((socket: Socket, cohostSocketId: string) => {
     if (coHostPCRef.current) { coHostPCRef.current.close(); coHostPCRef.current = null; }
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
@@ -369,24 +373,18 @@ export default function LiveStream() {
     pc.ontrack = (e) => {
       if (coHostVideoRef.current && e.streams[0]) {
         coHostVideoRef.current.srcObject = e.streams[0];
-        coHostVideoRef.current.muted = false;
-        coHostVideoRef.current.play().catch(() => { if (coHostVideoRef.current) coHostVideoRef.current.muted = true; coHostVideoRef.current?.play().catch(() => {}); });
         setCoHostActive(true);
+        coHostVideoRef.current.muted = false;
+        coHostVideoRef.current.play().catch(() => {
+          if (coHostVideoRef.current) { coHostVideoRef.current.muted = true; coHostVideoRef.current.play().catch(() => {}); }
+        });
       }
     };
     pc.onicecandidate = (e) => {
       if (e.candidate) socket.emit("cohost-candidate", cohostSocketId, e.candidate);
     };
+    // Tell co-host we want their stream
     socket.emit("cohost-watcher", { cohostId: cohostSocketId });
-    socket.on("cohost-offer", async (_: string, desc: RTCSessionDescriptionInit) => {
-      await pc.setRemoteDescription(new RTCSessionDescription(desc));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      socket.emit("cohost-answer", cohostSocketId, pc.localDescription);
-    });
-    socket.on("cohost-candidate", async (_: string, candidate: RTCIceCandidateInit) => {
-      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
-    });
   }, []);
 
   useEffect(() => {
@@ -402,14 +400,19 @@ export default function LiveStream() {
     socket.on("chat-message", (msg: ChatMsg) => setMessages(prev => [...prev, msg]));
     socket.on("stream-like", () => setLikesCount(prev => prev + 1));
 
-    // ── Co-host events for broadcaster ──
+    // ══════════════════════════════════════════════════════════
+    // CO-HOST SIGNALING  (all handlers at top level — no nesting)
+    // ══════════════════════════════════════════════════════════
+
+    // Broadcaster receives a join-request from a viewer
     socket.on("cohost-request", (data: { socketId: string; userName: string }) => {
       setCohostRequest(data);
       toast({ title: `👤 ${data.userName} يطلب المشاركة في البث`, description: "يمكنك قبول أو رفض الطلب" });
     });
 
-    // ── Co-host events for the guest (viewer who requested) ──
-    socket.on("cohost-accepted", async (data: { broadcasterId: string }) => {
+    // Guest (requesting viewer) got accepted — open camera & announce
+    socket.on("cohost-accepted", async () => {
+      isCoHostRef.current = true;
       setIsCoHost(true);
       setRequestingJoin(false);
       toast({ title: "✅ تم قبول طلبك! ستبدأ الكاميرا الآن" });
@@ -419,29 +422,19 @@ export default function LiveStream() {
           audio: HIGH_QUALITY_AUDIO,
         });
         coHostStreamRef.current = mediaStream;
+        // Show self-preview (muted so no echo)
         if (coHostVideoRef.current) {
           coHostVideoRef.current.srcObject = mediaStream;
           coHostVideoRef.current.muted = true;
           coHostVideoRef.current.play().catch(() => {});
         }
         setCoHostActive(true);
+        // Tell server: I'm now a co-broadcaster, notify all viewers
         socket.emit("cohost-broadcaster", id);
-        // Broadcast co-host stream to all watchers
-        socket.on("cohost-watcher", async (watcherId: string) => {
-          const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-          peersRef.current.set(`cohost-${watcherId}`, pc);
-          mediaStream.getTracks().forEach(track => pc.addTrack(track, mediaStream));
-          pc.onicecandidate = (e) => { if (e.candidate) socket.emit("cohost-candidate", watcherId, e.candidate); };
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          socket.emit("cohost-offer", watcherId, pc.localDescription);
-          socket.on("cohost-answer", async (wid: string, desc: RTCSessionDescriptionInit) => {
-            if (wid === watcherId) await pc.setRemoteDescription(new RTCSessionDescription(desc)).catch(() => {});
-          });
-        });
       } catch (err: any) {
-        toast({ variant: "destructive", title: "تعذّر فتح الكاميرا", description: err.message });
+        isCoHostRef.current = false;
         setIsCoHost(false);
+        toast({ variant: "destructive", title: "تعذّر فتح الكاميرا", description: err.message });
       }
     });
 
@@ -450,13 +443,71 @@ export default function LiveStream() {
       toast({ variant: "destructive", title: "❌ رُفض طلب المشاركة" });
     });
 
-    // ── Co-host became active (for all viewers + broadcaster) ──
+    // SERVER → viewer/broadcaster: a co-host just went live, connect to their stream
     socket.on("cohost-active", (cohostSocketId: string) => {
       setCoHostActive(true);
-      if (!isCoHost) connectToCoHost(socket, cohostSocketId);
+      if (!isCoHostRef.current) {
+        // We're a viewer or the main broadcaster — pull the co-host stream
+        connectToCoHost(socket, cohostSocketId);
+      }
+    });
+
+    // ── CO-HOST sends stream to each watcher (viewer / broadcaster) ──
+    // Triggered when a viewer emits cohost-watcher to the server
+    socket.on("cohost-watcher", async (watcherId: string) => {
+      if (!coHostStreamRef.current) return;  // only the active co-host handles this
+      // Close any existing connection for this watcher
+      const existing = cohostViewerPCsRef.current.get(watcherId);
+      if (existing) { existing.close(); }
+      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      cohostViewerPCsRef.current.set(watcherId, pc);
+      coHostStreamRef.current.getTracks().forEach(track =>
+        pc.addTrack(track, coHostStreamRef.current!)
+      );
+      pc.onicecandidate = (e) => {
+        if (e.candidate) socket.emit("cohost-candidate", watcherId, e.candidate);
+      };
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit("cohost-offer", watcherId, pc.localDescription);
+      } catch {}
+    });
+
+    // ── VIEWER receives co-host's offer → answers it ──
+    socket.on("cohost-offer", async (senderId: string, desc: RTCSessionDescriptionInit) => {
+      const pc = coHostPCRef.current;
+      if (!pc) return;
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(desc));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit("cohost-answer", senderId, pc.localDescription);
+      } catch {}
+    });
+
+    // ── CO-HOST receives viewer's answer → finalises connection ──
+    socket.on("cohost-answer", async (senderId: string, desc: RTCSessionDescriptionInit) => {
+      const pc = cohostViewerPCsRef.current.get(senderId);
+      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(desc)).catch(() => {});
+    });
+
+    // ── ICE candidates — route to the right PC ──
+    socket.on("cohost-candidate", async (senderId: string, candidate: RTCIceCandidateInit) => {
+      // If we're the co-host and this is from a viewer:
+      const viewerPC = cohostViewerPCsRef.current.get(senderId);
+      if (viewerPC) {
+        await viewerPC.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+        return;
+      }
+      // If we're a viewer and this is from the co-host:
+      if (coHostPCRef.current) {
+        await coHostPCRef.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      }
     });
 
     socket.on("cohost-left", () => {
+      isCoHostRef.current = false;
       setCoHostActive(false);
       setIsCoHost(false);
       setCohostRequest(null);
@@ -465,6 +516,9 @@ export default function LiveStream() {
       coHostPCRef.current = null;
       coHostStreamRef.current?.getTracks().forEach(t => t.stop());
       coHostStreamRef.current = null;
+      // Close all viewer connections on co-host side
+      cohostViewerPCsRef.current.forEach(pc => pc.close());
+      cohostViewerPCsRef.current.clear();
       toast({ title: "👋 انتهت مشاركة الضيف" });
     });
 
@@ -476,11 +530,14 @@ export default function LiveStream() {
 
     return () => {
       if (statsIntervalRef.current) clearInterval(statsIntervalRef.current);
+      if (isCoHostRef.current) socket.emit("cohost-leave", id);
       socket.emit("leave-stream", id);
       socket.disconnect();
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       coHostStreamRef.current?.getTracks().forEach(t => t.stop());
       coHostPCRef.current?.close();
+      cohostViewerPCsRef.current.forEach(pc => pc.close());
+      cohostViewerPCsRef.current.clear();
       peersRef.current.forEach(pc => pc.close());
       peersRef.current.clear();
     };
