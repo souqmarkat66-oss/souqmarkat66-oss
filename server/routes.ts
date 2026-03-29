@@ -995,6 +995,68 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.type('js').send(script);
   });
 
+  // ── Publisher Widget JS (by publisherCode) ──────────────────
+  app.get("/api/widget/:publisherCode", async (req, res) => {
+    const { publisherCode } = req.params;
+    // Find channel by publisherCode
+    const allChannels = await storage.getChannels();
+    const channel = allChannels.find((c: any) => c.publisherCode === publisherCode);
+    if (!channel) {
+      return res.type('js').send('/* Souq Ads: invalid publisher code */');
+    }
+    // Get a random active campaign to display
+    const campaigns = await storage.getActiveCampaigns();
+    const ad = campaigns.length > 0 ? campaigns[Math.floor(Math.random() * campaigns.length)] : null;
+    const adHtml = ad
+      ? `<a href="${ad.targetUrl||'#'}" target="_blank" rel="noopener" style="display:block;text-decoration:none" onclick="fetch('/api/campaigns/${ad.id}/click',{method:'POST'}).catch(()=>{})">
+          ${ad.mediaType === 'video'
+            ? `<video src="${ad.mediaUrl}" autoplay muted loop playsinline style="width:100%;display:block;border-radius:8px 8px 0 0"></video>`
+            : `<img src="${ad.mediaUrl}" alt="${ad.name}" style="width:100%;display:block;border-radius:8px 8px 0 0" />`}
+          <div style="padding:10px 14px;background:#f9f9f9;font-family:Cairo,sans-serif;direction:rtl">
+            <strong style="color:#009688;font-size:14px">${ad.name}</strong>
+            ${ad.description ? `<p style="color:#666;margin:4px 0 0;font-size:12px">${ad.description}</p>` : ''}
+            <span style="font-size:10px;color:#aaa">إعلان ممول · سوق للإعلانات</span>
+          </div>
+        </a>`
+      : `<div style="padding:16px;text-align:center;color:#999;font-family:Cairo;font-size:13px">لا توجد إعلانات نشطة حالياً</div>`;
+    if (ad) {
+      storage.recordImpression(ad.id).catch(() => {});
+    }
+    const script = `(function(){
+  var w=document.createElement('div');
+  w.style.cssText='max-width:480px;margin:12px auto;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.12);background:#fff;';
+  w.innerHTML=${JSON.stringify(adHtml)};
+  var s=document.currentScript||document.scripts[document.scripts.length-1];
+  s.parentNode.insertBefore(w,s.nextSibling);
+})();`;
+    res.type('js').set('Cache-Control', 'no-cache').send(script);
+  });
+
+  // ── Publisher Widget iframe HTML ─────────────────────────────
+  app.get("/api/widget/:publisherCode/iframe", async (req, res) => {
+    const { publisherCode } = req.params;
+    const allChannels = await storage.getChannels();
+    const channel = allChannels.find((c: any) => c.publisherCode === publisherCode);
+    if (!channel) return res.status(404).send('<html><body>كود ناشر غير صحيح</body></html>');
+    const campaigns = await storage.getActiveCampaigns();
+    const ad = campaigns.length > 0 ? campaigns[Math.floor(Math.random() * campaigns.length)] : null;
+    const html = `<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8">
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Cairo,sans-serif;background:#fff}</style>
+</head><body>${ad
+      ? `<a href="${ad.targetUrl||'#'}" target="_blank" rel="noopener" style="display:block;text-decoration:none">
+          ${ad.mediaType==='video'
+            ? `<video src="${ad.mediaUrl}" autoplay muted loop playsinline style="width:100%;display:block"></video>`
+            : `<img src="${ad.mediaUrl}" style="width:100%;display:block" />`}
+          <div style="padding:8px 12px;background:#f9f9f9">
+            <strong style="color:#009688;font-size:13px">${ad.name}</strong>
+            <span style="display:block;font-size:10px;color:#aaa">إعلان ممول · سوق للإعلانات</span>
+          </div></a>`
+      : `<div style="padding:20px;text-align:center;color:#aaa;font-size:13px">لا توجد إعلانات حالياً</div>`}
+</body></html>`;
+    if (ad) storage.recordImpression(ad.id).catch(() => {});
+    res.type('html').set('Cache-Control', 'no-cache').send(html);
+  });
+
   // ================================================================
   // REVENUE ROUTES (isolated per user)
   // ================================================================

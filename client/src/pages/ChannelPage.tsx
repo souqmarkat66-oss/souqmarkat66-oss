@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Radio, CheckCircle, Plus, Bell, Megaphone, Film, Play, Copy, CheckCheck, TrendingUp, DollarSign } from "lucide-react";
+import { Users, Radio, CheckCircle, Plus, Bell, Megaphone, Film, Play, Copy, CheckCheck, TrendingUp, DollarSign, Code2, ChevronDown, ChevronUp, Globe, Monitor } from "lucide-react";
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
@@ -64,6 +64,15 @@ export default function ChannelPage() {
 
   const isOwner = user && channel?.userId === user.id;
   const [codeCopied, setCodeCopied] = useState(false);
+  const [showEmbed, setShowEmbed] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const copyCode = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    toast({ title: "✅ تم نسخ الكود!" });
+    setTimeout(() => setCopiedKey(null), 2500);
+  };
 
   const handleCopyCode = () => {
     if (channel?.publisherCode) {
@@ -208,6 +217,84 @@ export default function ChannelPage() {
                 <p className="text-xs text-muted-foreground mt-3 text-center">
                   💰 نسبة أرباحك من الإعلانات: <strong className="text-yellow-600 dark:text-yellow-400">60%</strong> من كل مشاهدة
                 </p>
+
+                {/* ─── Embed Codes Toggle ─────────────────────── */}
+                <button
+                  onClick={() => setShowEmbed(v => !v)}
+                  className="w-full mt-4 flex items-center justify-between gap-2 px-4 py-2.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary font-bold text-sm transition-all"
+                  data-testid="btn-toggle-embed"
+                >
+                  <span className="flex items-center gap-2"><Code2 className="w-4 h-4" /> شفرات التضمين (إضافة الإعلانات للقناة والبث والريلز)</span>
+                  {showEmbed ? <ChevronUp className="w-4 h-4 shrink-0" /> : <ChevronDown className="w-4 h-4 shrink-0" />}
+                </button>
+
+                {showEmbed && channel.publisherCode && (() => {
+                  const base = window.location.origin;
+                  const pub = channel.publisherCode;
+                  const scriptCode = `<!-- شفرة إعلانات سوق — ضعها في أي موقع أو صفحة -->
+<script src="${base}/api/widget/${pub}" async></script>`;
+                  const iframeCode = `<!-- شفرة iframe — مناسبة للبث الخارجي وبرنامج OBS -->
+<iframe
+  src="${base}/api/widget/${pub}/iframe"
+  width="480" height="120"
+  style="border:none;border-radius:10px"
+  scrolling="no"
+  allowtransparency="true">
+</iframe>`;
+                  const overlayCode = `// ── OBS Browser Source ──
+// أضف هذا الرابط في Browser Source داخل OBS:
+${base}/api/widget/${pub}/iframe
+
+// الأبعاد المقترحة: 480 × 120 px`;
+                  const apiCode = `// ── كود JavaScript/API ──
+// استدعاء إعلان عشوائي وعرضه في البث أو الريلز:
+fetch('${base}/api/campaigns/random')
+  .then(r => r.json())
+  .then(ad => {
+    // ad.mediaUrl  ← رابط الصورة/الفيديو
+    // ad.targetUrl ← الرابط عند الضغط
+    // ad.name      ← اسم الحملة
+    showAd(ad); // دالتك الخاصة
+    // تسجيل ظهور الإعلان:
+    fetch('/api/campaigns/' + ad.id + '/impression', {method:'POST'});
+  });`;
+                  const snippets = [
+                    { key: "script", icon: <Globe className="w-3.5 h-3.5" />, label: "موقع ويب / HTML", code: scriptCode, lang: "html", desc: "ضعه في أي صفحة HTML قبل </body>" },
+                    { key: "iframe", icon: <Monitor className="w-3.5 h-3.5" />, label: "iframe — البث الخارجي", code: iframeCode, lang: "html", desc: "مناسب لـ OBS وأي بث خارجي" },
+                    { key: "overlay", icon: <Radio className="w-3.5 h-3.5" />, label: "OBS Browser Source", code: overlayCode, lang: "text", desc: "أضف الرابط مباشرة في OBS كمصدر متصفح" },
+                    { key: "api", icon: <Code2 className="w-3.5 h-3.5" />, label: "JavaScript API — الريلز والتطبيقات", code: apiCode, lang: "javascript", desc: "للمطورين — يعمل مع أي تطبيق أو ريلز" },
+                  ];
+                  return (
+                    <div className="mt-3 space-y-3">
+                      {snippets.map(s => (
+                        <div key={s.key} className="rounded-xl overflow-hidden border border-border/50">
+                          <div className="flex items-center justify-between px-3 py-2 bg-gray-900">
+                            <div className="flex items-center gap-1.5 text-gray-300 text-xs font-bold">
+                              {s.icon} {s.label}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500 text-xs hidden sm:block">{s.desc}</span>
+                              <button
+                                onClick={() => copyCode(s.code, s.key)}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-all"
+                                data-testid={`btn-copy-embed-${s.key}`}
+                              >
+                                {copiedKey === s.key ? <CheckCheck className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                                {copiedKey === s.key ? "تم!" : "نسخ"}
+                              </button>
+                            </div>
+                          </div>
+                          <pre className="bg-gray-950 text-green-400 text-xs font-mono p-3 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
+                            {s.code}
+                          </pre>
+                        </div>
+                      ))}
+                      <p className="text-xs text-center text-muted-foreground pt-1">
+                        📖 <a href="/embed-guide" className="text-primary underline font-bold">دليل التضمين الكامل</a> — خطوات تفصيلية لكل المنصات
+                      </p>
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
           </motion.div>
