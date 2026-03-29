@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown, Image as ImageIcon, Film, Music, ChevronLeft, ChevronRight, Pause, Pencil, Trash2 } from "lucide-react";
+import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown, Image as ImageIcon, Film, Music, ChevronLeft, ChevronRight, Pause, Pencil, Trash2, ArrowRight } from "lucide-react";
+import { useLocation } from "wouter";
 import { EditReelDialog } from "@/components/EditReelDialog";
 import { AdWidget } from "@/components/AdWidget";
 import { motion, AnimatePresence } from "framer-motion";
@@ -57,12 +58,13 @@ function speakEgyptian(text: string) {
   window.speechSynthesis.speak(utterance);
 }
 
-function ReelCard({ reel, isActive, isOwner, onEdit, onDelete }: {
+function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded }: {
   reel: Reel;
   isActive: boolean;
   isOwner?: boolean;
   onEdit?: () => void;
   onDelete?: () => void;
+  onEnded?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -328,10 +330,10 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete }: {
             ref={videoRef}
             src={reel.videoUrl}
             className="w-full h-full object-contain"
-            loop
             autoPlay={isActive}
             muted={muted}
             playsInline
+            onEnded={() => onEnded?.()}
             onClick={() => videoRef.current?.paused ? videoRef.current.play() : videoRef.current?.pause()}
           />
           {/* TAP TO UNMUTE */}
@@ -918,6 +920,7 @@ export default function Reels() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
   const { data: reels = [], isLoading } = useQuery<Reel[]>({
     queryKey: ['/api/reels'],
     queryFn: () => fetch('/api/reels', { credentials: 'include' }).then(r => r.json()),
@@ -936,6 +939,16 @@ export default function Reels() {
     const height = e.currentTarget.clientHeight;
     const newIndex = Math.round(scrollTop / height);
     setActiveIndex(newIndex);
+  };
+
+  const scrollToNext = () => {
+    const container = containerRef.current;
+    if (!container) return;
+    const nextIndex = activeIndex + 1;
+    if (nextIndex < reels.length) {
+      container.scrollTo({ top: nextIndex * container.clientHeight, behavior: 'smooth' });
+      setActiveIndex(nextIndex);
+    }
   };
 
   if (isLoading) {
@@ -959,6 +972,16 @@ export default function Reels() {
 
   return (
     <div className="h-screen bg-black overflow-hidden relative">
+      {/* زرار الرجوع */}
+      <button
+        onClick={() => setLocation('/ads')}
+        className="absolute top-4 right-4 z-50 flex items-center gap-1.5 bg-black/60 backdrop-blur border border-white/20 text-white text-sm font-bold px-3 py-2 rounded-full hover:bg-black/80 transition-all"
+        data-testid="btn-back-to-ads"
+      >
+        <ArrowRight className="w-4 h-4" />
+        رجوع
+      </button>
+
       <div
         ref={containerRef}
         className="h-full overflow-y-scroll snap-y snap-mandatory"
@@ -973,6 +996,7 @@ export default function Reels() {
             isOwner={!!user && reel.userId === user.id}
             onEdit={() => setEditingReel(reel)}
             onDelete={() => deleteReelMut.mutate(reel.id)}
+            onEnded={scrollToNext}
           />
         ))}
       </div>
