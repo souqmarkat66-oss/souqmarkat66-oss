@@ -393,6 +393,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const notifTitle = `🆕 إعلان جديد من ${publisherName}`;
           const notifBody = ad.title ? `"${ad.title}" — شاهد الإعلان الآن` : "أُضيف إعلان جديد قد يهمك";
 
+          const notifiedUsers = new Set<string>([userId]); // never notify self
+
           // 1) Notify followers of the creator's channel
           const channelRows = await db.execute(
             sql`SELECT id FROM channels WHERE user_id = ${userId} LIMIT 1`
@@ -403,26 +405,37 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               sql`SELECT follower_id FROM follows WHERE channel_id = ${channelId}`
             );
             for (const row of followerRows.rows as any[]) {
-              if (row.follower_id !== userId) {
-                await createNotification(row.follower_id, "system", notifTitle, notifBody, adLink);
+              const fid = (row as any).follower_id;
+              if (!notifiedUsers.has(fid)) {
+                await createNotification(fid, "system", notifTitle, notifBody, adLink);
+                notifiedUsers.add(fid);
               }
             }
           }
 
-          // 2) Notify ALL active users (broadcast new ad)
-          const allUsersRows = await db.execute(
-            sql`SELECT id FROM users WHERE id != ${userId} LIMIT 1000`
-          );
-          const alreadyNotified = new Set<string>();
-          // Mark followers already notified
-          (await db.execute(
-            sql`SELECT follower_id FROM follows WHERE channel_id IN (SELECT id FROM channels WHERE user_id = ${userId})`
-          )).rows.forEach((r: any) => alreadyNotified.add(r.follower_id));
-
-          for (const row of allUsersRows.rows as any[]) {
-            const uid = (row as any).id;
-            if (!alreadyNotified.has(uid)) {
-              await createNotification(uid, "system", notifTitle, notifBody, adLink);
+          // 2) Notify users in the same targeted governorate(s) — up to 500
+          const targetRegion: string = (ad as any).targetRegion || (ad as any).target_region || "";
+          if (targetRegion && targetRegion.trim().length > 0) {
+            // targetRegion is a comma-separated list of governorate names stored in users or ads
+            // We match users whose own ads have the same governorate, OR we broadcast to all
+            // non-notified users who have been active in those governorates.
+            // Simple approach: notify users whose last-created ad has a matching region.
+            const regions = targetRegion.split(",").map((r: string) => r.trim()).filter(Boolean);
+            for (const region of regions) {
+              const regionUsers = await db.execute(
+                sql`SELECT DISTINCT user_id FROM ads
+                    WHERE target_region ILIKE ${'%' + region + '%'}
+                      AND user_id != ${userId}
+                    LIMIT 200`
+              );
+              for (const row of regionUsers.rows as any[]) {
+                const uid = (row as any).user_id;
+                if (!notifiedUsers.has(uid)) {
+                  await createNotification(uid, "system",
+                    `📍 إعلان جديد في ${region}`, notifBody, adLink);
+                  notifiedUsers.add(uid);
+                }
+              }
             }
           }
         } catch (e) {
@@ -500,43 +513,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const publisherName = req.user.claims?.first_name || "معلن";
       const adLink = `/ads/${adId}`;
-      const notifTitle = `🚀 ${publisherName} يعزز إعلانه!`;
-      const notifBody = ad.title ? `"${ad.title}" — لا تفوّته!` : "عرض مميز قد يهمك";
+      const notifTitle = `🚀 إعلان مميز من ${publisherName}`;
+      const notifBody = ad.title ? `✨ "${ad.title}" — عرض مميز لا تفوّته!` : "✨ عرض مميز قد يهمك — شاهده الآن";
       let notifiedCount = 0;
+      const boostNotified = new Set<string>([userId]); // never notify self
 
-      // 1) Followers of the creator's channel
-      const channelRows = await db.execute(
-        sql`SELECT id FROM channels WHERE user_id = ${userId} LIMIT 1`
+      // Boost = paid reach → notify ALL users (up to 1000)
+      const allRows = await db.execute(
+        sql`SELECT id FROM users WHERE id != ${userId} LIMIT 1000`
       );
-      if (channelRows.rows.length > 0) {
-        const channelId = (channelRows.rows[0] as any).id;
-        const followerRows = await db.execute(
-          sql`SELECT follower_id FROM follows WHERE channel_id = ${channelId}`
-        );
-        for (const row of followerRows.rows as any[]) {
-          const fid = (row as any).follower_id;
-          if (fid !== userId) {
-            await createNotification(fid, "system", notifTitle, notifBody, adLink);
-            notifiedCount++;
-          }
-        }
-      }
-
-      // 2) Users who liked similar ads (by category) in last 60 days
-      const category = (ad as any).category || null;
-      if (category) {
-        const interestedRows = await db.execute(
-          sql`SELECT DISTINCT l.user_id FROM likes l
-              JOIN ads a ON a.id = l.target_id AND l.target_type = 'ad'
-              WHERE a.category = ${category}
-                AND l.user_id != ${userId}
-                AND l.created_at > NOW() - INTERVAL '60 days'
-              LIMIT 100`
-        );
-        for (const row of interestedRows.rows as any[]) {
-          const uid = (row as any).user_id;
-          await createNotification(uid, "system",
-            `💡 عرض في ${category} قد يهمك`, notifBody, adLink);
+      for (const row of allRows.rows as any[]) {
+        const uid = (row as any).id;
+        if (!boostNotified.has(uid)) {
+          await createNotification(uid, "system", notifTitle, notifBody, adLink);
+          boostNotified.add(uid);
           notifiedCount++;
         }
       }
