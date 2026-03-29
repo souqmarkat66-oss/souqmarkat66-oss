@@ -109,13 +109,9 @@ export default function AdminPanel() {
   }
 
   if (!isAdmin) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-4">
-        <ShieldAlert className="w-16 h-16 text-red-500" />
-        <h2 className="text-2xl font-bold">غير مصرح لك بالدخول</h2>
-        <p className="text-muted-foreground text-sm">هذه الصفحة مخصصة لمالك المشروع فقط</p>
-      </div>
-    );
+    // Redirect non-admins to their personal dashboard immediately
+    window.location.replace("/my-dashboard");
+    return null;
   }
 
   return (

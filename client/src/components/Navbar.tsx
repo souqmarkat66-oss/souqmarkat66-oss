@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { NotificationBell } from "./NotificationBell";
 import {
   LogIn, LogOut, PlusCircle, Globe, LayoutGrid, Megaphone,
-  Radio, BarChart2, ShieldCheck, DollarSign, Menu, X, Tv, UserCircle2, MessageSquare, Receipt, FolderOpen
+  Radio, BarChart2, ShieldCheck, DollarSign, Menu, X, Tv, UserCircle2, MessageSquare, Receipt, FolderOpen, PieChart
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -138,6 +138,13 @@ export function Navbar() {
                     <LayoutGrid className="w-4 h-4 text-blue-500" /> محتواي وإعلاناتي
                   </Link>
                 </DropdownMenuItem>
+                {user.id !== ADMIN_USER_ID && (
+                  <DropdownMenuItem asChild>
+                    <Link href="/my-dashboard" className="gap-2 cursor-pointer flex items-center">
+                      <PieChart className="w-4 h-4 text-teal-500" /> تقاريري ولوحتي
+                    </Link>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem asChild>
                   <Link href="/messages" className="gap-2 cursor-pointer flex items-center">
                     <MessageSquare className="w-4 h-4 text-green-500" /> الرسائل
@@ -193,6 +200,13 @@ export function Navbar() {
             ))}
             {user && (
               <>
+                {user.id !== ADMIN_USER_ID && (
+                  <Link href="/my-dashboard" onClick={() => setMobileOpen(false)}>
+                    <Button variant="ghost" className="w-full justify-start gap-2">
+                      <PieChart className="w-4 h-4 text-teal-500" /> تقاريري ولوحتي
+                    </Button>
+                  </Link>
+                )}
                 <Link href="/messages" onClick={() => setMobileOpen(false)}>
                   <Button variant="ghost" className="w-full justify-start gap-2">
                     <MessageSquare className="w-4 h-4" /> الرسائل

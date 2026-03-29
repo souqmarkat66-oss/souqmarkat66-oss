@@ -27,6 +27,7 @@ import EmbedGuide from "@/pages/EmbedGuide";
 import MediaLibrary from "@/pages/MediaLibrary";
 import Messages from "@/pages/Messages";
 import Profile from "@/pages/Profile";
+import MyDashboard from "@/pages/MyDashboard";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import { GlobalAssistant } from "@/components/GlobalAssistant";
 import NotFound from "@/pages/not-found";
@@ -96,6 +97,9 @@ function Router() {
               <Route path="/profile/:userId" component={Profile} />
               <Route path="/profile">
                 <ProtectedRoute component={Profile} />
+              </Route>
+              <Route path="/my-dashboard">
+                <ProtectedRoute component={MyDashboard} />
               </Route>
               <Route component={NotFound} />
             </Switch>
