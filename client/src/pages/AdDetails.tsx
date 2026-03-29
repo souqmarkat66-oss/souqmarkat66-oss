@@ -528,8 +528,12 @@ export default function AdDetails() {
   const [myRating, setMyRating] = useState(0);
   const [myReview, setMyReview] = useState("");
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
-  const [boosting, setBoosting]   = useState(false);
-  const [boosted, setBoosted]     = useState(false);
+  const [boosting, setBoosting]             = useState(false);
+  const [boosted, setBoosted]               = useState(false);
+  const [boostSettings, setBoostSettings]   = useState<{ enabled: boolean; price: number } | null>(null);
+  const [showBoostPayDialog, setShowBoostPayDialog] = useState(false);
+  const [boostPayRef, setBoostPayRef]       = useState("");
+  const [boostPayMsg, setBoostPayMsg]       = useState("");
 
   // Increment view count on page load
   useEffect(() => {
@@ -553,6 +557,13 @@ export default function AdDetails() {
     ogImg.content = ad.mediaUrl || "";
     return () => { document.title = "شبكة سوق للإعلانات"; };
   }, [ad]);
+
+  // Fetch boost settings when ad owner is viewing
+  useEffect(() => {
+    if (user && ad && user.id === ad.userId) {
+      fetch("/api/boost/settings").then(r => r.json()).then(setBoostSettings).catch(() => {});
+    }
+  }, [user, ad]);
 
   const { data: favCheck } = useQuery<{ favorited: boolean }>({
     queryKey: ["/api/favorites", id, "check"],
@@ -586,21 +597,33 @@ export default function AdDetails() {
     },
   });
 
-  const handleBoost = async () => {
+  const handleBoost = async (paymentRef?: string) => {
     if (!user) { window.location.href = "/login"; return; }
     setBoosting(true);
     try {
-      const res = await fetch(`/api/ads/${id}/boost-notify`, { method: "POST", credentials: "include" });
+      const body = paymentRef ? JSON.stringify({ payment_ref: paymentRef }) : undefined;
+      const res = await fetch(`/api/ads/${id}/boost-notify`, {
+        method: "POST",
+        credentials: "include",
+        headers: body ? { "Content-Type": "application/json" } : {},
+        body,
+      });
       const data = await res.json();
-      if (res.status === 429) {
+      if (res.status === 402 && data.requiresPayment) {
+        // Free limit reached — show payment dialog
+        setBoostPayMsg(data.message);
+        setShowBoostPayDialog(true);
+      } else if (res.status === 429) {
         toast({ variant: "destructive", title: "⏳ حد التعزيز", description: data.message });
       } else if (res.ok) {
         setBoosted(true);
+        setShowBoostPayDialog(false);
+        setBoostPayRef("");
         toast({
           title: "🚀 تم التعزيز!",
           description: data.notifiedCount > 0
-            ? `وصل إشعار لـ ${data.notifiedCount} متابع ومهتم — ستزيد مشاهداتك قريباً`
-            : "سيصل إشعار لمتابعيك والمهتمين بالفئة",
+            ? `وصل إشعار لـ ${data.notifiedCount} مستخدم — ستزيد مشاهداتك قريباً 📈`
+            : "سيصل إشعار للمهتمين بالفئة",
         });
       } else {
         toast({ variant: "destructive", title: data.message || "فشل التعزيز" });
@@ -719,9 +742,9 @@ export default function AdDetails() {
                     data-testid="btn-share-ad"
                   />
                   {/* 🚀 Boost — Ad Owner Only */}
-                  {user?.id === ad.userId && (
+                  {user?.id === ad.userId && boostSettings?.enabled !== false && (
                     <button
-                      onClick={handleBoost}
+                      onClick={() => handleBoost()}
                       disabled={boosting || boosted}
                       className={`flex items-center gap-1.5 h-7 px-3 rounded-full text-xs font-bold border transition-all ${
                         boosted
@@ -733,8 +756,10 @@ export default function AdDetails() {
                       {boosting
                         ? <><Loader2 className="w-3 h-3 animate-spin" /> جارٍ...</>
                         : boosted
-                        ? <>✓ أُرسل</>
-                        : <><Zap className="w-3 h-3" /> عزّز 🚀</>
+                        ? <>✓ تم التعزيز</>
+                        : boostSettings && boostSettings.price > 0
+                        ? <><Zap className="w-3 h-3" /> عزّز 🚀 ({boostSettings.price} ج.م)</>
+                        : <><Zap className="w-3 h-3" /> عزّز مجاناً 🚀</>
                       }
                     </button>
                   )}
@@ -887,6 +912,55 @@ export default function AdDetails() {
           </div>
         </div>
       )}
+
+      {/* ── 🚀 Boost Payment Dialog ── */}
+      <Dialog open={showBoostPayDialog} onOpenChange={setShowBoostPayDialog}>
+        <DialogContent dir="rtl" className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <Zap className="w-5 h-5 text-orange-500" /> تعزيز إضافي مدفوع
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <p className="text-sm text-muted-foreground">{boostPayMsg}</p>
+            <div className="bg-orange-50 dark:bg-orange-950/20 rounded-xl p-3 text-center border border-orange-200 dark:border-orange-800">
+              <p className="text-2xl font-black text-orange-600">{boostSettings?.price} ج.م</p>
+              <p className="text-xs text-muted-foreground mt-1">تعزيز فوري — إشعار لآلاف المستخدمين</p>
+            </div>
+            {/* Payment methods */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground">ادفع عبر:</p>
+              {PLATFORM_PAYMENTS.map(pm => (
+                <div key={pm.label} className={`flex items-center gap-2 rounded-lg px-3 py-2 border text-xs font-medium ${pm.color}`}>
+                  <span>{pm.emoji}</span>
+                  <span>{pm.label}</span>
+                  <span className="ml-auto font-mono font-bold">{pm.number}</span>
+                </div>
+              ))}
+            </div>
+            {/* Payment reference input */}
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">أدخل رقم العملية بعد الدفع:</p>
+              <input
+                type="text"
+                value={boostPayRef}
+                onChange={e => setBoostPayRef(e.target.value)}
+                placeholder="مثال: 12345678"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-background"
+                data-testid="input-boost-pay-ref"
+              />
+            </div>
+            <button
+              disabled={!boostPayRef.trim() || boosting}
+              onClick={() => handleBoost(boostPayRef.trim())}
+              className="w-full py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              data-testid="btn-confirm-boost-payment"
+            >
+              {boosting ? <><Loader2 className="w-4 h-4 animate-spin" /> جارٍ...</> : <><Zap className="w-4 h-4" /> تأكيد الدفع وتعزيز الإعلان</>}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* QR Code Dialog */}
       <Dialog open={qrOpen} onOpenChange={setQrOpen}>

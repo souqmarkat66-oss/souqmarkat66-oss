@@ -637,6 +637,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // AD BOOST NOTIFY — Paid reach: notifies ALL users (up to 1000)
   // Rate limited: max once every 30 days per ad. Admin can enable/disable + set price.
   // ================================================================
+  // GET boost settings (public — so the button can show price)
+  app.get("/api/boost/settings", async (_req, res) => {
+    try {
+      const rows = await db.execute(
+        sql`SELECT key, value FROM platform_settings WHERE key IN ('boost_enabled','boost_price_egp')`
+      );
+      const map: Record<string, string> = {};
+      (rows.rows as any[]).forEach((r: any) => { map[r.key] = r.value; });
+      res.json({
+        enabled: map["boost_enabled"] !== "0",
+        price: parseFloat(map["boost_price_egp"] || "0"),
+        currency: "EGP",
+      });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   app.post("/api/ads/:id/boost-notify", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
     const adId = parseInt(req.params.id);
@@ -656,28 +672,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const boostPriceRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_price_egp' LIMIT 1`);
       const boostPrice = parseFloat((boostPriceRow.rows[0] as any)?.value || "0");
 
-      // Verify payment if price > 0 (payment_ref sent from client)
       const { payment_ref } = req.body;
-      if (boostPrice > 0 && !payment_ref) {
-        return res.status(402).json({
-          message: "يتطلب التعزيز الدفع أولاً",
-          price: boostPrice,
-          requiresPayment: true,
-        });
-      }
+      const isPaid = !!payment_ref; // client sends payment_ref when user has paid
 
-      // Rate limit: check last boost time — max once per 30 days
+      // Rate limit: check last boost time — max once per 30 days for FREE boosts
       const lastBoost = await db.execute(
         sql`SELECT created_at FROM notifications
             WHERE link = ${`/ads/${adId}`} AND title LIKE '%🚀%'
             ORDER BY created_at DESC LIMIT 1`
       );
+
       if (lastBoost.rows.length > 0) {
         const last = new Date((lastBoost.rows[0] as any).created_at);
         const daysAgo = (Date.now() - last.getTime()) / 86_400_000;
         if (daysAgo < 30) {
-          const daysLeft = Math.ceil(30 - daysAgo);
-          return res.status(429).json({ message: `يمكنك تعزيز هذا الإعلان مرة واحدة كل 30 يوم. الأيام المتبقية: ${daysLeft} يوم` });
+          if (isPaid) {
+            // Paid extra boost — allow immediately, skip the 30-day limit
+          } else if (boostPrice > 0) {
+            // Free limit used up → offer paid option
+            const daysLeft = Math.ceil(30 - daysAgo);
+            return res.status(402).json({
+              requiresPayment: true,
+              price: boostPrice,
+              message: `استخدمت تعزيزك المجاني. يمكنك التعزيز الآن مقابل ${boostPrice} ج.م أو الانتظار ${daysLeft} يوم`,
+            });
+          } else {
+            // Price = 0, strictly once per 30 days
+            const daysLeft = Math.ceil(30 - daysAgo);
+            return res.status(429).json({ message: `يمكنك تعزيز هذا الإعلان مرة واحدة كل 30 يوم. الأيام المتبقية: ${daysLeft} يوم` });
+          }
         }
       }
 
