@@ -560,13 +560,46 @@ export default function Campaigns() {
                 )}
 
                 {/* Boost / Renew CTA */}
-                <div className="bg-gradient-to-r from-yellow-50 to-amber-50 dark:from-yellow-950/20 dark:to-amber-950/10 rounded-2xl p-4 border border-yellow-200/50 dark:border-yellow-800/30">
-                  <p className="text-sm font-bold mb-1 flex items-center gap-2"><Megaphone className="w-4 h-4 text-yellow-600" /> زيادة الميزانية أو تجديد الإعلان؟</p>
-                  <p className="text-xs text-muted-foreground mb-3">تواصل معنا بعد الدفع وسيتم تفعيل الحملة خلال دقائق</p>
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <span className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-3 py-1.5 rounded-full font-bold">📱 Vodafone Cash: 01098553911</span>
-                    <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-3 py-1.5 rounded-full font-bold">📱 Etisalat: 01126665741</span>
-                    <span className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 px-3 py-1.5 rounded-full font-bold">💳 InstaPay: 01285558567</span>
+                <div className="rounded-2xl overflow-hidden border border-yellow-200/50 dark:border-yellow-800/30">
+                  <div className="bg-gradient-to-r from-yellow-50 to-amber-50 dark:from-yellow-950/20 dark:to-amber-950/10 p-4">
+                    <p className="text-sm font-bold mb-1 flex items-center gap-2"><Megaphone className="w-4 h-4 text-yellow-600" /> زيادة الميزانية أو تجديد الإعلان؟</p>
+                    <p className="text-xs text-muted-foreground mb-3">تواصل معنا بعد الدفع وسيتم تفعيل الحملة خلال دقائق</p>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      <span className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-3 py-1.5 rounded-full font-bold">📱 Vodafone Cash: 01098553911</span>
+                      <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-3 py-1.5 rounded-full font-bold">📱 Etisalat: 01126665741</span>
+                      <span className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 px-3 py-1.5 rounded-full font-bold">💳 InstaPay: 01285558567</span>
+                    </div>
+                  </div>
+
+                  {/* التقسيط */}
+                  <div className="bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/20 dark:to-blue-950/10 p-4 border-t border-indigo-100 dark:border-indigo-900/30">
+                    <p className="text-sm font-bold mb-1 flex items-center gap-2">
+                      <span className="text-base">💳</span> تقسيط قيمة الإعلانات من 6 إلى 18 شهر
+                    </p>
+                    <p className="text-xs text-muted-foreground mb-2">متاح عبر بطاقات الفيزا والماستركارد من أغلب البنوك المصرية</p>
+                    <div className="flex flex-wrap gap-1.5 text-xs">
+                      {[6, 9, 12, 18].map(m => (
+                        <span key={m} className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 px-2.5 py-1 rounded-full font-bold">{m} شهر</span>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-2">* الأقساط تُحسب حسب سياسة البنك المُصدِر للبطاقة</p>
+                  </div>
+
+                  {/* البنك الأهلي 55 يوم */}
+                  <div className="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/10 p-4 border-t border-emerald-100 dark:border-emerald-900/30">
+                    <p className="text-sm font-bold mb-1 flex items-center gap-2">
+                      <span className="text-base">🏦</span> فيزا مشتريات البنك الأهلي المصري — 55 يوم سماح
+                    </p>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      إذا كان لديك حساب عرض متاح من فيزا مشتريات البنك الأهلي، يمكنك سداد قيمة إعلاناتك خلال
+                      <span className="font-bold text-emerald-700 dark:text-emerald-400"> 55 يوم </span>
+                      بدون أي فوائد أو مصاريف إضافية
+                    </p>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-3 py-1.5 rounded-full font-bold">✅ بدون فوائد</span>
+                      <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-3 py-1.5 rounded-full font-bold">✅ بدون مصاريف</span>
+                      <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-3 py-1.5 rounded-full font-bold">🕐 55 يوم سماح</span>
+                    </div>
                   </div>
                 </div>
               </div>

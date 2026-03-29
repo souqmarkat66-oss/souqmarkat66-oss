@@ -370,6 +370,53 @@ function AdvertiserTab() {
         </CardContent>
       </Card>
 
+      {/* طرق شحن الرصيد الإعلاني */}
+      <Card className="rounded-2xl overflow-hidden">
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><CreditCard className="w-4 h-4" /> طرق شحن رصيدك الإعلاني</CardTitle></CardHeader>
+        <CardContent className="p-0">
+          {/* الدفع الفوري */}
+          <div className="px-5 pb-4">
+            <p className="text-xs text-muted-foreground mb-3">تواصل معنا بعد الدفع لتفعيل رصيدك فوراً</p>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-3 py-1.5 rounded-full font-bold">📱 Vodafone Cash: 01098553911</span>
+              <span className="bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 px-3 py-1.5 rounded-full font-bold">📱 Etisalat: 01126665741</span>
+              <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-3 py-1.5 rounded-full font-bold">💳 InstaPay: 01285558567</span>
+            </div>
+          </div>
+
+          {/* التقسيط */}
+          <div className="bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/20 dark:to-blue-950/10 px-5 py-4 border-t">
+            <p className="text-sm font-bold mb-1 flex items-center gap-2">
+              <span>💳</span> تقسيط قيمة الإعلانات من 6 إلى 18 شهر
+            </p>
+            <p className="text-xs text-muted-foreground mb-2">متاح عبر بطاقات الفيزا والماستركارد من أغلب البنوك المصرية</p>
+            <div className="flex flex-wrap gap-1.5 text-xs">
+              {[6, 9, 12, 18].map(m => (
+                <span key={m} className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 px-2.5 py-1 rounded-full font-bold">{m} شهر</span>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1.5">* الأقساط تُحسب حسب سياسة البنك المُصدِر للبطاقة</p>
+          </div>
+
+          {/* البنك الأهلي 55 يوم */}
+          <div className="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/10 px-5 py-4 border-t">
+            <p className="text-sm font-bold mb-1 flex items-center gap-2">
+              <span>🏦</span> فيزا مشتريات البنك الأهلي المصري — 55 يوم سماح
+            </p>
+            <p className="text-xs text-muted-foreground mb-2">
+              سدّد قيمة إعلاناتك خلال
+              <span className="font-bold text-emerald-700 dark:text-emerald-400"> 55 يوم </span>
+              بدون فوائد أو مصاريف عبر حساب العرض المتاح من فيزا مشتريات البنك الأهلي
+            </p>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2.5 py-1.5 rounded-full font-bold">✅ بدون فوائد</span>
+              <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2.5 py-1.5 rounded-full font-bold">✅ بدون مصاريف</span>
+              <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2.5 py-1.5 rounded-full font-bold">🕐 55 يوم سماح</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* كشف حساب الإنفاق */}
       <Card className="rounded-2xl">
         <CardHeader><CardTitle className="text-base flex items-center gap-2"><Receipt className="w-4 h-4" /> كشف حساب الإنفاق</CardTitle></CardHeader>
