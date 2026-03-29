@@ -2533,6 +2533,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // GET /api/admin/payment-receipts — all payment proof screenshots with sender info
+  app.get("/api/admin/payment-receipts", isAuthenticated, async (req: any, res) => {
+    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
+    try {
+      const rows = await db.execute(sql`
+        SELECT dm.id, dm.from_user_id, dm.to_user_id, dm.message, dm.image_url,
+               dm.is_payment_proof, dm.is_read, dm.created_at,
+               u.first_name, u.last_name, u.username, u.phone_number, u.email
+        FROM direct_messages dm
+        LEFT JOIN users u ON u.id = dm.from_user_id
+        WHERE dm.is_payment_proof = true
+        ORDER BY dm.created_at DESC
+        LIMIT 100
+      `);
+      res.json(rows.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   app.get("/api/messages/unread-count", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
     try {

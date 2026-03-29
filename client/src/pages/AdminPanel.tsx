@@ -35,6 +35,7 @@ const NAV = [
   { key: "campaigns",      label: "الحملات الإعلانية",    icon: BarChart2,       color: "text-teal-400" },
   { key: "payments",       label: "طلبات السحب",          icon: Banknote,        color: "text-green-400" },
   { key: "boostorders",    label: "طلبات التعزيز",         icon: Zap,             color: "text-orange-400" },
+  { key: "payreceipts",    label: "إيصالات الدفع",          icon: Banknote,        color: "text-emerald-500" },
   { key: "reports",        label: "البلاغات",             icon: Flag,            color: "text-yellow-400" },
   { key: "fraud",          label: "كشف الاحتيال",         icon: ShieldX,         color: "text-red-500" },
   { key: "revenue",        label: "الإيرادات",            icon: DollarSign,      color: "text-emerald-400" },
@@ -191,6 +192,7 @@ export default function AdminPanel() {
           {section === "campaigns"  && <CampaignsSection logAction={logAction} />}
           {section === "payments"   && <PaymentsSection logAction={logAction} />}
           {section === "boostorders" && <BoostOrdersSection logAction={logAction} />}
+          {section === "payreceipts" && <PayReceiptsSection />}
           {section === "reports"    && <ReportsSection logAction={logAction} />}
           {section === "fraud"      && <FraudSection />}
           {section === "revenue"    && <RevenueSection />}
@@ -1577,6 +1579,247 @@ function BoostOrdersSection({ logAction }: { logAction: any }) {
             ))}
           </CardContent>
         </Card>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// PAY RECEIPTS SECTION — جدول إيصالات الدفع
+// ══════════════════════════════════════════════════════════════
+function PayReceiptsSection() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [zoom, setZoom] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+
+  const { data: receipts = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/payment-receipts"],
+    queryFn: () => fetch("/api/admin/payment-receipts").then(r => r.json()),
+    refetchInterval: 30000,
+  });
+
+  const handleConfirm = async (id: number) => {
+    setConfirming(id);
+    try {
+      const r = await fetch(`/api/messages/${id}/confirm-payment`, { method: "POST" });
+      if (!r.ok) throw new Error("فشل التأكيد");
+      toast({ title: "✅ تم تأكيد الدفع", description: "تم إرسال إشعار للمستخدم" });
+      qc.invalidateQueries({ queryKey: ["/api/admin/payment-receipts"] });
+    } catch {
+      toast({ title: "خطأ", description: "فشل تأكيد الدفع", variant: "destructive" });
+    } finally {
+      setConfirming(null);
+    }
+  };
+
+  const filtered = receipts.filter((r: any) => {
+    if (!search) return true;
+    const name = `${r.first_name || ""} ${r.last_name || ""} ${r.username || ""} ${r.phone_number || ""} ${r.email || ""}`.toLowerCase();
+    return name.includes(search.toLowerCase());
+  });
+
+  const pending = receipts.filter((r: any) => !r.is_read).length;
+
+  return (
+    <div className="space-y-5" dir="rtl">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold">إيصالات الدفع 💳</h2>
+          <p className="text-sm text-muted-foreground">لقطات الشاشة والإيصالات المرسلة من المستخدمين</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {pending > 0 && (
+            <Badge className="bg-orange-500 text-white text-sm px-3 py-1">
+              {pending} في الانتظار
+            </Badge>
+          )}
+          <Badge variant="outline" className="text-sm px-3 py-1">
+            الإجمالي: {receipts.length}
+          </Badge>
+        </div>
+      </div>
+
+      {/* Stats row */}
+      <div className="grid grid-cols-3 gap-3">
+        <Card className="rounded-2xl border border-border/50 bg-orange-500/10">
+          <CardContent className="p-4 text-center">
+            <div className="text-2xl font-bold text-orange-400">{pending}</div>
+            <div className="text-xs text-muted-foreground mt-1">في الانتظار</div>
+          </CardContent>
+        </Card>
+        <Card className="rounded-2xl border border-border/50 bg-green-500/10">
+          <CardContent className="p-4 text-center">
+            <div className="text-2xl font-bold text-green-400">{receipts.filter((r: any) => r.is_read).length}</div>
+            <div className="text-xs text-muted-foreground mt-1">تم التأكيد</div>
+          </CardContent>
+        </Card>
+        <Card className="rounded-2xl border border-border/50 bg-blue-500/10">
+          <CardContent className="p-4 text-center">
+            <div className="text-2xl font-bold text-blue-400">{receipts.length}</div>
+            <div className="text-xs text-muted-foreground mt-1">إجمالي الإيصالات</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="بحث باسم أو موبايل أو إيميل..."
+          className="pr-10 rounded-xl"
+          data-testid="input-search-receipts"
+        />
+      </div>
+
+      {/* Receipts list */}
+      {isLoading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-emerald-400" /></div>
+      ) : filtered.length === 0 ? (
+        <Card className="rounded-2xl border border-dashed border-border/50">
+          <CardContent className="py-16 text-center text-muted-foreground">
+            <Banknote className="w-12 h-12 mx-auto mb-3 opacity-30" />
+            <p>لا توجد إيصالات دفع بعد</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((r: any) => (
+            <Card
+              key={r.id}
+              className={`rounded-2xl border transition-all ${
+                !r.is_read
+                  ? "border-orange-500/60 bg-orange-500/5 shadow-md"
+                  : "border-border/40 bg-muted/20"
+              }`}
+              data-testid={`card-receipt-${r.id}`}
+            >
+              <CardContent className="p-4">
+                <div className="flex flex-col md:flex-row gap-4">
+                  {/* Screenshot thumbnail */}
+                  {r.image_url && (
+                    <div
+                      className="flex-shrink-0 cursor-zoom-in"
+                      onClick={() => setZoom(r.image_url)}
+                      data-testid={`img-receipt-${r.id}`}
+                    >
+                      <img
+                        src={r.image_url}
+                        alt="إيصال دفع"
+                        className="w-24 h-24 md:w-32 md:h-32 object-cover rounded-xl border border-border/50 hover:opacity-80 transition-opacity"
+                      />
+                      <p className="text-xs text-center text-muted-foreground mt-1">اضغط للتكبير</p>
+                    </div>
+                  )}
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0 space-y-2">
+                    {/* User info */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-sm">
+                        {r.first_name || ""} {r.last_name || ""}
+                      </span>
+                      {r.username && (
+                        <Badge variant="outline" className="text-xs">@{r.username}</Badge>
+                      )}
+                      {!r.is_read && (
+                        <Badge className="bg-orange-500 text-white text-xs">جديد ⏳</Badge>
+                      )}
+                      {r.is_read && (
+                        <Badge className="bg-green-600 text-white text-xs">✅ تم التأكيد</Badge>
+                      )}
+                    </div>
+
+                    {/* Contact */}
+                    <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                      {r.phone_number && (
+                        <span className="flex items-center gap-1">
+                          <Phone className="w-3 h-3" /> {r.phone_number}
+                        </span>
+                      )}
+                      {r.email && (
+                        <span className="flex items-center gap-1">
+                          <Mail className="w-3 h-3" /> {r.email}
+                        </span>
+                      )}
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {r.created_at ? format(new Date(r.created_at), "dd MMM yyyy - HH:mm", { locale: ar }) : "—"}
+                      </span>
+                    </div>
+
+                    {/* Message preview */}
+                    {r.message && r.message !== "📸 إيصال دفع" && (
+                      <p className="text-xs bg-muted/40 rounded-lg px-3 py-2 border border-border/30 line-clamp-2">
+                        {r.message}
+                      </p>
+                    )}
+
+                    {/* User ID */}
+                    <p className="text-xs text-muted-foreground font-mono">ID: {r.from_user_id}</p>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-col gap-2 justify-start md:items-end">
+                    {!r.is_read && (
+                      <Button
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700 text-white text-xs rounded-xl"
+                        onClick={() => handleConfirm(r.id)}
+                        disabled={confirming === r.id}
+                        data-testid={`btn-confirm-receipt-${r.id}`}
+                      >
+                        {confirming === r.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <CheckCircle className="w-3 h-3" />
+                        )}
+                        تأكيد الدفع ✓
+                      </Button>
+                    )}
+                    {r.image_url && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs rounded-xl"
+                        onClick={() => setZoom(r.image_url)}
+                        data-testid={`btn-zoom-receipt-${r.id}`}
+                      >
+                        <Eye className="w-3 h-3" /> عرض الصورة
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Zoom lightbox */}
+      {zoom && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 cursor-zoom-out"
+          onClick={() => setZoom(null)}
+        >
+          <div className="relative max-w-3xl w-full" onClick={e => e.stopPropagation()}>
+            <button
+              className="absolute -top-10 left-0 text-white text-sm flex items-center gap-2 hover:text-gray-300"
+              onClick={() => setZoom(null)}
+            >
+              <X className="w-4 h-4" /> إغلاق
+            </button>
+            <img
+              src={zoom}
+              alt="إيصال دفع — عرض كامل"
+              className="w-full max-h-[80vh] object-contain rounded-xl"
+            />
+          </div>
+        </div>
       )}
     </div>
   );
