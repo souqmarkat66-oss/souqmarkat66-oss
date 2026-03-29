@@ -384,12 +384,25 @@ function AdvertiserTab() {
             </div>
           </div>
 
-          {/* التقسيط */}
-          <div className="bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/20 dark:to-blue-950/10 px-5 py-4 border-t">
+          {/* جميع بطاقات فيزا / مستركارد */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/10 px-5 py-4 border-t">
             <p className="text-sm font-bold mb-1 flex items-center gap-2">
-              <span>💳</span> تقسيط قيمة الإعلانات من 6 إلى 18 شهر
+              <span>💳</span> جميع بطاقات فيزا ومستركارد وكارت الدفع مقبولة
             </p>
-            <p className="text-xs text-muted-foreground mb-2">متاح عبر بطاقات الفيزا والماستركارد من أغلب البنوك المصرية</p>
+            <p className="text-xs text-muted-foreground mb-2">من أي بنك مصري أو دولي — ائتمانية أو دفع فوري (Debit)</p>
+            <div className="flex flex-wrap gap-2 text-xs">
+              {["🟦 Visa", "🔴 Mastercard", "💙 Meeza", "🏦 أي بنك مصري", "🌍 بطاقات دولية"].map(b => (
+                <span key={b} className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2.5 py-1 rounded-full font-bold">{b}</span>
+              ))}
+            </div>
+          </div>
+
+          {/* التقسيط */}
+          <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/20 dark:to-purple-950/10 px-5 py-4 border-t">
+            <p className="text-sm font-bold mb-1 flex items-center gap-2">
+              <span>📅</span> تقسيط قيمة الإعلانات من 6 إلى 18 شهر
+            </p>
+            <p className="text-xs text-muted-foreground mb-2">متاح عبر بطاقات الفيزا والماستركارد الائتمانية من أي بنك</p>
             <div className="flex flex-wrap gap-1.5 text-xs">
               {[6, 9, 12, 18].map(m => (
                 <span key={m} className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 px-2.5 py-1 rounded-full font-bold">{m} شهر</span>
