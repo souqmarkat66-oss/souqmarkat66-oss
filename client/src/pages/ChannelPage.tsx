@@ -10,6 +10,7 @@ import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
 import { AdCard } from "@/components/AdCard";
+import { AdWidget } from "@/components/AdWidget";
 import type { Channel, LiveStream, Ad } from "@shared/schema";
 
 export default function ChannelPage() {
@@ -160,8 +161,11 @@ export default function ChannelPage() {
         </div>
 
         {channel.description && (
-          <p className="text-muted-foreground mb-8 max-w-2xl">{channel.description}</p>
+          <p className="text-muted-foreground mb-6 max-w-2xl">{channel.description}</p>
         )}
+
+        {/* ── إعلان مدمج مرئي لزوار القناة ─────────────── */}
+        <AdWidget variant="banner" className="mb-8 max-w-2xl" />
 
         {/* ── PUBLISHER CODE (Owner Only) ──────────────────────── */}
         {isOwner && channel.publisherCode && (

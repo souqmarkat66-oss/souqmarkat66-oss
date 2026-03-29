@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Badge } from "@/components/ui/badge";
 import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown, Image as ImageIcon, Film, Music, ChevronLeft, ChevronRight, Pause, Pencil, Trash2 } from "lucide-react";
 import { EditReelDialog } from "@/components/EditReelDialog";
+import { AdWidget } from "@/components/AdWidget";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiRequest } from "@/lib/queryClient";
 import { useTTS } from "@/hooks/use-tts";
@@ -986,6 +987,16 @@ export default function Reels() {
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/40 animate-bounce">
           <ChevronDown className="w-6 h-6" />
         </div>
+      )}
+
+      {/* ── إعلان overlay كل 3 ريلز ─────────────────────── */}
+      {activeIndex % 3 === 0 && activeIndex > 0 && (
+        <AdWidget
+          variant="overlay"
+          className="bottom-24 left-3"
+          refreshInterval={15000}
+          dismissible
+        />
       )}
 
       <CreateReelDialog />

@@ -18,6 +18,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
 import { ShareMenu } from "@/components/ShareMenu";
+import { AdWidget } from "@/components/AdWidget";
 
 interface ChatMsg {
   id: number;
@@ -666,6 +667,11 @@ export default function LiveStream() {
               </div>
             </div>
           </div>
+
+          {/* ── إعلان مدمج للمشاهدين ─────────────────────── */}
+          {!isBroadcast && (
+            <AdWidget variant="banner" className="mt-4" refreshInterval={20000} />
+          )}
 
           {/* Broadcaster Settings Panel */}
           {isBroadcast && !streaming && (
