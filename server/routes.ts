@@ -196,6 +196,49 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(rows.rows);
   });
 
+  // ── Sitemap.xml (SEO) ─────────────────────────────────────────
+  app.get("/sitemap.xml", async (_req, res) => {
+    const BASE = "https://pp.asouq.shop";
+    const now = new Date().toISOString().split("T")[0];
+    const staticPages = [
+      { loc: "/",          priority: "1.0", freq: "daily"   },
+      { loc: "/ads",       priority: "0.9", freq: "hourly"  },
+      { loc: "/reels",     priority: "0.8", freq: "daily"   },
+      { loc: "/channels",  priority: "0.8", freq: "daily"   },
+      { loc: "/streams",   priority: "0.8", freq: "hourly"  },
+      { loc: "/login",     priority: "0.5", freq: "monthly" },
+      { loc: "/register",  priority: "0.5", freq: "monthly" },
+    ];
+    // Dynamic ad pages
+    let adRows: any[] = [];
+    try {
+      const result = await db.execute(sql`SELECT id, updated_at, created_at FROM ads WHERE status = 'active' ORDER BY id DESC LIMIT 1000`);
+      adRows = result.rows as any[];
+    } catch {}
+
+    const urlTags = [
+      ...staticPages.map(p => `
+    <url>
+      <loc>${BASE}${p.loc}</loc>
+      <lastmod>${now}</lastmod>
+      <changefreq>${p.freq}</changefreq>
+      <priority>${p.priority}</priority>
+    </url>`),
+      ...adRows.map(ad => `
+    <url>
+      <loc>${BASE}/ads/${ad.id}</loc>
+      <lastmod>${(ad.updated_at || ad.created_at || now).toString().split("T")[0]}</lastmod>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>`),
+    ].join("");
+
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urlTags}
+</urlset>`);
+  });
+
   // ================================================================
   // PLATFORM SETTINGS (Admin only)
   // ================================================================
