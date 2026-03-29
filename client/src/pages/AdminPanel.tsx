@@ -11,7 +11,8 @@ import { useAuth } from "@/hooks/use-auth";
 import {
   Users, BarChart2, Flag, Megaphone, Radio, CheckCircle, XCircle,
   AlertTriangle, TrendingUp, Eye, Banknote, Settings, Loader2,
-  ShieldAlert, Tv, Film, ShieldX, VideoOff, Search, Edit2, Save, X
+  ShieldAlert, Tv, Film, ShieldX, VideoOff, Search, Edit2, Save, X,
+  ArrowUpRight, ArrowDownLeft, DollarSign, PieChart
 } from "lucide-react";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
@@ -80,6 +81,13 @@ export default function AdminPanel() {
     queryKey: ["/api/admin/stream-moderation"],
     queryFn: () => fetch("/api/admin/stream-moderation", { credentials: "include" }).then(r => r.json()),
     enabled: isAdmin,
+  });
+
+  const { data: adminRevenue } = useQuery<any>({
+    queryKey: ["/api/admin/revenue"],
+    queryFn: () => fetch("/api/admin/revenue", { credentials: "include" }).then(r => r.json()),
+    enabled: isAdmin,
+    refetchInterval: 30000,
   });
 
   const [settingsForm, setSettingsForm] = useState<Record<string, string>>({});
@@ -213,6 +221,7 @@ export default function AdminPanel() {
           <TabsTrigger value="channels" className="gap-1.5"><Tv className="w-4 h-4" /> القنوات</TabsTrigger>
           <TabsTrigger value="fraud" className="gap-1.5 text-red-500"><ShieldX className="w-4 h-4" /> كشف الاحتيال</TabsTrigger>
           <TabsTrigger value="streams" className="gap-1.5 text-orange-500"><VideoOff className="w-4 h-4" /> مراقبة البث</TabsTrigger>
+          <TabsTrigger value="revenue" className="gap-1.5 text-emerald-500"><DollarSign className="w-4 h-4" /> الإيرادات</TabsTrigger>
         </TabsList>
 
         {/* ADS MANAGEMENT */}
@@ -684,6 +693,127 @@ export default function AdminPanel() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ── REVENUE TAB ─────────────────────────────────── */}
+        <TabsContent value="revenue">
+          {!adminRevenue ? (
+            <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
+          ) : (
+            <div className="space-y-6">
+
+              {/* ── ملخص الأرقام الكبيرة ── */}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {[
+                  { label: "إجمالي الإنفاق (المعلنون)", value: adminRevenue.summary.totalSpentEGP.toFixed(2), unit: "ج.م", icon: Banknote, color: "from-blue-500/10 to-blue-500/5 border-blue-500/20", iconColor: "text-blue-500" },
+                  { label: "دخل المنصة (40%)", value: adminRevenue.summary.platformRevenueEGP.toFixed(2), unit: "ج.م", icon: DollarSign, color: "from-emerald-500/10 to-emerald-500/5 border-emerald-500/20", iconColor: "text-emerald-600" },
+                  { label: "أرباح الناشرين (60%)", value: adminRevenue.summary.publishersRevenueEGP.toFixed(2), unit: "ج.م", icon: TrendingUp, color: "from-green-500/10 to-green-500/5 border-green-500/20", iconColor: "text-green-500" },
+                  { label: "الميزانية الإجمالية", value: adminRevenue.summary.totalBudgetEGP.toFixed(2), unit: "ج.م", icon: PieChart, color: "from-purple-500/10 to-purple-500/5 border-purple-500/20", iconColor: "text-purple-500" },
+                  { label: "المشاهدات الحقيقية", value: adminRevenue.summary.totalImpressions.toLocaleString(), unit: "", icon: Eye, color: "from-teal-500/10 to-teal-500/5 border-teal-500/20", iconColor: "text-teal-500" },
+                  { label: "النقرات الحقيقية", value: adminRevenue.summary.totalClicks.toLocaleString(), unit: "", icon: BarChart2, color: "from-indigo-500/10 to-indigo-500/5 border-indigo-500/20", iconColor: "text-indigo-500" },
+                  { label: "محاولات الاحتيال", value: adminRevenue.summary.fraudTotal.toLocaleString(), unit: "", icon: ShieldX, color: "from-red-500/10 to-red-500/5 border-red-500/20", iconColor: "text-red-500" },
+                  { label: "الحملات الكلية", value: adminRevenue.summary.totalCampaigns.toString(), unit: "", icon: Megaphone, color: "from-orange-500/10 to-orange-500/5 border-orange-500/20", iconColor: "text-orange-500" },
+                ].map(s => (
+                  <Card key={s.label} className={`rounded-2xl bg-gradient-to-br border ${s.color}`}>
+                    <CardContent className="p-4">
+                      <s.icon className={`w-6 h-6 mb-2 ${s.iconColor}`} />
+                      <div className="text-xl font-bold">{s.value} <span className="text-sm font-normal text-muted-foreground">{s.unit}</span></div>
+                      <div className="text-xs text-muted-foreground mt-0.5">{s.label}</div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-6">
+                {/* أصحاب القنوات الأعلى ربحاً */}
+                <Card className="rounded-2xl">
+                  <CardHeader><CardTitle className="text-base flex items-center gap-2"><Tv className="w-4 h-4 text-green-500" /> أعلى القنوات ربحاً</CardTitle></CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {(adminRevenue.channelRevenue || []).filter((c: any) => Number(c.earnings_egp) > 0).slice(0, 10).map((ch: any, i: number) => (
+                        <div key={ch.id} className="flex items-center justify-between p-2.5 rounded-xl hover:bg-muted/50 transition-colors" data-testid={`admin-rev-ch-${ch.id}`}>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground w-5 text-center">{i + 1}</span>
+                            <div>
+                              <div className="text-sm font-medium">{ch.name}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {Number(ch.impression_count || 0).toLocaleString()} مشاهدة · {Number(ch.click_count || 0).toLocaleString()} نقرة
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-green-600 font-bold text-sm">{Number(ch.earnings_egp || 0).toFixed(2)} ج.م</div>
+                        </div>
+                      ))}
+                      {(adminRevenue.channelRevenue || []).filter((c: any) => Number(c.earnings_egp) > 0).length === 0 && (
+                        <p className="text-center py-4 text-muted-foreground text-sm">لا توجد أرباح بعد</p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* أكبر المعلنين إنفاقاً */}
+                <Card className="rounded-2xl">
+                  <CardHeader><CardTitle className="text-base flex items-center gap-2"><Megaphone className="w-4 h-4 text-blue-500" /> أكبر المعلنين إنفاقاً</CardTitle></CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {(adminRevenue.advertiserSpend || []).filter((a: any) => Number(a.total_spent) > 0).slice(0, 10).map((adv: any, i: number) => (
+                        <div key={adv.advertiser_id} className="flex items-center justify-between p-2.5 rounded-xl hover:bg-muted/50 transition-colors" data-testid={`admin-rev-adv-${i}`}>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground w-5 text-center">{i + 1}</span>
+                            <div>
+                              <div className="text-xs font-mono text-muted-foreground truncate max-w-[120px]">{adv.advertiser_id}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {Number(adv.campaign_count || 0)} حملة · {Number(adv.total_impressions || 0).toLocaleString()} مشاهدة
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-blue-600 font-bold text-sm">{Number(adv.total_spent || 0).toFixed(2)} ج.م</div>
+                        </div>
+                      ))}
+                      {(adminRevenue.advertiserSpend || []).filter((a: any) => Number(a.total_spent) > 0).length === 0 && (
+                        <p className="text-center py-4 text-muted-foreground text-sm">لا توجد بيانات إنفاق بعد</p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* آخر المعاملات */}
+              <Card className="rounded-2xl">
+                <CardHeader><CardTitle className="text-base">آخر المعاملات المالية</CardTitle></CardHeader>
+                <CardContent>
+                  {(adminRevenue.recentTransactions || []).length === 0 ? (
+                    <p className="text-center py-8 text-muted-foreground text-sm">لا توجد معاملات بعد</p>
+                  ) : (
+                    <div className="space-y-1 max-h-80 overflow-y-auto">
+                      {adminRevenue.recentTransactions.map((tx: any) => (
+                        <div key={tx.id} className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-muted/50 text-sm" data-testid={`admin-tx-${tx.id}`}>
+                          <div className="flex items-center gap-2">
+                            <div className={`w-7 h-7 rounded-full flex items-center justify-center ${tx.type === 'earning' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>
+                              {tx.type === 'earning'
+                                ? <ArrowUpRight className="w-3.5 h-3.5 text-green-600" />
+                                : <ArrowDownLeft className="w-3.5 h-3.5 text-red-500" />}
+                            </div>
+                            <div>
+                              <div className="font-medium text-xs">{tx.description}</div>
+                              <div className="text-[10px] text-muted-foreground">
+                                {tx.campaign_name && <span className="ml-1">📢 {tx.campaign_name}</span>}
+                                {tx.created_at ? format(new Date(tx.created_at), 'dd/MM/yy HH:mm', { locale: ar }) : ''}
+                              </div>
+                            </div>
+                          </div>
+                          <div className={`font-bold text-xs ${tx.type === 'earning' ? 'text-green-600' : 'text-red-500'}`}>
+                            {tx.type === 'earning' ? '+' : '-'}{Number(tx.amount_egp || 0).toFixed(3)} ج.م
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+            </div>
+          )}
         </TabsContent>
       </Tabs>
 

@@ -1237,6 +1237,87 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(payment);
   });
 
+  // ── Admin: إيرادات المنصة الكاملة ─────────────────────────────
+  app.get("/api/admin/revenue", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      // إجمالي الإنفاق من جميع الحملات (= إيرادات المنصة الكاملة)
+      const campaignStats = await db.execute(sql`
+        SELECT 
+          COUNT(*) as total_campaigns,
+          SUM(impressions) as total_impressions,
+          SUM(clicks) as total_clicks,
+          SUM(spent_egp) as total_spent,
+          SUM(budget_egp) as total_budget
+        FROM ad_campaigns`);
+      const cs = campaignStats.rows[0] as any;
+
+      // إيرادات أصحاب القنوات
+      const channelRevenue = await db.execute(sql`
+        SELECT c.id, c.name, c.user_id, c.earnings_egp, c.subscriber_count,
+               COUNT(DISTINCT ai.id) as impression_count,
+               COUNT(DISTINCT ai2.id) as click_count
+        FROM channels c
+        LEFT JOIN ad_impressions ai ON ai.channel_id = c.id AND ai.event_type = 'impression' AND ai.is_fraud = false
+        LEFT JOIN ad_impressions ai2 ON ai2.channel_id = c.id AND ai2.event_type = 'click' AND ai2.is_fraud = false
+        GROUP BY c.id, c.name, c.user_id, c.earnings_egp, c.subscriber_count
+        ORDER BY c.earnings_egp DESC
+        LIMIT 20`);
+
+      // إنفاق المعلنين
+      const advertiserSpend = await db.execute(sql`
+        SELECT ac.advertiser_id, 
+               SUM(ac.spent_egp) as total_spent,
+               SUM(ac.impressions) as total_impressions,
+               SUM(ac.clicks) as total_clicks,
+               COUNT(*) as campaign_count
+        FROM ad_campaigns ac
+        GROUP BY ac.advertiser_id
+        ORDER BY total_spent DESC
+        LIMIT 20`);
+
+      // إيراد المنصة (40% من الإنفاق الكلي)
+      const totalSpent = Number(cs.total_spent || 0);
+      const platformRevenue = totalSpent * 0.40;
+      const publishersRevenue = totalSpent * 0.60;
+
+      // آخر 50 معاملة على مستوى المنصة
+      const recentTx = await db.execute(sql`
+        SELECT rt.*, ac.name as campaign_name
+        FROM revenue_transactions rt
+        LEFT JOIN ad_campaigns ac ON ac.id = rt.campaign_id
+        ORDER BY rt.created_at DESC
+        LIMIT 50`);
+
+      // إحصاء الاحتيال
+      const fraudCount = await db.execute(sql`
+        SELECT COUNT(*) as fraud_total,
+               COUNT(*) FILTER (WHERE event_type = 'click') as fraud_clicks,
+               COUNT(*) FILTER (WHERE event_type = 'impression') as fraud_impressions
+        FROM ad_impressions WHERE is_fraud = true`);
+      const fc = fraudCount.rows[0] as any;
+
+      res.json({
+        summary: {
+          totalCampaigns: Number(cs.total_campaigns || 0),
+          totalImpressions: Number(cs.total_impressions || 0),
+          totalClicks: Number(cs.total_clicks || 0),
+          totalSpentEGP: totalSpent,
+          platformRevenueEGP: platformRevenue,
+          publishersRevenueEGP: publishersRevenue,
+          totalBudgetEGP: Number(cs.total_budget || 0),
+          fraudTotal: Number(fc.fraud_total || 0),
+          fraudClicks: Number(fc.fraud_clicks || 0),
+          fraudImpressions: Number(fc.fraud_impressions || 0),
+        },
+        channelRevenue: channelRevenue.rows,
+        advertiserSpend: advertiserSpend.rows,
+        recentTransactions: recentTx.rows,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   app.get("/api/admin/reels", isAuthenticated, requireAdmin, async (req: any, res) => {
     const reels = await storage.getReels();
     res.json(reels);
