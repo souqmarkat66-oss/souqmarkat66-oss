@@ -90,10 +90,11 @@ function WithdrawDialog({ balanceEGP, label }: { balanceEGP: number; label: stri
           )}
           {method === 'visa_bank' && (
             <div className="bg-emerald-50 dark:bg-emerald-950/20 rounded-xl p-3 space-y-2">
-              <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400">💳 تحويل بنكي عبر تطبيق سوق ماركات</p>
-              <p className="text-xs text-emerald-600 dark:text-emerald-500">
-                سيتم إرسال المبلغ لحسابك البنكي المسجّل في تطبيق سوق ماركات. رسوم التحويل: 1.5%
-              </p>
+              <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400">💳 فيزا / بنك عبر تطبيق سوق ماركات</p>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-emerald-600 dark:text-emerald-500">✅ بدون رسوم تحويل</span>
+                <span className="text-xs text-emerald-600 dark:text-emerald-500">🎁 تكسب نقاط مشتريات على كل عملية سحب تُضاف لرصيد نقاطك في التطبيق</span>
+              </div>
               <Input value={cardNote} onChange={e => setCardNote(e.target.value)}
                 placeholder="رقم الحساب البنكي أو ملاحظة" className="font-mono text-xs"
                 data-testid="input-bank-note" />
