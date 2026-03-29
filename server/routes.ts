@@ -413,26 +413,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             }
           }
 
-          // 2) Notify users in the same targeted governorate(s) — up to 500
+          // 2) Notify users linked to the same governorate(s) as the ad's targetRegion.
+          // Proxy: users who have posted ads OR liked ads in matching regions.
           const targetRegion: string = (ad as any).targetRegion || (ad as any).target_region || "";
           if (targetRegion && targetRegion.trim().length > 0) {
-            // targetRegion is a comma-separated list of governorate names stored in users or ads
-            // We match users whose own ads have the same governorate, OR we broadcast to all
-            // non-notified users who have been active in those governorates.
-            // Simple approach: notify users whose last-created ad has a matching region.
             const regions = targetRegion.split(",").map((r: string) => r.trim()).filter(Boolean);
             for (const region of regions) {
-              const regionUsers = await db.execute(
+              // Users who posted ads targeting this region
+              const posters = await db.execute(
                 sql`SELECT DISTINCT user_id FROM ads
                     WHERE target_region ILIKE ${'%' + region + '%'}
                       AND user_id != ${userId}
-                    LIMIT 200`
+                    LIMIT 150`
               );
-              for (const row of regionUsers.rows as any[]) {
-                const uid = (row as any).user_id;
+              // Users who liked ads targeting this region
+              const likers = await db.execute(
+                sql`SELECT DISTINCT l.user_id FROM likes l
+                    JOIN ads a ON a.id::text = l.target_id AND l.target_type = 'ad'
+                    WHERE a.target_region ILIKE ${'%' + region + '%'}
+                      AND l.user_id != ${userId}
+                    LIMIT 150`
+              );
+              const regionTitle = `📍 إعلان جديد في ${region}`;
+              for (const row of [...posters.rows, ...likers.rows] as any[]) {
+                const uid = row.user_id;
                 if (!notifiedUsers.has(uid)) {
-                  await createNotification(uid, "system",
-                    `📍 إعلان جديد في ${region}`, notifBody, adLink);
+                  await createNotification(uid, "system", regionTitle, notifBody, adLink);
                   notifiedUsers.add(uid);
                 }
               }
