@@ -18,7 +18,7 @@ import {
   ArrowUpRight, ArrowDownLeft, Trash2, PauseCircle, PlayCircle, Send,
   AlertTriangle, Activity, Menu, ChevronLeft, VideoOff, PieChart,
   Star, MessageSquare, Clock, BanIcon, UserCheck, FolderOpen, FileImage,
-  FileVideo, File, Lock, Phone, Mail, Shield, RefreshCw
+  FileVideo, File, Lock, Phone, Mail, Shield, RefreshCw, ToggleLeft, ToggleRight
 } from "lucide-react";
 
 const ADMIN_ID = "54219806";
@@ -1169,7 +1169,30 @@ function SettingsSection({ logAction }: { logAction: any }) {
   const get = (key: string, def: string) => form[key] !== undefined ? form[key] : (settings?.[key] ?? def);
   const set = (key: string, val: string) => setForm(f => ({ ...f, [key]: val }));
 
-  const fields = [
+  const toggleFeature = async (key: string, current: string) => {
+    const newVal = current === "1" ? "0" : "1";
+    await fetch("/api/settings/bulk", {
+      method: "PUT", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [key]: newVal }),
+    });
+    refetch();
+    logAction("toggle_feature", key, newVal === "1" ? "تفعيل" : "إيقاف");
+    toast({ title: newVal === "1" ? `✅ تم تفعيل الخاصية` : `⏸️ تم إيقاف الخاصية` });
+  };
+
+  const features = [
+    { key: "feature_reels",         label: "ريلز",            desc: "السماح برفع ومشاهدة الريلز",           icon: Film },
+    { key: "feature_livestream",    label: "البث المباشر",    desc: "السماح بإنشاء وعرض البث المباشر",       icon: Radio },
+    { key: "feature_channels",      label: "القنوات",          desc: "السماح بإنشاء قنوات جديدة",             icon: Tv },
+    { key: "feature_ai",            label: "الذكاء الاصطناعي", desc: "خدمة توليد المحتوى بالذكاء الاصطناعي", icon: ShieldAlert },
+    { key: "feature_messages",      label: "الرسائل",          desc: "الرسائل المباشرة بين المستخدمين",       icon: MessageSquare },
+    { key: "feature_registration",  label: "التسجيل",         desc: "السماح بإنشاء حسابات جديدة",            icon: UserCheck },
+    { key: "feature_ads",           label: "الإعلانات",        desc: "عرض ونشر الإعلانات على المنصة",        icon: Megaphone },
+    { key: "feature_campaigns",     label: "الحملات الإعلانية", desc: "إنشاء وتشغيل الحملات المدفوعة",      icon: BarChart2 },
+  ];
+
+  const numFields = [
     { key: "cpm_rate_egp",            label: "سعر الألف مشاهدة (CPM)",       suffix: "ج.م",         default: "15",   group: "الأسعار" },
     { key: "publisher_rev_share",     label: "نسبة الناشر من الإعلانات",    suffix: "مثال: 0.60",  default: "0.60", group: "الأسعار" },
     { key: "min_withdrawal_egp",      label: "الحد الأدنى للسحب",            suffix: "ج.م",         default: "50",   group: "المحفظة" },
@@ -1177,15 +1200,57 @@ function SettingsSection({ logAction }: { logAction: any }) {
     { key: "ai_price_per_credit_egp", label: "سعر رصيد AI الإضافي",          suffix: "ج.م/رصيد",   default: "5",    group: "الذكاء الاصطناعي" },
   ];
 
-  const groups = [...new Set(fields.map(f => f.group))];
+  const groups = [...new Set(numFields.map(f => f.group))];
 
   return (
     <div className="max-w-2xl space-y-6">
+
+      {/* ── Feature Toggles ── */}
+      <Card className="rounded-2xl">
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <ToggleRight className="w-4 h-4 text-primary" />
+            تفعيل / إيقاف الخصائص
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">التغييرات تؤثر فوراً على جميع المستخدمين</p>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {features.map(({ key, label, desc, icon: Icon }) => {
+            const isOn = get(key, "1") === "1";
+            return (
+              <div key={key} className="flex items-center justify-between p-3 rounded-xl bg-muted/40 hover:bg-muted/60 transition-colors">
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isOn ? "bg-green-500/15" : "bg-gray-500/15"}`}>
+                    <Icon className={`w-4 h-4 ${isOn ? "text-green-500" : "text-gray-400"}`} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">{label}</p>
+                    <p className="text-xs text-muted-foreground">{desc}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => toggleFeature(key, get(key, "1"))}
+                  className="flex items-center gap-1.5 text-xs font-medium transition-colors"
+                  data-testid={`toggle-${key}`}
+                >
+                  {isOn ? (
+                    <><ToggleRight className="w-8 h-8 text-green-500" /><span className="text-green-600">مفعّل</span></>
+                  ) : (
+                    <><ToggleLeft className="w-8 h-8 text-gray-400" /><span className="text-gray-500">موقوف</span></>
+                  )}
+                </button>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      {/* ── Numeric Settings ── */}
       {groups.map(group => (
         <Card key={group} className="rounded-2xl">
           <CardHeader><CardTitle className="text-sm">{group}</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            {fields.filter(f => f.group === group).map(field => (
+            {numFields.filter(f => f.group === group).map(field => (
               <div key={field.key}>
                 <label className="text-sm font-medium mb-1 block">{field.label}</label>
                 <div className="flex gap-2">

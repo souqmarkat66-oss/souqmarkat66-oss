@@ -1404,8 +1404,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ================================================================
   app.get("/api/admin/stats", isAuthenticated, requireAdmin, async (req: any, res) => {
     const stats = await storage.getStats();
-    const [usersRow] = await db.execute(sql`SELECT COUNT(*) as cnt FROM users`);
-    res.json({ ...stats, totalUsers: Number((usersRow as any).cnt || 0) });
+    const usersResult = await db.execute(sql`SELECT COUNT(*) as cnt FROM users`);
+    const totalUsers = Number((usersResult.rows[0] as any)?.cnt || 0);
+    res.json({ ...stats, totalUsers });
   });
 
   app.get("/api/admin/reports", isAuthenticated, requireAdmin, async (req: any, res) => {
