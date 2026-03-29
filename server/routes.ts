@@ -1487,8 +1487,119 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/admin/reels", isAuthenticated, requireAdmin, async (req: any, res) => {
-    const reels = await storage.getReels();
-    res.json(reels);
+    const { reels } = await import("@shared/schema");
+    const { desc } = await import("drizzle-orm");
+    const all = await db.select().from(reels).orderBy(desc(reels.createdAt));
+    res.json(all);
+  });
+
+  app.put("/api/admin/reels/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { reels } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const { status } = req.body;
+    const [updated] = await db.update(reels).set({ status }).where(eq(reels.id, Number(req.params.id))).returning();
+    res.json(updated);
+  });
+
+  app.delete("/api/admin/reels/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { reels } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    await db.delete(reels).where(eq(reels.id, Number(req.params.id)));
+    res.json({ success: true });
+  });
+
+  app.delete("/api/admin/ads/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { ads } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    await db.delete(ads).where(eq(ads.id, Number(req.params.id)));
+    res.json({ success: true });
+  });
+
+  app.put("/api/admin/users/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { users } = await import("@shared/models/auth");
+    const { eq } = await import("drizzle-orm");
+    const { isBanned, role } = req.body;
+    try {
+      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned boolean DEFAULT false`);
+      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role text DEFAULT 'user'`);
+    } catch {}
+    await db.execute(sql`UPDATE users SET is_banned = ${isBanned ?? false}, role = ${role ?? 'user'} WHERE id = ${req.params.id}`);
+    res.json({ success: true });
+  });
+
+  app.get("/api/admin/users", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned boolean DEFAULT false`);
+      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role text DEFAULT 'user'`);
+    } catch {}
+    const search = req.query.search as string || '';
+    const rows = await db.execute(sql`
+      SELECT u.id, u.email, u.first_name, u.last_name, u.profile_image_url, u.created_at,
+             COALESCE(u.is_banned, false) as is_banned,
+             COALESCE(u.role, 'user') as role,
+             (SELECT COUNT(*) FROM ads WHERE user_id = u.id) as ads_count,
+             (SELECT COUNT(*) FROM channels WHERE user_id = u.id) as channels_count,
+             (SELECT COUNT(*) FROM reels WHERE user_id = u.id) as reels_count,
+             (SELECT COALESCE(SUM(amount_egp),0) FROM revenue_transactions WHERE user_id = u.id AND type = 'earning') as total_earnings
+      FROM users u
+      WHERE (${search} = '' OR u.email ILIKE ${'%' + search + '%'} OR u.first_name ILIKE ${'%' + search + '%'} OR u.last_name ILIKE ${'%' + search + '%'})
+      ORDER BY u.created_at DESC
+      LIMIT 100`);
+    res.json(rows.rows);
+  });
+
+  app.put("/api/admin/streams/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { liveStreams } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const { status } = req.body;
+    const [updated] = await db.update(liveStreams).set({ status, endedAt: status === 'ended' ? new Date() : undefined }).where(eq(liveStreams.id, Number(req.params.id))).returning();
+    res.json(updated);
+  });
+
+  app.get("/api/admin/streams", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { liveStreams } = await import("@shared/schema");
+    const { desc } = await import("drizzle-orm");
+    const all = await db.select().from(liveStreams).orderBy(desc(liveStreams.createdAt));
+    res.json(all);
+  });
+
+  app.post("/api/admin/notifications/broadcast", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { title, body, link, targetType } = req.body;
+    if (!title || !body) return res.status(400).json({ message: "title and body required" });
+    const rows = await db.execute(sql`SELECT id FROM users LIMIT 1000`);
+    let count = 0;
+    for (const row of rows.rows as any[]) {
+      try {
+        await storage.createNotification(row.id, 'system', title, body, link || undefined);
+        count++;
+      } catch {}
+    }
+    res.json({ success: true, sent: count });
+  });
+
+  app.get("/api/admin/activity-log", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT al.*, u.first_name, u.last_name, u.email
+        FROM admin_activity_log al
+        LEFT JOIN users u ON u.id = al.admin_id
+        ORDER BY al.created_at DESC LIMIT 200`);
+      res.json(rows.rows);
+    } catch {
+      res.json([]);
+    }
+  });
+
+  app.post("/api/admin/activity-log", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const adminId = req.user.claims.sub;
+    const { action, target, details } = req.body;
+    try {
+      await db.execute(sql`CREATE TABLE IF NOT EXISTS admin_activity_log (
+        id serial PRIMARY KEY, admin_id varchar, action text, target text, details text, created_at timestamp DEFAULT now()
+      )`);
+      await db.execute(sql`INSERT INTO admin_activity_log (admin_id, action, target, details) VALUES (${adminId}, ${action}, ${target}, ${details})`);
+    } catch {}
+    res.json({ success: true });
   });
 
   // ================================================================

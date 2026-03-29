@@ -1,829 +1,1258 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
-import {
-  Users, BarChart2, Flag, Megaphone, Radio, CheckCircle, XCircle,
-  AlertTriangle, TrendingUp, Eye, Banknote, Settings, Loader2,
-  ShieldAlert, Tv, Film, ShieldX, VideoOff, Search, Edit2, Save, X,
-  ArrowUpRight, ArrowDownLeft, DollarSign, PieChart
-} from "lucide-react";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 import AdminPinLock from "@/components/AdminPinLock";
+import {
+  LayoutDashboard, Users, Megaphone, Film, Tv, Radio, Flag, Banknote,
+  ShieldX, Settings, Bell, BarChart2, Eye, TrendingUp, DollarSign,
+  CheckCircle, XCircle, Loader2, ShieldAlert, Search, Edit2, Save, X,
+  ArrowUpRight, ArrowDownLeft, Trash2, PauseCircle, PlayCircle, Send,
+  AlertTriangle, Activity, Menu, ChevronLeft, VideoOff, PieChart,
+  Star, MessageSquare, Clock, BanIcon, UserCheck
+} from "lucide-react";
 
 const ADMIN_ID = "54219806";
 
+// ── Nav items ─────────────────────────────────────────────────
+const NAV = [
+  { key: "dashboard",      label: "الرئيسية",            icon: LayoutDashboard, color: "text-blue-400" },
+  { key: "users",          label: "المستخدمون",           icon: Users,           color: "text-purple-400" },
+  { key: "ads",            label: "الإعلانات",            icon: Megaphone,       color: "text-orange-400" },
+  { key: "reels",          label: "الريلز",               icon: Film,            color: "text-pink-400" },
+  { key: "channels",       label: "القنوات",              icon: Tv,              color: "text-indigo-400" },
+  { key: "streams",        label: "البث المباشر",          icon: Radio,           color: "text-red-400" },
+  { key: "campaigns",      label: "الحملات الإعلانية",    icon: BarChart2,       color: "text-teal-400" },
+  { key: "payments",       label: "طلبات السحب",          icon: Banknote,        color: "text-green-400" },
+  { key: "reports",        label: "البلاغات",             icon: Flag,            color: "text-yellow-400" },
+  { key: "fraud",          label: "كشف الاحتيال",         icon: ShieldX,         color: "text-red-500" },
+  { key: "revenue",        label: "الإيرادات",            icon: DollarSign,      color: "text-emerald-400" },
+  { key: "broadcast",      label: "إشعارات جماعية",       icon: Bell,            color: "text-cyan-400" },
+  { key: "settings",       label: "إعدادات المنصة",       icon: Settings,        color: "text-gray-400" },
+  { key: "activity",       label: "سجل النشاط",           icon: Activity,        color: "text-slate-400" },
+];
+
+// ── Helpers ────────────────────────────────────────────────────
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    active:    { label: "نشط",     cls: "bg-green-500/15 text-green-600 border-green-500/30" },
+    inactive:  { label: "غير نشط", cls: "bg-gray-500/15 text-gray-500 border-gray-500/30" },
+    paused:    { label: "متوقف",   cls: "bg-yellow-500/15 text-yellow-600 border-yellow-500/30" },
+    pending:   { label: "معلق",    cls: "bg-blue-500/15 text-blue-600 border-blue-500/30" },
+    approved:  { label: "مقبول",   cls: "bg-green-500/15 text-green-600 border-green-500/30" },
+    rejected:  { label: "مرفوض",   cls: "bg-red-500/15 text-red-600 border-red-500/30" },
+    resolved:  { label: "محلول",   cls: "bg-green-500/15 text-green-600 border-green-500/30" },
+    dismissed: { label: "مرفوض",   cls: "bg-gray-500/15 text-gray-500 border-gray-500/30" },
+    live:      { label: "مباشر",   cls: "bg-red-500/15 text-red-600 border-red-500/30" },
+    ended:     { label: "منتهي",   cls: "bg-gray-500/15 text-gray-500 border-gray-500/30" },
+    suspended: { label: "معلق",    cls: "bg-red-500/15 text-red-600 border-red-500/30" },
+    hidden:    { label: "مخفي",    cls: "bg-gray-500/15 text-gray-500 border-gray-500/30" },
+    completed: { label: "مكتمل",   cls: "bg-gray-500/15 text-gray-500 border-gray-500/30" },
+  };
+  const info = map[status] ?? { label: status, cls: "bg-gray-500/15 text-gray-500" };
+  return <span className={`text-xs border rounded-full px-2 py-0.5 font-medium ${info.cls}`}>{info.label}</span>;
+}
+
+function StatCard({ icon: Icon, label, value, color, sub }: any) {
+  return (
+    <Card className="rounded-2xl border border-border/50 hover:shadow-md transition-all duration-200">
+      <CardContent className="p-4">
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${color.replace('text-', 'bg-').replace('-400', '-500/10').replace('-500', '-500/10').replace('-600', '-500/10')}`}>
+          <Icon className={`w-5 h-5 ${color}`} />
+        </div>
+        <div className="text-2xl font-bold">{value}</div>
+        <div className="text-xs text-muted-foreground mt-0.5">{label}</div>
+        {sub && <div className="text-xs text-muted-foreground mt-1 opacity-70">{sub}</div>}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Main Component ─────────────────────────────────────────────
 export default function AdminPanel() {
   const { user } = useAuth();
   const { toast } = useToast();
   const qc = useQueryClient();
   const [pinUnlocked, setPinUnlocked] = useState(false);
+  const [section, setSection] = useState("dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // Check if user is admin
   const isAdmin = user?.id === ADMIN_ID;
 
-  // Show PIN lock for admin
+  // Log admin action helper
+  const logAction = useCallback(async (action: string, target: string, details = "") => {
+    await fetch("/api/admin/activity-log", {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, target, details }),
+    }).catch(() => {});
+  }, []);
+
   if (isAdmin && !pinUnlocked) {
     return <AdminPinLock onUnlocked={() => setPinUnlocked(true)} />;
   }
 
-  const { data: stats } = useQuery({
-    queryKey: ["/api/admin/stats"],
-    queryFn: () => fetch("/api/admin/stats", { credentials: "include" }).then(r => r.json()),
-    enabled: isAdmin,
-    refetchInterval: 30000,
-  });
-
-  const { data: reports = [] } = useQuery<any[]>({
-    queryKey: ["/api/admin/reports"],
-    queryFn: () => fetch("/api/admin/reports", { credentials: "include" }).then(r => r.json()),
-    enabled: isAdmin,
-  });
-
-  const { data: campaigns = [] } = useQuery<any[]>({
-    queryKey: ["/api/admin/campaigns"],
-    queryFn: () => fetch("/api/admin/campaigns", { credentials: "include" }).then(r => r.json()),
-    enabled: isAdmin,
-  });
-
-  const { data: channels = [] } = useQuery<any[]>({
-    queryKey: ["/api/admin/channels"],
-    queryFn: () => fetch("/api/admin/channels", { credentials: "include" }).then(r => r.json()),
-    enabled: isAdmin,
-  });
-
-  const { data: payments = [] } = useQuery<any[]>({
-    queryKey: ["/api/admin/payments"],
-    queryFn: () => fetch("/api/admin/payments", { credentials: "include" }).then(r => r.json()),
-    enabled: isAdmin,
-  });
-
-  const { data: settings, refetch: refetchSettings } = useQuery<Record<string, string>>({
-    queryKey: ["/api/settings"],
-    queryFn: () => fetch("/api/settings").then(r => r.json()),
-    enabled: isAdmin,
-  });
-
-  const { data: fraudStats } = useQuery<any>({
-    queryKey: ["/api/admin/fraud-stats"],
-    queryFn: () => fetch("/api/admin/fraud-stats", { credentials: "include" }).then(r => r.json()),
-    enabled: isAdmin,
-    refetchInterval: 30000,
-  });
-
-  const { data: fraudAlerts = [] } = useQuery<any[]>({
-    queryKey: ["/api/admin/fraud-alerts"],
-    queryFn: () => fetch("/api/admin/fraud-alerts", { credentials: "include" }).then(r => r.json()),
-    enabled: isAdmin,
-  });
-
-  const { data: streamModeration = [] } = useQuery<any[]>({
-    queryKey: ["/api/admin/stream-moderation"],
-    queryFn: () => fetch("/api/admin/stream-moderation", { credentials: "include" }).then(r => r.json()),
-    enabled: isAdmin,
-  });
-
-  const { data: adminRevenue } = useQuery<any>({
-    queryKey: ["/api/admin/revenue"],
-    queryFn: () => fetch("/api/admin/revenue", { credentials: "include" }).then(r => r.json()),
-    enabled: isAdmin,
-    refetchInterval: 30000,
-  });
-
-  const [settingsForm, setSettingsForm] = useState<Record<string, string>>({});
-  const [adsSearch, setAdsSearch] = useState("");
-  const [adsSearchInput, setAdsSearchInput] = useState("");
-  const [editingAd, setEditingAd] = useState<any>(null);
-  const [editForm, setEditForm] = useState<{ title?: string; priceEGP?: string; status?: string }>({});
-
-  const { data: adminAds = [], refetch: refetchAds } = useQuery<any[]>({
-    queryKey: ["/api/admin/ads", adsSearch],
-    queryFn: () => fetch(`/api/admin/ads?search=${encodeURIComponent(adsSearch)}`, { credentials: "include" }).then(r => r.json()),
-    enabled: isAdmin,
-  });
-
-  const adUpdateMutation = useMutation({
-    mutationFn: ({ id, data }: any) =>
-      fetch(`/api/admin/ads/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data), credentials: "include" }).then(r => r.json()),
-    onSuccess: () => {
-      refetchAds();
-      setEditingAd(null);
-      setEditForm({});
-      toast({ title: "✅ تم تحديث الإعلان" });
-    },
-    onError: () => toast({ title: "❌ فشل التحديث", variant: "destructive" }),
-  });
-
-  const reportMutation = useMutation({
-    mutationFn: ({ id, status, adminNote }: any) =>
-      fetch(`/api/admin/reports/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, adminNote }), credentials: "include" }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/admin/reports"] }); toast({ title: "✅ تم تحديث البلاغ" }); },
-  });
-
-  const campaignMutation = useMutation({
-    mutationFn: ({ id, status }: any) =>
-      fetch(`/api/admin/campaigns/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }), credentials: "include" }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/admin/campaigns"] }); toast({ title: "✅ تم تحديث الحملة" }); },
-  });
-
-  const channelMutation = useMutation({
-    mutationFn: ({ id, data }: any) =>
-      fetch(`/api/admin/channels/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data), credentials: "include" }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/admin/channels"] }); toast({ title: "✅ تم تحديث القناة" }); },
-  });
-
-  const paymentMutation = useMutation({
-    mutationFn: ({ id, status, adminNote }: any) =>
-      fetch(`/api/admin/payments/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, adminNote }), credentials: "include" }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/admin/payments"] }); toast({ title: "✅ تم تحديث طلب السحب" }); },
-  });
-
-  const settingsMutation = useMutation({
-    mutationFn: async (data: Record<string, string>) => {
-      const res = await fetch('/api/settings/bulk', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data), credentials: 'include'
-      });
-      return res.json();
-    },
-    onSuccess: () => { refetchSettings(); toast({ title: "✅ تم حفظ الإعدادات" }); },
-  });
-
-  const getSettingValue = (key: string, fallback: string) =>
-    settingsForm[key] !== undefined ? settingsForm[key] : (settings?.[key] ?? fallback);
-
-  // Still loading user
   if (user === undefined) {
     return (
-      <div className="container py-20 text-center">
-        <Loader2 className="w-10 h-10 mx-auto animate-spin text-primary mb-4" />
-        <p className="text-muted-foreground">جاري التحقق من الصلاحيات...</p>
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="w-10 h-10 animate-spin text-primary" />
       </div>
     );
   }
 
   if (!isAdmin) {
     return (
-      <div className="container py-20 text-center">
-        <ShieldAlert className="w-16 h-16 mx-auto mb-4 text-red-500" />
-        <h2 className="text-2xl font-bold mb-2">غير مصرح لك بالدخول</h2>
-        <p className="text-muted-foreground">هذه الصفحة مخصصة لمالك المشروع فقط.</p>
-        <p className="text-xs text-muted-foreground mt-2">للدخول كأدمن: تسجيل الدخول أولاً ثم اذهب إلى /admin</p>
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4">
+        <ShieldAlert className="w-16 h-16 text-red-500" />
+        <h2 className="text-2xl font-bold">غير مصرح لك بالدخول</h2>
+        <p className="text-muted-foreground text-sm">هذه الصفحة مخصصة لمالك المشروع فقط</p>
       </div>
     );
   }
 
   return (
-    <div className="container px-4 py-12">
-      <div className="flex items-center gap-3 mb-8">
-        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
-          <BarChart2 className="w-6 h-6 text-white" />
+    <div className="flex h-screen overflow-hidden bg-background" dir="rtl">
+      {/* ── Sidebar ───────────────────────────────────────────── */}
+      <aside className={`${sidebarOpen ? "w-60" : "w-16"} flex-shrink-0 bg-card border-l border-border flex flex-col transition-all duration-300 overflow-hidden`}>
+        {/* Header */}
+        <div className="flex items-center gap-2 px-4 py-4 border-b border-border">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center flex-shrink-0">
+            <ShieldX className="w-4 h-4 text-white" />
+          </div>
+          {sidebarOpen && (
+            <div className="flex-1 min-w-0">
+              <div className="font-bold text-sm truncate">لوحة التحكم</div>
+              <div className="text-xs text-muted-foreground truncate">Souq Ads Network</div>
+            </div>
+          )}
+          <Button variant="ghost" size="icon" className="w-7 h-7 flex-shrink-0" onClick={() => setSidebarOpen(o => !o)}>
+            <Menu className="w-4 h-4" />
+          </Button>
         </div>
-        <div>
-          <h1 className="text-3xl font-extrabold">لوحة تحكم الإدارة الشاملة</h1>
-          <p className="text-muted-foreground">Admin Panel — Souq Ads Network (صاحب المشروع فقط)</p>
-        </div>
-      </div>
 
-      {/* Stats Grid */}
+        {/* Nav */}
+        <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-2">
+          {NAV.map(item => (
+            <button
+              key={item.key}
+              onClick={() => setSection(item.key)}
+              data-testid={`nav-${item.key}`}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 text-right
+                ${section === item.key
+                  ? "bg-primary/10 text-primary font-semibold"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
+            >
+              <item.icon className={`w-4 h-4 flex-shrink-0 ${section === item.key ? "text-primary" : item.color}`} />
+              {sidebarOpen && <span className="truncate">{item.label}</span>}
+            </button>
+          ))}
+        </nav>
+
+        {/* Footer */}
+        {sidebarOpen && (
+          <div className="px-4 py-3 border-t border-border">
+            <div className="text-xs text-muted-foreground">أحمد محمد</div>
+            <div className="text-xs text-muted-foreground opacity-60">ID: {ADMIN_ID}</div>
+          </div>
+        )}
+      </aside>
+
+      {/* ── Main Content ──────────────────────────────────────── */}
+      <main className="flex-1 overflow-y-auto">
+        {/* Top bar */}
+        <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border px-6 py-3 flex items-center justify-between">
+          <div>
+            <h1 className="font-bold text-lg">{NAV.find(n => n.key === section)?.label}</h1>
+            <p className="text-xs text-muted-foreground">شبكة سوق للإعلانات — لوحة الإدارة</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            <span className="text-xs text-muted-foreground">متصل</span>
+          </div>
+        </div>
+
+        {/* Sections */}
+        <div className="p-6">
+          {section === "dashboard"  && <DashboardSection />}
+          {section === "users"      && <UsersSection logAction={logAction} />}
+          {section === "ads"        && <AdsSection logAction={logAction} />}
+          {section === "reels"      && <ReelsSection logAction={logAction} />}
+          {section === "channels"   && <ChannelsSection logAction={logAction} />}
+          {section === "streams"    && <StreamsSection logAction={logAction} />}
+          {section === "campaigns"  && <CampaignsSection logAction={logAction} />}
+          {section === "payments"   && <PaymentsSection logAction={logAction} />}
+          {section === "reports"    && <ReportsSection logAction={logAction} />}
+          {section === "fraud"      && <FraudSection />}
+          {section === "revenue"    && <RevenueSection />}
+          {section === "broadcast"  && <BroadcastSection logAction={logAction} />}
+          {section === "settings"   && <SettingsSection logAction={logAction} />}
+          {section === "activity"   && <ActivitySection />}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════════════════════
+function DashboardSection() {
+  const { data: stats } = useQuery<any>({
+    queryKey: ["/api/admin/stats"],
+    queryFn: () => fetch("/api/admin/stats", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 30000,
+  });
+  const { data: adminRevenue } = useQuery<any>({
+    queryKey: ["/api/admin/revenue"],
+    queryFn: () => fetch("/api/admin/revenue", { credentials: "include" }).then(r => r.json()),
+  });
+
+  return (
+    <div className="space-y-6">
+      {/* Primary stats */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+          <StatCard icon={Users}      label="المستخدمون"      value={stats.totalUsers ?? "—"}        color="text-purple-500" />
+          <StatCard icon={Megaphone}  label="الإعلانات"       value={stats.totalAds}                 color="text-orange-500" />
+          <StatCard icon={Tv}         label="القنوات"          value={stats.totalChannels}             color="text-indigo-500" />
+          <StatCard icon={Film}       label="الريلز"           value={stats.totalReels}               color="text-pink-500" />
+          <StatCard icon={Radio}      label="بث مباشر حالي"    value={stats.liveStreams}              color="text-red-500"    sub="🔴 مباشر الآن" />
+          <StatCard icon={BarChart2}  label="حملات نشطة"       value={stats.activeCampaigns}          color="text-teal-500" />
+          <StatCard icon={Flag}       label="بلاغات معلقة"     value={stats.pendingReports}           color="text-yellow-500" />
+          <StatCard icon={Eye}        label="مشاهدات كلية"     value={Number(stats.totalImpressions || 0).toLocaleString()} color="text-blue-500" />
+          <StatCard icon={Banknote}   label="إيرادات المنصة"   value={`${(stats.totalRevenueEGP || 0).toFixed(0)} ج.م`}    color="text-emerald-500" />
+          <StatCard icon={Clock}      label="طلبات سحب معلقة"  value={stats.pendingPayments}          color="text-amber-500" />
+        </div>
+      )}
+
+      {/* Revenue quick view */}
+      {adminRevenue && (
+        <div className="grid md:grid-cols-3 gap-4">
           {[
-            { label: "الإعلانات", value: stats.totalAds, icon: Megaphone, color: "text-blue-500" },
-            { label: "القنوات", value: stats.totalChannels, icon: Tv, color: "text-purple-500" },
-            { label: "بث مباشر", value: stats.liveStreams, icon: Radio, color: "text-red-500" },
-            { label: "الريلز", value: stats.totalReels, icon: Film, color: "text-pink-500" },
-            { label: "حملات نشطة", value: stats.activeCampaigns, icon: BarChart2, color: "text-green-500" },
-            { label: "البلاغات المعلقة", value: stats.pendingReports, icon: Flag, color: "text-yellow-500" },
-            { label: "المشاهدات الكلية", value: Number(stats.totalImpressions || 0).toLocaleString(), icon: Eye, color: "text-teal-500" },
-            { label: "الإيرادات (ج.م)", value: `${(stats.totalRevenueEGP || 0).toFixed(0)} ج.م`, icon: Banknote, color: "text-emerald-500" },
-            { label: "طلبات السحب", value: stats.pendingPayments, icon: Banknote, color: "text-orange-500" },
-            { label: "مستخدمون", value: stats.totalUsers || '-', icon: Users, color: "text-indigo-500" },
-          ].map(s => (
-            <Card key={s.label} className="rounded-2xl hover:shadow-md transition-shadow">
-              <CardContent className="p-4">
-                <s.icon className={`w-6 h-6 mb-2 ${s.color}`} />
-                <div className="text-2xl font-bold">{s.value}</div>
-                <div className="text-xs text-muted-foreground">{s.label}</div>
+            { label: "إجمالي الإنفاق الإعلاني", value: adminRevenue.summary.totalSpentEGP.toFixed(2), unit: "ج.م", icon: Banknote, cls: "border-blue-500/20 from-blue-500/5" },
+            { label: "دخل المنصة (40%)",         value: adminRevenue.summary.platformRevenueEGP.toFixed(2), unit: "ج.م", icon: DollarSign, cls: "border-emerald-500/20 from-emerald-500/5" },
+            { label: "أرباح الناشرين (60%)",      value: adminRevenue.summary.publishersRevenueEGP.toFixed(2), unit: "ج.م", icon: TrendingUp, cls: "border-green-500/20 from-green-500/5" },
+          ].map(r => (
+            <Card key={r.label} className={`rounded-2xl border bg-gradient-to-br ${r.cls} to-transparent`}>
+              <CardContent className="p-5 flex items-center gap-4">
+                <r.icon className="w-8 h-8 text-muted-foreground" />
+                <div>
+                  <div className="text-2xl font-bold">{r.value} <span className="text-sm font-normal text-muted-foreground">{r.unit}</span></div>
+                  <div className="text-xs text-muted-foreground">{r.label}</div>
+                </div>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
 
-      <Tabs defaultValue="ads">
-        <TabsList className="mb-6 flex-wrap gap-1 h-auto">
-          <TabsTrigger value="ads" className="gap-1.5"><Megaphone className="w-4 h-4" /> الإعلانات</TabsTrigger>
-          <TabsTrigger value="settings" className="gap-1.5"><Settings className="w-4 h-4" /> الإعدادات</TabsTrigger>
-          <TabsTrigger value="payments" className="gap-1.5"><Banknote className="w-4 h-4" /> طلبات السحب</TabsTrigger>
-          <TabsTrigger value="reports" className="gap-1.5"><Flag className="w-4 h-4" /> البلاغات</TabsTrigger>
-          <TabsTrigger value="campaigns" className="gap-1.5"><BarChart2 className="w-4 h-4" /> الحملات</TabsTrigger>
-          <TabsTrigger value="channels" className="gap-1.5"><Tv className="w-4 h-4" /> القنوات</TabsTrigger>
-          <TabsTrigger value="fraud" className="gap-1.5 text-red-500"><ShieldX className="w-4 h-4" /> كشف الاحتيال</TabsTrigger>
-          <TabsTrigger value="streams" className="gap-1.5 text-orange-500"><VideoOff className="w-4 h-4" /> مراقبة البث</TabsTrigger>
-          <TabsTrigger value="revenue" className="gap-1.5 text-emerald-500"><DollarSign className="w-4 h-4" /> الإيرادات</TabsTrigger>
-        </TabsList>
+      {/* Recent transactions */}
+      {adminRevenue?.recentTransactions?.length > 0 && (
+        <Card className="rounded-2xl">
+          <CardHeader><CardTitle className="text-base">آخر المعاملات المالية</CardTitle></CardHeader>
+          <CardContent>
+            <div className="space-y-1 max-h-72 overflow-y-auto">
+              {adminRevenue.recentTransactions.slice(0, 20).map((tx: any) => (
+                <div key={tx.id} className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-muted/40 text-sm">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center ${tx.type === "earning" ? "bg-green-500/10" : "bg-red-500/10"}`}>
+                      {tx.type === "earning" ? <ArrowUpRight className="w-3.5 h-3.5 text-green-500" /> : <ArrowDownLeft className="w-3.5 h-3.5 text-red-500" />}
+                    </div>
+                    <div>
+                      <div className="font-medium text-xs">{tx.description}</div>
+                      <div className="text-[10px] text-muted-foreground">{tx.created_at ? format(new Date(tx.created_at), "dd/MM/yy HH:mm", { locale: ar }) : ""}</div>
+                    </div>
+                  </div>
+                  <div className={`font-bold text-xs ${tx.type === "earning" ? "text-green-600" : "text-red-500"}`}>
+                    {tx.type === "earning" ? "+" : "-"}{Number(tx.amount_egp || 0).toFixed(3)} ج.م
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
 
-        {/* ADS MANAGEMENT */}
-        <TabsContent value="ads">
-          <Card className="rounded-2xl mb-4">
-            <CardContent className="p-4">
-              <div className="flex gap-2">
-                <Input
-                  placeholder="🔍 ابحث عن إعلان بالاسم أو الوصف..."
-                  value={adsSearchInput}
-                  onChange={e => setAdsSearchInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && setAdsSearch(adsSearchInput)}
-                  data-testid="input-ads-search"
-                  className="flex-1"
-                />
-                <Button onClick={() => setAdsSearch(adsSearchInput)} data-testid="btn-ads-search">
-                  <Search className="w-4 h-4 me-1" /> بحث
-                </Button>
-                {adsSearch && (
-                  <Button variant="outline" onClick={() => { setAdsSearch(""); setAdsSearchInput(""); }}>
-                    <X className="w-4 h-4" />
+// ═══════════════════════════════════════════════════════════════
+// USERS
+// ═══════════════════════════════════════════════════════════════
+function UsersSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [searchQ, setSearchQ] = useState("");
+
+  const { data: users = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/users", searchQ],
+    queryFn: () => fetch(`/api/admin/users?search=${encodeURIComponent(searchQ)}`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  const updateUser = useMutation({
+    mutationFn: ({ id, data }: any) =>
+      fetch(`/api/admin/users/${id}`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      toast({ title: "✅ تم تحديث المستخدم" });
+      logAction("update_user", vars.id, JSON.stringify(vars.data));
+    },
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        <Input placeholder="🔍 ابحث بالاسم أو الإيميل..." value={search} onChange={e => setSearch(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && setSearchQ(search)} className="flex-1" data-testid="input-users-search" />
+        <Button onClick={() => setSearchQ(search)} data-testid="btn-users-search"><Search className="w-4 h-4 me-1" />بحث</Button>
+        {searchQ && <Button variant="outline" onClick={() => { setSearchQ(""); setSearch(""); }}><X className="w-4 h-4" /></Button>}
+      </div>
+
+      {isLoading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : (
+        <div className="space-y-2">
+          {users.map((u: any) => (
+            <Card key={u.id} className="rounded-xl" data-testid={`user-card-${u.id}`}>
+              <CardContent className="p-4 flex items-center gap-4">
+                {u.profile_image_url
+                  ? <img src={u.profile_image_url} className="w-10 h-10 rounded-full object-cover flex-shrink-0" alt="" />
+                  : <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center flex-shrink-0 text-lg font-bold">{(u.first_name || u.email || "?")[0]}</div>
+                }
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-sm">{u.first_name} {u.last_name}</span>
+                    {u.is_banned && <span className="text-xs bg-red-500/15 text-red-600 border border-red-500/30 rounded-full px-2 py-0.5">محظور</span>}
+                    {u.id === ADMIN_ID && <span className="text-xs bg-primary/15 text-primary border border-primary/30 rounded-full px-2 py-0.5">أدمن</span>}
+                  </div>
+                  <div className="text-xs text-muted-foreground truncate">{u.email}</div>
+                  <div className="flex gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
+                    <span>📢 {u.ads_count} إعلان</span>
+                    <span>📺 {u.channels_count} قناة</span>
+                    <span>🎬 {u.reels_count} ريل</span>
+                    <span>💰 {Number(u.total_earnings || 0).toFixed(2)} ج.م</span>
+                    <span>{u.created_at ? format(new Date(u.created_at), "dd/MM/yyyy", { locale: ar }) : ""}</span>
+                  </div>
+                </div>
+                {u.id !== ADMIN_ID && (
+                  <Button
+                    size="sm" variant={u.is_banned ? "outline" : "destructive"} className="gap-1 text-xs flex-shrink-0"
+                    disabled={updateUser.isPending}
+                    onClick={() => updateUser.mutate({ id: u.id, data: { isBanned: !u.is_banned } })}
+                    data-testid={`btn-ban-${u.id}`}
+                  >
+                    {u.is_banned ? <><UserCheck className="w-3 h-3" /> رفع الحظر</> : <><BanIcon className="w-3 h-3" /> حظر</>}
                   </Button>
                 )}
-              </div>
-              {adsSearch && <p className="text-xs text-muted-foreground mt-2">نتائج البحث عن: <strong>{adsSearch}</strong></p>}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          ))}
+          {users.length === 0 && !isLoading && (
+            <div className="text-center py-16 text-muted-foreground"><Users className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد نتائج</p></div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
-          <div className="space-y-3">
-            {adminAds.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Megaphone className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                <p>لا توجد إعلانات</p>
-              </div>
-            ) : adminAds.map((ad: any) => (
-              <Card key={ad.id} className="rounded-xl" data-testid={`admin-ad-${ad.id}`}>
-                <CardContent className="p-4">
-                  {editingAd === ad.id ? (
-                    /* EDIT MODE */
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Badge variant="outline" className="text-xs">تعديل #{ad.id}</Badge>
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground">العنوان</label>
-                        <Input
-                          value={editForm.title ?? ad.title}
-                          onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}
-                          className="mt-1"
-                          data-testid={`input-edit-title-${ad.id}`}
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-xs text-muted-foreground">السعر (ج.م)</label>
-                          <Input
-                            type="number" step="0.5"
-                            value={editForm.priceEGP ?? (ad.price_egp || '')}
-                            onChange={e => setEditForm(f => ({ ...f, priceEGP: e.target.value }))}
-                            placeholder="0"
-                            className="mt-1"
-                            data-testid={`input-edit-price-${ad.id}`}
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-muted-foreground">الحالة</label>
-                          <Select
-                            value={editForm.status ?? ad.status}
-                            onValueChange={v => setEditForm(f => ({ ...f, status: v }))}
-                          >
-                            <SelectTrigger className="mt-1" data-testid={`select-edit-status-${ad.id}`}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="active">✅ نشط</SelectItem>
-                              <SelectItem value="paused">⏸️ متوقف</SelectItem>
-                              <SelectItem value="rejected">❌ مرفوض</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      <div className="flex gap-2 pt-1">
-                        <Button
-                          size="sm" className="gap-1 bg-green-500 hover:bg-green-600 text-white"
-                          disabled={adUpdateMutation.isPending}
-                          onClick={() => adUpdateMutation.mutate({ id: ad.id, data: editForm })}
-                          data-testid={`btn-save-ad-${ad.id}`}
-                        >
-                          {adUpdateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                          حفظ
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => { setEditingAd(null); setEditForm({}); }}>
-                          <X className="w-3 h-3 me-1" /> إلغاء
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    /* VIEW MODE */
-                    <div className="flex items-center gap-3">
-                      {ad.media_url && ad.media_type === 'image' && (
-                        <img src={ad.media_url} alt="" className="w-14 h-14 rounded-xl object-cover bg-muted flex-shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <span className="font-bold truncate">{ad.title}</span>
-                          <Badge className={`text-xs ${ad.status === 'active' ? 'bg-green-500' : ad.status === 'paused' ? 'bg-yellow-500' : 'bg-red-500'} text-white`}>
-                            {ad.status === 'active' ? 'نشط' : ad.status === 'paused' ? 'متوقف' : ad.status}
-                          </Badge>
-                        </div>
-                        <div className="flex gap-3 text-xs text-muted-foreground flex-wrap">
-                          <span>#{ad.id}</span>
-                          {ad.price_egp && <span className="font-medium text-green-600">{ad.price_egp} ج.م</span>}
-                          <span>مشاهدات: {ad.views_count || 0}</span>
-                          <span>إعجابات: {ad.likes_count || 0}</span>
-                          <span>{ad.created_at ? format(new Date(ad.created_at), 'dd/MM/yyyy', { locale: ar }) : ''}</span>
-                        </div>
-                      </div>
-                      <div className="flex gap-2 flex-shrink-0">
-                        <Button
-                          size="sm" variant="outline" className="gap-1 text-xs"
-                          onClick={() => { setEditingAd(ad.id); setEditForm({ title: ad.title, priceEGP: ad.price_egp || '', status: ad.status }); }}
-                          data-testid={`btn-edit-ad-${ad.id}`}
-                        >
-                          <Edit2 className="w-3 h-3" /> تعديل
-                        </Button>
-                        <Button
-                          size="sm" variant={ad.status === 'active' ? 'destructive' : 'default'} className="text-xs"
-                          onClick={() => adUpdateMutation.mutate({ id: ad.id, data: { status: ad.status === 'active' ? 'paused' : 'active' } })}
-                          data-testid={`btn-toggle-ad-${ad.id}`}
-                        >
-                          {ad.status === 'active' ? '⏸️ إيقاف' : '▶️ تفعيل'}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
+// ═══════════════════════════════════════════════════════════════
+// ADS
+// ═══════════════════════════════════════════════════════════════
+function AdsSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [searchQ, setSearchQ] = useState("");
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<any>({});
 
-        {/* PLATFORM SETTINGS */}
-        <TabsContent value="settings">
-          <Card className="rounded-2xl">
-            <CardHeader><CardTitle>إعدادات المنصة (تحكم الأسعار)</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {[
-                  { key: "ai_free_credits", label: "رصيد AI المجاني للمستخدم الجديد", default: "3", suffix: "رصيد" },
-                  { key: "ai_price_per_credit_egp", label: "سعر رصيد AI الإضافي", default: "5", suffix: "ج.م / رصيد" },
-                  { key: "cpm_rate_egp", label: "سعر الألف مشاهدة (CPM)", default: "15", suffix: "ج.م" },
-                  { key: "publisher_rev_share", label: "نسبة الناشر من الإعلانات", default: "0.60", suffix: "مثال: 0.60 = 60%" },
-                  { key: "min_withdrawal_egp", label: "الحد الأدنى للسحب", default: "50", suffix: "ج.م" },
-                ].map(setting => (
-                  <div key={setting.key}>
-                    <label className="text-sm font-medium">{setting.label}</label>
-                    <div className="flex gap-2 mt-1">
-                      <Input
-                        type="number" step="0.01"
-                        value={getSettingValue(setting.key, setting.default)}
-                        onChange={e => setSettingsForm(prev => ({ ...prev, [setting.key]: e.target.value }))}
-                        placeholder={setting.default}
-                        data-testid={`setting-${setting.key}`}
-                      />
-                      <span className="text-xs text-muted-foreground self-center whitespace-nowrap">{setting.suffix}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <Button
-                onClick={() => settingsMutation.mutate(settingsForm)}
-                disabled={settingsMutation.isPending || Object.keys(settingsForm).length === 0}
-                data-testid="btn-save-settings"
-              >
-                {settingsMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin me-2" /> : null}
-                💾 حفظ الإعدادات
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                ملاحظة: تغيير سعر الألف مشاهدة يؤثر على الحملات الجديدة فقط. الحملات القائمة تستمر بالسعر المحدد عند إنشائها.
-              </p>
-            </CardContent>
-          </Card>
-        </TabsContent>
+  const { data: ads = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ["/api/admin/ads", searchQ],
+    queryFn: () => fetch(`/api/admin/ads?search=${encodeURIComponent(searchQ)}`, { credentials: "include" }).then(r => r.json()),
+  });
 
-        {/* PAYMENT REQUESTS */}
-        <TabsContent value="payments">
-          <div className="space-y-3">
-            {payments.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Banknote className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                <p>لا توجد طلبات سحب معلقة</p>
-              </div>
-            ) : payments.map((p: any) => (
-              <Card key={p.id} className="rounded-xl" data-testid={`payment-${p.id}`}>
-                <CardContent className="p-4 flex items-center justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge variant={p.status === 'approved' ? 'default' : p.status === 'rejected' ? 'destructive' : 'secondary'}>
-                        {p.status === 'pending' ? 'معلق' : p.status === 'approved' ? 'مقبول' : 'مرفوض'}
-                      </Badge>
-                      <span className="font-bold text-lg">{p.amountEGP} ج.م</span>
+  const updateAd = useMutation({
+    mutationFn: ({ id, data }: any) =>
+      fetch(`/api/admin/ads/${id}`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: (_, vars) => { refetch(); setEditId(null); setEditForm({}); toast({ title: "✅ تم تحديث الإعلان" }); logAction("update_ad", `ad#${vars.id}`, JSON.stringify(vars.data)); },
+  });
+
+  const deleteAd = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`/api/admin/ads/${id}`, { method: "DELETE", credentials: "include" }).then(r => r.json()),
+    onSuccess: (_, id) => { refetch(); toast({ title: "🗑️ تم حذف الإعلان" }); logAction("delete_ad", `ad#${id}`); },
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        <Input placeholder="🔍 ابحث عن إعلان..." value={search} onChange={e => setSearch(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && setSearchQ(search)} className="flex-1" />
+        <Button onClick={() => setSearchQ(search)}><Search className="w-4 h-4 me-1" />بحث</Button>
+        {searchQ && <Button variant="outline" onClick={() => { setSearchQ(""); setSearch(""); }}><X className="w-4 h-4" /></Button>}
+      </div>
+
+      {isLoading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : (
+        <div className="space-y-2">
+          {ads.map((ad: any) => (
+            <Card key={ad.id} className="rounded-xl" data-testid={`admin-ad-${ad.id}`}>
+              <CardContent className="p-4">
+                {editId === ad.id ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="text-xs">تعديل #{ad.id}</Badge></div>
+                    <Input value={editForm.title ?? ad.title} onChange={e => setEditForm((f: any) => ({ ...f, title: e.target.value }))} placeholder="العنوان" />
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input type="number" step="0.5" value={editForm.priceEGP ?? (ad.price_egp || "")} onChange={e => setEditForm((f: any) => ({ ...f, priceEGP: e.target.value }))} placeholder="السعر (ج.م)" />
+                      <Select value={editForm.status ?? ad.status} onValueChange={v => setEditForm((f: any) => ({ ...f, status: v }))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="active">✅ نشط</SelectItem>
+                          <SelectItem value="paused">⏸️ متوقف</SelectItem>
+                          <SelectItem value="rejected">❌ مرفوض</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
-                    <p className="text-sm text-muted-foreground">
-                      {p.method} — {p.phoneNumber} — {p.createdAt ? format(new Date(p.createdAt), 'dd MMM yyyy', { locale: ar }) : ''}
-                    </p>
-                    <p className="text-xs text-muted-foreground">المستخدم: {p.userId}</p>
-                  </div>
-                  {p.status === 'pending' && (
                     <div className="flex gap-2">
-                      <Button size="sm" className="gap-1 bg-green-500 hover:bg-green-600 text-white" onClick={() => paymentMutation.mutate({ id: p.id, status: 'approved' })}>
-                        <CheckCircle className="w-3 h-3" /> موافقة
+                      <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white" disabled={updateAd.isPending} onClick={() => updateAd.mutate({ id: ad.id, data: editForm })}>
+                        {updateAd.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}&nbsp;حفظ
                       </Button>
-                      <Button size="sm" variant="destructive" className="gap-1" onClick={() => paymentMutation.mutate({ id: p.id, status: 'rejected', adminNote: 'مرفوض' })}>
-                        <XCircle className="w-3 h-3" /> رفض
-                      </Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-
-        {/* REPORTS */}
-        <TabsContent value="reports">
-          <div className="space-y-3">
-            {reports.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Flag className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                <p>لا توجد بلاغات معلقة</p>
-              </div>
-            ) : reports.map((report: any) => (
-              <Card key={report.id} className="rounded-xl" data-testid={`report-${report.id}`}>
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Badge variant={report.status === 'pending' ? 'secondary' : report.status === 'resolved' ? 'default' : 'outline'}>
-                          {report.status === 'pending' ? 'معلق' : report.status === 'resolved' ? 'محلول' : 'مرفوض'}
-                        </Badge>
-                        <span className="text-sm font-medium">{report.targetType} #{report.targetId}</span>
-                      </div>
-                      <p className="text-sm">{report.reason}</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {report.createdAt ? format(new Date(report.createdAt), 'dd MMM yyyy HH:mm', { locale: ar }) : ''}
-                      </p>
-                    </div>
-                    {report.status === 'pending' && (
-                      <div className="flex gap-2">
-                        <Button size="sm" className="gap-1 bg-green-500 hover:bg-green-600 text-white" onClick={() => reportMutation.mutate({ id: report.id, status: 'resolved' })}>
-                          <CheckCircle className="w-3 h-3" /> حل
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => reportMutation.mutate({ id: report.id, status: 'dismissed' })}>
-                          <XCircle className="w-3 h-3" /> رفض
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-
-        {/* CAMPAIGNS */}
-        <TabsContent value="campaigns">
-          <div className="space-y-3">
-            {campaigns.map((campaign: any) => (
-              <Card key={campaign.id} className="rounded-xl" data-testid={`admin-campaign-${campaign.id}`}>
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-3">
-                      {campaign.mediaUrl && (
-                        <img src={campaign.mediaUrl} alt="" className="w-14 h-14 rounded-xl object-cover bg-muted flex-shrink-0" />
-                      )}
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="font-bold">{campaign.name}</h3>
-                          <Badge className={`${
-                            campaign.status === 'active' ? 'bg-green-500' : campaign.status === 'pending' ? 'bg-blue-500' : 'bg-gray-500'
-                          } text-white text-xs`}>
-                            {campaign.status === 'active' ? 'نشط' : campaign.status === 'pending' ? 'مراجعة' : campaign.status}
-                          </Badge>
-                        </div>
-                        <p className="text-xs text-muted-foreground">المعلن: {campaign.advertiserId}</p>
-                        <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
-                          <span>مشاهدات: {campaign.impressions}</span>
-                          <span>نقرات: {campaign.clicks}</span>
-                          <span>إنفاق: {(campaign.spentEGP || 0).toFixed(2)} ج.م</span>
-                          <span>ميزانية: {(campaign.budgetEGP || 0).toFixed(2)} ج.م</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex gap-2 flex-shrink-0">
-                      {campaign.status === 'pending' && (
-                        <>
-                          <Button size="sm" className="gap-1 bg-green-500 hover:bg-green-600 text-white" onClick={() => campaignMutation.mutate({ id: campaign.id, status: 'active' })}>
-                            <CheckCircle className="w-3 h-3" /> موافقة
-                          </Button>
-                          <Button size="sm" variant="destructive" onClick={() => campaignMutation.mutate({ id: campaign.id, status: 'rejected' })}>
-                            <XCircle className="w-3 h-3" /> رفض
-                          </Button>
-                        </>
-                      )}
-                      {campaign.status === 'active' && (
-                        <Button size="sm" variant="outline" onClick={() => campaignMutation.mutate({ id: campaign.id, status: 'paused' })}>
-                          إيقاف
-                        </Button>
-                      )}
-                      {campaign.status === 'paused' && (
-                        <Button size="sm" variant="outline" onClick={() => campaignMutation.mutate({ id: campaign.id, status: 'active' })}>
-                          تفعيل
-                        </Button>
-                      )}
+                      <Button size="sm" variant="outline" onClick={() => { setEditId(null); setEditForm({}); }}><X className="w-3 h-3" /></Button>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-
-        {/* CHANNELS */}
-        <TabsContent value="channels">
-          <div className="space-y-3">
-            {channels.map((channel: any) => (
-              <Card key={channel.id} className="rounded-xl" data-testid={`admin-channel-${channel.id}`}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-bold">{channel.name}</h3>
-                        {channel.isVerified && <Badge className="bg-blue-500 text-white text-xs">موثق</Badge>}
-                        {channel.isMonetized && <Badge className="bg-green-500 text-white text-xs">ممول</Badge>}
-                        <Badge variant={channel.status === 'active' ? 'default' : 'destructive'} className="text-xs">
-                          {channel.status}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {channel.subscriberCount} متابع — {(channel.earningsEGP || 0).toFixed(2)} ج.م أرباح
-                      </p>
-                      <p className="text-xs text-muted-foreground">المالك: {channel.userId}</p>
-                    </div>
-                    <div className="flex gap-2 flex-wrap justify-end">
-                      <Button
-                        size="sm" variant="outline" className="text-xs gap-1"
-                        onClick={() => channelMutation.mutate({ id: channel.id, data: { isVerified: !channel.isVerified } })}
-                      >
-                        {channel.isVerified ? '❌ إلغاء التوثيق' : '✅ توثيق'}
-                      </Button>
-                      <Button
-                        size="sm" variant="outline" className="text-xs gap-1"
-                        onClick={() => channelMutation.mutate({ id: channel.id, data: { isMonetized: !channel.isMonetized } })}
-                      >
-                        {channel.isMonetized ? '❌ إلغاء التمويل' : '💰 تمويل'}
-                      </Button>
-                      <Button
-                        size="sm" variant={channel.status === 'active' ? 'destructive' : 'default'} className="text-xs"
-                        onClick={() => channelMutation.mutate({ id: channel.id, data: { status: channel.status === 'active' ? 'suspended' : 'active' } })}
-                      >
-                        {channel.status === 'active' ? '🚫 تعليق' : '✅ تفعيل'}
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-
-        {/* FRAUD DETECTION */}
-        <TabsContent value="fraud">
-          <div className="space-y-6">
-            {/* Stats */}
-            {fraudStats && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
-                  { label: "نقرات وهمية", value: fraudStats.fraud_clicks || 0, color: "text-red-500" },
-                  { label: "مشاهدات وهمية", value: fraudStats.fraud_impressions || 0, color: "text-orange-500" },
-                  { label: "إجمالي الاحتيال", value: fraudStats.total_fraud || 0, color: "text-red-700" },
-                  { label: "حقيقية (نظيفة)", value: fraudStats.total_legit || 0, color: "text-green-600" },
-                ].map(s => (
-                  <Card key={s.label} className="rounded-2xl">
-                    <CardContent className="p-4">
-                      <div className={`text-2xl font-bold ${s.color}`}>{Number(s.value).toLocaleString()}</div>
-                      <div className="text-xs text-muted-foreground">{s.label}</div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-            {/* Fraud Alerts Table */}
-            <Card className="rounded-2xl">
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <ShieldX className="w-5 h-5 text-red-500" /> سجل التنبيهات الوهمية (آخر 200)
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {fraudAlerts.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground text-sm">لا توجد تنبيهات احتيال حتى الآن ✅</div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead><tr className="text-muted-foreground border-b">
-                        <th className="pb-2 text-right">الحملة</th>
-                        <th className="pb-2 text-right">IP</th>
-                        <th className="pb-2 text-right">النوع</th>
-                        <th className="pb-2 text-right">التفاصيل</th>
-                        <th className="pb-2 text-right">الوقت</th>
-                      </tr></thead>
-                      <tbody>
-                        {fraudAlerts.map((alert: any) => (
-                          <tr key={alert.id} className="border-b last:border-0 hover:bg-muted/50">
-                            <td className="py-2 font-medium">{alert.campaign_name || `#${alert.campaign_id}`}</td>
-                            <td className="py-2 font-mono text-xs">{alert.ip_address}</td>
-                            <td className="py-2">
-                              <Badge variant={alert.alert_type === 'click' ? 'destructive' : 'secondary'} className="text-xs">
-                                {alert.alert_type === 'click' ? '🖱️ نقر' : '👁️ مشاهدة'}
-                              </Badge>
-                            </td>
-                            <td className="py-2 text-xs text-muted-foreground">{alert.details}</td>
-                            <td className="py-2 text-xs text-muted-foreground">
-                              {alert.created_at ? format(new Date(alert.created_at), 'dd/MM HH:mm', { locale: ar }) : '-'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="flex items-center gap-3">
+                    {ad.media_url && ad.media_type === "image" && (
+                      <img src={ad.media_url} alt="" className="w-14 h-14 rounded-xl object-cover bg-muted flex-shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className="font-semibold truncate text-sm">{ad.title}</span>
+                        <StatusBadge status={ad.status} />
+                      </div>
+                      <div className="flex gap-3 text-xs text-muted-foreground flex-wrap">
+                        <span>#{ad.id}</span>
+                        {ad.price_egp && <span className="text-green-600 font-medium">{ad.price_egp} ج.م</span>}
+                        <span>👁️ {ad.views_count || 0}</span>
+                        <span>❤️ {ad.likes_count || 0}</span>
+                        <span>{ad.created_at ? format(new Date(ad.created_at), "dd/MM/yyyy", { locale: ar }) : ""}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      <Button size="sm" variant="outline" className="text-xs" onClick={() => { setEditId(ad.id); setEditForm({ title: ad.title, priceEGP: ad.price_egp || "", status: ad.status }); }}>
+                        <Edit2 className="w-3 h-3" />
+                      </Button>
+                      <Button size="sm" variant={ad.status === "active" ? "secondary" : "default"} className="text-xs"
+                        onClick={() => updateAd.mutate({ id: ad.id, data: { status: ad.status === "active" ? "paused" : "active" } })}>
+                        {ad.status === "active" ? <PauseCircle className="w-3 h-3" /> : <PlayCircle className="w-3 h-3" />}
+                      </Button>
+                      <Button size="sm" variant="destructive" className="text-xs" onClick={() => { if (confirm("حذف الإعلان نهائياً؟")) deleteAd.mutate(ad.id); }}>
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    </div>
                   </div>
                 )}
               </CardContent>
             </Card>
-          </div>
-        </TabsContent>
+          ))}
+          {ads.length === 0 && !isLoading && (
+            <div className="text-center py-16 text-muted-foreground"><Megaphone className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد إعلانات</p></div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
-        {/* STREAM MODERATION */}
-        <TabsContent value="streams">
-          <Card className="rounded-2xl">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <VideoOff className="w-5 h-5 text-orange-500" /> مراقبة البث المباشر بالذكاء الاصطناعي
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {streamModeration.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground text-sm">لا توجد بثوث مراجَعة بعد</div>
-              ) : (
-                <div className="space-y-3">
-                  {streamModeration.map((sm: any) => (
-                    <div key={sm.id} className="flex items-start justify-between p-4 rounded-xl border" data-testid={`stream-mod-${sm.id}`}>
-                      <div>
-                        <div className="font-medium">{sm.stream_title || `بث #${sm.stream_id}`}</div>
-                        <div className="text-xs text-muted-foreground mt-1">{sm.ai_reason || 'لا توجد ملاحظات'}</div>
-                        <div className="text-xs text-muted-foreground">
-                          حالة البث: <span className={sm.stream_status === 'live' ? 'text-green-500' : 'text-red-500'}>{sm.stream_status}</span>
-                          {' · '}{sm.reviewed_at ? format(new Date(sm.reviewed_at), 'dd/MM HH:mm', { locale: ar }) : ''}
-                        </div>
+// ═══════════════════════════════════════════════════════════════
+// REELS
+// ═══════════════════════════════════════════════════════════════
+function ReelsSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data: reels = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ["/api/admin/reels"],
+    queryFn: () => fetch("/api/admin/reels", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const updateReel = useMutation({
+    mutationFn: ({ id, status }: any) =>
+      fetch(`/api/admin/reels/${id}`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }).then(r => r.json()),
+    onSuccess: (_, vars) => { refetch(); toast({ title: "✅ تم تحديث الريل" }); logAction("update_reel", `reel#${vars.id}`, vars.status); },
+  });
+
+  const deleteReel = useMutation({
+    mutationFn: (id: number) => fetch(`/api/admin/reels/${id}`, { method: "DELETE", credentials: "include" }).then(r => r.json()),
+    onSuccess: (_, id) => { refetch(); toast({ title: "🗑️ تم حذف الريل" }); logAction("delete_reel", `reel#${id}`); },
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">إجمالي {reels.length} ريل</p>
+      </div>
+      {isLoading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {reels.map((r: any) => (
+            <Card key={r.id} className="rounded-xl overflow-hidden" data-testid={`reel-card-${r.id}`}>
+              <div className="aspect-[9/16] max-h-56 relative bg-black">
+                {r.video_url && (
+                  <video src={r.video_url} className="w-full h-full object-cover" muted playsInline />
+                )}
+                <div className="absolute top-2 right-2"><StatusBadge status={r.status} /></div>
+              </div>
+              <CardContent className="p-3">
+                <div className="font-semibold text-sm truncate mb-1">{r.title}</div>
+                <div className="flex gap-3 text-xs text-muted-foreground mb-3">
+                  <span>👁️ {r.views_count || 0}</span>
+                  <span>❤️ {r.likes_count || 0}</span>
+                  <span>💬 {r.comments_count || 0}</span>
+                </div>
+                <div className="flex gap-1.5">
+                  <Button size="sm" variant="outline" className="flex-1 text-xs"
+                    onClick={() => updateReel.mutate({ id: r.id, status: r.status === "active" ? "hidden" : "active" })}>
+                    {r.status === "active" ? "🙈 إخفاء" : "👁️ إظهار"}
+                  </Button>
+                  <Button size="sm" variant="destructive" className="text-xs"
+                    onClick={() => { if (confirm("حذف الريل نهائياً؟")) deleteReel.mutate(r.id); }}>
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+          {reels.length === 0 && !isLoading && (
+            <div className="col-span-3 text-center py-16 text-muted-foreground"><Film className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد ريلز</p></div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CHANNELS
+// ═══════════════════════════════════════════════════════════════
+function ChannelsSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data: channels = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/channels"],
+    queryFn: () => fetch("/api/admin/channels", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const updateChannel = useMutation({
+    mutationFn: ({ id, data }: any) =>
+      fetch(`/api/admin/channels/${id}`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: (_, vars) => { qc.invalidateQueries({ queryKey: ["/api/admin/channels"] }); toast({ title: "✅ تم تحديث القناة" }); logAction("update_channel", `ch#${vars.id}`); },
+  });
+
+  return (
+    <div className="space-y-3">
+      {isLoading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : channels.map((ch: any) => (
+        <Card key={ch.id} className="rounded-xl" data-testid={`admin-channel-${ch.id}`}>
+          <CardContent className="p-4 flex items-center gap-4">
+            {ch.avatarUrl
+              ? <img src={ch.avatarUrl} className="w-11 h-11 rounded-full object-cover flex-shrink-0" alt="" />
+              : <div className="w-11 h-11 rounded-full bg-muted flex items-center justify-center flex-shrink-0"><Tv className="w-5 h-5 text-muted-foreground" /></div>
+            }
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                <span className="font-semibold text-sm">{ch.name}</span>
+                {ch.isVerified  && <span className="text-xs bg-blue-500/10 text-blue-600 border border-blue-500/20 rounded-full px-2 py-0.5">✓ موثق</span>}
+                {ch.isMonetized && <span className="text-xs bg-green-500/10 text-green-600 border border-green-500/20 rounded-full px-2 py-0.5">💰 ممول</span>}
+                <StatusBadge status={ch.status} />
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {ch.subscriberCount?.toLocaleString()} متابع · {Number(ch.earningsEGP || 0).toFixed(2)} ج.م أرباح
+              </div>
+            </div>
+            <div className="flex gap-1.5 flex-wrap justify-end flex-shrink-0">
+              <Button size="sm" variant="outline" className="text-xs"
+                onClick={() => updateChannel.mutate({ id: ch.id, data: { isVerified: !ch.isVerified } })}>
+                {ch.isVerified ? "❌ إلغاء توثيق" : "✅ توثيق"}
+              </Button>
+              <Button size="sm" variant="outline" className="text-xs"
+                onClick={() => updateChannel.mutate({ id: ch.id, data: { isMonetized: !ch.isMonetized } })}>
+                {ch.isMonetized ? "❌ إلغاء تمويل" : "💰 تمويل"}
+              </Button>
+              <Button size="sm" variant={ch.status === "active" ? "destructive" : "default"} className="text-xs"
+                onClick={() => updateChannel.mutate({ id: ch.id, data: { status: ch.status === "active" ? "suspended" : "active" } })}>
+                {ch.status === "active" ? "🚫 تعليق" : "✅ تفعيل"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+      {channels.length === 0 && !isLoading && (
+        <div className="text-center py-16 text-muted-foreground"><Tv className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد قنوات</p></div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// STREAMS
+// ═══════════════════════════════════════════════════════════════
+function StreamsSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data: streams = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/streams"],
+    queryFn: () => fetch("/api/admin/streams", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 15000,
+  });
+
+  const updateStream = useMutation({
+    mutationFn: ({ id, status }: any) =>
+      fetch(`/api/admin/streams/${id}`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }).then(r => r.json()),
+    onSuccess: (_, vars) => { qc.invalidateQueries({ queryKey: ["/api/admin/streams"] }); toast({ title: vars.status === "ended" ? "🛑 تم إيقاف البث" : "✅ تم تحديث البث" }); logAction("update_stream", `stream#${vars.id}`, vars.status); },
+  });
+
+  const liveCount = streams.filter((s: any) => s.status === "live").length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        {liveCount > 0 && <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-full">
+          <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          <span className="text-xs text-red-600 font-medium">{liveCount} بث مباشر حالياً</span>
+        </div>}
+        <span className="text-sm text-muted-foreground">إجمالي {streams.length} بث</span>
+      </div>
+
+      {isLoading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : (
+        <div className="space-y-2">
+          {streams.map((s: any) => (
+            <Card key={s.id} className="rounded-xl" data-testid={`stream-${s.id}`}>
+              <CardContent className="p-4 flex items-center gap-4">
+                <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${s.status === "live" ? "bg-red-500/10" : "bg-muted"}`}>
+                  <Radio className={`w-5 h-5 ${s.status === "live" ? "text-red-500" : "text-muted-foreground"}`} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="font-semibold text-sm truncate">{s.title}</span>
+                    <StatusBadge status={s.status} />
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    👁️ {s.viewerCount || 0} مشاهد · ❤️ {s.likesCount || 0} · {s.startedAt ? format(new Date(s.startedAt), "dd/MM HH:mm", { locale: ar }) : ""}
+                  </div>
+                </div>
+                {s.status === "live" && (
+                  <Button size="sm" variant="destructive" className="text-xs flex-shrink-0"
+                    onClick={() => { if (confirm("إيقاف البث المباشر نهائياً؟")) updateStream.mutate({ id: s.id, status: "ended" }); }}>
+                    <VideoOff className="w-3 h-3 me-1" /> إيقاف
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+          {streams.length === 0 && !isLoading && (
+            <div className="text-center py-16 text-muted-foreground"><Radio className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد بثوث</p></div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CAMPAIGNS
+// ═══════════════════════════════════════════════════════════════
+function CampaignsSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data: campaigns = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/campaigns"],
+    queryFn: () => fetch("/api/admin/campaigns", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const updateCampaign = useMutation({
+    mutationFn: ({ id, status }: any) =>
+      fetch(`/api/admin/campaigns/${id}`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }).then(r => r.json()),
+    onSuccess: (_, vars) => { qc.invalidateQueries({ queryKey: ["/api/admin/campaigns"] }); toast({ title: "✅ تم تحديث الحملة" }); logAction("update_campaign", `camp#${vars.id}`, vars.status); },
+  });
+
+  const pending = campaigns.filter((c: any) => c.status === "pending");
+  const others = campaigns.filter((c: any) => c.status !== "pending");
+
+  return (
+    <div className="space-y-5">
+      {pending.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-yellow-600 mb-3 flex items-center gap-2"><Clock className="w-4 h-4" /> تنتظر المراجعة ({pending.length})</h3>
+          <div className="space-y-2">
+            {pending.map((c: any) => <CampaignCard key={c.id} c={c} updateCampaign={updateCampaign} />)}
+          </div>
+        </div>
+      )}
+      <div>
+        <h3 className="text-sm font-semibold text-muted-foreground mb-3">جميع الحملات ({campaigns.length})</h3>
+        <div className="space-y-2">
+          {others.map((c: any) => <CampaignCard key={c.id} c={c} updateCampaign={updateCampaign} />)}
+        </div>
+      </div>
+      {campaigns.length === 0 && !isLoading && (
+        <div className="text-center py-16 text-muted-foreground"><BarChart2 className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد حملات</p></div>
+      )}
+    </div>
+  );
+}
+
+function CampaignCard({ c, updateCampaign }: any) {
+  const spent = Number(c.spentEGP || 0);
+  const budget = Number(c.budgetEGP || 1);
+  const pct = Math.min(100, (spent / budget) * 100);
+  return (
+    <Card className="rounded-xl" data-testid={`camp-${c.id}`}>
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            {c.mediaUrl && <img src={c.mediaUrl} alt="" className="w-12 h-12 rounded-xl object-cover bg-muted flex-shrink-0" />}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className="font-semibold text-sm">{c.name}</span>
+                <StatusBadge status={c.status} />
+              </div>
+              <div className="flex gap-3 text-xs text-muted-foreground flex-wrap">
+                <span>👁️ {c.impressions?.toLocaleString()}</span>
+                <span>🖱️ {c.clicks?.toLocaleString()}</span>
+                <span>💸 {spent.toFixed(2)} / {budget.toFixed(2)} ج.م</span>
+              </div>
+              <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden w-48">
+                <div className={`h-full rounded-full ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-yellow-500" : "bg-primary"}`} style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-1.5 flex-shrink-0 flex-wrap justify-end">
+            {c.status === "pending" && <>
+              <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "active" })}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
+              <Button size="sm" variant="destructive" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "rejected" })}><XCircle className="w-3 h-3 me-1" />رفض</Button>
+            </>}
+            {c.status === "active"  && <Button size="sm" variant="outline" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "paused" })}>⏸️ إيقاف</Button>}
+            {c.status === "paused"  && <Button size="sm" variant="outline" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "active" })}>▶️ تفعيل</Button>}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PAYMENTS
+// ═══════════════════════════════════════════════════════════════
+function PaymentsSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data: payments = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/payments"],
+    queryFn: () => fetch("/api/admin/payments", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const updatePayment = useMutation({
+    mutationFn: ({ id, status }: any) =>
+      fetch(`/api/admin/payments/${id}`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }).then(r => r.json()),
+    onSuccess: (_, vars) => { qc.invalidateQueries({ queryKey: ["/api/admin/payments"] }); toast({ title: vars.status === "approved" ? "✅ تمت الموافقة" : "❌ تم الرفض" }); logAction("update_payment", `pay#${vars.id}`, vars.status); },
+  });
+
+  const pending = payments.filter((p: any) => p.status === "pending");
+  const done = payments.filter((p: any) => p.status !== "pending");
+
+  const methodLabel: Record<string, string> = { vodafone: "فودافون كاش", etisalat: "اتصالات كاش", instapay: "إنستاباي", souq: "محفظة سوق" };
+
+  return (
+    <div className="space-y-5">
+      {pending.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-yellow-600 mb-3 flex items-center gap-2"><Clock className="w-4 h-4" /> معلقة ({pending.length})</h3>
+          <div className="space-y-2">
+            {pending.map((p: any) => (
+              <Card key={p.id} className="rounded-xl border-yellow-500/20" data-testid={`payment-${p.id}`}>
+                <CardContent className="p-4 flex items-center gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-bold text-lg text-green-600">{p.amountEGP} ج.م</span>
+                      <StatusBadge status={p.status} />
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {methodLabel[p.method] || p.method} · {p.phoneNumber} · {p.createdAt ? format(new Date(p.createdAt), "dd MMM yyyy", { locale: ar }) : ""}
+                    </div>
+                    <div className="text-xs text-muted-foreground opacity-60">ID: {p.userId}</div>
+                  </div>
+                  <div className="flex gap-1.5 flex-shrink-0">
+                    <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "approved" })}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
+                    <Button size="sm" variant="destructive" className="text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "rejected" })}><XCircle className="w-3 h-3 me-1" />رفض</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+      <div>
+        <h3 className="text-sm font-semibold text-muted-foreground mb-3">سجل الطلبات ({done.length})</h3>
+        <div className="space-y-2">
+          {done.map((p: any) => (
+            <Card key={p.id} className="rounded-xl opacity-80">
+              <CardContent className="p-4 flex items-center gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-semibold">{p.amountEGP} ج.م</span>
+                    <StatusBadge status={p.status} />
+                  </div>
+                  <div className="text-xs text-muted-foreground">{methodLabel[p.method] || p.method} · {p.phoneNumber}</div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+      {payments.length === 0 && !isLoading && (
+        <div className="text-center py-16 text-muted-foreground"><Banknote className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد طلبات</p></div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REPORTS
+// ═══════════════════════════════════════════════════════════════
+function ReportsSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data: reports = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/reports"],
+    queryFn: () => fetch("/api/admin/reports", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const updateReport = useMutation({
+    mutationFn: ({ id, status }: any) =>
+      fetch(`/api/admin/reports/${id}`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }).then(r => r.json()),
+    onSuccess: (_, vars) => { qc.invalidateQueries({ queryKey: ["/api/admin/reports"] }); toast({ title: "✅ تم تحديث البلاغ" }); logAction("update_report", `report#${vars.id}`, vars.status); },
+  });
+
+  const pending = reports.filter((r: any) => r.status === "pending");
+  const done = reports.filter((r: any) => r.status !== "pending");
+
+  const targetTypeLabel: Record<string, string> = { ad: "إعلان", stream: "بث", channel: "قناة", user: "مستخدم", comment: "تعليق", reel: "ريل" };
+
+  return (
+    <div className="space-y-5">
+      {pending.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-yellow-600 mb-3 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> معلقة ({pending.length})</h3>
+          <div className="space-y-2">
+            {pending.map((r: any) => (
+              <Card key={r.id} className="rounded-xl border-yellow-500/20" data-testid={`report-${r.id}`}>
+                <CardContent className="p-4 flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-yellow-500/10 flex items-center justify-center flex-shrink-0">
+                    <Flag className="w-5 h-5 text-yellow-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className="font-semibold text-sm">{targetTypeLabel[r.targetType] || r.targetType} #{r.targetId}</span>
+                      <StatusBadge status={r.status} />
+                    </div>
+                    <p className="text-sm">{r.reason}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{r.createdAt ? format(new Date(r.createdAt), "dd MMM yyyy HH:mm", { locale: ar }) : ""}</p>
+                  </div>
+                  <div className="flex gap-1.5 flex-shrink-0">
+                    <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updateReport.mutate({ id: r.id, status: "resolved" })}><CheckCircle className="w-3 h-3 me-1" />حل</Button>
+                    <Button size="sm" variant="outline" className="text-xs" onClick={() => updateReport.mutate({ id: r.id, status: "dismissed" })}><XCircle className="w-3 h-3 me-1" />رفض</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+      <div>
+        <h3 className="text-sm font-semibold text-muted-foreground mb-3">سجل البلاغات ({done.length})</h3>
+        <div className="space-y-2">
+          {done.map((r: any) => (
+            <Card key={r.id} className="rounded-xl opacity-70">
+              <CardContent className="p-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium">{targetTypeLabel[r.targetType] || r.targetType} #{r.targetId}</span>
+                  <span className="text-xs text-muted-foreground mx-2">—</span>
+                  <span className="text-xs text-muted-foreground truncate">{r.reason}</span>
+                </div>
+                <StatusBadge status={r.status} />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+      {reports.length === 0 && !isLoading && (
+        <div className="text-center py-16 text-muted-foreground"><Flag className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد بلاغات</p></div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FRAUD
+// ═══════════════════════════════════════════════════════════════
+function FraudSection() {
+  const { data: fraudStats } = useQuery<any>({
+    queryKey: ["/api/admin/fraud-stats"],
+    queryFn: () => fetch("/api/admin/fraud-stats", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 30000,
+  });
+  const { data: alerts = [] } = useQuery<any[]>({
+    queryKey: ["/api/admin/fraud-alerts"],
+    queryFn: () => fetch("/api/admin/fraud-alerts", { credentials: "include" }).then(r => r.json()),
+  });
+
+  return (
+    <div className="space-y-6">
+      {fraudStats && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard icon={ShieldX}     label="نقرات وهمية"    value={Number(fraudStats.fraud_clicks || 0).toLocaleString()}      color="text-red-500" />
+          <StatCard icon={AlertTriangle} label="مشاهدات وهمية" value={Number(fraudStats.fraud_impressions || 0).toLocaleString()} color="text-orange-500" />
+          <StatCard icon={ShieldX}     label="إجمالي الاحتيال" value={Number(fraudStats.total_fraud || 0).toLocaleString()}       color="text-red-700" />
+          <StatCard icon={CheckCircle} label="تفاعل حقيقي"    value={Number(fraudStats.total_legit || 0).toLocaleString()}       color="text-green-500" />
+        </div>
+      )}
+
+      <Card className="rounded-2xl">
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><ShieldX className="w-5 h-5 text-red-500" /> سجل التنبيهات (آخر 200)</CardTitle></CardHeader>
+        <CardContent>
+          {alerts.length === 0
+            ? <div className="text-center py-10 text-muted-foreground text-sm">لا توجد تنبيهات احتيال ✅</div>
+            : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="border-b text-muted-foreground text-right">
+                    <th className="pb-2 font-medium">الحملة</th>
+                    <th className="pb-2 font-medium">IP</th>
+                    <th className="pb-2 font-medium">النوع</th>
+                    <th className="pb-2 font-medium">التفاصيل</th>
+                    <th className="pb-2 font-medium">الوقت</th>
+                  </tr></thead>
+                  <tbody>
+                    {alerts.map((a: any) => (
+                      <tr key={a.id} className="border-b last:border-0 hover:bg-muted/40">
+                        <td className="py-2 font-medium">{a.campaign_name || `#${a.campaign_id}`}</td>
+                        <td className="py-2 font-mono text-xs text-muted-foreground">{a.ip_address}</td>
+                        <td className="py-2"><StatusBadge status={a.alert_type === "click" ? "active" : "paused"} /></td>
+                        <td className="py-2 text-xs text-muted-foreground max-w-[200px] truncate">{a.details}</td>
+                        <td className="py-2 text-xs text-muted-foreground">{a.created_at ? format(new Date(a.created_at), "dd/MM HH:mm", { locale: ar }) : ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REVENUE
+// ═══════════════════════════════════════════════════════════════
+function RevenueSection() {
+  const { data: rev } = useQuery<any>({
+    queryKey: ["/api/admin/revenue"],
+    queryFn: () => fetch("/api/admin/revenue", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 30000,
+  });
+
+  if (!rev) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard icon={Banknote}   label="إجمالي الإنفاق الإعلاني" value={`${rev.summary.totalSpentEGP.toFixed(2)} ج.م`}     color="text-blue-500" />
+        <StatCard icon={DollarSign} label="دخل المنصة (40%)"         value={`${rev.summary.platformRevenueEGP.toFixed(2)} ج.م`} color="text-emerald-500" />
+        <StatCard icon={TrendingUp} label="أرباح الناشرين (60%)"      value={`${rev.summary.publishersRevenueEGP.toFixed(2)} ج.م`} color="text-green-500" />
+        <StatCard icon={PieChart}   label="الميزانية الإجمالية"       value={`${rev.summary.totalBudgetEGP.toFixed(2)} ج.م`}     color="text-purple-500" />
+        <StatCard icon={Eye}        label="مشاهدات حقيقية"            value={rev.summary.totalImpressions.toLocaleString()}       color="text-teal-500" />
+        <StatCard icon={BarChart2}  label="نقرات حقيقية"              value={rev.summary.totalClicks.toLocaleString()}            color="text-indigo-500" />
+        <StatCard icon={ShieldX}    label="محاولات احتيال"            value={rev.summary.fraudTotal.toLocaleString()}             color="text-red-500" />
+        <StatCard icon={Megaphone}  label="الحملات الكلية"            value={rev.summary.totalCampaigns}                          color="text-orange-500" />
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-6">
+        <Card className="rounded-2xl">
+          <CardHeader><CardTitle className="text-sm flex items-center gap-2"><Tv className="w-4 h-4 text-green-500" /> أعلى القنوات ربحاً</CardTitle></CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {(rev.channelRevenue || []).filter((c: any) => Number(c.earnings_egp) > 0).slice(0, 10).map((ch: any, i: number) => (
+                <div key={ch.id} className="flex items-center justify-between p-2.5 rounded-xl hover:bg-muted/40">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground w-5 text-center font-bold">{i + 1}</span>
+                    <div>
+                      <div className="text-sm font-medium">{ch.name}</div>
+                      <div className="text-xs text-muted-foreground">{Number(ch.impression_count || 0).toLocaleString()} مشاهدة</div>
+                    </div>
+                  </div>
+                  <div className="text-green-600 font-bold text-sm">{Number(ch.earnings_egp || 0).toFixed(2)} ج.م</div>
+                </div>
+              ))}
+              {(rev.channelRevenue || []).filter((c: any) => Number(c.earnings_egp) > 0).length === 0 && (
+                <p className="text-center py-6 text-muted-foreground text-sm">لا توجد أرباح بعد</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl">
+          <CardHeader><CardTitle className="text-sm flex items-center gap-2"><Megaphone className="w-4 h-4 text-blue-500" /> أكبر المعلنين إنفاقاً</CardTitle></CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {(rev.advertiserSpend || []).filter((a: any) => Number(a.total_spent) > 0).slice(0, 10).map((adv: any, i: number) => (
+                <div key={adv.advertiser_id} className="flex items-center justify-between p-2.5 rounded-xl hover:bg-muted/40">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground w-5 text-center font-bold">{i + 1}</span>
+                    <div>
+                      <div className="text-xs font-mono text-muted-foreground truncate max-w-[130px]">{adv.advertiser_id}</div>
+                      <div className="text-xs text-muted-foreground">{Number(adv.campaign_count || 0)} حملة</div>
+                    </div>
+                  </div>
+                  <div className="text-blue-600 font-bold text-sm">{Number(adv.total_spent || 0).toFixed(2)} ج.م</div>
+                </div>
+              ))}
+              {(rev.advertiserSpend || []).filter((a: any) => Number(a.total_spent) > 0).length === 0 && (
+                <p className="text-center py-6 text-muted-foreground text-sm">لا توجد بيانات بعد</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="rounded-2xl">
+        <CardHeader><CardTitle className="text-sm">آخر 50 معاملة مالية</CardTitle></CardHeader>
+        <CardContent>
+          <div className="space-y-1 max-h-80 overflow-y-auto">
+            {(rev.recentTransactions || []).map((tx: any) => (
+              <div key={tx.id} className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-muted/40 text-sm">
+                <div className="flex items-center gap-2">
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center ${tx.type === "earning" ? "bg-green-500/10" : "bg-red-500/10"}`}>
+                    {tx.type === "earning" ? <ArrowUpRight className="w-3.5 h-3.5 text-green-500" /> : <ArrowDownLeft className="w-3.5 h-3.5 text-red-500" />}
+                  </div>
+                  <div>
+                    <div className="font-medium text-xs">{tx.description}</div>
+                    <div className="text-[10px] text-muted-foreground">{tx.created_at ? format(new Date(tx.created_at), "dd/MM/yy HH:mm", { locale: ar }) : ""}</div>
+                  </div>
+                </div>
+                <div className={`font-bold text-xs ${tx.type === "earning" ? "text-green-600" : "text-red-500"}`}>
+                  {tx.type === "earning" ? "+" : "-"}{Number(tx.amount_egp || 0).toFixed(3)} ج.م
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BROADCAST
+// ═══════════════════════════════════════════════════════════════
+function BroadcastSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const [form, setForm] = useState({ title: "", body: "", link: "" });
+  const [sent, setSent] = useState<{ count: number } | null>(null);
+
+  const broadcast = useMutation({
+    mutationFn: (data: any) =>
+      fetch("/api/admin/notifications/broadcast", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: (res) => {
+      setSent(res);
+      setForm({ title: "", body: "", link: "" });
+      toast({ title: `✅ تم إرسال الإشعار لـ ${res.sent} مستخدم` });
+      logAction("broadcast_notification", "all_users", form.title);
+    },
+    onError: () => toast({ title: "❌ فشل الإرسال", variant: "destructive" }),
+  });
+
+  return (
+    <div className="max-w-2xl space-y-5">
+      <Card className="rounded-2xl">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><Bell className="w-5 h-5 text-cyan-500" /> إرسال إشعار جماعي</CardTitle>
+          <p className="text-sm text-muted-foreground">يُرسَل الإشعار لجميع المستخدمين المسجلين في المنصة</p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <label className="text-sm font-medium mb-1 block">عنوان الإشعار *</label>
+            <Input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="مثال: تحديث جديد متاح الآن!" data-testid="input-broadcast-title" />
+          </div>
+          <div>
+            <label className="text-sm font-medium mb-1 block">نص الإشعار *</label>
+            <Textarea rows={4} value={form.body} onChange={e => setForm(f => ({ ...f, body: e.target.value }))} placeholder="اكتب تفاصيل الإشعار هنا..." data-testid="input-broadcast-body" />
+          </div>
+          <div>
+            <label className="text-sm font-medium mb-1 block">رابط (اختياري)</label>
+            <Input value={form.link} onChange={e => setForm(f => ({ ...f, link: e.target.value }))} placeholder="/channels أو /ads" data-testid="input-broadcast-link" />
+          </div>
+          <Button
+            className="gap-2 w-full" disabled={!form.title.trim() || !form.body.trim() || broadcast.isPending}
+            onClick={() => broadcast.mutate(form)} data-testid="btn-broadcast-send"
+          >
+            {broadcast.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            إرسال الإشعار لجميع المستخدمين
+          </Button>
+
+          {sent && (
+            <div className="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/20 rounded-xl">
+              <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
+              <p className="text-sm text-green-700">تم إرسال الإشعار بنجاح لـ <strong>{sent.count}</strong> مستخدم</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SETTINGS
+// ═══════════════════════════════════════════════════════════════
+function SettingsSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const [form, setForm] = useState<Record<string, string>>({});
+
+  const { data: settings, refetch } = useQuery<Record<string, string>>({
+    queryKey: ["/api/settings"],
+    queryFn: () => fetch("/api/settings").then(r => r.json()),
+  });
+
+  const save = useMutation({
+    mutationFn: (data: Record<string, string>) =>
+      fetch("/api/settings/bulk", { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: () => { refetch(); setForm({}); toast({ title: "✅ تم حفظ الإعدادات" }); logAction("update_settings", "platform_settings", JSON.stringify(Object.keys(form))); },
+  });
+
+  const get = (key: string, def: string) => form[key] !== undefined ? form[key] : (settings?.[key] ?? def);
+  const set = (key: string, val: string) => setForm(f => ({ ...f, [key]: val }));
+
+  const fields = [
+    { key: "cpm_rate_egp",            label: "سعر الألف مشاهدة (CPM)",       suffix: "ج.م",         default: "15",   group: "الأسعار" },
+    { key: "publisher_rev_share",     label: "نسبة الناشر من الإعلانات",    suffix: "مثال: 0.60",  default: "0.60", group: "الأسعار" },
+    { key: "min_withdrawal_egp",      label: "الحد الأدنى للسحب",            suffix: "ج.م",         default: "50",   group: "المحفظة" },
+    { key: "ai_free_credits",         label: "رصيد AI المجاني (يوزر جديد)",  suffix: "رصيد",        default: "3",    group: "الذكاء الاصطناعي" },
+    { key: "ai_price_per_credit_egp", label: "سعر رصيد AI الإضافي",          suffix: "ج.م/رصيد",   default: "5",    group: "الذكاء الاصطناعي" },
+  ];
+
+  const groups = [...new Set(fields.map(f => f.group))];
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      {groups.map(group => (
+        <Card key={group} className="rounded-2xl">
+          <CardHeader><CardTitle className="text-sm">{group}</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            {fields.filter(f => f.group === group).map(field => (
+              <div key={field.key}>
+                <label className="text-sm font-medium mb-1 block">{field.label}</label>
+                <div className="flex gap-2">
+                  <Input
+                    type="number" step="0.01"
+                    value={get(field.key, field.default)}
+                    onChange={e => set(field.key, e.target.value)}
+                    placeholder={field.default}
+                    data-testid={`setting-${field.key}`}
+                  />
+                  <span className="text-xs text-muted-foreground self-center whitespace-nowrap min-w-fit">{field.suffix}</span>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ))}
+
+      <Button
+        className="w-full gap-2" disabled={Object.keys(form).length === 0 || save.isPending}
+        onClick={() => save.mutate(form)} data-testid="btn-save-settings"
+      >
+        {save.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+        حفظ الإعدادات
+      </Button>
+      <p className="text-xs text-muted-foreground text-center">تغيير سعر CPM يؤثر على الحملات الجديدة فقط</p>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ACTIVITY LOG
+// ═══════════════════════════════════════════════════════════════
+function ActivitySection() {
+  const { data: log = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/activity-log"],
+    queryFn: () => fetch("/api/admin/activity-log", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 30000,
+  });
+
+  const actionLabel: Record<string, string> = {
+    update_user: "تحديث مستخدم", delete_ad: "حذف إعلان", update_ad: "تحديث إعلان",
+    delete_reel: "حذف ريل", update_reel: "تحديث ريل", update_channel: "تحديث قناة",
+    update_campaign: "تحديث حملة", update_payment: "تحديث سحب", update_report: "تحديث بلاغ",
+    broadcast_notification: "إشعار جماعي", update_settings: "تعديل الإعدادات", update_stream: "تحديث بث",
+  };
+
+  const actionColor: Record<string, string> = {
+    delete_ad: "text-red-500", delete_reel: "text-red-500", broadcast_notification: "text-cyan-500",
+    update_settings: "text-yellow-500",
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <Activity className="w-5 h-5 text-muted-foreground" />
+        <h3 className="font-semibold">سجل نشاط الأدمن</h3>
+        <Badge variant="secondary" className="text-xs">{log.length} إجراء</Badge>
+      </div>
+
+      {isLoading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : (
+        <Card className="rounded-2xl">
+          <CardContent className="p-0">
+            {log.length === 0
+              ? <div className="text-center py-16 text-muted-foreground"><Activity className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا يوجد نشاط بعد</p></div>
+              : (
+                <div className="divide-y divide-border">
+                  {log.map((entry: any, i: number) => (
+                    <div key={entry.id || i} className="flex items-center gap-4 px-4 py-3 hover:bg-muted/30 transition-colors">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <Activity className="w-4 h-4 text-primary" />
                       </div>
-                      <Badge
-                        variant={sm.ai_verdict === 'safe' ? 'default' : 'destructive'}
-                        className="text-xs shrink-0"
-                      >
-                        {sm.ai_verdict === 'safe' ? '✅ آمن' : '🚫 محظور'}
-                      </Badge>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-sm font-medium ${actionColor[entry.action] || "text-foreground"}`}>
+                            {actionLabel[entry.action] || entry.action}
+                          </span>
+                          {entry.target && <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{entry.target}</span>}
+                        </div>
+                        {entry.details && <p className="text-xs text-muted-foreground truncate max-w-xs">{entry.details}</p>}
+                      </div>
+                      <div className="text-xs text-muted-foreground flex-shrink-0">
+                        {entry.created_at ? format(new Date(entry.created_at), "dd/MM HH:mm", { locale: ar }) : ""}
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ── REVENUE TAB ─────────────────────────────────── */}
-        <TabsContent value="revenue">
-          {!adminRevenue ? (
-            <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
-          ) : (
-            <div className="space-y-6">
-
-              {/* ── ملخص الأرقام الكبيرة ── */}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {[
-                  { label: "إجمالي الإنفاق (المعلنون)", value: adminRevenue.summary.totalSpentEGP.toFixed(2), unit: "ج.م", icon: Banknote, color: "from-blue-500/10 to-blue-500/5 border-blue-500/20", iconColor: "text-blue-500" },
-                  { label: "دخل المنصة (40%)", value: adminRevenue.summary.platformRevenueEGP.toFixed(2), unit: "ج.م", icon: DollarSign, color: "from-emerald-500/10 to-emerald-500/5 border-emerald-500/20", iconColor: "text-emerald-600" },
-                  { label: "أرباح الناشرين (60%)", value: adminRevenue.summary.publishersRevenueEGP.toFixed(2), unit: "ج.م", icon: TrendingUp, color: "from-green-500/10 to-green-500/5 border-green-500/20", iconColor: "text-green-500" },
-                  { label: "الميزانية الإجمالية", value: adminRevenue.summary.totalBudgetEGP.toFixed(2), unit: "ج.م", icon: PieChart, color: "from-purple-500/10 to-purple-500/5 border-purple-500/20", iconColor: "text-purple-500" },
-                  { label: "المشاهدات الحقيقية", value: adminRevenue.summary.totalImpressions.toLocaleString(), unit: "", icon: Eye, color: "from-teal-500/10 to-teal-500/5 border-teal-500/20", iconColor: "text-teal-500" },
-                  { label: "النقرات الحقيقية", value: adminRevenue.summary.totalClicks.toLocaleString(), unit: "", icon: BarChart2, color: "from-indigo-500/10 to-indigo-500/5 border-indigo-500/20", iconColor: "text-indigo-500" },
-                  { label: "محاولات الاحتيال", value: adminRevenue.summary.fraudTotal.toLocaleString(), unit: "", icon: ShieldX, color: "from-red-500/10 to-red-500/5 border-red-500/20", iconColor: "text-red-500" },
-                  { label: "الحملات الكلية", value: adminRevenue.summary.totalCampaigns.toString(), unit: "", icon: Megaphone, color: "from-orange-500/10 to-orange-500/5 border-orange-500/20", iconColor: "text-orange-500" },
-                ].map(s => (
-                  <Card key={s.label} className={`rounded-2xl bg-gradient-to-br border ${s.color}`}>
-                    <CardContent className="p-4">
-                      <s.icon className={`w-6 h-6 mb-2 ${s.iconColor}`} />
-                      <div className="text-xl font-bold">{s.value} <span className="text-sm font-normal text-muted-foreground">{s.unit}</span></div>
-                      <div className="text-xs text-muted-foreground mt-0.5">{s.label}</div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-6">
-                {/* أصحاب القنوات الأعلى ربحاً */}
-                <Card className="rounded-2xl">
-                  <CardHeader><CardTitle className="text-base flex items-center gap-2"><Tv className="w-4 h-4 text-green-500" /> أعلى القنوات ربحاً</CardTitle></CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      {(adminRevenue.channelRevenue || []).filter((c: any) => Number(c.earnings_egp) > 0).slice(0, 10).map((ch: any, i: number) => (
-                        <div key={ch.id} className="flex items-center justify-between p-2.5 rounded-xl hover:bg-muted/50 transition-colors" data-testid={`admin-rev-ch-${ch.id}`}>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground w-5 text-center">{i + 1}</span>
-                            <div>
-                              <div className="text-sm font-medium">{ch.name}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {Number(ch.impression_count || 0).toLocaleString()} مشاهدة · {Number(ch.click_count || 0).toLocaleString()} نقرة
-                              </div>
-                            </div>
-                          </div>
-                          <div className="text-green-600 font-bold text-sm">{Number(ch.earnings_egp || 0).toFixed(2)} ج.م</div>
-                        </div>
-                      ))}
-                      {(adminRevenue.channelRevenue || []).filter((c: any) => Number(c.earnings_egp) > 0).length === 0 && (
-                        <p className="text-center py-4 text-muted-foreground text-sm">لا توجد أرباح بعد</p>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* أكبر المعلنين إنفاقاً */}
-                <Card className="rounded-2xl">
-                  <CardHeader><CardTitle className="text-base flex items-center gap-2"><Megaphone className="w-4 h-4 text-blue-500" /> أكبر المعلنين إنفاقاً</CardTitle></CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      {(adminRevenue.advertiserSpend || []).filter((a: any) => Number(a.total_spent) > 0).slice(0, 10).map((adv: any, i: number) => (
-                        <div key={adv.advertiser_id} className="flex items-center justify-between p-2.5 rounded-xl hover:bg-muted/50 transition-colors" data-testid={`admin-rev-adv-${i}`}>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground w-5 text-center">{i + 1}</span>
-                            <div>
-                              <div className="text-xs font-mono text-muted-foreground truncate max-w-[120px]">{adv.advertiser_id}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {Number(adv.campaign_count || 0)} حملة · {Number(adv.total_impressions || 0).toLocaleString()} مشاهدة
-                              </div>
-                            </div>
-                          </div>
-                          <div className="text-blue-600 font-bold text-sm">{Number(adv.total_spent || 0).toFixed(2)} ج.م</div>
-                        </div>
-                      ))}
-                      {(adminRevenue.advertiserSpend || []).filter((a: any) => Number(a.total_spent) > 0).length === 0 && (
-                        <p className="text-center py-4 text-muted-foreground text-sm">لا توجد بيانات إنفاق بعد</p>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* آخر المعاملات */}
-              <Card className="rounded-2xl">
-                <CardHeader><CardTitle className="text-base">آخر المعاملات المالية</CardTitle></CardHeader>
-                <CardContent>
-                  {(adminRevenue.recentTransactions || []).length === 0 ? (
-                    <p className="text-center py-8 text-muted-foreground text-sm">لا توجد معاملات بعد</p>
-                  ) : (
-                    <div className="space-y-1 max-h-80 overflow-y-auto">
-                      {adminRevenue.recentTransactions.map((tx: any) => (
-                        <div key={tx.id} className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-muted/50 text-sm" data-testid={`admin-tx-${tx.id}`}>
-                          <div className="flex items-center gap-2">
-                            <div className={`w-7 h-7 rounded-full flex items-center justify-center ${tx.type === 'earning' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>
-                              {tx.type === 'earning'
-                                ? <ArrowUpRight className="w-3.5 h-3.5 text-green-600" />
-                                : <ArrowDownLeft className="w-3.5 h-3.5 text-red-500" />}
-                            </div>
-                            <div>
-                              <div className="font-medium text-xs">{tx.description}</div>
-                              <div className="text-[10px] text-muted-foreground">
-                                {tx.campaign_name && <span className="ml-1">📢 {tx.campaign_name}</span>}
-                                {tx.created_at ? format(new Date(tx.created_at), 'dd/MM/yy HH:mm', { locale: ar }) : ''}
-                              </div>
-                            </div>
-                          </div>
-                          <div className={`font-bold text-xs ${tx.type === 'earning' ? 'text-green-600' : 'text-red-500'}`}>
-                            {tx.type === 'earning' ? '+' : '-'}{Number(tx.amount_egp || 0).toFixed(3)} ج.م
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
-
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
