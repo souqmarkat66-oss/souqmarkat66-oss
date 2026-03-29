@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
+import AdminPinLock from "@/components/AdminPinLock";
 
 const ADMIN_ID = "54219806";
 
@@ -23,9 +24,15 @@ export default function AdminPanel() {
   const { user } = useAuth();
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [pinUnlocked, setPinUnlocked] = useState(false);
 
   // Check if user is admin
   const isAdmin = user?.id === ADMIN_ID;
+
+  // Show PIN lock for admin
+  if (isAdmin && !pinUnlocked) {
+    return <AdminPinLock onUnlocked={() => setPinUnlocked(true)} />;
+  }
 
   const { data: stats } = useQuery({
     queryKey: ["/api/admin/stats"],

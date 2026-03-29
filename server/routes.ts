@@ -175,6 +175,54 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(settings);
   });
 
+  // ── Admin PIN ────────────────────────────────────────────────────
+  app.post("/api/admin/pin/set", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { pin, recoveryEmail, recoveryPhone } = req.body;
+    if (!pin || pin.length < 4) return res.status(400).json({ message: "PIN لازم يكون 4 أرقام على الأقل" });
+    const { createHash } = await import("crypto");
+    const hashed = createHash("sha256").update(pin).digest("hex");
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('admin_pin', ${hashed}) ON CONFLICT (key) DO UPDATE SET value = ${hashed}`);
+    if (recoveryEmail) await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('admin_recovery_email', ${recoveryEmail}) ON CONFLICT (key) DO UPDATE SET value = ${recoveryEmail}`);
+    if (recoveryPhone) await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('admin_recovery_phone', ${recoveryPhone}) ON CONFLICT (key) DO UPDATE SET value = ${recoveryPhone}`);
+    res.json({ success: true });
+  });
+
+  app.post("/api/admin/pin/verify", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { pin } = req.body;
+    const { createHash } = await import("crypto");
+    const hashed = createHash("sha256").update(pin || "").digest("hex");
+    const row = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'admin_pin' LIMIT 1`);
+    const stored = (row.rows[0] as any)?.value;
+    if (!stored) return res.json({ valid: true, noPinSet: true }); // no pin yet → allow
+    res.json({ valid: hashed === stored });
+  });
+
+  app.post("/api/admin/pin/recover", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { input } = req.body; // email or phone
+    const emailRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'admin_recovery_email' LIMIT 1`);
+    const phoneRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'admin_recovery_phone' LIMIT 1`);
+    const storedEmail = (emailRow.rows[0] as any)?.value || "";
+    const storedPhone = (phoneRow.rows[0] as any)?.value || "";
+    const match = input && (input === storedEmail || input === storedPhone);
+    if (!match) return res.status(401).json({ message: "البيانات غير مطابقة، تحقق من الإيميل أو رقم التليفون" });
+    // allow reset — return a one-time token stored in memory
+    const token = Math.random().toString(36).substring(2, 10).toUpperCase();
+    (global as any).__adminResetToken = token;
+    setTimeout(() => { (global as any).__adminResetToken = null; }, 15 * 60 * 1000); // 15 min
+    res.json({ success: true, resetToken: token });
+  });
+
+  app.post("/api/admin/pin/reset", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { newPin, resetToken } = req.body;
+    if (!resetToken || resetToken !== (global as any).__adminResetToken) return res.status(401).json({ message: "رمز الاسترداد غير صحيح أو منتهي" });
+    if (!newPin || newPin.length < 4) return res.status(400).json({ message: "PIN لازم يكون 4 أرقام على الأقل" });
+    const { createHash } = await import("crypto");
+    const hashed = createHash("sha256").update(newPin).digest("hex");
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('admin_pin', ${hashed}) ON CONFLICT (key) DO UPDATE SET value = ${hashed}`);
+    (global as any).__adminResetToken = null;
+    res.json({ success: true });
+  });
+
   app.put("/api/settings", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { key, value } = req.body;
     await storage.setSetting(key, value);
