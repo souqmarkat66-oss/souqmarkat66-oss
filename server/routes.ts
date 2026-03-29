@@ -384,7 +384,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const ad = await storage.createAd({ ...input, userId: req.user.claims.sub });
       res.status(201).json(ad);
 
-      // ── Notify channel followers about the new ad (async, non-blocking) ──
+      // ── Notify targeted users about the new ad (async, non-blocking) ──
       (async () => {
         try {
           const userId = req.user.claims.sub;
@@ -394,6 +394,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const notifBody = ad.title ? `"${ad.title}" — شاهد الإعلان الآن` : "أُضيف إعلان جديد قد يهمك";
 
           const notifiedUsers = new Set<string>([userId]); // never notify self
+
+          // Update publisher's governorate from ad's targetRegion (first region, if not set)
+          const targetRegion: string = (ad as any).targetRegion || (ad as any).target_region || "";
+          if (targetRegion && targetRegion.trim().length > 0) {
+            const firstRegion = targetRegion.split(",")[0].trim();
+            await db.execute(
+              sql`UPDATE users SET governorate = ${firstRegion}
+                  WHERE id = ${userId} AND (governorate IS NULL OR governorate = '')`
+            );
+          }
 
           // 1) Notify followers of the creator's channel
           const channelRows = await db.execute(
@@ -413,30 +423,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             }
           }
 
-          // 2) Notify users linked to the same governorate(s) as the ad's targetRegion.
-          // Proxy: users who have posted ads OR liked ads in matching regions.
-          const targetRegion: string = (ad as any).targetRegion || (ad as any).target_region || "";
+          // 2) Notify users whose governorate matches any region in the ad's targetRegion
           if (targetRegion && targetRegion.trim().length > 0) {
             const regions = targetRegion.split(",").map((r: string) => r.trim()).filter(Boolean);
             for (const region of regions) {
-              // Users who posted ads targeting this region
-              const posters = await db.execute(
-                sql`SELECT DISTINCT user_id FROM ads
-                    WHERE target_region ILIKE ${'%' + region + '%'}
-                      AND user_id != ${userId}
-                    LIMIT 150`
-              );
-              // Users who liked ads targeting this region
-              const likers = await db.execute(
-                sql`SELECT DISTINCT l.user_id FROM likes l
-                    JOIN ads a ON a.id = l.target_id AND l.target_type = 'ad'
-                    WHERE a.target_region ILIKE ${'%' + region + '%'}
-                      AND l.user_id != ${userId}
-                    LIMIT 150`
+              const regionUsers = await db.execute(
+                sql`SELECT id FROM users
+                    WHERE governorate = ${region} AND id != ${userId}
+                    LIMIT 300`
               );
               const regionTitle = `📍 إعلان جديد في ${region}`;
-              for (const row of [...posters.rows, ...likers.rows] as any[]) {
-                const uid = row.user_id;
+              for (const row of regionUsers.rows as any[]) {
+                const uid = (row as any).id;
                 if (!notifiedUsers.has(uid)) {
                   await createNotification(uid, "system", regionTitle, notifBody, adLink);
                   notifiedUsers.add(uid);
@@ -445,7 +443,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             }
           }
         } catch (e) {
-          console.error('[Ad Notify All] Error:', e);
+          console.error('[Ad Notify] Error:', e);
         }
       })();
     } catch (err: any) {
