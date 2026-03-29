@@ -6,7 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight, Loader2, CreditCard, Banknote, PhoneCall, AlertCircle } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
+import {
+  TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight, Loader2, CreditCard,
+  Banknote, PhoneCall, AlertCircle, BarChart2, Eye, MousePointer,
+  ShieldX, Tv, Megaphone, Receipt
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { format } from "date-fns";
@@ -16,26 +22,27 @@ const PAYMENT_METHODS = [
   { value: "vodafone", label: "فودافون كاش", number: "01098553911", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
   { value: "etisalat", label: "اتصالات e& كاش", number: "01126665741", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
   { value: "instapay", label: "InstaPay", number: "01285558567", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
-  { value: "souq", label: "تطبيق سوق ماركات", number: "", color: "bg-primary/10 text-primary" },
+  { value: "visa_bank", label: "فيزا / بنك (عبر سوق ماركات)", number: "", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
+  { value: "souq", label: "رصيد تطبيق سوق ماركات", number: "", color: "bg-primary/10 text-primary" },
 ];
 
-function WithdrawDialog({ balanceEGP }: { balanceEGP: number }) {
+function WithdrawDialog({ balanceEGP, label }: { balanceEGP: number; label: string }) {
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("");
   const [phone, setPhone] = useState("");
+  const [cardNote, setCardNote] = useState("");
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
   const mutation = useMutation({
     mutationFn: () => apiRequest('/api/payments', 'POST', {
-      type: 'withdrawal',
-      amountEGP: parseFloat(amount),
-      method,
-      phoneNumber: phone,
+      type: 'withdrawal', amountEGP: parseFloat(amount),
+      method, phoneNumber: phone, adminNote: cardNote || undefined,
     }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/revenue'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/publisher/report'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/advertiser/report'] });
       queryClient.invalidateQueries({ queryKey: ['/api/payments'] });
       setOpen(false);
       toast({ title: "✅ تم إرسال طلب السحب، سيتم المراجعة خلال 24 ساعة" });
@@ -49,7 +56,7 @@ function WithdrawDialog({ balanceEGP }: { balanceEGP: number }) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button className="gap-2" data-testid="btn-withdraw">
-          <Banknote className="w-4 h-4" /> طلب سحب رصيد
+          <Banknote className="w-4 h-4" /> سحب {label}
         </Button>
       </DialogTrigger>
       <DialogContent>
@@ -60,12 +67,9 @@ function WithdrawDialog({ balanceEGP }: { balanceEGP: number }) {
             <div className="text-2xl font-bold text-green-600">{balanceEGP.toFixed(2)} ج.م</div>
           </div>
           <div>
-            <label className="text-sm font-medium">المبلغ (بالجنيه المصري)</label>
-            <Input
-              type="number" value={amount} onChange={e => setAmount(e.target.value)}
-              placeholder="الحد الأدنى 50 ج.م" className="mt-1"
-              data-testid="input-withdraw-amount"
-            />
+            <label className="text-sm font-medium">المبلغ (ج.م)</label>
+            <Input type="number" value={amount} onChange={e => setAmount(e.target.value)}
+              placeholder="الحد الأدنى 50 ج.م" className="mt-1" data-testid="input-withdraw-amount" />
           </div>
           <div>
             <label className="text-sm font-medium">طريقة الاستلام</label>
@@ -76,27 +80,39 @@ function WithdrawDialog({ balanceEGP }: { balanceEGP: number }) {
               </SelectContent>
             </Select>
           </div>
-          {method && method !== 'souq' && (
+          {method && !['souq', 'visa_bank'].includes(method) && (
             <div>
               <label className="text-sm font-medium">رقم المحفظة / الهاتف</label>
-              <Input
-                value={phone} onChange={e => setPhone(e.target.value)}
+              <Input value={phone} onChange={e => setPhone(e.target.value)}
                 placeholder={selectedMethod?.number || "01xxxxxxxxx"} className="mt-1 font-mono"
-                data-testid="input-wallet-number"
-              />
+                data-testid="input-wallet-number" />
+            </div>
+          )}
+          {method === 'visa_bank' && (
+            <div className="bg-emerald-50 dark:bg-emerald-950/20 rounded-xl p-3 space-y-2">
+              <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400">💳 تحويل بنكي عبر تطبيق سوق ماركات</p>
+              <p className="text-xs text-emerald-600 dark:text-emerald-500">
+                سيتم إرسال المبلغ لحسابك البنكي المسجّل في تطبيق سوق ماركات. رسوم التحويل: 1.5%
+              </p>
+              <Input value={cardNote} onChange={e => setCardNote(e.target.value)}
+                placeholder="رقم الحساب البنكي أو ملاحظة" className="font-mono text-xs"
+                data-testid="input-bank-note" />
+            </div>
+          )}
+          {method === 'souq' && (
+            <div className="bg-primary/5 rounded-xl p-3">
+              <p className="text-xs text-primary font-bold">🏪 سيُضاف لرصيد تطبيق سوق ماركات فوراً بدون رسوم</p>
             </div>
           )}
           <div className="flex items-start gap-2 bg-yellow-50 dark:bg-yellow-950/20 rounded-xl p-3">
-            <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0" />
+            <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 shrink-0" />
             <p className="text-xs text-yellow-700 dark:text-yellow-400">
-              سيتم مراجعة طلبك وإرسال المبلغ خلال 24-48 ساعة عمل. الحد الأدنى للسحب 50 ج.م.
+              مراجعة الطلبات خلال 24-48 ساعة عمل. الحد الأدنى 50 ج.م.
             </p>
           </div>
-          <Button
-            className="w-full" onClick={() => mutation.mutate()}
+          <Button className="w-full" onClick={() => mutation.mutate()}
             disabled={!amount || !method || parseFloat(amount) < 50 || parseFloat(amount) > balanceEGP || mutation.isPending}
-            data-testid="btn-confirm-withdraw"
-          >
+            data-testid="btn-confirm-withdraw">
             {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin me-2" /> : null}
             تأكيد طلب السحب
           </Button>
@@ -106,132 +122,106 @@ function WithdrawDialog({ balanceEGP }: { balanceEGP: number }) {
   );
 }
 
-export default function Revenue() {
-  const { data, isLoading } = useQuery<{ transactions: any[]; balanceEGP: number; channel: any }>({
-    queryKey: ["/api/revenue"],
-    queryFn: () => fetch("/api/revenue", { credentials: "include" }).then(r => r.json()),
+// ── ناشر ──────────────────────────────────────────────────────────────
+function PublisherTab() {
+  const { data, isLoading } = useQuery<any>({
+    queryKey: ['/api/publisher/report'],
+    queryFn: () => fetch('/api/publisher/report', { credentials: 'include' }).then(r => r.json()),
   });
-
-  const { data: aiUsage } = useQuery<any>({ queryKey: ['/api/ai/usage'] });
   const { data: payments = [] } = useQuery<any[]>({
     queryKey: ['/api/payments'],
     queryFn: () => fetch('/api/payments', { credentials: 'include' }).then(r => r.json()),
   });
 
-  const { data: paymentNotifications = [] } = useQuery<any[]>({
-    queryKey: ['/api/payment-notifications'],
-    queryFn: () => fetch('/api/payment-notifications', { credentials: 'include' }).then(r => r.json()),
-  });
+  if (isLoading) return <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  if (!data?.channel) return (
+    <div className="text-center py-16">
+      <Tv className="w-12 h-12 mx-auto mb-3 opacity-30" />
+      <p className="text-muted-foreground">ليس لديك قناة بعد لكسب الإيرادات منها</p>
+      <p className="text-xs text-muted-foreground mt-1">أنشئ قناتك من صفحة القنوات</p>
+    </div>
+  );
 
-  const balanceEGP = data?.balanceEGP || 0;
-  const transactions = data?.transactions || [];
-  const channel = data?.channel;
-  const earningsEGP = transactions.filter(t => t.type === 'earning').reduce((s: number, t: any) => s + (t.amountEGP || 0), 0);
-  const spendingEGP = transactions.filter(t => t.type === 'spending' || t.type === 'ai_charge').reduce((s: number, t: any) => s + (t.amountEGP || 0), 0);
-  const withdrawnEGP = transactions.filter(t => t.type === 'withdrawal').reduce((s: number, t: any) => s + (t.amountEGP || 0), 0);
-
-  if (isLoading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  const { channel, channelStats, totalEarnedEGP, withdrawnEGP, balanceEGP, transactions } = data;
+  const realImpr = Number(channelStats?.real_impressions || 0);
+  const realClicks = Number(channelStats?.real_clicks || 0);
+  const fraudImpr = Number(channelStats?.fraud_impressions || 0);
+  const fraudClicks = Number(channelStats?.fraud_clicks || 0);
+  const campaignsServed = Number(channelStats?.campaigns_served || 0);
 
   return (
-    <div className="container px-4 py-12 max-w-4xl">
-      <div className="flex items-center justify-between mb-2">
-        <h1 className="text-4xl font-extrabold">💰 الإيرادات</h1>
-        {balanceEGP > 0 && <WithdrawDialog balanceEGP={balanceEGP} />}
-      </div>
-      <p className="text-muted-foreground mb-8">تتبع أرباحك وإنفاقك - جميع المبالغ بالجنيه المصري</p>
+    <div className="space-y-6">
+      {/* رأس القناة */}
+      <Card className="rounded-2xl border-green-200 dark:border-green-900 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/20">
+        <CardContent className="p-5 flex items-center justify-between flex-wrap gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-green-100 dark:bg-green-900/40 flex items-center justify-center text-2xl">📺</div>
+            <div>
+              <div className="font-bold text-lg">{channel.name}</div>
+              <div className="text-sm text-muted-foreground">{channel.subscriberCount} متابع · {campaignsServed} حملة إعلانية</div>
+              <Badge className="mt-1 bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 border-0 text-xs">ناشر معتمد ✓</Badge>
+            </div>
+          </div>
+          {balanceEGP > 0 && <WithdrawDialog balanceEGP={balanceEGP} label="أرباحي" />}
+        </CardContent>
+      </Card>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <Card className="rounded-2xl bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
-          <CardContent className="p-5">
-            <Wallet className="w-8 h-8 text-primary mb-2" />
-            <div className="text-2xl font-bold">{balanceEGP.toFixed(2)}</div>
-            <div className="text-xs text-muted-foreground">الرصيد الحالي (ج.م)</div>
-          </CardContent>
-        </Card>
-        <Card className="rounded-2xl bg-gradient-to-br from-green-500/10 to-green-500/5 border-green-500/20">
-          <CardContent className="p-5">
-            <TrendingUp className="w-8 h-8 text-green-500 mb-2" />
-            <div className="text-2xl font-bold">{earningsEGP.toFixed(2)}</div>
-            <div className="text-xs text-muted-foreground">إجمالي الأرباح (ج.م)</div>
-          </CardContent>
-        </Card>
-        <Card className="rounded-2xl bg-gradient-to-br from-red-500/10 to-red-500/5 border-red-500/20">
-          <CardContent className="p-5">
-            <CreditCard className="w-8 h-8 text-red-500 mb-2" />
-            <div className="text-2xl font-bold">{spendingEGP.toFixed(2)}</div>
-            <div className="text-xs text-muted-foreground">إجمالي الإنفاق (ج.م)</div>
-          </CardContent>
-        </Card>
-        <Card className="rounded-2xl bg-gradient-to-br from-blue-500/10 to-blue-500/5 border-blue-500/20">
-          <CardContent className="p-5">
-            <Banknote className="w-8 h-8 text-blue-500 mb-2" />
-            <div className="text-2xl font-bold">{withdrawnEGP.toFixed(2)}</div>
-            <div className="text-xs text-muted-foreground">المسحوب (ج.م)</div>
-          </CardContent>
-        </Card>
+      {/* إحصائيات */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { label: "الرصيد المتاح", value: balanceEGP.toFixed(2), unit: "ج.م", icon: Wallet, color: "text-primary", bg: "from-primary/10 to-primary/5 border-primary/20" },
+          { label: "إجمالي الأرباح", value: totalEarnedEGP.toFixed(2), unit: "ج.م", icon: TrendingUp, color: "text-green-600", bg: "from-green-500/10 to-green-500/5 border-green-500/20" },
+          { label: "المسحوب", value: withdrawnEGP.toFixed(2), unit: "ج.م", icon: Banknote, color: "text-blue-500", bg: "from-blue-500/10 to-blue-500/5 border-blue-500/20" },
+          { label: "حملات نُشرت فيها", value: campaignsServed.toString(), unit: "", icon: Megaphone, color: "text-purple-500", bg: "from-purple-500/10 to-purple-500/5 border-purple-500/20" },
+        ].map(s => (
+          <Card key={s.label} className={`rounded-2xl bg-gradient-to-br border ${s.bg}`}>
+            <CardContent className="p-4">
+              <s.icon className={`w-7 h-7 mb-2 ${s.color}`} />
+              <div className="text-xl font-bold">{s.value} <span className="text-sm font-normal text-muted-foreground">{s.unit}</span></div>
+              <div className="text-xs text-muted-foreground">{s.label}</div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      {/* AI Credits */}
-      {aiUsage && (
-        <Card className="rounded-2xl mb-6 border-primary/20">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                ✨
-              </div>
+      {/* مشاهدات ونقرات */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { label: "مشاهدات حقيقية", value: realImpr.toLocaleString(), icon: Eye, color: "text-teal-500" },
+          { label: "نقرات حقيقية", value: realClicks.toLocaleString(), icon: MousePointer, color: "text-indigo-500" },
+          { label: "مشاهدات مرفوضة (احتيال)", value: fraudImpr.toLocaleString(), icon: ShieldX, color: "text-red-400" },
+          { label: "نقرات مرفوضة (احتيال)", value: fraudClicks.toLocaleString(), icon: ShieldX, color: "text-red-400" },
+        ].map(s => (
+          <Card key={s.label} className="rounded-2xl">
+            <CardContent className="p-4 flex items-center gap-3">
+              <s.icon className={`w-6 h-6 ${s.color}`} />
               <div>
-                <div className="font-bold text-sm">رصيد الذكاء الاصطناعي</div>
-                <div className="text-xs text-muted-foreground">
-                  استخدمت {aiUsage.usageCount} من {aiUsage.freeCredits} مجاني
-                  {aiUsage.remaining === 0 && ` — سعر الإضافي: ${aiUsage.pricePerCredit} ج.م`}
-                </div>
+                <div className="font-bold text-base">{s.value}</div>
+                <div className="text-xs text-muted-foreground">{s.label}</div>
               </div>
-            </div>
-            <Badge variant={aiUsage.remaining > 0 ? "default" : "destructive"}>
-              {aiUsage.remaining} متبقي
-            </Badge>
-          </CardContent>
-        </Card>
-      )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
 
-      {/* Channel earnings */}
-      {channel && (
-        <Card className="rounded-2xl mb-6 border-green-200 dark:border-green-900">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600">📺</div>
-              <div>
-                <div className="font-bold text-sm">{channel.name}</div>
-                <div className="text-xs text-muted-foreground">أرباح القناة من الإعلانات</div>
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="font-bold text-green-600">{(channel.earningsEGP || 0).toFixed(2)} ج.م</div>
-              <div className="text-xs text-muted-foreground">{channel.subscriberCount} متابع</div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Payment Requests */}
-      {payments.length > 0 && (
-        <Card className="rounded-2xl mb-6">
+      {/* طلبات السحب */}
+      {payments.filter((p: any) => p.type === 'withdrawal').length > 0 && (
+        <Card className="rounded-2xl">
           <CardHeader><CardTitle className="text-base">طلبات السحب</CardTitle></CardHeader>
           <CardContent className="space-y-2">
-            {payments.map((p: any) => (
-              <div key={p.id} className="flex items-center justify-between p-3 bg-muted rounded-xl">
+            {payments.filter((p: any) => p.type === 'withdrawal').map((p: any) => (
+              <div key={p.id} className="flex items-center justify-between p-3 bg-muted rounded-xl" data-testid={`withdraw-${p.id}`}>
                 <div className="flex items-center gap-3">
                   <PhoneCall className="w-4 h-4 text-muted-foreground" />
                   <div>
                     <div className="text-sm font-medium">{PAYMENT_METHODS.find(m => m.value === p.method)?.label || p.method}</div>
-                    <div className="text-xs text-muted-foreground">{p.phoneNumber}</div>
+                    <div className="text-xs text-muted-foreground">{p.orderNumber} · {p.phoneNumber || p.adminNote}</div>
                   </div>
                 </div>
                 <div className="text-right">
                   <div className="font-bold">{p.amountEGP} ج.م</div>
                   <Badge variant={p.status === 'approved' ? 'default' : p.status === 'rejected' ? 'destructive' : 'secondary'} className="text-xs">
-                    {p.status === 'pending' ? 'قيد المراجعة' : p.status === 'approved' ? 'مقبول' : 'مرفوض'}
+                    {p.status === 'pending' ? 'قيد المراجعة' : p.status === 'approved' ? 'مقبول ✓' : 'مرفوض'}
                   </Badge>
                 </div>
               </div>
@@ -240,65 +230,209 @@ export default function Revenue() {
         </Card>
       )}
 
-      {/* Payment Notifications from Buyers */}
-      {paymentNotifications.length > 0 && (
-        <Card className="rounded-2xl mb-6 border-green-200 dark:border-green-900">
-          <CardHeader><CardTitle className="text-base flex items-center gap-2">📩 إشعارات دفع من المشترين</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            {paymentNotifications.map((pn: any) => (
-              <div key={pn.id} className="flex items-center justify-between p-3 bg-muted rounded-xl" data-testid={`pn-${pn.id}`}>
-                <div>
-                  <div className="text-sm font-bold">{pn.payer_name} — {pn.payer_phone}</div>
-                  <div className="text-xs text-muted-foreground">{pn.ad_title} · {pn.payment_method}</div>
-                </div>
-                <div className="text-right">
-                  <div className="font-bold text-green-600">{pn.paid_amount} ج.م</div>
-                  <Badge variant={pn.status === 'confirmed' ? 'default' : 'secondary'} className="text-xs">
-                    {pn.status === 'pending' ? 'قيد المراجعة' : 'مؤكد'}
-                  </Badge>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Transactions */}
+      {/* سجل الأرباح */}
       <Card className="rounded-2xl">
-        <CardHeader><CardTitle>سجل المعاملات</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Receipt className="w-4 h-4" /> كشف حساب الأرباح</CardTitle></CardHeader>
         <CardContent>
           {transactions.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              <Wallet className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>لا توجد معاملات بعد</p>
-              <p className="text-sm mt-1">ستظهر هنا أرباحك وإنفاقك</p>
+              <TrendingUp className="w-10 h-10 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">لا توجد أرباح بعد — الإيرادات ستظهر هنا عند عرض الإعلانات</p>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1 max-h-72 overflow-y-auto">
               {transactions.map((t: any) => (
-                <div key={t.id} className="flex items-center justify-between p-3 hover:bg-muted/50 rounded-xl transition-colors" data-testid={`tx-${t.id}`}>
-                  <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                      t.type === 'earning' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-red-100 dark:bg-red-900/30'
-                    }`}>
-                      {t.type === 'earning' ? <ArrowUpRight className="w-4 h-4 text-green-600" /> : <ArrowDownLeft className="w-4 h-4 text-red-500" />}
+                <div key={t.id} className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-muted/50 text-sm" data-testid={`pub-tx-${t.id}`}>
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+                      <ArrowUpRight className="w-3.5 h-3.5 text-green-600" />
                     </div>
                     <div>
-                      <div className="text-sm font-medium">{t.description}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {t.createdAt ? format(new Date(t.createdAt), 'dd MMM yyyy', { locale: ar }) : ''}
-                      </div>
+                      <div className="text-xs font-medium">{t.description}</div>
+                      <div className="text-[10px] text-muted-foreground">{t.createdAt ? format(new Date(t.createdAt), 'dd/MM/yy HH:mm', { locale: ar }) : ''}</div>
                     </div>
                   </div>
-                  <div className={`font-bold ${t.type === 'earning' ? 'text-green-600' : 'text-red-500'}`}>
-                    {t.type === 'earning' ? '+' : '-'}{(t.amountEGP || 0).toFixed(2)} ج.م
-                  </div>
+                  <div className="font-bold text-xs text-green-600">+{(t.amountEGP || 0).toFixed(4)} ج.م</div>
                 </div>
               ))}
             </div>
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// ── معلن ──────────────────────────────────────────────────────────────
+function AdvertiserTab() {
+  const { data, isLoading } = useQuery<any>({
+    queryKey: ['/api/advertiser/report'],
+    queryFn: () => fetch('/api/advertiser/report', { credentials: 'include' }).then(r => r.json()),
+  });
+  const { data: payments = [] } = useQuery<any[]>({
+    queryKey: ['/api/payments'],
+    queryFn: () => fetch('/api/payments', { credentials: 'include' }).then(r => r.json()),
+  });
+
+  if (isLoading) return <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  if (!data?.campaigns?.length) return (
+    <div className="text-center py-16">
+      <Megaphone className="w-12 h-12 mx-auto mb-3 opacity-30" />
+      <p className="text-muted-foreground">ليس لديك حملات إعلانية بعد</p>
+      <p className="text-xs text-muted-foreground mt-1">أنشئ حملتك الأولى من صفحة الحملات</p>
+    </div>
+  );
+
+  const { campaigns, totalSpentEGP, balanceEGP, transactions } = data;
+
+  return (
+    <div className="space-y-6">
+      {/* ملخص الإنفاق */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        {[
+          { label: "إجمالي الإنفاق", value: totalSpentEGP.toFixed(2), unit: "ج.م", icon: CreditCard, color: "text-red-500", bg: "from-red-500/10 to-red-500/5 border-red-500/20" },
+          { label: "عدد الحملات", value: campaigns.length.toString(), unit: "", icon: Megaphone, color: "text-blue-500", bg: "from-blue-500/10 to-blue-500/5 border-blue-500/20" },
+          { label: "رصيدك الحالي", value: balanceEGP.toFixed(2), unit: "ج.م", icon: Wallet, color: "text-primary", bg: "from-primary/10 to-primary/5 border-primary/20" },
+        ].map(s => (
+          <Card key={s.label} className={`rounded-2xl bg-gradient-to-br border ${s.bg}`}>
+            <CardContent className="p-4">
+              <s.icon className={`w-7 h-7 mb-2 ${s.color}`} />
+              <div className="text-xl font-bold">{s.value} <span className="text-sm font-normal text-muted-foreground">{s.unit}</span></div>
+              <div className="text-xs text-muted-foreground">{s.label}</div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* تفاصيل كل حملة */}
+      <Card className="rounded-2xl">
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><BarChart2 className="w-4 h-4" /> تقرير الحملات التفصيلي</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          {campaigns.map((c: any) => (
+            <div key={c.id} className="border rounded-xl p-4 space-y-3" data-testid={`camp-report-${c.id}`}>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <div className="font-bold">{c.name}</div>
+                  <div className="text-xs text-muted-foreground">حملة #{c.id}</div>
+                </div>
+                <Badge variant={c.status === 'active' ? 'default' : c.status === 'paused' ? 'secondary' : 'destructive'} className="text-xs">
+                  {c.status === 'active' ? '✅ نشطة' : c.status === 'paused' ? '⏸️ متوقفة' : '❌ مرفوضة'}
+                </Badge>
+              </div>
+
+              {/* شريط الميزانية */}
+              {c.budgetEGP > 0 && (
+                <div>
+                  <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                    <span>الميزانية المستهلكة</span>
+                    <span className={`font-bold ${c.budgetPct >= 90 ? 'text-red-500' : c.budgetPct >= 70 ? 'text-yellow-500' : 'text-green-600'}`}>
+                      {c.budgetPct}%
+                    </span>
+                  </div>
+                  <Progress value={c.budgetPct} className={`h-2 ${c.budgetPct >= 90 ? '[&>div]:bg-red-500' : c.budgetPct >= 70 ? '[&>div]:bg-yellow-500' : ''}`} />
+                  <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                    <span>صُرف: {(c.spentEGP || 0).toFixed(3)} ج.م</span>
+                    <span>الميزانية: {c.budgetEGP} ج.م</span>
+                  </div>
+                </div>
+              )}
+
+              {/* إحصائيات الحملة */}
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                {[
+                  { label: "مشاهدات حقيقية", value: c.realImpressions.toLocaleString(), icon: Eye, cls: "text-teal-600" },
+                  { label: "نقرات حقيقية", value: c.realClicks.toLocaleString(), icon: MousePointer, cls: "text-indigo-600" },
+                  { label: "نسبة النقر CTR", value: `${c.ctr}%`, icon: BarChart2, cls: "text-blue-600" },
+                  { label: "سعر 1000 مشاهدة", value: `${c.cpmRate} ج.م`, icon: Banknote, cls: "text-purple-600" },
+                  { label: "سعر النقرة", value: `${c.cpcRate.toFixed(3)} ج.م`, icon: CreditCard, cls: "text-orange-600" },
+                  { label: "محاولات احتيال", value: (c.fraudImpressions + c.fraudClicks).toString(), icon: ShieldX, cls: "text-red-400" },
+                ].map(s => (
+                  <div key={s.label} className="bg-muted/40 rounded-lg p-2 text-center">
+                    <s.icon className={`w-3.5 h-3.5 mx-auto mb-1 ${s.cls}`} />
+                    <div className="font-bold text-xs">{s.value}</div>
+                    <div className="text-[9px] text-muted-foreground leading-tight">{s.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* تحذير الميزانية */}
+              {c.budgetPct >= 80 && c.status === 'active' && (
+                <div className={`flex items-center gap-2 rounded-lg p-2.5 text-xs ${c.budgetPct >= 100 ? 'bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-400' : 'bg-yellow-50 dark:bg-yellow-950/20 text-yellow-700 dark:text-yellow-400'}`}>
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {c.budgetPct >= 100
+                    ? '⛔ انتهت الميزانية — الحملة متوقفة. اشحن رصيدك لاستئناف النشر.'
+                    : `⚠️ استهلكت ${c.budgetPct}% من الميزانية — اشحن رصيدك قبل توقف الحملة!`}
+                </div>
+              )}
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      {/* كشف حساب الإنفاق */}
+      <Card className="rounded-2xl">
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Receipt className="w-4 h-4" /> كشف حساب الإنفاق</CardTitle></CardHeader>
+        <CardContent>
+          {transactions.length === 0 ? (
+            <p className="text-center py-8 text-sm text-muted-foreground">لا توجد معاملات بعد</p>
+          ) : (
+            <div className="space-y-1 max-h-64 overflow-y-auto">
+              {transactions.map((t: any) => (
+                <div key={t.id} className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-muted/50 text-sm" data-testid={`adv-tx-${t.id}`}>
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                      <ArrowDownLeft className="w-3.5 h-3.5 text-red-500" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium">{t.description}</div>
+                      <div className="text-[10px] text-muted-foreground">{t.createdAt ? format(new Date(t.createdAt), 'dd/MM/yy HH:mm', { locale: ar }) : ''}</div>
+                    </div>
+                  </div>
+                  <div className="font-bold text-xs text-red-500">-{(t.amountEGP || 0).toFixed(4)} ج.م</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── الصفحة الرئيسية ───────────────────────────────────────────────────
+export default function Revenue() {
+  const { data: pubData } = useQuery<any>({
+    queryKey: ['/api/publisher/report'],
+    queryFn: () => fetch('/api/publisher/report', { credentials: 'include' }).then(r => r.json()),
+  });
+  const { data: advData } = useQuery<any>({
+    queryKey: ['/api/advertiser/report'],
+    queryFn: () => fetch('/api/advertiser/report', { credentials: 'include' }).then(r => r.json()),
+  });
+
+  const isPublisher = !!pubData?.channel;
+  const isAdvertiser = !!(advData?.campaigns?.length);
+  const defaultTab = isPublisher ? 'publisher' : 'advertiser';
+
+  return (
+    <div className="container px-4 py-10 max-w-4xl">
+      <div className="mb-8">
+        <h1 className="text-3xl font-extrabold flex items-center gap-2">💰 الإيرادات والتقارير</h1>
+        <p className="text-muted-foreground mt-1">جميع المبالغ بالجنيه المصري — بياناتك الخاصة فقط</p>
+      </div>
+
+      <Tabs defaultValue={defaultTab}>
+        <TabsList className="mb-6 w-full">
+          <TabsTrigger value="publisher" className="flex-1 gap-2" disabled={!isPublisher && pubData !== undefined}>
+            <Tv className="w-4 h-4" /> ناشر (صاحب قناة)
+          </TabsTrigger>
+          <TabsTrigger value="advertiser" className="flex-1 gap-2" disabled={!isAdvertiser && advData !== undefined}>
+            <Megaphone className="w-4 h-4" /> معلن
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="publisher"><PublisherTab /></TabsContent>
+        <TabsContent value="advertiser"><AdvertiserTab /></TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -335,11 +335,12 @@ export class DatabaseStorage implements IStorage {
     return active;
   }
 
-  async recordImpression(campaignId: number, channelId?: number, userId?: string): Promise<void> {
+  async recordImpression(campaignId: number, channelId?: number, userId?: string): Promise<{ budgetWarning?: boolean; budgetRatio?: number; advertiserId?: string; campaignName?: string }> {
     const campaign = await this.getAdCampaign(campaignId);
-    if (!campaign) return;
+    if (!campaign) return {};
     const revenueEGP = (campaign.cpmRateEGP || 15) / 1000;
     const publisherShareEGP = revenueEGP * (campaign.publisherRevShare || 0.6);
+    const newSpent = (campaign.spentEGP || 0) + revenueEGP;
     await db.update(adCampaigns).set({
       impressions: sql`${adCampaigns.impressions} + 1`,
       spentEGP: sql`${adCampaigns.spentEGP} + ${revenueEGP}`
@@ -358,7 +359,6 @@ export class DatabaseStorage implements IStorage {
         });
       }
     }
-    // Deduct from advertiser
     await db.insert(revenueTransactions).values({
       userId: campaign.advertiserId,
       type: 'spending',
@@ -366,11 +366,20 @@ export class DatabaseStorage implements IStorage {
       description: `تكلفة مشاهدة - حملة ${campaign.name}`,
       campaignId,
     });
+    // تحقق من نسبة الميزانية المستهلكة
+    const budget = campaign.budgetEGP || 0;
+    if (budget > 0) {
+      const ratio = newSpent / budget;
+      if (ratio >= 0.8) {
+        return { budgetWarning: true, budgetRatio: ratio, advertiserId: campaign.advertiserId, campaignName: campaign.name };
+      }
+    }
+    return {};
   }
 
-  async recordClick(campaignId: number, channelId?: number, userId?: string): Promise<void> {
+  async recordClick(campaignId: number, channelId?: number, userId?: string): Promise<{ budgetWarning?: boolean; budgetRatio?: number; advertiserId?: string; campaignName?: string }> {
     const campaign = await this.getAdCampaign(campaignId);
-    if (!campaign) return;
+    if (!campaign) return {};
     // سعر النقرة = CPM / 20  (افتراضي: 15 EGP CPM → 0.75 EGP للنقرة)
     const cpcEGP = (campaign.cpmRateEGP || 15) / 20;
     const publisherShareEGP = cpcEGP * (campaign.publisherRevShare || 0.6);
@@ -403,6 +412,13 @@ export class DatabaseStorage implements IStorage {
       description: `تكلفة نقرة - حملة ${campaign.name}`,
       campaignId,
     });
+    // تحقق من نسبة الميزانية
+    const newSpent = (campaign.spentEGP || 0) + cpcEGP;
+    const budget = campaign.budgetEGP || 0;
+    if (budget > 0 && newSpent / budget >= 0.8) {
+      return { budgetWarning: true, budgetRatio: newSpent / budget, advertiserId: campaign.advertiserId, campaignName: campaign.name };
+    }
+    return {};
   }
 
   // ─── REVENUE ──────────────────────────────────────────────────

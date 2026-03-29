@@ -889,7 +889,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             VALUES (${campaignId}, ${channelId || null}, ${userId || null}, ${ip}, ${ua}, 'impression', ${fraud.isFraud}, ${fraud.reason || null})`
       );
       if (!fraud.isFraud) {
-        await storage.recordImpression(campaignId, channelId, userId);
+        const result = await storage.recordImpression(campaignId, channelId, userId);
+        // تنبيه الميزانية إذا وصلت 80%+
+        if (result.budgetWarning && result.advertiserId) {
+          const pct = Math.round((result.budgetRatio || 0) * 100);
+          const notifKey = `budget_warn_${campaignId}_${pct >= 100 ? 'full' : '80'}`;
+          const already = await db.execute(
+            sql`SELECT id FROM notifications WHERE user_id = ${result.advertiserId} AND link = ${notifKey} LIMIT 1`
+          );
+          if ((already.rows as any[]).length === 0) {
+            await createNotification(
+              result.advertiserId, 'system',
+              pct >= 100 ? `⛔ انتهت ميزانية حملتك!` : `⚠️ تنبيه: ميزانية حملتك ${pct}%`,
+              pct >= 100
+                ? `حملة "${result.campaignName}" توقفت تلقائياً. اشحن رصيدك لاستمرار النشر.`
+                : `حملة "${result.campaignName}" استهلكت ${pct}% من الميزانية. اشحن رصيدك الآن!`,
+              notifKey
+            );
+          }
+        }
       } else {
         await db.execute(
           sql`INSERT INTO fraud_alerts (campaign_id, ip_address, alert_type, details)
@@ -917,7 +935,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             VALUES (${campaignId}, ${channelId || null}, ${userId || null}, ${ip}, ${ua}, 'click', ${fraud.isFraud}, ${fraud.reason || null})`
       );
       if (!fraud.isFraud) {
-        await storage.recordClick(campaignId, channelId, userId);
+        const result = await storage.recordClick(campaignId, channelId, userId);
+        if (result.budgetWarning && result.advertiserId) {
+          const pct = Math.round((result.budgetRatio || 0) * 100);
+          const notifKey = `budget_warn_${campaignId}_${pct >= 100 ? 'full' : '80'}`;
+          const already = await db.execute(
+            sql`SELECT id FROM notifications WHERE user_id = ${result.advertiserId} AND link = ${notifKey} LIMIT 1`
+          );
+          if ((already.rows as any[]).length === 0) {
+            await createNotification(
+              result.advertiserId, 'system',
+              pct >= 100 ? `⛔ انتهت ميزانية حملتك!` : `⚠️ ميزانية حملتك ${pct}%`,
+              pct >= 100
+                ? `حملة "${result.campaignName}" توقفت. اشحن رصيدك لاستمرار النشر.`
+                : `حملة "${result.campaignName}" استهلكت ${pct}% من الميزانية!`,
+              notifKey
+            );
+          }
+        }
       } else {
         await db.execute(
           sql`INSERT INTO fraud_alerts (campaign_id, ip_address, alert_type, details)
@@ -1112,6 +1147,91 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const balanceEGP = await storage.getUserBalanceEGP(userId);
     const channel = await storage.getChannelByUserId(userId);
     res.json({ transactions, balanceEGP, channel });
+  });
+
+  // ── تقرير المعلن التفصيلي ──────────────────────────────────────
+  app.get("/api/advertiser/report", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      // حملاته مع إحصائيات تفصيلية
+      const campaigns = await storage.getAdCampaigns(userId);
+      const campaignIds = campaigns.map(c => c.id);
+
+      let campaignStats: any[] = [];
+      if (campaignIds.length > 0) {
+        const statsResult = await db.execute(sql`
+          SELECT
+            campaign_id,
+            COUNT(*) FILTER (WHERE event_type = 'impression' AND is_fraud = false) as real_impressions,
+            COUNT(*) FILTER (WHERE event_type = 'click' AND is_fraud = false) as real_clicks,
+            COUNT(*) FILTER (WHERE event_type = 'impression' AND is_fraud = true) as fraud_impressions,
+            COUNT(*) FILTER (WHERE event_type = 'click' AND is_fraud = true) as fraud_clicks
+          FROM ad_impressions
+          WHERE campaign_id = ANY(ARRAY[${sql.raw(campaignIds.join(','))}])
+          GROUP BY campaign_id`);
+        campaignStats = statsResult.rows as any[];
+      }
+
+      const merged = campaigns.map(c => {
+        const st = campaignStats.find((s: any) => s.campaign_id === c.id) || {};
+        const realImpr = Number(st.real_impressions || 0);
+        const realClicks = Number(st.real_clicks || 0);
+        const cpmRate = c.cpmRateEGP || 15;
+        const cpcRate = cpmRate / 20;
+        const spentEGP = c.spentEGP || 0;
+        const budgetEGP = c.budgetEGP || 0;
+        const budgetPct = budgetEGP > 0 ? Math.round((spentEGP / budgetEGP) * 100) : 0;
+        const ctr = realImpr > 0 ? ((realClicks / realImpr) * 100).toFixed(2) : '0';
+        return {
+          ...c, realImpressions: realImpr, realClicks, fraudImpressions: Number(st.fraud_impressions || 0),
+          fraudClicks: Number(st.fraud_clicks || 0), cpmRate, cpcRate, ctr, budgetPct,
+        };
+      });
+
+      // معاملات الإنفاق فقط
+      const txs = (await storage.getRevenueTransactions(userId)).filter(t => t.type === 'spending');
+      const totalSpent = txs.reduce((s, t) => s + (t.amountEGP || 0), 0);
+      const balance = await storage.getUserBalanceEGP(userId);
+
+      res.json({ campaigns: merged, transactions: txs, totalSpentEGP: totalSpent, balanceEGP: balance });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ── تقرير الناشر (صاحب القناة) التفصيلي ──────────────────────
+  app.get("/api/publisher/report", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const channel = await storage.getChannelByUserId(userId);
+      let channelStats: any = {};
+      if (channel) {
+        const statsResult = await db.execute(sql`
+          SELECT
+            COUNT(*) FILTER (WHERE event_type = 'impression' AND is_fraud = false) as real_impressions,
+            COUNT(*) FILTER (WHERE event_type = 'click' AND is_fraud = false) as real_clicks,
+            COUNT(*) FILTER (WHERE event_type = 'impression' AND is_fraud = true) as fraud_impressions,
+            COUNT(*) FILTER (WHERE event_type = 'click' AND is_fraud = true) as fraud_clicks,
+            COUNT(DISTINCT campaign_id) as campaigns_served
+          FROM ad_impressions
+          WHERE channel_id = ${channel.id}`);
+        channelStats = statsResult.rows[0] || {};
+      }
+
+      // معاملات الأرباح فقط
+      const txs = (await storage.getRevenueTransactions(userId)).filter(t => t.type === 'earning');
+      const totalEarned = txs.reduce((s, t) => s + (t.amountEGP || 0), 0);
+      const withdrawn = (await storage.getRevenueTransactions(userId))
+        .filter(t => t.type === 'withdrawal').reduce((s, t) => s + (t.amountEGP || 0), 0);
+      const balance = await storage.getUserBalanceEGP(userId);
+
+      res.json({
+        channel, channelStats, transactions: txs, totalEarnedEGP: totalEarned,
+        withdrawnEGP: withdrawn, balanceEGP: balance
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
   });
 
   // ================================================================
