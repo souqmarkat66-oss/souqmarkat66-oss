@@ -568,7 +568,7 @@ export default function Campaigns() {
                       <span className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-3 py-1.5 rounded-full font-bold">📱 Vodafone Cash: 01098553911</span>
                       <span className="bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 px-3 py-1.5 rounded-full font-bold">📱 Etisalat: 01126665741</span>
                       <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-3 py-1.5 rounded-full font-bold">💳 InstaPay: 01285558567</span>
-                      <span className="bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 px-3 py-1.5 rounded-full font-bold">⚡ فوري نفدة (الدفع الفوري)</span>
+                      <span className="bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 px-3 py-1.5 rounded-full font-bold">🏧 فوري نقدي (ماكينات ونقاط فوري)</span>
                     </div>
                   </div>
 
