@@ -130,7 +130,7 @@ export function Navbar() {
               <DropdownMenuContent align="end" className="w-52" dir="rtl">
                 <DropdownMenuItem asChild>
                   <Link href={`/profile/${user.id}`} className="gap-2 cursor-pointer flex items-center">
-                    <UserCircle2 className="w-4 h-4 text-primary" /> ملفي الشخصي
+                    <UserCircle2 className="w-4 h-4 text-primary" /> ملفي الشخصي واهتماماتي
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
@@ -200,6 +200,11 @@ export function Navbar() {
             ))}
             {user && (
               <>
+                <Link href={`/profile/${user.id}`} onClick={() => setMobileOpen(false)}>
+                  <Button variant="ghost" className="w-full justify-start gap-2">
+                    <UserCircle2 className="w-4 h-4 text-primary" /> ملفي الشخصي واهتماماتي
+                  </Button>
+                </Link>
                 {user.id !== ADMIN_USER_ID && (
                   <Link href="/my-dashboard" onClick={() => setMobileOpen(false)}>
                     <Button variant="ghost" className="w-full justify-start gap-2">
