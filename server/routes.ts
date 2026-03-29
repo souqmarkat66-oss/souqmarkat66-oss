@@ -198,7 +198,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Sitemap.xml (SEO) ─────────────────────────────────────────
   app.get("/sitemap.xml", async (_req, res) => {
-    const BASE = "https://pp.asouq.shop";
+    const BASE = "https://app.asouq.shop";
     const now = new Date().toISOString().split("T")[0];
     const staticPages = [
       { loc: "/",          priority: "1.0", freq: "daily"   },
