@@ -84,6 +84,8 @@ export default function LiveStream() {
   const [selectedMic, setSelectedMic]       = useState<string>("");
   const [isFullscreen, setIsFullscreen]     = useState(false);
   const [showSharePanel, setShowSharePanel] = useState(false);
+  const [viewerMuted, setViewerMuted]       = useState(true);
+  const [audioBlocked, setAudioBlocked]     = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const statsIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -302,7 +304,18 @@ export default function LiveStream() {
       pc.ontrack = (e) => {
         if (videoRef.current && e.streams[0]) {
           videoRef.current.srcObject = e.streams[0];
-          videoRef.current.play().catch(() => {});
+          videoRef.current.muted = false;
+          videoRef.current.volume = 1;
+          videoRef.current.play().then(() => {
+            setViewerMuted(false);
+            setAudioBlocked(false);
+          }).catch(() => {
+            // Autoplay with audio blocked — play muted first
+            videoRef.current!.muted = true;
+            videoRef.current!.play().catch(() => {});
+            setViewerMuted(true);
+            setAudioBlocked(true);
+          });
           setStreaming(true);
         }
       };
@@ -538,6 +551,27 @@ export default function LiveStream() {
                 className="absolute top-4 end-4 w-9 h-9 rounded-full bg-black/60 backdrop-blur flex items-center justify-center text-white hover:bg-black/80 transition"
               >
                 <Maximize className="w-4 h-4" />
+              </button>
+            )}
+
+            {/* 🔊 Enable Audio Button for viewers (browser blocks autoplay with audio) */}
+            {!isBroadcast && streaming && (audioBlocked || viewerMuted) && (
+              <button
+                onClick={() => {
+                  if (videoRef.current) {
+                    videoRef.current.muted = false;
+                    videoRef.current.volume = 1;
+                    videoRef.current.play().then(() => {
+                      setViewerMuted(false);
+                      setAudioBlocked(false);
+                    }).catch(() => {});
+                  }
+                }}
+                className="absolute bottom-4 start-4 flex items-center gap-2 px-4 py-2.5 rounded-full bg-white/20 backdrop-blur border border-white/30 text-white text-sm font-bold hover:bg-white/30 transition animate-pulse"
+                data-testid="btn-enable-audio"
+              >
+                <Volume2 className="w-4 h-4 text-yellow-300" />
+                انقر لتفعيل الصوت
               </button>
             )}
 

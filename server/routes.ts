@@ -407,31 +407,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             }
           }
 
-          // 2) Notify users who liked/viewed ads in the same category
-          if (input.targetRegion || (ad as any).targetRegion) {
-            // Targeted by region — notify users who liked ads in same category
-          }
-          // Notify users who liked ads with same category in the last 30 days
-          const category = (input as any).category || null;
-          if (category) {
-            const interestedRows = await db.execute(
-              sql`SELECT DISTINCT l.user_id FROM likes l
-                  JOIN ads a ON a.id = l.target_id AND l.target_type = 'ad'
-                  WHERE a.category = ${category}
-                    AND l.user_id != ${userId}
-                    AND l.created_at > NOW() - INTERVAL '30 days'
-                  LIMIT 50`
-            );
-            for (const row of interestedRows.rows as any[]) {
-              const uid = (row as any).user_id;
-              await createNotification(uid, "system",
-                `💡 إعلان قد يهمك في ${category}`,
-                notifBody, adLink
-              );
+          // 2) Notify ALL active users (broadcast new ad)
+          const allUsersRows = await db.execute(
+            sql`SELECT id FROM users WHERE id != ${userId} LIMIT 1000`
+          );
+          const alreadyNotified = new Set<string>();
+          // Mark followers already notified
+          (await db.execute(
+            sql`SELECT follower_id FROM follows WHERE channel_id IN (SELECT id FROM channels WHERE user_id = ${userId})`
+          )).rows.forEach((r: any) => alreadyNotified.add(r.follower_id));
+
+          for (const row of allUsersRows.rows as any[]) {
+            const uid = (row as any).id;
+            if (!alreadyNotified.has(uid)) {
+              await createNotification(uid, "system", notifTitle, notifBody, adLink);
             }
           }
         } catch (e) {
-          console.error('[Ad Notify Followers] Error:', e);
+          console.error('[Ad Notify All] Error:', e);
         }
       })();
     } catch (err: any) {
@@ -457,7 +450,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ================================================================
   // AD BOOST NOTIFY — Owner notifies followers & interested users
-  // Rate limited: max once every 24h per ad
+  // Rate limited: max once every 30 days per ad. Admin can enable/disable + set price.
   // ================================================================
   app.post("/api/ads/:id/boost-notify", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
@@ -467,7 +460,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!ad) return res.status(404).json({ message: "الإعلان غير موجود" });
       if (ad.userId !== userId) return res.status(403).json({ message: "غير مصرح" });
 
-      // Rate limit: check last boost time
+      // Check admin setting: boost_enabled
+      const boostEnabledRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_enabled' LIMIT 1`);
+      const boostEnabled = boostEnabledRow.rows.length === 0 || (boostEnabledRow.rows[0] as any).value !== "0";
+      if (!boostEnabled) {
+        return res.status(403).json({ message: "خاصية التعزيز معطّلة حالياً من قِبل الإدارة" });
+      }
+
+      // Check boost price
+      const boostPriceRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_price_egp' LIMIT 1`);
+      const boostPrice = parseFloat((boostPriceRow.rows[0] as any)?.value || "0");
+
+      // Verify payment if price > 0 (payment_ref sent from client)
+      const { payment_ref } = req.body;
+      if (boostPrice > 0 && !payment_ref) {
+        return res.status(402).json({
+          message: "يتطلب التعزيز الدفع أولاً",
+          price: boostPrice,
+          requiresPayment: true,
+        });
+      }
+
+      // Rate limit: check last boost time — max once per 30 days
       const lastBoost = await db.execute(
         sql`SELECT created_at FROM notifications
             WHERE link = ${`/ads/${adId}`} AND title LIKE '%🚀%'
@@ -475,10 +489,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       );
       if (lastBoost.rows.length > 0) {
         const last = new Date((lastBoost.rows[0] as any).created_at);
-        const hoursAgo = (Date.now() - last.getTime()) / 3_600_000;
-        if (hoursAgo < 24) {
-          const hoursLeft = Math.ceil(24 - hoursAgo);
-          return res.status(429).json({ message: `يمكنك تعزيز الإعلان مرة كل 24 ساعة. الوقت المتبقي: ${hoursLeft} ساعة` });
+        const daysAgo = (Date.now() - last.getTime()) / 86_400_000;
+        if (daysAgo < 30) {
+          const daysLeft = Math.ceil(30 - daysAgo);
+          return res.status(429).json({ message: `يمكنك تعزيز هذا الإعلان مرة واحدة كل 30 يوم. الأيام المتبقية: ${daysLeft} يوم` });
         }
       }
 

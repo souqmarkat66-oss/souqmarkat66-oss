@@ -18,7 +18,7 @@ import {
   ArrowUpRight, ArrowDownLeft, Trash2, PauseCircle, PlayCircle, Send,
   AlertTriangle, Activity, Menu, ChevronLeft, VideoOff, PieChart,
   Star, MessageSquare, Clock, BanIcon, UserCheck, FolderOpen, FileImage,
-  FileVideo, File, Lock, Phone, Mail, Shield, RefreshCw, ToggleLeft, ToggleRight
+  FileVideo, File, Lock, Phone, Mail, Shield, RefreshCw, ToggleLeft, ToggleRight, Zap
 } from "lucide-react";
 
 const ADMIN_ID = "54219806";
@@ -1190,11 +1190,13 @@ function SettingsSection({ logAction }: { logAction: any }) {
     { key: "feature_registration",  label: "التسجيل",         desc: "السماح بإنشاء حسابات جديدة",            icon: UserCheck },
     { key: "feature_ads",           label: "الإعلانات",        desc: "عرض ونشر الإعلانات على المنصة",        icon: Megaphone },
     { key: "feature_campaigns",     label: "الحملات الإعلانية", desc: "إنشاء وتشغيل الحملات المدفوعة",      icon: BarChart2 },
+    { key: "boost_enabled",         label: "تعزيز الإعلانات 🚀", desc: "السماح لأصحاب الإعلانات بتعزيز إعلاناتهم (مرة كل 30 يوم)", icon: Zap },
   ];
 
   const numFields = [
     { key: "cpm_rate_egp",            label: "سعر الألف مشاهدة (CPM)",       suffix: "ج.م",         default: "15",   group: "الأسعار" },
     { key: "publisher_rev_share",     label: "نسبة الناشر من الإعلانات",    suffix: "مثال: 0.60",  default: "0.60", group: "الأسعار" },
+    { key: "boost_price_egp",         label: "سعر تعزيز الإعلان 🚀",         suffix: "ج.م (0 = مجاني)", default: "0", group: "الأسعار" },
     { key: "min_withdrawal_egp",      label: "الحد الأدنى للسحب",            suffix: "ج.م",         default: "50",   group: "المحفظة" },
     { key: "ai_free_credits",         label: "رصيد AI المجاني (يوزر جديد)",  suffix: "رصيد",        default: "3",    group: "الذكاء الاصطناعي" },
     { key: "ai_price_per_credit_egp", label: "سعر رصيد AI الإضافي",          suffix: "ج.م/رصيد",   default: "5",    group: "الذكاء الاصطناعي" },
