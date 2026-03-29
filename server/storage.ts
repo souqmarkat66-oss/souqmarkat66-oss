@@ -349,23 +349,12 @@ export class DatabaseStorage implements IStorage {
       const ch = await this.getChannel(channelId);
       if (ch) {
         await db.update(channels).set({ earningsEGP: sql`${channels.earningsEGP} + ${publisherShareEGP}` }).where(eq(channels.id, channelId));
-        await db.insert(revenueTransactions).values({
-          userId: ch.userId,
-          type: 'earning',
-          amountEGP: publisherShareEGP,
-          description: `إيراد إعلان - حملة #${campaignId}`,
-          campaignId,
-          channelId,
-        });
+        await db.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id, channel_id)
+          VALUES (${ch.userId}, 'earning', ${publisherShareEGP}, ${publisherShareEGP}, ${'إيراد إعلان - حملة #' + campaignId}, ${campaignId}, ${channelId})`);
       }
     }
-    await db.insert(revenueTransactions).values({
-      userId: campaign.advertiserId,
-      type: 'spending',
-      amountEGP: revenueEGP,
-      description: `تكلفة مشاهدة - حملة ${campaign.name}`,
-      campaignId,
-    });
+    await db.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id)
+      VALUES (${campaign.advertiserId}, 'spending', ${revenueEGP}, ${revenueEGP}, ${'تكلفة مشاهدة - حملة ' + campaign.name}, ${campaignId})`);
     // تحقق من نسبة الميزانية المستهلكة
     const budget = campaign.budgetEGP || 0;
     if (budget > 0) {
@@ -394,24 +383,13 @@ export class DatabaseStorage implements IStorage {
         await db.update(channels).set({
           earningsEGP: sql`${channels.earningsEGP} + ${publisherShareEGP}`
         }).where(eq(channels.id, channelId));
-        await db.insert(revenueTransactions).values({
-          userId: ch.userId,
-          type: 'earning',
-          amountEGP: publisherShareEGP,
-          description: `إيراد نقرة - حملة #${campaignId}`,
-          campaignId,
-          channelId,
-        });
+        await db.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id, channel_id)
+          VALUES (${ch.userId}, 'earning', ${publisherShareEGP}, ${publisherShareEGP}, ${'إيراد نقرة - حملة #' + campaignId}, ${campaignId}, ${channelId})`);
       }
     }
     // خصم من المعلن
-    await db.insert(revenueTransactions).values({
-      userId: campaign.advertiserId,
-      type: 'spending',
-      amountEGP: cpcEGP,
-      description: `تكلفة نقرة - حملة ${campaign.name}`,
-      campaignId,
-    });
+    await db.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id)
+      VALUES (${campaign.advertiserId}, 'spending', ${cpcEGP}, ${cpcEGP}, ${'تكلفة نقرة - حملة ' + campaign.name}, ${campaignId})`);
     // تحقق من نسبة الميزانية
     const newSpent = (campaign.spentEGP || 0) + cpcEGP;
     const budget = campaign.budgetEGP || 0;
