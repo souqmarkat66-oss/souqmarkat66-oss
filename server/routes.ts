@@ -20,9 +20,11 @@ import express from "express";
 
 // Admin user ID
 const ADMIN_USER_ID = "54219806";
+const ADMIN_EMAIL   = "souqmarkat66@gmail.com";
 
 function isAdminUser(req: any): boolean {
-  return req.user?.claims?.sub === ADMIN_USER_ID;
+  return req.user?.claims?.sub === ADMIN_USER_ID ||
+         req.user?.claims?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 }
 
 async function requireAdmin(req: any, res: any, next: any) {

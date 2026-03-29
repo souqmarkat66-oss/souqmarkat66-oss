@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 
 const ADMIN_ID = "54219806";
+const ADMIN_EMAIL = "souqmarkat66@gmail.com";
 
 // ── Nav items ─────────────────────────────────────────────────
 const NAV = [
@@ -87,7 +88,7 @@ export default function AdminPanel() {
   const [section, setSection] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  const isAdmin = user?.id === ADMIN_ID;
+  const isAdmin = user?.id === ADMIN_ID || user?.email === ADMIN_EMAIL;
 
   // Log admin action helper
   const logAction = useCallback(async (action: string, target: string, details = "") => {

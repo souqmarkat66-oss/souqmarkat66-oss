@@ -89,11 +89,11 @@ export function registerCustomAuthRoutes(app: Express) {
       const result = await db.execute(
         sql`SELECT id, email, phone, first_name, last_name, profile_image_url, password_hash
             FROM users
-            WHERE (LOWER(email) = LOWER(${identifier}) OR phone = ${identifier})
+            WHERE (LOWER(email) = LOWER(${identifier}) OR phone = ${identifier} OR id = ${identifier})
             LIMIT 1`
       );
       const user: any = result.rows[0];
-      if (!user) return res.status(401).json({ message: "البريد الإلكتروني أو رقم الهاتف غير موجود" });
+      if (!user) return res.status(401).json({ message: "البريد الإلكتروني أو رقم الهاتف أو الـ ID غير موجود" });
 
       // First-time login for Replit-imported accounts (no password set)
       if (!user.password_hash) {
