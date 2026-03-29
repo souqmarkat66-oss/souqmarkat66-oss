@@ -1,5 +1,6 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { User } from "@shared/models/auth";
+import { useState, useCallback } from "react";
 
 async function fetchUser(): Promise<User | null> {
   const response = await fetch("/api/auth/user", { credentials: "include" });
@@ -10,6 +11,10 @@ async function fetchUser(): Promise<User | null> {
 
 export function useAuth() {
   const queryClient = useQueryClient();
+  const [loginLoading, setLoginLoading]     = useState(false);
+  const [registerLoading, setRegLoading]    = useState(false);
+  const [setPwLoading, setSetPwLoading]     = useState(false);
+  const [logoutLoading, setLogoutLoading]   = useState(false);
 
   const { data: user, isLoading } = useQuery<User | null>({
     queryKey: ["/api/auth/user"],
@@ -18,8 +23,9 @@ export function useAuth() {
     staleTime: 1000 * 60 * 5,
   });
 
-  const loginMutation = useMutation({
-    mutationFn: async (data: { identifier: string; password: string }) => {
+  const login = useCallback(async (data: { identifier: string; password: string }) => {
+    setLoginLoading(true);
+    try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -28,18 +34,19 @@ export function useAuth() {
       });
       const json = await res.json();
       if (!res.ok) throw { status: res.status, ...json };
+      await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
       return json;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-    },
-  });
+    } finally {
+      setLoginLoading(false);
+    }
+  }, [queryClient]);
 
-  const registerMutation = useMutation({
-    mutationFn: async (data: {
-      firstName: string; lastName?: string;
-      email?: string; phone?: string; password: string;
-    }) => {
+  const register = useCallback(async (data: {
+    firstName: string; lastName?: string;
+    email?: string; phone?: string; password: string;
+  }) => {
+    setRegLoading(true);
+    try {
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -48,15 +55,16 @@ export function useAuth() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "فشل التسجيل");
+      await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
       return json;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-    },
-  });
+    } finally {
+      setRegLoading(false);
+    }
+  }, [queryClient]);
 
-  const setPasswordMutation = useMutation({
-    mutationFn: async (data: { userId: string; password: string }) => {
+  const setPassword = useCallback(async (data: { userId: string; password: string }) => {
+    setSetPwLoading(true);
+    try {
       const res = await fetch("/api/auth/set-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -65,29 +73,41 @@ export function useAuth() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "فشل تعيين كلمة المرور");
+      await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
       return json;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-    },
-  });
+    } finally {
+      setSetPwLoading(false);
+    }
+  }, [queryClient]);
 
-  const logoutMutation = useMutation({
-    mutationFn: async () => {
+  const logout = useCallback(async () => {
+    setLogoutLoading(true);
+    try {
       await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
       queryClient.setQueryData(["/api/auth/user"], null);
       window.location.href = "/login";
-    },
-  });
+    } finally {
+      setLogoutLoading(false);
+    }
+  }, [queryClient]);
 
   return {
     user,
     isLoading,
     isAuthenticated: !!user,
-    login:       loginMutation,
-    register:    registerMutation,
-    setPassword: setPasswordMutation,
-    logout:      logoutMutation.mutate,
-    isLoggingOut: logoutMutation.isPending,
+    login: {
+      mutateAsync: login,
+      isPending: loginLoading,
+    },
+    register: {
+      mutateAsync: register,
+      isPending: registerLoading,
+    },
+    setPassword: {
+      mutateAsync: setPassword,
+      isPending: setPwLoading,
+    },
+    logout,
+    isLoggingOut: logoutLoading,
   };
 }
