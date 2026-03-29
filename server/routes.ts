@@ -216,13 +216,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ success: true });
   });
 
+  // Auto-generate PIN on first access
+  app.get("/api/admin/pin/init", isAuthenticated, requireAdmin, async (_req, res) => {
+    const { createHash } = await import("crypto");
+    const row = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'admin_pin' LIMIT 1`);
+    const stored = (row.rows[0] as any)?.value;
+    if (stored) return res.json({ generated: false }); // already set
+    // Generate random 6-digit PIN
+    const pin = String(Math.floor(100000 + Math.random() * 900000));
+    const hashed = createHash("sha256").update(pin).digest("hex");
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('admin_pin', ${hashed}) ON CONFLICT (key) DO UPDATE SET value = ${hashed}`);
+    res.json({ generated: true, pin });
+  });
+
   app.post("/api/admin/pin/verify", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { pin } = req.body;
     const { createHash } = await import("crypto");
     const hashed = createHash("sha256").update(pin || "").digest("hex");
     const row = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'admin_pin' LIMIT 1`);
     const stored = (row.rows[0] as any)?.value;
-    if (!stored) return res.json({ valid: true, noPinSet: true }); // no pin yet → allow
+    if (!stored) return res.json({ valid: false, noPinSet: true });
     res.json({ valid: hashed === stored });
   });
 
