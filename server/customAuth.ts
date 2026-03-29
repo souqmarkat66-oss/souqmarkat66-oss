@@ -42,7 +42,7 @@ export function isAuthenticated(req: Request, res: Response, next: NextFunction)
 // ── Ensure columns exist ──────────────────────────────────────────
 async function ensureColumns() {
   await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
-  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20) UNIQUE`);
+  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)`);
 }
 
 // ── Register custom auth routes ───────────────────────────────────
