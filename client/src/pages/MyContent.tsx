@@ -1,5 +1,5 @@
 import { useAuth } from "@/hooks/use-auth";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -8,14 +8,21 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AdCard } from "@/components/AdCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   PlusCircle, Video, Image, Play, Eye, Heart, Trash2, Edit, Pencil,
-  LayoutGrid, Radio, User, LogIn, MessageSquare, RefreshCw, Clock, Bookmark
+  LayoutGrid, Radio, User, LogIn, MessageSquare, RefreshCw, Clock, Bookmark, Zap, Loader2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { EditAdDialog } from "@/components/EditAdDialog";
 import { EditReelDialog } from "@/components/EditReelDialog";
+
+const BOOST_PAYMENTS = [
+  { label: "فودافون كاش", number: "01098553911", color: "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900 text-red-700 dark:text-red-400", emoji: "📱" },
+  { label: "اتصالات e& كاش", number: "01126665741", color: "bg-orange-50 dark:bg-orange-950/20 border-orange-200 dark:border-orange-900 text-orange-700 dark:text-orange-400", emoji: "📲" },
+  { label: "InstaPay", number: "01285558567", color: "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900 text-blue-700 dark:text-blue-400", emoji: "💳" },
+];
 
 export default function MyContent() {
   const { user, isLoading: authLoading } = useAuth();
@@ -52,6 +59,51 @@ function AuthenticatedContent({ user }: { user: any }) {
   const qc = useQueryClient();
   const [editingAd, setEditingAd] = useState<any | null>(null);
   const [editingReel, setEditingReel] = useState<any | null>(null);
+
+  // ── Boost state ──────────────────────────────────────────────
+  const [boostSettings, setBoostSettings] = useState<{ enabled: boolean; price: number } | null>(null);
+  const [boostingId, setBoostingId]       = useState<number | null>(null);
+  const [boostedIds, setBoostedIds]       = useState<Set<number>>(new Set());
+  const [boostPayDialog, setBoostPayDialog] = useState<{ adId: number; msg: string } | null>(null);
+  const [boostPayRef, setBoostPayRef]     = useState("");
+
+  useEffect(() => {
+    fetch("/api/boost/settings").then(r => r.json()).then(setBoostSettings).catch(() => {});
+  }, []);
+
+  const handleBoost = async (adId: number, paymentRef?: string) => {
+    setBoostingId(adId);
+    try {
+      const body = paymentRef ? JSON.stringify({ payment_ref: paymentRef }) : undefined;
+      const res = await fetch(`/api/ads/${adId}/boost-notify`, {
+        method: "POST",
+        credentials: "include",
+        headers: body ? { "Content-Type": "application/json" } : {},
+        body,
+      });
+      const data = await res.json();
+      if (res.status === 402 && data.requiresPayment) {
+        setBoostPayRef("");
+        setBoostPayDialog({ adId, msg: data.message });
+      } else if (res.status === 429) {
+        toast({ variant: "destructive", title: "⏳ حد التعزيز", description: data.message });
+      } else if (res.ok) {
+        setBoostedIds(prev => new Set(prev).add(adId));
+        setBoostPayDialog(null);
+        setBoostPayRef("");
+        toast({
+          title: "🚀 تم تعزيز الإعلان!",
+          description: data.notifiedCount > 0
+            ? `وصل إشعار لـ ${data.notifiedCount} مستخدم — ستزيد مشاهداتك 📈`
+            : "سيصل إشعار للمهتمين بالفئة",
+        });
+      } else {
+        toast({ variant: "destructive", title: data.message || "فشل التعزيز" });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "خطأ في الاتصال" });
+    } finally { setBoostingId(null); }
+  };
 
   const { data: allAds = [], isLoading: adsLoading } = useQuery<any[]>({
     queryKey: ["/api/ads"],
@@ -211,7 +263,7 @@ function AuthenticatedContent({ user }: { user: any }) {
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <Badge variant={ad.status === "active" ? "default" : "secondary"} className="text-[10px] h-5">
                         {ad.status === "active" ? "✅ نشط" : ad.status}
                       </Badge>
@@ -224,6 +276,26 @@ function AuthenticatedContent({ user }: { user: any }) {
                       >
                         <RefreshCw className="w-2.5 h-2.5" /> تجديد
                       </button>
+                      {boostSettings?.enabled !== false && (
+                        <button
+                          onClick={() => handleBoost(ad.id)}
+                          disabled={boostingId === ad.id || boostedIds.has(ad.id)}
+                          className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
+                            boostedIds.has(ad.id)
+                              ? "bg-green-500/10 border-green-300 text-green-600"
+                              : "bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 text-orange-600 hover:bg-orange-100"
+                          } disabled:opacity-60`}
+                          title={boostSettings?.price ? `تعزيز الإعلان (${boostSettings.price} ج.م للتعزيز الإضافي)` : "تعزيز الإعلان مجاناً"}
+                          data-testid={`btn-boost-ad-${ad.id}`}
+                        >
+                          {boostingId === ad.id
+                            ? <><Loader2 className="w-2.5 h-2.5 animate-spin" /> جارٍ...</>
+                            : boostedIds.has(ad.id)
+                            ? <>✓ عُزِّز</>
+                            : <><Zap className="w-2.5 h-2.5" /> عزّز 🚀</>
+                          }
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -413,6 +485,56 @@ function AuthenticatedContent({ user }: { user: any }) {
           onClose={() => setEditingReel(null)}
         />
       )}
+
+      {/* ── 🚀 Boost Payment Dialog ── */}
+      <Dialog open={!!boostPayDialog} onOpenChange={open => { if (!open) setBoostPayDialog(null); }}>
+        <DialogContent dir="rtl" className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <Zap className="w-5 h-5 text-orange-500" /> تعزيز إضافي مدفوع
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <p className="text-sm text-muted-foreground">{boostPayDialog?.msg}</p>
+            <div className="bg-orange-50 dark:bg-orange-950/20 rounded-xl p-3 text-center border border-orange-200 dark:border-orange-800">
+              <p className="text-2xl font-black text-orange-600">{boostSettings?.price} ج.م</p>
+              <p className="text-xs text-muted-foreground mt-1">تعزيز فوري — إشعار لآلاف المستخدمين 📣</p>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground">ادفع عبر:</p>
+              {BOOST_PAYMENTS.map(pm => (
+                <div key={pm.label} className={`flex items-center gap-2 rounded-lg px-3 py-2 border text-xs font-medium ${pm.color}`}>
+                  <span>{pm.emoji}</span>
+                  <span>{pm.label}</span>
+                  <span className="ml-auto font-mono font-bold">{pm.number}</span>
+                </div>
+              ))}
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">أدخل رقم العملية بعد الدفع:</p>
+              <input
+                type="text"
+                value={boostPayRef}
+                onChange={e => setBoostPayRef(e.target.value)}
+                placeholder="مثال: 12345678"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-background"
+                data-testid="input-boost-pay-ref-mycontent"
+              />
+            </div>
+            <button
+              disabled={!boostPayRef.trim() || boostingId === boostPayDialog?.adId}
+              onClick={() => boostPayDialog && handleBoost(boostPayDialog.adId, boostPayRef.trim())}
+              className="w-full py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              data-testid="btn-confirm-boost-payment-mycontent"
+            >
+              {boostingId === boostPayDialog?.adId
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> جارٍ...</>
+                : <><Zap className="w-4 h-4" /> تأكيد الدفع وتعزيز الإعلان</>
+              }
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
