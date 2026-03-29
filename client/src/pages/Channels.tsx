@@ -116,20 +116,40 @@ export default function Channels() {
                       <div className="w-14 h-14 rounded-full border-4 border-background bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white text-xl font-bold shadow-lg shrink-0">
                         {ch.avatarUrl ? <img src={ch.avatarUrl} className="w-full h-full rounded-full object-cover" alt="" /> : ch.name[0]}
                       </div>
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1">
                           <h3 className="font-bold truncate">{ch.name}</h3>
                           {ch.isVerified && <CheckCircle className="w-4 h-4 text-primary shrink-0" />}
                         </div>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Users className="w-3 h-3" />
-                          <span>{(ch.subscriberCount || 0).toLocaleString()} مشترك</span>
-                        </div>
+                        {ch.description && (
+                          <p className="text-xs text-muted-foreground line-clamp-1">{ch.description}</p>
+                        )}
                       </div>
                     </div>
-                    {ch.description && (
-                      <p className="text-sm text-muted-foreground line-clamp-2">{ch.description}</p>
-                    )}
+
+                    {/* ── Stats Row ── */}
+                    <div className="flex items-center gap-2 mt-1 border-t border-border/40 pt-3">
+                      <div className="flex-1 flex flex-col items-center gap-0.5 bg-primary/5 rounded-xl py-2">
+                        <span className="text-base font-extrabold text-primary leading-none">
+                          {(ch.subscriberCount || 0).toLocaleString()}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                          <Users className="w-2.5 h-2.5" /> مشترك
+                        </span>
+                      </div>
+                      <div className="flex-1 flex flex-col items-center gap-0.5 bg-muted/50 rounded-xl py-2">
+                        <span className="text-base font-extrabold leading-none">
+                          {(ch.viewsCount || 0).toLocaleString()}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">مشاهدة</span>
+                      </div>
+                      {ch.isMonetized && (
+                        <div className="flex-1 flex flex-col items-center gap-0.5 bg-green-500/10 rounded-xl py-2">
+                          <span className="text-base font-extrabold text-green-600 leading-none">✓</span>
+                          <span className="text-[10px] text-green-600">ممنتج</span>
+                        </div>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
               </Link>
