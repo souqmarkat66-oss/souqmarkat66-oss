@@ -95,16 +95,34 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     cors: { origin: "*", methods: ["GET", "POST"] },
   });
 
-  const streamRooms: Map<string, { broadcasterId: string | null; viewers: Set<string> }> = new Map();
+  const streamRooms: Map<string, {
+    broadcasterId: string | null;
+    cohostId: string | null;
+    viewers: Set<string>;
+    peakViewers: number;
+    startedAt: number;
+    totalLikes: number;
+    totalComments: number;
+  }> = new Map();
+
+  function getOrCreateRoom(streamId: string) {
+    if (!streamRooms.has(streamId)) {
+      streamRooms.set(streamId, { broadcasterId: null, cohostId: null, viewers: new Set(), peakViewers: 0, startedAt: Date.now(), totalLikes: 0, totalComments: 0 });
+    }
+    return streamRooms.get(streamId)!;
+  }
 
   io.on("connection", (socket) => {
     socket.on("join-stream", (streamId: string) => {
       socket.join(`stream:${streamId}`);
-      if (!streamRooms.has(streamId)) streamRooms.set(streamId, { broadcasterId: null, viewers: new Set() });
-      streamRooms.get(streamId)!.viewers.add(socket.id);
-      const count = streamRooms.get(streamId)!.viewers.size;
+      const room = getOrCreateRoom(streamId);
+      room.viewers.add(socket.id);
+      const count = room.viewers.size;
+      if (count > room.peakViewers) room.peakViewers = count;
       io.to(`stream:${streamId}`).emit("viewer-count", count);
       storage.updateLiveStream(Number(streamId), { viewerCount: count }).catch(() => {});
+      // Inform new viewer if co-host is active
+      if (room.cohostId) socket.emit("cohost-active", room.cohostId);
     });
 
     socket.on("leave-stream", (streamId: string) => {
@@ -115,6 +133,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
 
     socket.on("chat-message", (data: { streamId: string; userId: string; userName: string; message: string; isVoice?: boolean; voiceUrl?: string; isOwner?: boolean }) => {
+      const room = streamRooms.get(data.streamId);
+      if (room) room.totalComments++;
       const msg = { ...data, timestamp: new Date().toISOString(), id: Date.now() };
       io.to(`stream:${data.streamId}`).emit("chat-message", msg);
       storage.createChatMessage({
@@ -128,22 +148,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
 
     socket.on("stream-like", (streamId: string) => {
+      const room = streamRooms.get(streamId);
+      if (room) room.totalLikes++;
       io.to(`stream:${streamId}`).emit("stream-like");
     });
 
-    // WebRTC Signaling
+    // ── WebRTC Signaling (main broadcaster → viewers) ──
     socket.on("broadcaster", (streamId: string) => {
       socket.join(`stream:${streamId}`);
-      if (!streamRooms.has(streamId)) streamRooms.set(streamId, { broadcasterId: socket.id, viewers: new Set() });
-      else streamRooms.get(streamId)!.broadcasterId = socket.id;
+      const room = getOrCreateRoom(streamId);
+      room.broadcasterId = socket.id;
+      room.startedAt = Date.now();
       socket.to(`stream:${streamId}`).emit("broadcaster");
     });
 
     socket.on("watcher", (streamId: string) => {
       socket.join(`stream:${streamId}`);
-      if (!streamRooms.has(streamId)) streamRooms.set(streamId, { broadcasterId: null, viewers: new Set() });
-      streamRooms.get(streamId)!.viewers.add(socket.id);
-      const broadcasterId = streamRooms.get(streamId)!.broadcasterId;
+      const room = getOrCreateRoom(streamId);
+      room.viewers.add(socket.id);
+      const broadcasterId = room.broadcasterId;
       if (broadcasterId) socket.to(broadcasterId).emit("watcher", socket.id);
     });
 
@@ -151,11 +174,56 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socket.on("answer", (id: string, message: any) => socket.to(id).emit("answer", socket.id, message));
     socket.on("candidate", (id: string, message: any) => socket.to(id).emit("candidate", socket.id, message));
 
+    // ── Co-host Signaling ──
+    socket.on("request-cohost", (data: { streamId: string; userId: string; userName: string }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room?.broadcasterId || room.cohostId) return; // already has co-host
+      socket.to(room.broadcasterId).emit("cohost-request", { socketId: socket.id, userId: data.userId, userName: data.userName });
+    });
+
+    socket.on("accept-cohost", (data: { streamId: string; guestSocketId: string }) => {
+      const room = streamRooms.get(data.streamId);
+      if (room) room.cohostId = data.guestSocketId;
+      io.to(data.guestSocketId).emit("cohost-accepted", { broadcasterId: socket.id });
+    });
+
+    socket.on("reject-cohost", (data: { guestSocketId: string }) => {
+      io.to(data.guestSocketId).emit("cohost-rejected");
+    });
+
+    socket.on("cohost-broadcaster", (streamId: string) => {
+      const room = streamRooms.get(streamId);
+      if (room) room.cohostId = socket.id;
+      // Notify all viewers that co-host is live
+      socket.to(`stream:${streamId}`).emit("cohost-active", socket.id);
+    });
+
+    socket.on("cohost-watcher", (data: { cohostId: string }) => {
+      socket.to(data.cohostId).emit("cohost-watcher", socket.id);
+    });
+
+    // Co-host WebRTC signaling (separate from main broadcaster signaling)
+    socket.on("cohost-offer", (targetId: string, message: any) => socket.to(targetId).emit("cohost-offer", socket.id, message));
+    socket.on("cohost-answer", (targetId: string, message: any) => socket.to(targetId).emit("cohost-answer", socket.id, message));
+    socket.on("cohost-candidate", (targetId: string, message: any) => socket.to(targetId).emit("cohost-candidate", socket.id, message));
+
+    socket.on("cohost-leave", (streamId: string) => {
+      const room = streamRooms.get(streamId);
+      if (room) room.cohostId = null;
+      io.to(`stream:${streamId}`).emit("cohost-left");
+    });
+
     socket.on("disconnect", () => {
       streamRooms.forEach((room, streamId) => {
         if (room.broadcasterId === socket.id) {
+          const durationSec = Math.round((Date.now() - room.startedAt) / 1000);
           room.broadcasterId = null;
           io.to(`stream:${streamId}`).emit("broadcaster-disconnected");
+          // Send summary to broadcaster (they may have already disconnected, that's ok)
+        }
+        if (room.cohostId === socket.id) {
+          room.cohostId = null;
+          io.to(`stream:${streamId}`).emit("cohost-left");
         }
         room.viewers.delete(socket.id);
       });

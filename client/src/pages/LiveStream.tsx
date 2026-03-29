@@ -10,7 +10,8 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Radio, Users, Heart, Send, MicOff, VideoOff, PhoneOff,
   Mic, Video, Share2, Eye, MessageCircle, Monitor, Camera,
-  Settings, Wifi, WifiOff, Maximize, RotateCcw, Volume2, X
+  Settings, Wifi, WifiOff, Maximize, RotateCcw, Volume2, X,
+  UserPlus, UserCheck, UserX, Trophy, Clock, TrendingUp
 } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import type { LiveStream as LiveStreamType } from "@shared/schema";
@@ -89,6 +90,24 @@ export default function LiveStream() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const statsIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // ── Co-host states ──────────────────────────────────────────
+  const coHostVideoRef    = useRef<HTMLVideoElement>(null);
+  const coHostPCRef       = useRef<RTCPeerConnection | null>(null);
+  const coHostStreamRef   = useRef<MediaStream | null>(null);
+  const [coHostActive, setCoHostActive]         = useState(false);
+  const [coHostName, setCoHostName]             = useState("");
+  const [isCoHost, setIsCoHost]                 = useState(false);
+  const [cohostRequest, setCohostRequest]       = useState<{ socketId: string; userName: string } | null>(null);
+  const [requestingJoin, setRequestingJoin]     = useState(false);
+  const [coHostMuted, setCoHostMuted]           = useState(false);
+  const [coHostVideoOff, setCoHostVideoOff]     = useState(false);
+  const streamStartRef = useRef<number>(Date.now());
+  const peakViewersRef = useRef<number>(0);
+
+  // ── Post-stream summary ─────────────────────────────────────
+  const [showSummary, setShowSummary] = useState(false);
+  const [summary, setSummary] = useState({ duration: 0, peakViewers: 0, totalLikes: 0, totalComments: 0 });
+
   // ─── Voice Chat Recording (Press & Hold) ───────────────────
   const [chatIsRecording, setChatIsRecording] = useState(false);
   const [chatIsUploading, setChatIsUploading] = useState(false);
@@ -113,7 +132,18 @@ export default function LiveStream() {
 
   const endStreamMutation = useMutation({
     mutationFn: () => fetch(`/api/streams/${id}/end`, { method: "POST", credentials: "include" }).then(r => r.json()),
-    onSuccess: () => { toast({ title: "انتهى البث" }); window.location.href = "/channels"; },
+    onSuccess: () => {
+      const durationSec = Math.round((Date.now() - streamStartRef.current) / 1000);
+      setSummary({
+        duration: durationSec,
+        peakViewers: peakViewersRef.current,
+        totalLikes: likesCount,
+        totalComments: messages.length,
+      });
+      setShowSummary(true);
+      // Stop co-host if active
+      if (isCoHost) socketRef.current?.emit("cohost-leave", id);
+    },
   });
 
   useEffect(() => {
@@ -331,14 +361,112 @@ export default function LiveStream() {
     });
   }, [id, createPeer]);
 
+  // ── Co-host helper: connect to co-host as watcher ───────────
+  const connectToCoHost = useCallback((socket: Socket, cohostSocketId: string) => {
+    if (coHostPCRef.current) { coHostPCRef.current.close(); coHostPCRef.current = null; }
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    coHostPCRef.current = pc;
+    pc.ontrack = (e) => {
+      if (coHostVideoRef.current && e.streams[0]) {
+        coHostVideoRef.current.srcObject = e.streams[0];
+        coHostVideoRef.current.muted = false;
+        coHostVideoRef.current.play().catch(() => { if (coHostVideoRef.current) coHostVideoRef.current.muted = true; coHostVideoRef.current?.play().catch(() => {}); });
+        setCoHostActive(true);
+      }
+    };
+    pc.onicecandidate = (e) => {
+      if (e.candidate) socket.emit("cohost-candidate", cohostSocketId, e.candidate);
+    };
+    socket.emit("cohost-watcher", { cohostId: cohostSocketId });
+    socket.on("cohost-offer", async (_: string, desc: RTCSessionDescriptionInit) => {
+      await pc.setRemoteDescription(new RTCSessionDescription(desc));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit("cohost-answer", cohostSocketId, pc.localDescription);
+    });
+    socket.on("cohost-candidate", async (_: string, candidate: RTCIceCandidateInit) => {
+      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
+    });
+  }, []);
+
   useEffect(() => {
+    streamStartRef.current = Date.now();
     const socket = io({ path: "/socket.io", transports: ["websocket"], upgrade: false });
     socketRef.current = socket;
 
     socket.emit("join-stream", id);
-    socket.on("viewer-count", (count: number) => setViewerCount(count));
+    socket.on("viewer-count", (count: number) => {
+      setViewerCount(count);
+      if (count > peakViewersRef.current) peakViewersRef.current = count;
+    });
     socket.on("chat-message", (msg: ChatMsg) => setMessages(prev => [...prev, msg]));
     socket.on("stream-like", () => setLikesCount(prev => prev + 1));
+
+    // ── Co-host events for broadcaster ──
+    socket.on("cohost-request", (data: { socketId: string; userName: string }) => {
+      setCohostRequest(data);
+      toast({ title: `👤 ${data.userName} يطلب المشاركة في البث`, description: "يمكنك قبول أو رفض الطلب" });
+    });
+
+    // ── Co-host events for the guest (viewer who requested) ──
+    socket.on("cohost-accepted", async (data: { broadcasterId: string }) => {
+      setIsCoHost(true);
+      setRequestingJoin(false);
+      toast({ title: "✅ تم قبول طلبك! ستبدأ الكاميرا الآن" });
+      try {
+        const mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: HIGH_QUALITY_AUDIO,
+        });
+        coHostStreamRef.current = mediaStream;
+        if (coHostVideoRef.current) {
+          coHostVideoRef.current.srcObject = mediaStream;
+          coHostVideoRef.current.muted = true;
+          coHostVideoRef.current.play().catch(() => {});
+        }
+        setCoHostActive(true);
+        socket.emit("cohost-broadcaster", id);
+        // Broadcast co-host stream to all watchers
+        socket.on("cohost-watcher", async (watcherId: string) => {
+          const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+          peersRef.current.set(`cohost-${watcherId}`, pc);
+          mediaStream.getTracks().forEach(track => pc.addTrack(track, mediaStream));
+          pc.onicecandidate = (e) => { if (e.candidate) socket.emit("cohost-candidate", watcherId, e.candidate); };
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit("cohost-offer", watcherId, pc.localDescription);
+          socket.on("cohost-answer", async (wid: string, desc: RTCSessionDescriptionInit) => {
+            if (wid === watcherId) await pc.setRemoteDescription(new RTCSessionDescription(desc)).catch(() => {});
+          });
+        });
+      } catch (err: any) {
+        toast({ variant: "destructive", title: "تعذّر فتح الكاميرا", description: err.message });
+        setIsCoHost(false);
+      }
+    });
+
+    socket.on("cohost-rejected", () => {
+      setRequestingJoin(false);
+      toast({ variant: "destructive", title: "❌ رُفض طلب المشاركة" });
+    });
+
+    // ── Co-host became active (for all viewers + broadcaster) ──
+    socket.on("cohost-active", (cohostSocketId: string) => {
+      setCoHostActive(true);
+      if (!isCoHost) connectToCoHost(socket, cohostSocketId);
+    });
+
+    socket.on("cohost-left", () => {
+      setCoHostActive(false);
+      setIsCoHost(false);
+      setCohostRequest(null);
+      if (coHostVideoRef.current) coHostVideoRef.current.srcObject = null;
+      coHostPCRef.current?.close();
+      coHostPCRef.current = null;
+      coHostStreamRef.current?.getTracks().forEach(t => t.stop());
+      coHostStreamRef.current = null;
+      toast({ title: "👋 انتهت مشاركة الضيف" });
+    });
 
     if (isBroadcast) {
       setupBroadcaster(socket);
@@ -351,6 +479,8 @@ export default function LiveStream() {
       socket.emit("leave-stream", id);
       socket.disconnect();
       localStreamRef.current?.getTracks().forEach(t => t.stop());
+      coHostStreamRef.current?.getTracks().forEach(t => t.stop());
+      coHostPCRef.current?.close();
       peersRef.current.forEach(pc => pc.close());
       peersRef.current.clear();
     };
@@ -499,13 +629,100 @@ export default function LiveStream() {
 
   if (isLoading) return <div className="container py-12"><Skeleton className="aspect-video rounded-3xl" /></div>;
 
+  // ── Format duration ──────────────────────────────────────────
+  const fmtDuration = (sec: number) => {
+    const h = Math.floor(sec / 3600); const m = Math.floor((sec % 3600) / 60); const s = sec % 60;
+    return h > 0 ? `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}` : `${m}:${String(s).padStart(2,"0")}`;
+  };
+
   return (
     <div className="container px-4 py-6" dir="rtl">
+
+      {/* ── Post-Stream Summary Modal ── */}
+      {showSummary && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur z-50 flex items-center justify-center p-4">
+          <div className="bg-card rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border" dir="rtl">
+            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center mx-auto mb-4 shadow-lg">
+              <Trophy className="w-10 h-10 text-white" />
+            </div>
+            <h2 className="text-2xl font-extrabold mb-1">انتهى البث 🎉</h2>
+            <p className="text-muted-foreground text-sm mb-6">إليك ملخص بث "{stream?.title}"</p>
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              <div className="bg-muted/50 rounded-2xl p-4">
+                <Clock className="w-5 h-5 text-blue-500 mx-auto mb-1" />
+                <div className="text-xl font-bold">{fmtDuration(summary.duration)}</div>
+                <div className="text-xs text-muted-foreground">مدة البث</div>
+              </div>
+              <div className="bg-muted/50 rounded-2xl p-4">
+                <Eye className="w-5 h-5 text-green-500 mx-auto mb-1" />
+                <div className="text-xl font-bold">{summary.peakViewers}</div>
+                <div className="text-xs text-muted-foreground">أعلى عدد مشاهدين</div>
+              </div>
+              <div className="bg-muted/50 rounded-2xl p-4">
+                <Heart className="w-5 h-5 text-red-500 mx-auto mb-1" />
+                <div className="text-xl font-bold">{summary.totalLikes}</div>
+                <div className="text-xs text-muted-foreground">إجمالي اللايكات</div>
+              </div>
+              <div className="bg-muted/50 rounded-2xl p-4">
+                <MessageCircle className="w-5 h-5 text-purple-500 mx-auto mb-1" />
+                <div className="text-xl font-bold">{summary.totalComments}</div>
+                <div className="text-xs text-muted-foreground">رسائل الشات</div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={() => { setShowSummary(false); window.location.href = "/channels"; }}>
+                العودة للقنوات
+              </Button>
+              <Button variant="outline" className="flex-1" onClick={() => { setShowSummary(false); window.location.href = "/my-content"; }}>
+                محتواي
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col lg:flex-row gap-6">
 
         {/* ── Video Area ── */}
         <div className="flex-1">
-          <div className="relative rounded-3xl overflow-hidden bg-black shadow-2xl shadow-black/50" style={{ aspectRatio: "16/9" }}>
+          {/* Co-host request popup (for broadcaster) */}
+          {isBroadcast && cohostRequest && (
+            <div className="mb-3 p-4 rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 flex items-center gap-3" dir="rtl">
+              <UserPlus className="w-5 h-5 text-blue-600 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="font-bold text-sm">👤 {cohostRequest.userName} يطلب المشاركة في البث</p>
+                <p className="text-xs text-muted-foreground">سيظهر صوته وصورته جانباً مع البث</p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    socketRef.current?.emit("accept-cohost", { streamId: id, guestSocketId: cohostRequest.socketId });
+                    setCoHostName(cohostRequest.userName);
+                    setCohostRequest(null);
+                    toast({ title: "✅ تم قبول الضيف" });
+                  }}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-green-500 text-white text-xs font-bold hover:bg-green-600 transition"
+                  data-testid="btn-accept-cohost"
+                >
+                  <UserCheck className="w-3.5 h-3.5" /> قبول
+                </button>
+                <button
+                  onClick={() => {
+                    socketRef.current?.emit("reject-cohost", { guestSocketId: cohostRequest.socketId });
+                    setCohostRequest(null);
+                  }}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-red-500 text-white text-xs font-bold hover:bg-red-600 transition"
+                  data-testid="btn-reject-cohost"
+                >
+                  <UserX className="w-3.5 h-3.5" /> رفض
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Dual video area when co-host is active */}
+          <div className={`${coHostActive ? "grid grid-cols-2 gap-2" : ""}`}>
+            <div className="relative rounded-3xl overflow-hidden bg-black shadow-2xl shadow-black/50" style={{ aspectRatio: "16/9" }}>
             <video
               ref={videoRef}
               autoPlay
@@ -676,6 +893,89 @@ export default function LiveStream() {
               );
             })()}
           </div>
+
+          {/* Co-host video (shown when active) */}
+          {coHostActive && (
+            <div className="relative rounded-3xl overflow-hidden bg-black shadow-2xl shadow-black/50" style={{ aspectRatio: "16/9" }}>
+              <video
+                ref={coHostVideoRef}
+                autoPlay
+                playsInline
+                className="w-full h-full object-contain"
+                style={{ backgroundColor: "#000" }}
+              />
+              <div className="absolute top-3 start-3">
+                <Badge className="bg-purple-600 text-white gap-1 px-3 py-1 text-xs font-bold shadow-lg">
+                  <Users className="w-3 h-3" /> {coHostName || "ضيف"}
+                </Badge>
+              </div>
+              {/* Co-host controls (for isCoHost) */}
+              {isCoHost && (
+                <div className="absolute bottom-4 inset-x-0 flex items-center justify-center gap-3">
+                  <button
+                    onClick={() => {
+                      if (coHostStreamRef.current) {
+                        const aTrack = coHostStreamRef.current.getAudioTracks()[0];
+                        if (aTrack) { aTrack.enabled = !aTrack.enabled; setCoHostMuted(!aTrack.enabled); }
+                      }
+                    }}
+                    className={`w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all ${coHostMuted ? "bg-red-500 text-white" : "bg-white/20 backdrop-blur text-white hover:bg-white/30"}`}
+                  >
+                    {coHostMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (coHostStreamRef.current) {
+                        const vTrack = coHostStreamRef.current.getVideoTracks()[0];
+                        if (vTrack) { vTrack.enabled = !vTrack.enabled; setCoHostVideoOff(!vTrack.enabled); }
+                      }
+                    }}
+                    className={`w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all ${coHostVideoOff ? "bg-red-500 text-white" : "bg-white/20 backdrop-blur text-white hover:bg-white/30"}`}
+                  >
+                    {coHostVideoOff ? <VideoOff className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+                  </button>
+                  <button
+                    onClick={() => {
+                      socketRef.current?.emit("cohost-leave", id);
+                      setIsCoHost(false);
+                      setCoHostActive(false);
+                      coHostStreamRef.current?.getTracks().forEach(t => t.stop());
+                      coHostStreamRef.current = null;
+                    }}
+                    className="px-4 h-11 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5 text-xs font-bold shadow-lg transition"
+                    data-testid="btn-leave-cohost"
+                  >
+                    <PhoneOff className="w-3.5 h-3.5" /> مغادرة
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          </div>{/* end grid wrapper */}
+
+          {/* Viewer: Request to join as co-host */}
+          {!isBroadcast && streaming && !isCoHost && !coHostActive && user && (
+            <div className="mt-3 flex justify-center">
+              <button
+                onClick={() => {
+                  if (requestingJoin) return;
+                  setRequestingJoin(true);
+                  socketRef.current?.emit("request-cohost", {
+                    streamId: id,
+                    userId: (user as any).id,
+                    userName: `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مشاهد",
+                  });
+                  toast({ title: "⏳ تم إرسال طلب المشاركة، انتظر موافقة المذيع" });
+                }}
+                disabled={requestingJoin}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-l from-purple-600 to-blue-600 text-white font-bold text-sm shadow-lg hover:opacity-90 transition disabled:opacity-60"
+                data-testid="btn-request-cohost"
+              >
+                <UserPlus className="w-4 h-4" />
+                {requestingJoin ? "جاري انتظار الموافقة..." : "طلب المشاركة في البث"}
+              </button>
+            </div>
+          )}
 
           {/* Stream Info */}
           <div className="mt-4 flex items-start justify-between gap-4 flex-wrap">
