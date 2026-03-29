@@ -800,12 +800,52 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ─── AI FRAUD DETECTION ──────────────────────────────────────
   const BOT_AGENTS = ['bot','spider','crawl','scraper','headless','phantom','selenium','puppeteer','curl','wget','python-requests'];
 
-  async function detectFraud(campaignId: number, ip: string, ua: string, eventType: string): Promise<{ isFraud: boolean; reason: string }> {
+  async function detectFraud(
+    campaignId: number, ip: string, ua: string, eventType: string, userId?: string
+  ): Promise<{ isFraud: boolean; reason: string }> {
+
+    // 1. بوت / كرولر
     const lowerUA = (ua || '').toLowerCase();
     if (BOT_AGENTS.some(b => lowerUA.includes(b))) {
       return { isFraud: true, reason: 'user_agent_bot' };
     }
-    // Rate limit: same IP > 15 events in 5 minutes
+
+    // 2. المعلن لا يستطيع النقر على إعلانه هو (self-click)
+    if (userId) {
+      const campaign = await storage.getAdCampaign(campaignId);
+      if (campaign && campaign.advertiserId === userId) {
+        return { isFraud: true, reason: 'self_click_advertiser' };
+      }
+      // صاحب القناة لا يستطيع النقر على الإعلانات في قناته لكسب إيراد
+      if (eventType === 'click') {
+        const ownerChannel = await storage.getChannelByUserId(userId);
+        if (ownerChannel) {
+          const recentSelf = await db.execute(
+            sql`SELECT COUNT(*) as cnt FROM ad_impressions
+                WHERE campaign_id = ${campaignId} AND user_id = ${userId}
+                AND event_type = 'click' AND created_at > (now() - interval '1 hour')`
+          );
+          const selfClicks = Number((recentSelf.rows[0] as any)?.cnt || 0);
+          if (selfClicks >= 2) {
+            return { isFraud: true, reason: `self_channel_click_flood_${selfClicks}` };
+          }
+        }
+      }
+      // نفس المستخدم شاف نفس الإعلان أكتر من 3 مرات في ساعة
+      if (eventType === 'impression') {
+        const selfImpr = await db.execute(
+          sql`SELECT COUNT(*) as cnt FROM ad_impressions
+              WHERE campaign_id = ${campaignId} AND user_id = ${userId}
+              AND event_type = 'impression' AND created_at > (now() - interval '1 hour')`
+        );
+        const cnt = Number((selfImpr.rows[0] as any)?.cnt || 0);
+        if (cnt >= 5) {
+          return { isFraud: true, reason: `duplicate_impression_${cnt}` };
+        }
+      }
+    }
+
+    // 3. Rate limit: same IP > 15 events in 5 minutes
     const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const countResult = await db.execute(
       sql`SELECT COUNT(*) as cnt FROM ad_impressions 
@@ -816,7 +856,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (cnt >= 15) {
       return { isFraud: true, reason: `rate_limit_${cnt}_events_5min` };
     }
-    // Click-through fraud: >3 clicks from same IP in 10 min
+
+    // 4. Click flood: >3 نقرات من نفس الـ IP في 10 دقائق
     if (eventType === 'click') {
       const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       const clickResult = await db.execute(
@@ -829,17 +870,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return { isFraud: true, reason: `click_flood_${clicks}_clicks_10min` };
       }
     }
+
     return { isFraud: false, reason: '' };
   }
 
-  // Record impression/click
-  app.post("/api/campaigns/:id/impression", async (req, res) => {
-    const { channelId, userId } = req.body;
+  // ── تسجيل مشاهدة ────────────────────────────────────────────
+  app.post("/api/campaigns/:id/impression", async (req: any, res) => {
+    const { channelId } = req.body;
+    // userId من الجلسة إن وُجد، وإلا من الـ body
+    const userId: string | undefined = req.user?.claims?.sub || req.body.userId || undefined;
     const campaignId = Number(req.params.id);
     const ip = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
     const ua = req.headers['user-agent'] || '';
     try {
-      const fraud = await detectFraud(campaignId, ip, ua, 'impression');
+      const fraud = await detectFraud(campaignId, ip, ua, 'impression', userId);
       await db.execute(
         sql`INSERT INTO ad_impressions (campaign_id, channel_id, user_id, ip_address, user_agent, event_type, is_fraud, fraud_reason)
             VALUES (${campaignId}, ${channelId || null}, ${userId || null}, ${ip}, ${ua}, 'impression', ${fraud.isFraud}, ${fraud.reason || null})`
@@ -852,20 +896,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               VALUES (${campaignId}, ${ip}, 'impression', ${fraud.reason})`
         );
       }
-      res.json({ success: true, fraud: fraud.isFraud });
+      res.json({ success: true, fraud: fraud.isFraud, reason: fraud.reason });
     } catch {
       await storage.recordImpression(campaignId, channelId, userId);
       res.json({ success: true });
     }
   });
 
-  app.post("/api/campaigns/:id/click", async (req, res) => {
-    const { channelId, userId } = req.body;
+  // ── تسجيل نقرة ──────────────────────────────────────────────
+  app.post("/api/campaigns/:id/click", async (req: any, res) => {
+    const { channelId } = req.body;
+    const userId: string | undefined = req.user?.claims?.sub || req.body.userId || undefined;
     const campaignId = Number(req.params.id);
     const ip = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
     const ua = req.headers['user-agent'] || '';
     try {
-      const fraud = await detectFraud(campaignId, ip, ua, 'click');
+      const fraud = await detectFraud(campaignId, ip, ua, 'click', userId);
       await db.execute(
         sql`INSERT INTO ad_impressions (campaign_id, channel_id, user_id, ip_address, user_agent, event_type, is_fraud, fraud_reason)
             VALUES (${campaignId}, ${channelId || null}, ${userId || null}, ${ip}, ${ua}, 'click', ${fraud.isFraud}, ${fraud.reason || null})`
@@ -878,7 +924,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               VALUES (${campaignId}, ${ip}, 'click', ${fraud.reason})`
         );
       }
-      res.json({ success: true, fraud: fraud.isFraud });
+      res.json({ success: true, fraud: fraud.isFraud, reason: fraud.reason });
     } catch {
       await storage.recordClick(campaignId, channelId, userId);
       res.json({ success: true });

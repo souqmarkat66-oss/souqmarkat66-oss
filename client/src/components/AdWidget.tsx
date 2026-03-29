@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { X, ExternalLink } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
 interface Campaign {
   id: number;
@@ -12,7 +13,7 @@ interface Campaign {
 
 interface AdWidgetProps {
   variant?: "banner" | "sidebar" | "inline" | "overlay";
-  publisherCode?: string;
+  channelId?: number;
   className?: string;
   dismissible?: boolean;
   refreshInterval?: number;
@@ -20,11 +21,14 @@ interface AdWidgetProps {
 
 export function AdWidget({
   variant = "banner",
-  publisherCode,
+  channelId,
   className = "",
   dismissible = true,
   refreshInterval = 30000,
 }: AdWidgetProps) {
+  const { user } = useAuth();
+  const userId = (user as any)?.id || (user as any)?.claims?.sub || undefined;
+
   const [ad, setAd] = useState<Campaign | null>(null);
   const [visible, setVisible] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -37,13 +41,17 @@ export function AdWidget({
       setAd(data);
       setVisible(true);
       if (data?.id) {
-        fetch(`/api/campaigns/${data.id}/impression`, { method: "POST" }).catch(() => {});
+        fetch(`/api/campaigns/${data.id}/impression`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channelId, userId }),
+        }).catch(() => {});
       }
     } catch {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [channelId, userId]);
 
   useEffect(() => {
     fetchAd();
@@ -53,7 +61,11 @@ export function AdWidget({
 
   const handleClick = () => {
     if (!ad) return;
-    fetch(`/api/campaigns/${ad.id}/click`, { method: "POST" }).catch(() => {});
+    fetch(`/api/campaigns/${ad.id}/click`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channelId, userId }),
+    }).catch(() => {});
     if (ad.targetUrl) window.open(ad.targetUrl, "_blank", "noopener");
   };
 

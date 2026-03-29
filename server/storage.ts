@@ -321,7 +321,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getActiveCampaigns(): Promise<AdCampaign[]> {
-    return db.select().from(adCampaigns).where(eq(adCampaigns.status, 'active'));
+    // نُرجع فقط الحملات التي لم تستنزف ميزانيتها بعد
+    const all = await db.select().from(adCampaigns).where(eq(adCampaigns.status, 'active'));
+    const active: typeof all = [];
+    for (const c of all) {
+      if (c.budgetEGP && c.budgetEGP > 0 && (c.spentEGP || 0) >= c.budgetEGP) {
+        // الميزانية انتهت — أوقف الحملة تلقائياً
+        await db.update(adCampaigns).set({ status: 'paused' }).where(eq(adCampaigns.id, c.id));
+      } else {
+        active.push(c);
+      }
+    }
+    return active;
   }
 
   async recordImpression(campaignId: number, channelId?: number, userId?: string): Promise<void> {
@@ -358,7 +369,40 @@ export class DatabaseStorage implements IStorage {
   }
 
   async recordClick(campaignId: number, channelId?: number, userId?: string): Promise<void> {
-    await db.update(adCampaigns).set({ clicks: sql`${adCampaigns.clicks} + 1` }).where(eq(adCampaigns.id, campaignId));
+    const campaign = await this.getAdCampaign(campaignId);
+    if (!campaign) return;
+    // سعر النقرة = CPM / 20  (افتراضي: 15 EGP CPM → 0.75 EGP للنقرة)
+    const cpcEGP = (campaign.cpmRateEGP || 15) / 20;
+    const publisherShareEGP = cpcEGP * (campaign.publisherRevShare || 0.6);
+    await db.update(adCampaigns).set({
+      clicks: sql`${adCampaigns.clicks} + 1`,
+      spentEGP: sql`${adCampaigns.spentEGP} + ${cpcEGP}`
+    }).where(eq(adCampaigns.id, campaignId));
+    // إيراد صاحب القناة (60%)
+    if (channelId) {
+      const ch = await this.getChannel(channelId);
+      if (ch) {
+        await db.update(channels).set({
+          earningsEGP: sql`${channels.earningsEGP} + ${publisherShareEGP}`
+        }).where(eq(channels.id, channelId));
+        await db.insert(revenueTransactions).values({
+          userId: ch.userId,
+          type: 'earning',
+          amountEGP: publisherShareEGP,
+          description: `إيراد نقرة - حملة #${campaignId}`,
+          campaignId,
+          channelId,
+        });
+      }
+    }
+    // خصم من المعلن
+    await db.insert(revenueTransactions).values({
+      userId: campaign.advertiserId,
+      type: 'spending',
+      amountEGP: cpcEGP,
+      description: `تكلفة نقرة - حملة ${campaign.name}`,
+      campaignId,
+    });
   }
 
   // ─── REVENUE ──────────────────────────────────────────────────

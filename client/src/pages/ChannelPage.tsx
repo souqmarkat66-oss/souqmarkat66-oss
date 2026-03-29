@@ -165,7 +165,7 @@ export default function ChannelPage() {
         )}
 
         {/* ── إعلان مدمج مرئي لزوار القناة ─────────────── */}
-        <AdWidget variant="banner" className="mb-8 max-w-2xl" />
+        <AdWidget variant="banner" channelId={channel?.id} className="mb-8 max-w-2xl" />
 
         {/* ── PUBLISHER CODE (Owner Only) ──────────────────────── */}
         {isOwner && channel.publisherCode && (
