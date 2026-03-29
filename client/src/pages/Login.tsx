@@ -125,19 +125,18 @@ export default function Login() {
   };
 
   const handleForgotPassword = async () => {
-    if (!forgotIdentifier.trim()) return toast({ variant: "destructive", title: "أدخل البريد الإلكتروني أو رقم الهاتف" });
+    if (!forgotIdentifier.trim()) return toast({ variant: "destructive", title: "أدخل البريد الإلكتروني أو رقم الهاتف أو الـ ID" });
     setForgotLoading(true);
     try {
-      const isEmail = forgotIdentifier.includes("@");
       const res = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify(isEmail ? { email: forgotIdentifier } : { phone: forgotIdentifier }),
+        body: JSON.stringify({ identifier: forgotIdentifier }),
       });
       const json = await res.json();
       if (json.notFound || !json.userId) {
-        toast({ variant: "destructive", title: "البريد الإلكتروني أو رقم الهاتف غير مسجل" });
+        toast({ variant: "destructive", title: "البيانات غير مسجّلة، تأكد من الإيميل أو الـ ID" });
         return;
       }
       setFirstLoginUserId(json.userId);
@@ -513,7 +512,7 @@ export default function Login() {
               </button>
               <div>
                 <h2 className="text-xl font-bold">إعادة تعيين كلمة المرور</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">أدخل البريد الإلكتروني أو رقم الهاتف المسجّل</p>
+                <p className="text-xs text-muted-foreground mt-0.5">أدخل الإيميل أو رقم الهاتف أو الـ ID المسجّل</p>
               </div>
             </div>
 
@@ -523,13 +522,13 @@ export default function Login() {
 
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-semibold mb-1.5 block">البريد الإلكتروني أو رقم الهاتف</label>
+                <label className="text-sm font-semibold mb-1.5 block">البريد الإلكتروني أو رقم الهاتف أو الـ ID</label>
                 <div className="relative">
                   <Mail className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     value={forgotIdentifier}
                     onChange={e => setForgotIdentifier(e.target.value)}
-                    placeholder="example@email.com أو 01XXXXXXXXX"
+                    placeholder="example@email.com أو 01XXXXXXXXX أو 54219806"
                     className="pr-9 h-11"
                     dir="ltr"
                     data-testid="input-forgot-identifier"

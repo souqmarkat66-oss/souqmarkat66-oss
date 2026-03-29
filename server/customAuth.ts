@@ -188,13 +188,14 @@ export function registerCustomAuthRoutes(app: Express) {
 
   // ── POST /api/auth/forgot-password ─────────────────────────────
   app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
-    const { email, phone } = req.body;
-    if (!email && !phone)
-      return res.status(400).json({ message: "البريد الإلكتروني أو رقم الهاتف مطلوب" });
+    const { email, phone, identifier } = req.body;
+    const lookup = identifier || email || phone;
+    if (!lookup)
+      return res.status(400).json({ message: "البريد الإلكتروني أو رقم الهاتف أو الـ ID مطلوب" });
     try {
       const result = await db.execute(
         sql`SELECT id, email, phone, first_name FROM users
-            WHERE (LOWER(email) = LOWER(${email || ""}) OR phone = ${phone || ""})
+            WHERE (LOWER(email) = LOWER(${lookup}) OR phone = ${lookup} OR id = ${lookup})
             LIMIT 1`
       );
       const user: any = result.rows[0];
