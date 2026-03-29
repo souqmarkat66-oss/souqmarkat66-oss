@@ -109,6 +109,27 @@ async function runMigrations() {
     await db.execute(sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS sender_user_id VARCHAR`);
     await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_voice BOOLEAN DEFAULT FALSE`);
     await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS voice_url TEXT`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS governorate TEXT`);
+    // Backfill users.governorate from their most recent ad's target_region
+    await db.execute(sql`
+      UPDATE users u
+      SET governorate = (
+        SELECT SPLIT_PART(a.target_region, ',', 1)
+        FROM ads a
+        WHERE a.user_id = u.id
+          AND a.target_region IS NOT NULL
+          AND a.target_region <> ''
+        ORDER BY a.created_at DESC
+        LIMIT 1
+      )
+      WHERE u.governorate IS NULL
+        AND EXISTS (
+          SELECT 1 FROM ads a2
+          WHERE a2.user_id = u.id
+            AND a2.target_region IS NOT NULL
+            AND a2.target_region <> ''
+        )
+    `);
     console.log("Migrations applied successfully");
   } catch (e: any) {
     console.error("Migration warning:", e.message);

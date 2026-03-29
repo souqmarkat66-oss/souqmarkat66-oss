@@ -43,7 +43,6 @@ export function isAuthenticated(req: Request, res: Response, next: NextFunction)
 async function ensureColumns() {
   await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
   await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)`);
-  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS governorate TEXT`);
 }
 
 // ── Register custom auth routes ───────────────────────────────────

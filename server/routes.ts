@@ -395,16 +395,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
           const notifiedUsers = new Set<string>([userId]); // never notify self
 
-          // Update publisher's governorate from ad's targetRegion (first region, if not set)
-          const targetRegion: string = (ad as any).targetRegion || (ad as any).target_region || "";
-          if (targetRegion && targetRegion.trim().length > 0) {
-            const firstRegion = targetRegion.split(",")[0].trim();
-            await db.execute(
-              sql`UPDATE users SET governorate = ${firstRegion}
-                  WHERE id = ${userId} AND (governorate IS NULL OR governorate = '')`
-            );
-          }
-
           // 1) Notify followers of the creator's channel
           const channelRows = await db.execute(
             sql`SELECT id FROM channels WHERE user_id = ${userId} LIMIT 1`
@@ -423,9 +413,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             }
           }
 
-          // 2) Notify users whose governorate matches any region in the ad's targetRegion
-          if (targetRegion && targetRegion.trim().length > 0) {
-            const regions = targetRegion.split(",").map((r: string) => r.trim()).filter(Boolean);
+          // 2) Notify users whose stored governorate matches the ad's targetRegion
+          const targetRegion = ad.targetRegion ?? "";
+          if (targetRegion.trim().length > 0) {
+            const regions = targetRegion.split(",").map((r) => r.trim()).filter(Boolean);
             for (const region of regions) {
               const regionUsers = await db.execute(
                 sql`SELECT id FROM users
