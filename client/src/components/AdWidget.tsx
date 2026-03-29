@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { X, ExternalLink } from "lucide-react";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/use-auth";
 
 interface Campaign {
   id: number;
