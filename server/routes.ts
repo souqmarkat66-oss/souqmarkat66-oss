@@ -2540,7 +2540,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const rows = await db.execute(sql`
         SELECT dm.id, dm.from_user_id, dm.to_user_id, dm.message, dm.image_url,
                dm.is_payment_proof, dm.is_read, dm.created_at,
-               u.first_name, u.last_name, u.username, u.phone_number, u.email
+               u.first_name, u.last_name, u.phone, u.email
         FROM direct_messages dm
         LEFT JOIN users u ON u.id = dm.from_user_id
         WHERE dm.is_payment_proof = true

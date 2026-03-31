@@ -1,67 +1,60 @@
-const CACHE_NAME = 'souq-ads-v1';
-const STATIC_ASSETS = [
-  '/',
-  '/ads',
-  '/manifest.json',
-  '/favicon.png',
-];
+// Service Worker — Souq Ads Network
+// Handles: Push Notifications + Notification Clicks only
+// No page caching (Vite SPA handles its own assets)
 
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => {
-      return cache.addAll(STATIC_ASSETS).catch(() => {});
-    })
-  );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    )
+      Promise.all(keys.map(k => caches.delete(k)))
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', event => {
-  if (event.request.method !== 'GET') return;
-  const url = new URL(event.request.url);
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/')) {
-    return;
-  }
-  event.respondWith(
-    caches.match(event.request).then(cached => {
-      const networkFetch = fetch(event.request).then(response => {
-        if (response && response.status === 200 && response.type === 'basic') {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        }
-        return response;
-      }).catch(() => cached);
-      return cached || networkFetch;
-    })
-  );
+  // Pass all requests through — do NOT intercept or cache
+  // This prevents the app from hanging on stale cached versions
 });
 
 self.addEventListener('push', event => {
   if (!event.data) return;
   let data = {};
-  try { data = event.data.json(); } catch { data = { title: 'سوق للإعلانات', body: event.data.text() }; }
+  try {
+    data = event.data.json();
+  } catch {
+    data = { title: 'سوق للإعلانات', body: event.data.text() };
+  }
+  const options = {
+    body: data.body || '',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-72.png',
+    dir: 'rtl',
+    lang: 'ar',
+    vibrate: [200, 100, 200],
+    data: { url: data.link || data.url || '/' },
+    actions: [
+      { action: 'open', title: 'فتح' },
+      { action: 'close', title: 'إغلاق' },
+    ],
+  };
   event.waitUntil(
-    self.registration.showNotification(data.title || 'سوق للإعلانات', {
-      body: data.body || '',
-      icon: '/icons/icon-192.png',
-      badge: '/icons/icon-72.png',
-      dir: 'rtl',
-      lang: 'ar',
-      data: { url: data.link || data.url || '/' },
-    })
+    self.registration.showNotification(data.title || 'سوق للإعلانات', options)
   );
 });
 
 self.addEventListener('notificationclick', event => {
   event.notification.close();
+  if (event.action === 'close') return;
   const url = event.notification.data?.url || '/';
-  event.waitUntil(clients.openWindow(url));
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+      for (const client of list) {
+        if ('focus' in client) { client.focus(); return; }
+      }
+      clients.openWindow(url);
+    })
+  );
 });

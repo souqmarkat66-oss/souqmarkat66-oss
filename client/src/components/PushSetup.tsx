@@ -10,6 +10,23 @@ function urlBase64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
+function sendSubscription(sub: PushSubscription) {
+  const subJson = sub.toJSON() as any;
+  const keys = subJson.keys || {};
+  fetch("/api/push/subscribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      endpoint: sub.endpoint,
+      keys: {
+        p256dh: keys.p256dh || "",
+        auth: keys.auth || "",
+      },
+    }),
+    credentials: "include",
+  }).catch(() => {});
+}
+
 export function PushSetup() {
   const { user } = useAuth();
   const attempted = useRef(false);
@@ -23,36 +40,32 @@ export function PushSetup() {
     async function setup() {
       try {
         const reg = await navigator.serviceWorker.ready;
+
         const existing = await reg.pushManager.getSubscription();
         if (existing) {
-          await fetch("/api/push/subscribe", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ endpoint: existing.endpoint, keys: { p256dh: btoa(String.fromCharCode(...new Uint8Array((existing.toJSON().keys as any).p256dh))), auth: btoa(String.fromCharCode(...new Uint8Array((existing.toJSON().keys as any).auth))) } }),
-            credentials: "include",
-          }).catch(() => {});
+          sendSubscription(existing);
           return;
         }
+
         if (Notification.permission !== "granted") {
           const perm = await Notification.requestPermission();
           if (perm !== "granted") return;
         }
+
         const keyRes = await fetch("/api/vapid-public-key");
         if (!keyRes.ok) return;
         const { publicKey } = await keyRes.json();
+        if (!publicKey) return;
+
         const sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(publicKey),
         });
-        const subJson = sub.toJSON();
-        await fetch("/api/push/subscribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ endpoint: sub.endpoint, keys: subJson.keys }),
-          credentials: "include",
-        });
+
+        sendSubscription(sub);
       } catch {}
     }
+
     setup();
   }, [user]);
 

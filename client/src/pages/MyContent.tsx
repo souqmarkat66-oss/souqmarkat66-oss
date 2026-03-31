@@ -106,7 +106,12 @@ function AuthenticatedContent({ user }: { user: any }) {
         setBoostPayRef("");
         setBoostPayDialog({ adId, msg: data.message });
       } else if (res.status === 429) {
-        toast({ variant: "destructive", title: "⏳ حد التعزيز", description: data.message });
+        if (boostSettings?.price && boostSettings.price > 0) {
+          setBoostPayRef("");
+          setBoostPayDialog({ adId, msg: data.message + `\n\n💡 يمكنك تجاوز الانتظار بالتعزيز المدفوع مقابل ${boostSettings.price} ج.م فقط` });
+        } else {
+          toast({ variant: "destructive", title: "⏳ حد التعزيز", description: data.message });
+        }
       } else if (res.ok) {
         setBoostedIds(prev => new Set(prev).add(adId));
         toast({

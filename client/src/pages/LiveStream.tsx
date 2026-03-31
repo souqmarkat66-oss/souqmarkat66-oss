@@ -204,6 +204,46 @@ export default function LiveStream() {
   }, []);
 
   const setupBroadcaster = useCallback(async (socket: Socket) => {
+    // ── Register socket handlers FIRST (before any async await) ──
+    // This prevents the race condition where a watcher joins before the camera is ready.
+    const pendingWatchers: string[] = [];
+
+    socket.on("watcher", (watcherId: string) => {
+      const ms = localStreamRef.current;
+      if (!ms) {
+        // Camera not ready yet — queue the watcher
+        pendingWatchers.push(watcherId);
+        return;
+      }
+      const pc = createPeer(socket, watcherId);
+      peersRef.current.set(watcherId, pc);
+      ms.getTracks().forEach(track => {
+        const sender = pc.addTrack(track, ms);
+        if (track.kind === "video") {
+          sender.setParameters({
+            ...sender.getParameters(),
+            encodings: [{ maxBitrate: quality === "1080p" ? 4_000_000 : quality === "720p" ? 2_500_000 : quality === "480p" ? 1_000_000 : 500_000, priority: "high" as RTCPriorityType }],
+          }).catch(() => {});
+        } else {
+          sender.setParameters({ ...sender.getParameters(), encodings: [{ maxBitrate: 128_000 }] }).catch(() => {});
+        }
+      });
+      pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false })
+        .then(offer => pc.setLocalDescription(offer).then(() => {
+          socket.emit("offer", watcherId, pc.localDescription);
+          startStats(pc);
+        })).catch(() => {});
+    });
+
+    socket.on("answer", async (watcherId: string, desc: RTCSessionDescriptionInit) => {
+      await peersRef.current.get(watcherId)?.setRemoteDescription(new RTCSessionDescription(desc));
+    });
+
+    socket.on("candidate", async (watcherId: string, candidate: RTCIceCandidateInit) => {
+      try { await peersRef.current.get(watcherId)?.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
+    });
+
+    // ── Now get camera/mic ──
     try {
       let mediaStream: MediaStream;
 
@@ -212,15 +252,12 @@ export default function LiveStream() {
           video: { ...QUALITY_PRESETS[quality], cursor: "motion" },
           audio: true,
         });
-        // Merge with mic audio if screen has no audio
         if (!screenStream.getAudioTracks().length) {
           const micStream = await navigator.mediaDevices.getUserMedia({ audio: HIGH_QUALITY_AUDIO });
           micStream.getAudioTracks().forEach(t => screenStream.addTrack(t));
         }
         mediaStream = screenStream;
       } else {
-        // Mobile-first: try ideal deviceId (not exact) to avoid "OverconstrainedError"
-        // then fallback to just facingMode if that also fails
         try {
           mediaStream = await navigator.mediaDevices.getUserMedia({
             video: {
@@ -233,7 +270,6 @@ export default function LiveStream() {
             },
           });
         } catch {
-          // Ultimate fallback: any available camera/mic (works on all phones)
           mediaStream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: "user" },
             audio: HIGH_QUALITY_AUDIO,
@@ -253,28 +289,11 @@ export default function LiveStream() {
       socket.emit("broadcaster", id);
       await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" });
 
-      // Inform broadcaster that followers were notified
-      if (stream?.channelId) {
-        const chRes = await fetch(`/api/channels/${stream.channelId}`).catch(() => null);
-        if (chRes?.ok) {
-          const ch = await chRes.json();
-          const followerCount = ch?.subscriberCount || 0;
-          if (followerCount > 0) {
-            toast({
-              title: `🔔 تم إشعار ${followerCount} متابع`,
-              description: "تم إرسال إشعار للمتابعين بأنك بدأت البث المباشر",
-            });
-          } else {
-            toast({ title: "✅ البث مباشر الآن! شارك الرابط لتصل لجمهور أكبر 📡" });
-          }
-        }
-      }
-
-      socket.on("watcher", async (watcherId: string) => {
+      // Drain any watchers that joined while camera was starting
+      for (const watcherId of pendingWatchers) {
+        socket.emit("watcher-retry", watcherId); // trigger re-emit from server if needed
         const pc = createPeer(socket, watcherId);
         peersRef.current.set(watcherId, pc);
-
-        // Add all tracks with high quality encoding
         mediaStream.getTracks().forEach(track => {
           const sender = pc.addTrack(track, mediaStream);
           if (track.kind === "video") {
@@ -283,29 +302,28 @@ export default function LiveStream() {
               encodings: [{ maxBitrate: quality === "1080p" ? 4_000_000 : quality === "720p" ? 2_500_000 : quality === "480p" ? 1_000_000 : 500_000, priority: "high" as RTCPriorityType }],
             }).catch(() => {});
           } else {
-            sender.setParameters({
-              ...sender.getParameters(),
-              encodings: [{ maxBitrate: 128_000 }],
-            }).catch(() => {});
+            sender.setParameters({ ...sender.getParameters(), encodings: [{ maxBitrate: 128_000 }] }).catch(() => {});
           }
         });
-
-        const offer = await pc.createOffer({
-          offerToReceiveAudio: false,
-          offerToReceiveVideo: false,
-        });
+        const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
         await pc.setLocalDescription(offer);
         socket.emit("offer", watcherId, pc.localDescription);
         startStats(pc);
-      });
+      }
 
-      socket.on("answer", async (watcherId: string, desc: RTCSessionDescriptionInit) => {
-        await peersRef.current.get(watcherId)?.setRemoteDescription(new RTCSessionDescription(desc));
-      });
-
-      socket.on("candidate", async (watcherId: string, candidate: RTCIceCandidateInit) => {
-        try { await peersRef.current.get(watcherId)?.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
-      });
+      // Notify followers
+      if (stream?.channelId) {
+        const chRes = await fetch(`/api/channels/${stream.channelId}`).catch(() => null);
+        if (chRes?.ok) {
+          const ch = await chRes.json();
+          const followerCount = ch?.subscriberCount || 0;
+          if (followerCount > 0) {
+            toast({ title: `🔔 تم إشعار ${followerCount} متابع`, description: "تم إرسال إشعار للمتابعين بأنك بدأت البث المباشر" });
+          } else {
+            toast({ title: "✅ البث مباشر الآن! شارك الرابط لتصل لجمهور أكبر 📡" });
+          }
+        }
+      }
 
       toast({ title: "🔴 البث بدأ!", description: `جودة ${quality} · صوت عالي الجودة` });
     } catch (err: any) {

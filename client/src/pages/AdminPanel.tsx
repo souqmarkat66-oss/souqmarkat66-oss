@@ -1736,9 +1736,9 @@ function PayReceiptsSection() {
 
                     {/* Contact */}
                     <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                      {r.phone_number && (
+                      {r.phone && (
                         <span className="flex items-center gap-1">
-                          <Phone className="w-3 h-3" /> {r.phone_number}
+                          <Phone className="w-3 h-3" /> {r.phone}
                         </span>
                       )}
                       {r.email && (
