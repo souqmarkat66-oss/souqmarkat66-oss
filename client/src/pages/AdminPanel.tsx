@@ -1596,7 +1596,7 @@ function PayReceiptsSection() {
 
   const { data: receipts = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/admin/payment-receipts"],
-    queryFn: () => fetch("/api/admin/payment-receipts").then(r => r.json()),
+    queryFn: () => fetch("/api/admin/payment-receipts").then(r => r.json()).then(d => Array.isArray(d) ? d : []),
     refetchInterval: 30000,
   });
 
