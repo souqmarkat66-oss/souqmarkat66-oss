@@ -18,7 +18,8 @@ import {
   ArrowUpRight, ArrowDownLeft, Trash2, PauseCircle, PlayCircle, Send,
   AlertTriangle, Activity, Menu, ChevronLeft, VideoOff, PieChart,
   Star, MessageSquare, Clock, BanIcon, UserCheck, FolderOpen, FileImage,
-  FileVideo, File, Lock, Phone, Mail, Shield, RefreshCw, ToggleLeft, ToggleRight, Zap
+  FileVideo, File, Lock, Phone, Mail, Shield, RefreshCw, ToggleLeft, ToggleRight, Zap,
+  Sparkles, Image, Video, Wand2, FileText, Gift
 } from "lucide-react";
 
 const ADMIN_ID = "54219806";
@@ -41,6 +42,7 @@ const NAV = [
   { key: "revenue",        label: "الإيرادات",            icon: DollarSign,      color: "text-emerald-400" },
   { key: "broadcast",      label: "إشعارات جماعية",       icon: Bell,            color: "text-cyan-400" },
   { key: "media",          label: "مكتبة الملفات",         icon: FolderOpen,      color: "text-lime-400" },
+  { key: "aipricing",      label: "أسعار الذكاء الاصطناعي", icon: Sparkles,       color: "text-violet-400" },
   { key: "settings",       label: "إعدادات المنصة",       icon: Settings,        color: "text-gray-400" },
   { key: "activity",       label: "سجل النشاط",           icon: Activity,        color: "text-slate-400" },
 ];
@@ -198,6 +200,7 @@ export default function AdminPanel() {
           {section === "revenue"    && <RevenueSection />}
           {section === "broadcast"  && <BroadcastSection logAction={logAction} />}
           {section === "media"      && <MediaSection logAction={logAction} />}
+          {section === "aipricing"  && <AiPricingSection />}
           {section === "settings"   && <SettingsSection logAction={logAction} />}
           {section === "activity"   && <ActivitySection />}
         </div>
@@ -1821,6 +1824,119 @@ function PayReceiptsSection() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────
+// AI PRICING SECTION
+// ──────────────────────────────────────────────────────────
+function AiPricingSection() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data: settings, isLoading } = useQuery<Record<string, string>>({
+    queryKey: ["/api/admin/ai-pricing"],
+    queryFn: () => fetch("/api/admin/ai-pricing", { credentials: "include" }).then(r => r.json()).then(d => typeof d === 'object' && !Array.isArray(d) ? d : {}),
+  });
+
+  const [vals, setVals] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (settings) setVals(settings);
+  }, [settings]);
+
+  const saveMutation = useMutation({
+    mutationFn: () => fetch("/api/admin/ai-pricing", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: vals }),
+    }).then(r => r.json()),
+    onSuccess: () => {
+      toast({ title: "✅ تم حفظ أسعار الذكاء الاصطناعي" });
+      qc.invalidateQueries({ queryKey: ["/api/admin/ai-pricing"] });
+    },
+    onError: () => toast({ title: "❌ فشل الحفظ", variant: "destructive" }),
+  });
+
+  const FIELDS = [
+    { key: "ai_free_credits", label: "عدد الاستخدامات المجانية للمستخدم الجديد", icon: Gift, unit: "استخدام", desc: "عدد مرات استخدام الذكاء الاصطناعي مجاناً لكل مستخدم" },
+    { key: "ai_price_per_credit_egp", label: "سعر الكريديت الواحد (عام)", icon: DollarSign, unit: "ج.م", desc: "السعر الافتراضي للكريديت الواحد بالجنيه المصري" },
+    { key: "ai_price_image", label: "توليد صورة احترافية (كريديت)", icon: Image, unit: "كريديت", desc: "تصميم صورة إعلانية أو ترويجية بالذكاء الاصطناعي" },
+    { key: "ai_price_post", label: "كتابة بوست احترافي (كريديت)", icon: FileText, unit: "كريديت", desc: "كتابة محتوى تسويقي وإعلانات نصية بجودة عالية" },
+    { key: "ai_price_content", label: "كتابة وصف إعلان (كريديت)", icon: Wand2, unit: "كريديت", desc: "توليد وصف احترافي للمنتج أو الخدمة" },
+    { key: "ai_price_video", label: "توليد فيديو سينمائي (كريديت)", icon: Video, unit: "كريديت", desc: "فيديو إعلاني سينمائي بصوت وصورة عالية الجودة" },
+    { key: "ai_price_animation", label: "إنشاء أنيميشن متحرك (كريديت)", icon: Sparkles, unit: "كريديت", desc: "محتوى متحرك صوت وصورة — أنيميشن احترافي" },
+    { key: "ai_referral_bonus_egp", label: "مكافأة الإحالة (جنيه)", icon: Gift, unit: "ج.م", desc: "المبلغ الذي يحصل عليه المُحيل عند انضمام صديقه" },
+  ];
+
+  if (isLoading) return <div className="py-20 text-center"><Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" /></div>;
+
+  return (
+    <div className="space-y-6 p-1" dir="rtl">
+      <div className="bg-gradient-to-r from-violet-500/10 to-purple-500/5 border border-violet-200/40 rounded-2xl p-5">
+        <div className="flex items-center gap-3 mb-2">
+          <Sparkles className="w-6 h-6 text-violet-500" />
+          <h2 className="font-bold text-xl">أسعار خدمات الذكاء الاصطناعي</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">تحكم كامل في تسعير جميع خدمات الذكاء الاصطناعي — كلما زاد الكريديت، ارتفعت جودة الخدمة</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {FIELDS.map(({ key, label, icon: Icon, unit, desc }) => (
+          <Card key={key} className="border-border/60 rounded-2xl overflow-hidden">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3 mb-3">
+                <div className="w-10 h-10 rounded-xl bg-violet-500/10 flex items-center justify-center flex-shrink-0">
+                  <Icon className="w-5 h-5 text-violet-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm leading-tight">{label}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={vals[key] ?? ""}
+                  onChange={e => setVals(prev => ({ ...prev, [key]: e.target.value }))}
+                  className="text-center font-bold text-lg"
+                  data-testid={`input-ai-price-${key}`}
+                />
+                <span className="text-sm text-muted-foreground font-medium shrink-0">{unit}</span>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200/50 rounded-2xl p-4">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-semibold text-amber-800 dark:text-amber-400 mb-1">نظام الشرائح التسعيرية</p>
+            <ul className="text-amber-700 dark:text-amber-500 space-y-1 text-xs list-disc list-inside">
+              <li>المستخدم الجديد يحصل على عدد استخدامات مجانية تحددها أنت</li>
+              <li>بعد انتهاء الاستخدامات المجانية، يُطلب الدفع بالكريديت</li>
+              <li>كل خدمة تستهلك عدداً معيناً من الكريديتات تحددها أنت هنا</li>
+              <li>المستخدم الذي يدفع أكثر يحصل على جودة أعلى في المخرجات</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <Button
+        className="w-full gap-2 h-12 text-base font-bold"
+        onClick={() => saveMutation.mutate()}
+        disabled={saveMutation.isPending}
+        data-testid="btn-save-ai-pricing"
+      >
+        {saveMutation.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+        حفظ الأسعار
+      </Button>
     </div>
   );
 }

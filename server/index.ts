@@ -115,6 +115,29 @@ async function runMigrations() {
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_interests TEXT`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS interests TEXT`);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_ages TEXT`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(20)`);
+    await db.execute(sql`ALTER TABLE boost_orders ADD COLUMN IF NOT EXISTS payment_screenshot_url TEXT`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS referrals (
+      id SERIAL PRIMARY KEY,
+      referrer_id VARCHAR NOT NULL,
+      referred_id VARCHAR NOT NULL,
+      bonus_egp NUMERIC(10,2) DEFAULT 5,
+      status VARCHAR DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES
+      ('ai_price_image', '10'),
+      ('ai_price_video', '50'),
+      ('ai_price_animation', '80'),
+      ('ai_price_content', '5'),
+      ('ai_price_post', '8'),
+      ('ai_referral_bonus_egp', '5')
+      ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`
+      UPDATE users SET referral_code = UPPER(SUBSTRING(MD5(id::text) FROM 1 FOR 8))
+      WHERE referral_code IS NULL
+    `);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS whatsapp_clicks INTEGER DEFAULT 0`);
     await db.execute(sql`CREATE TABLE IF NOT EXISTS push_subscriptions (
       id SERIAL PRIMARY KEY,

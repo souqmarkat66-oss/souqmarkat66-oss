@@ -87,6 +87,9 @@ export default function Messages() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [zoomImg, setZoomImg] = useState<string | null>(null);
+  const [receiptOrderNum, setReceiptOrderNum] = useState("");
+  const [receiptAdNum, setReceiptAdNum] = useState("");
+  const [receiptAmount, setReceiptAmount] = useState("");
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
@@ -154,9 +157,20 @@ export default function Messages() {
       const res = await fetch("/api/upload", { method: "POST", body: fd, credentials: "include" });
       if (!res.ok) throw new Error("فشل رفع الصورة");
       const { url } = await res.json();
-      // Mark as payment proof if sending to admin
       const isPaymentProof = activePartner === ADMIN_ID;
-      sendMutation.mutate({ message: text || "📸 إيصال دفع", imageUrl: url, isPaymentProof });
+      let message = "📸 إيصال دفع";
+      if (isPaymentProof) {
+        const parts: string[] = [];
+        if (receiptOrderNum) parts.push(`رقم الطلب: ${receiptOrderNum}`);
+        if (receiptAdNum) parts.push(`رقم الإعلان: #${receiptAdNum}`);
+        if (receiptAmount) parts.push(`قيمة الدفع: ${receiptAmount} ج.م`);
+        if (text.trim()) parts.push(text.trim());
+        if (parts.length > 0) message = "📸 إيصال دفع — " + parts.join(" | ");
+      } else if (text.trim()) {
+        message = text;
+      }
+      sendMutation.mutate({ message, imageUrl: url, isPaymentProof });
+      setReceiptOrderNum(""); setReceiptAdNum(""); setReceiptAmount("");
     } catch {
       toast({ variant: "destructive", title: "فشل إرسال الصورة" });
     } finally { setUploading(false); }
@@ -540,26 +554,57 @@ export default function Messages() {
 
               {/* Image preview bar */}
               {imagePreview && (
-                <div className="px-3 py-2 border-t border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/20 flex items-center gap-3">
-                  <div className="relative">
-                    <img src={imagePreview} alt="معاينة" className="w-14 h-14 object-cover rounded-lg border" />
-                    <button
-                      onClick={() => { setImagePreview(null); setImageFile(null); }}
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-destructive text-white rounded-full flex items-center justify-center"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs font-bold text-orange-700 dark:text-orange-400">
-                      {activePartner === ADMIN_ID ? "📸 إيصال دفع — سيُرسَل للإدارة للمراجعة" : "📸 صورة جاهزة للإرسال"}
-                    </p>
-                    <input
-                      value={text}
-                      onChange={e => setText(e.target.value)}
-                      placeholder="ملاحظة اختيارية..."
-                      className="text-xs bg-transparent border-none outline-none w-full text-muted-foreground mt-0.5"
-                    />
+                <div className="px-3 py-2 border-t border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/20 space-y-2">
+                  <div className="flex items-start gap-3">
+                    <div className="relative flex-shrink-0">
+                      <img src={imagePreview} alt="معاينة" className="w-14 h-14 object-cover rounded-lg border" />
+                      <button
+                        onClick={() => { setImagePreview(null); setImageFile(null); setReceiptOrderNum(""); setReceiptAdNum(""); setReceiptAmount(""); }}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-destructive text-white rounded-full flex items-center justify-center"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-xs font-bold text-orange-700 dark:text-orange-400 mb-1.5">
+                        {activePartner === ADMIN_ID ? "📸 إيصال دفع — سيُرسَل للإدارة للمراجعة" : "📸 صورة جاهزة للإرسال"}
+                      </p>
+                      {activePartner === ADMIN_ID ? (
+                        <div className="grid grid-cols-3 gap-1.5">
+                          <input
+                            value={receiptOrderNum}
+                            onChange={e => setReceiptOrderNum(e.target.value)}
+                            placeholder="رقم الطلب"
+                            className="text-xs bg-white dark:bg-white/10 border border-orange-200 dark:border-orange-700 rounded-lg px-2 py-1 outline-none"
+                            dir="ltr"
+                            data-testid="input-receipt-order-num"
+                          />
+                          <input
+                            value={receiptAdNum}
+                            onChange={e => setReceiptAdNum(e.target.value)}
+                            placeholder="رقم الإعلان"
+                            className="text-xs bg-white dark:bg-white/10 border border-orange-200 dark:border-orange-700 rounded-lg px-2 py-1 outline-none"
+                            dir="ltr"
+                            data-testid="input-receipt-ad-num"
+                          />
+                          <input
+                            value={receiptAmount}
+                            onChange={e => setReceiptAmount(e.target.value)}
+                            placeholder="المبلغ ج.م"
+                            className="text-xs bg-white dark:bg-white/10 border border-orange-200 dark:border-orange-700 rounded-lg px-2 py-1 outline-none"
+                            dir="ltr"
+                            data-testid="input-receipt-amount"
+                          />
+                        </div>
+                      ) : (
+                        <input
+                          value={text}
+                          onChange={e => setText(e.target.value)}
+                          placeholder="ملاحظة اختيارية..."
+                          className="text-xs bg-transparent border-none outline-none w-full text-muted-foreground"
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
               )}

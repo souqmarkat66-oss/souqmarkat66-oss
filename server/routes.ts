@@ -2564,11 +2564,85 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ================================================================
   // USER PROFILE ROUTES
   // ================================================================
+  // PATCH /api/auth/me/profile — update name, bio, profile photo
+  app.patch("/api/auth/me/profile", isAuthenticated, upload.single("photo"), async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const firstName = req.body.firstName ?? null;
+      const lastName = req.body.lastName ?? null;
+      const bio = req.body.bio ?? null;
+      const profileImageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+      await db.execute(sql`
+        UPDATE users SET
+          first_name = COALESCE(${firstName}, first_name),
+          last_name = COALESCE(${lastName}, last_name),
+          bio = CASE WHEN ${bio} IS NOT NULL THEN ${bio} ELSE bio END,
+          profile_image_url = COALESCE(${profileImageUrl}, profile_image_url)
+        WHERE id = ${userId}
+      `);
+      const row = await db.execute(sql`SELECT id, first_name, last_name, profile_image_url, bio, governorate, referral_code FROM users WHERE id = ${userId} LIMIT 1`);
+      res.json({ ok: true, user: row.rows[0] });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // GET /api/auth/me/referral — referral code + stats
+  app.get("/api/auth/me/referral", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const userRow = await db.execute(sql`SELECT referral_code FROM users WHERE id = ${userId} LIMIT 1`);
+      const code = userRow.rows[0]?.referral_code;
+      const statsRow = await db.execute(sql`SELECT COUNT(*) as count, COALESCE(SUM(bonus_egp),0) as earned FROM referrals WHERE referrer_id = ${userId}`);
+      res.json({ code, stats: statsRow.rows[0] });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // POST /api/auth/me/use-referral — use someone's referral code
+  app.post("/api/auth/me/use-referral", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const { code } = req.body;
+    try {
+      const alreadyUsed = await db.execute(sql`SELECT id FROM referrals WHERE referred_id = ${userId} LIMIT 1`);
+      if (alreadyUsed.rows.length > 0) return res.status(400).json({ message: "already_used" });
+      const referrerRow = await db.execute(sql`SELECT id FROM users WHERE referral_code = ${code} LIMIT 1`);
+      if (!referrerRow.rows[0]) return res.status(404).json({ message: "invalid_code" });
+      const referrerId = referrerRow.rows[0].id;
+      if (referrerId === userId) return res.status(400).json({ message: "self_referral" });
+      const bonusRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'ai_referral_bonus_egp' LIMIT 1`);
+      const bonus = parseFloat(bonusRow.rows[0]?.value || '5');
+      await db.execute(sql`INSERT INTO referrals (referrer_id, referred_id, bonus_egp, status) VALUES (${referrerId}, ${userId}, ${bonus}, 'confirmed')`);
+      res.json({ ok: true, bonus });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // GET /api/admin/ai-pricing — get AI pricing settings
+  app.get("/api/admin/ai-pricing", isAuthenticated, async (req: any, res) => {
+    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
+    try {
+      const keys = ['ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post','ai_free_credits','ai_price_per_credit_egp','ai_referral_bonus_egp'];
+      const rows = await db.execute(sql`SELECT key, value FROM platform_settings WHERE key = ANY(${keys})`);
+      const settings: Record<string,string> = {};
+      for (const r of rows.rows) settings[r.key as string] = r.value as string;
+      res.json(settings);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // POST /api/admin/ai-pricing — update AI pricing settings
+  app.post("/api/admin/ai-pricing", isAuthenticated, async (req: any, res) => {
+    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
+    try {
+      const { settings } = req.body;
+      for (const [key, value] of Object.entries(settings)) {
+        await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES (${key}, ${String(value)}) ON CONFLICT (key) DO UPDATE SET value = ${String(value)}`);
+      }
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   app.get("/api/profile/:userId", async (req, res) => {
     const { userId } = req.params;
     try {
       const [userRow, adsRow, channelRow] = await Promise.all([
-        db.execute(sql`SELECT id, first_name, last_name, profile_image_url, created_at, interests FROM users WHERE id = ${userId}`),
+        db.execute(sql`SELECT id, first_name, last_name, profile_image_url, bio, governorate, referral_code, created_at, interests FROM users WHERE id = ${userId}`),
         db.execute(sql`SELECT COUNT(*) as count, SUM(views_count) as views, SUM(likes_count) as likes FROM ads WHERE user_id = ${userId} AND status = 'active'`),
         db.execute(sql`SELECT * FROM channels WHERE user_id = ${userId} LIMIT 1`),
       ]);
