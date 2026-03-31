@@ -892,17 +892,34 @@ export default function LiveStream() {
   };
 
   return (
-    <div className="container px-4 py-6" dir="rtl">
+    <div className="bg-black min-h-[100dvh] overflow-hidden" dir="rtl">
       <style>{`
         @keyframes floatUp {
           0%   { transform: translateY(0) scale(1); opacity: 1; }
-          70%  { transform: translateY(-160px) scale(1.3) rotate(10deg); opacity: 0.8; }
-          100% { transform: translateY(-250px) scale(0.5); opacity: 0; }
+          70%  { transform: translateY(-200px) scale(1.4) rotate(12deg); opacity: 0.8; }
+          100% { transform: translateY(-320px) scale(0.4); opacity: 0; }
         }
         @keyframes slideInLeft {
           from { transform: translateX(-30px); opacity: 0; }
           to   { transform: translateX(0); opacity: 1; }
         }
+        @keyframes chatSlideIn {
+          from { transform: translateY(8px); opacity: 0; }
+          to   { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes giftPop {
+          0%   { transform: scale(0) rotate(-10deg); opacity: 0; }
+          60%  { transform: scale(1.3) rotate(5deg); opacity: 1; }
+          100% { transform: scale(1) rotate(0deg); opacity: 1; }
+        }
+        @keyframes heartBeat {
+          0%   { transform: scale(1); }
+          30%  { transform: scale(1.4); }
+          60%  { transform: scale(1.1); }
+          100% { transform: scale(1); }
+        }
+        .tiktok-chat-msg { animation: chatSlideIn 0.25s ease-out; }
+        .gift-pop { animation: giftPop 0.4s cubic-bezier(0.175,0.885,0.32,1.275); }
       `}</style>
 
       {/* ── Post-Stream Summary Modal ── */}
@@ -948,19 +965,19 @@ export default function LiveStream() {
         </div>
       )}
 
-      <div className="flex flex-col lg:flex-row gap-6">
+      <div className="flex flex-col lg:flex-row h-[100dvh]">
 
-        {/* ── Video Area ── */}
-        <div className="flex-1">
-          {/* Co-host request popup (for broadcaster) */}
+        {/* ══ TikTok-style Full-Screen Video Area ══ */}
+        <div className="relative flex-1 overflow-hidden bg-black flex items-center justify-center lg:max-w-[480px] lg:mx-auto"
+          style={{ minHeight: "100dvh" }}>
+          {/* Co-host request popup — floating overlay at top */}
           {isBroadcast && cohostRequest && (
-            <div className="mb-3 p-4 rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 flex items-center gap-3" dir="rtl">
-              <UserPlus className="w-5 h-5 text-blue-600 flex-shrink-0" />
-              <div className="flex-1">
-                <p className="font-bold text-sm">👤 {cohostRequest.userName} يطلب المشاركة في البث</p>
-                <p className="text-xs text-muted-foreground">سيظهر صوته وصورته جانباً مع البث</p>
+            <div className="absolute top-16 inset-x-3 z-30 p-3 rounded-2xl bg-black/80 backdrop-blur border border-blue-500/50 flex items-center gap-3" dir="rtl">
+              <UserPlus className="w-5 h-5 text-blue-400 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="font-bold text-sm text-white">👤 {cohostRequest.userName} يطلب المشاركة</p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-shrink-0">
                 <button
                   onClick={() => {
                     socketRef.current?.emit("accept-cohost", { streamId: id, guestSocketId: cohostRequest.socketId });
@@ -968,37 +985,31 @@ export default function LiveStream() {
                     setCohostRequest(null);
                     toast({ title: "✅ تم قبول الضيف" });
                   }}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-green-500 text-white text-xs font-bold hover:bg-green-600 transition"
+                  className="px-3 py-1.5 rounded-xl bg-green-500 text-white text-xs font-bold hover:bg-green-600 transition"
                   data-testid="btn-accept-cohost"
                 >
-                  <UserCheck className="w-3.5 h-3.5" /> قبول
+                  <UserCheck className="w-3.5 h-3.5 inline ml-1" />قبول
                 </button>
                 <button
-                  onClick={() => {
-                    socketRef.current?.emit("reject-cohost", { guestSocketId: cohostRequest.socketId });
-                    setCohostRequest(null);
-                  }}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-red-500 text-white text-xs font-bold hover:bg-red-600 transition"
+                  onClick={() => { socketRef.current?.emit("reject-cohost", { guestSocketId: cohostRequest.socketId }); setCohostRequest(null); }}
+                  className="px-3 py-1.5 rounded-xl bg-red-500 text-white text-xs font-bold hover:bg-red-600 transition"
                   data-testid="btn-reject-cohost"
-                >
-                  <UserX className="w-3.5 h-3.5" /> رفض
-                </button>
+                >رفض</button>
               </div>
             </div>
           )}
 
-          {/* Group Live Banner */}
+          {/* Group Live Banner — absolute top center */}
           {coHostActive && (
-            <div className="mb-2 flex items-center justify-center gap-2 py-2 rounded-2xl bg-gradient-to-l from-purple-600/20 to-blue-600/20 border border-purple-500/30">
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-4 py-1.5 rounded-full bg-black/70 backdrop-blur border border-purple-500/50">
               <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-              <span className="text-sm font-bold text-purple-700 dark:text-purple-300">🔴 بث جماعي مباشر</span>
-              <span className="text-xs text-muted-foreground">— {viewerCount} مشاهد</span>
+              <span className="text-xs font-bold text-white">🔴 بث جماعي — {viewerCount} مشاهد</span>
             </div>
           )}
 
-          {/* Dual video area when co-host is active */}
-          <div className={coHostActive ? "grid grid-cols-2 gap-2" : ""}>
-            <div className={`relative overflow-hidden bg-black shadow-2xl shadow-black/50 ${coHostActive ? "rounded-2xl ring-2 ring-red-500/60" : "rounded-3xl"}`} style={{ aspectRatio: "16/9" }}>
+          {/* Dual video area — TikTok full-height portrait */}
+          <div className={coHostActive ? "absolute inset-0 grid grid-cols-2 gap-0" : "absolute inset-0"}>
+            <div className={`relative overflow-hidden bg-black ${coHostActive ? "ring-2 ring-red-500/60" : ""}`}>
             {/* Host label when in group live — bottom-left to avoid overlap with top badges */}
             {coHostActive && (
               <div className="absolute bottom-3 start-3 z-10 flex items-center gap-1.5 bg-black/70 backdrop-blur rounded-full px-3 py-1">
@@ -1229,9 +1240,9 @@ export default function LiveStream() {
             })()}
           </div>
 
-          {/* Co-host video (shown when active) */}
+          {/* Co-host video (shown when active) — fills its half of the split */}
           {coHostActive && (
-            <div className="relative rounded-2xl overflow-hidden bg-black shadow-2xl shadow-black/50 ring-2 ring-purple-500/60" style={{ aspectRatio: "16/9" }}>
+            <div className="relative overflow-hidden bg-black ring-2 ring-purple-500/60 h-full">
               <video
                 ref={coHostVideoRef}
                 autoPlay
@@ -1294,9 +1305,54 @@ export default function LiveStream() {
           )}
           </div>{/* end grid wrapper */}
 
-          {/* Viewer: Request to join as co-host */}
-          {!isBroadcast && streaming && !isCoHost && !coHostActive && user && (
-            <div className="mt-3 flex justify-center">
+          {/* ── TikTok Top Bar Overlay ── */}
+          <div className="absolute top-0 inset-x-0 z-20 bg-gradient-to-b from-black/70 to-transparent px-4 pt-4 pb-10 pointer-events-none">
+            <div className="flex items-center gap-2">
+              <Badge className="bg-red-500 text-white gap-1 px-2.5 py-0.5 text-xs font-bold animate-pulse pointer-events-auto">
+                🔴 مباشر
+              </Badge>
+              <span className="text-white font-bold text-sm truncate flex-1">{stream?.title}</span>
+              <Badge variant="secondary" className="gap-1 bg-black/60 text-white text-xs pointer-events-auto">
+                <Eye className="w-3 h-3" /> {viewerCount.toLocaleString()}
+              </Badge>
+              {/* Back button */}
+              <button
+                onClick={() => window.history.back()}
+                className="w-8 h-8 rounded-full bg-black/60 backdrop-blur flex items-center justify-center text-white hover:bg-black/80 pointer-events-auto"
+              ><X className="w-4 h-4" /></button>
+            </div>
+          </div>
+
+          {/* ── TikTok Right Action Buttons ── */}
+          <div className="absolute end-3 bottom-28 z-20 flex flex-col gap-4 items-center">
+            {/* Like */}
+            <button
+              onClick={handleLike}
+              className="flex flex-col items-center gap-0.5"
+              data-testid="btn-stream-like"
+            >
+              <div className={`w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all ${liked ? "bg-red-500 scale-110" : "bg-black/60 backdrop-blur"}`}
+                style={{ animation: liked ? "heartBeat 0.4s ease" : undefined }}>
+                <Heart className={`w-5 h-5 ${liked ? "text-white fill-white" : "text-white"}`} />
+              </div>
+              <span className="text-white text-[10px] font-bold drop-shadow">{likesCount}</span>
+            </button>
+            {/* Share */}
+            <div onClick={e => e.stopPropagation()} className="flex flex-col items-center gap-0.5">
+              <div className="w-11 h-11 rounded-full bg-black/60 backdrop-blur flex items-center justify-center shadow-lg">
+                <ShareMenu
+                  url={window.location.href.replace("mode=broadcast", "")}
+                  title={stream?.title || "بث مباشر على سوق"}
+                  description={stream?.description || ""}
+                  variant="ghost"
+                  size="icon"
+                  data-testid="btn-stream-share"
+                />
+              </div>
+              <span className="text-white text-[10px] font-bold drop-shadow">مشاركة</span>
+            </div>
+            {/* Cohost join (viewer) */}
+            {!isBroadcast && streaming && !isCoHost && !coHostActive && user && (
               <button
                 onClick={() => {
                   if (requestingJoin) return;
@@ -1306,404 +1362,324 @@ export default function LiveStream() {
                     userId: (user as any).id,
                     userName: `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مشاهد",
                   });
-                  toast({ title: "⏳ تم إرسال طلب المشاركة، انتظر موافقة المذيع" });
+                  toast({ title: "⏳ تم إرسال طلب المشاركة" });
                 }}
                 disabled={requestingJoin}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-l from-purple-600 to-blue-600 text-white font-bold text-sm shadow-lg hover:opacity-90 transition disabled:opacity-60"
+                className="flex flex-col items-center gap-0.5"
                 data-testid="btn-request-cohost"
               >
-                <UserPlus className="w-4 h-4" />
-                {requestingJoin ? "جاري انتظار الموافقة..." : "طلب المشاركة في البث"}
+                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center shadow-lg">
+                  <UserPlus className="w-5 h-5 text-white" />
+                </div>
+                <span className="text-white text-[10px] font-bold drop-shadow">{requestingJoin ? "انتظار..." : "مشاركة"}</span>
               </button>
-            </div>
-          )}
-
-          {/* Stream Info */}
-          <div className="mt-4 flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <h1 className="text-2xl font-bold">{stream?.title}</h1>
-              {stream?.description && <p className="text-muted-foreground mt-1 text-sm">{stream.description}</p>}
-            </div>
-            <div className="flex items-center gap-2">
-              <Button onClick={handleLike} variant={liked ? "default" : "outline"} size="sm" className="gap-2 rounded-full">
-                <Heart className={`w-4 h-4 ${liked ? "fill-current text-red-400" : ""}`} />
-                {likesCount.toLocaleString()}
-              </Button>
-              <div onClick={e => e.stopPropagation()}>
-                <ShareMenu
-                  url={window.location.href.replace("mode=broadcast", "")}
-                  title={stream?.title || "بث مباشر على سوق"}
-                  description={stream?.description || ""}
-                  variant="outline"
-                  size="sm"
-                  label="مشاركة"
-                  data-testid="btn-stream-share"
-                />
-              </div>
-            </div>
+            )}
+            {/* Gift button (viewer) */}
+            {!isBroadcast && user && (
+              <button
+                onClick={() => setShowGiftsPanel(v => !v)}
+                className="flex flex-col items-center gap-0.5"
+                data-testid="btn-gifts-tiktok"
+              >
+                <div className={`w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all ${showGiftsPanel ? "bg-yellow-500 scale-110" : "bg-black/60 backdrop-blur"}`}>
+                  <span className="text-xl">🎁</span>
+                </div>
+                <span className="text-white text-[10px] font-bold drop-shadow">هدية</span>
+              </button>
+            )}
           </div>
 
-          {/* ── Poll Creator (broadcaster only) ── */}
-          {isBroadcast && showPollCreator && (
-            <div className="mt-4 bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-2xl p-4" dir="rtl">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-bold text-sm flex items-center gap-2 text-purple-700 dark:text-purple-300">
-                  <TrendingUp className="w-4 h-4" /> إنشاء استطلاع مباشر
-                </h3>
-                {livePoll && (
-                  <button onClick={() => { socketRef.current?.emit("end-poll", id); setLivePoll(null); }}
-                    className="text-xs px-3 py-1 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 hover:bg-red-200 transition">
-                    إنهاء الاستطلاع الحالي
-                  </button>
+          {/* ── TikTok Floating Chat Messages ── */}
+          <div className="absolute bottom-24 start-0 w-3/4 px-3 z-20 max-h-52 overflow-hidden flex flex-col-reverse gap-1 pointer-events-none">
+            {/* Pinned comment */}
+            {pinnedComment && (
+              <div className="flex items-start gap-1.5 bg-yellow-500/20 backdrop-blur rounded-xl px-2.5 py-1.5 mb-1 pointer-events-auto">
+                <span className="text-xs">📌</span>
+                <span className="text-yellow-200 text-xs font-bold">{pinnedComment.userName}: </span>
+                <span className="text-white text-xs">{pinnedComment.message}</span>
+                {isBroadcast && (
+                  <button onClick={() => { socketRef.current?.emit("unpin-comment", id); setPinnedComment(null); }}
+                    className="text-yellow-400 text-sm ml-1 pointer-events-auto">×</button>
                 )}
               </div>
-              <input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)}
-                placeholder="اكتب سؤال الاستطلاع..."
-                className="w-full h-9 rounded-xl border border-border px-3 text-sm mb-2 bg-white dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-400" />
-              {pollOptions.map((opt, i) => (
-                <div key={i} className="flex gap-2 mb-2">
-                  <input value={opt} onChange={e => { const o = [...pollOptions]; o[i] = e.target.value; setPollOptions(o); }}
-                    placeholder={`الخيار ${i + 1}`}
-                    className="flex-1 h-9 rounded-xl border border-border px-3 text-sm bg-white dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-400" />
-                  {i >= 2 && <button onClick={() => setPollOptions(prev => prev.filter((_, j) => j !== i))} className="text-red-500 hover:text-red-700 text-lg leading-none">×</button>}
-                </div>
-              ))}
-              <div className="flex gap-2 mt-2">
-                {pollOptions.length < 4 && (
-                  <button onClick={() => setPollOptions(prev => [...prev, ""])}
-                    className="text-xs px-3 py-1.5 rounded-full border border-purple-300 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition">
-                    + إضافة خيار
-                  </button>
+            )}
+            {messages.slice(-8).reverse().map((msg, i) => (
+              <div key={i} className="tiktok-chat-msg flex items-baseline gap-1.5 py-0.5">
+                <span className={`text-[11px] font-bold shrink-0 ${msg.isOwner ? "text-red-400" : "text-yellow-300"}`}>
+                  {msg.userName}{msg.isOwner ? " 🔴" : ""}
+                </span>
+                {msg.isVoice ? (
+                  <span className="text-white/80 text-xs">🎤 رسالة صوتية</span>
+                ) : (
+                  <span className="text-white text-xs leading-snug">{msg.message}</span>
                 )}
-                <button onClick={handleCreatePoll}
-                  className="flex-1 h-9 rounded-xl bg-purple-600 text-white text-sm font-bold hover:bg-purple-700 transition">
-                  إطلاق الاستطلاع 🚀
-                </button>
               </div>
-            </div>
-          )}
+            ))}
+          </div>
 
-          {/* ── Live Poll (viewers) ── */}
-          {livePoll && !isBroadcast && (
-            <div className="mt-4 bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-2xl p-4" dir="rtl">
-              <h3 className="font-bold text-sm text-purple-700 dark:text-purple-300 mb-3 flex items-center gap-2">
-                <TrendingUp className="w-4 h-4" /> استطلاع مباشر
-              </h3>
-              <p className="font-semibold mb-3">{livePoll.question}</p>
-              <div className="space-y-2">
-                {livePoll.options.map((opt, i) => {
-                  const pct = livePoll.totalVotes > 0 ? Math.round((opt.votes / livePoll.totalVotes) * 100) : 0;
-                  return (
-                    <button key={i} onClick={() => handleVotePoll(i)} disabled={votedPollOption !== null}
-                      className={`w-full relative flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition border overflow-hidden ${
-                        votedPollOption === i ? "border-purple-500 bg-purple-100 dark:bg-purple-900/40 text-purple-700" :
-                        votedPollOption !== null ? "border-border bg-muted/30 opacity-70 cursor-not-allowed" :
-                        "border-border hover:border-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 cursor-pointer"
-                      }`}>
-                      {votedPollOption !== null && (
-                        <div className="absolute inset-y-0 start-0 bg-purple-300/30 dark:bg-purple-700/30 rounded-xl transition-all" style={{ width: `${pct}%` }} />
-                      )}
-                      <span className="relative">{opt.text}</span>
-                      {votedPollOption !== null && <span className="relative font-bold text-purple-600">{pct}%</span>}
-                    </button>
-                  );
-                })}
-              </div>
-              {livePoll.totalVotes > 0 && (
-                <p className="text-xs text-muted-foreground mt-2 text-center">{livePoll.totalVotes} صوت</p>
+          {/* ── TikTok Bottom Chat Input ── */}
+          {user ? (
+            <div className="absolute bottom-0 inset-x-0 z-20 bg-gradient-to-t from-black/70 to-transparent px-3 pb-4 pt-8">
+              {/* Gifts Panel slides up */}
+              {showGiftsPanel && (
+                <div className="mb-2 bg-black/80 backdrop-blur border border-white/10 rounded-2xl p-3" dir="rtl">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-white">أرسل هدية 🎁</span>
+                    <button onClick={() => setShowGiftsPanel(false)} className="text-white/60 hover:text-white text-lg leading-none">×</button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {GIFTS.map(gift => (
+                      <button key={gift.id} onClick={() => { sendGift(gift); setShowGiftsPanel(false); }}
+                        className="gift-pop flex flex-col items-center gap-0.5 p-2 rounded-xl hover:bg-white/10 border border-transparent hover:border-yellow-400/40 transition">
+                        <span className="text-2xl">{gift.emoji}</span>
+                        <span className="text-[9px] text-white font-medium">{gift.name}</span>
+                        <span className="text-[8px] text-yellow-400">{gift.coins}🪙</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
+              {/* Voice recording status */}
+              {(chatIsRecording || chatIsUploading) && (
+                <div className={`mb-1.5 flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium ${
+                  chatIsUploading ? "bg-blue-500/30 text-blue-200" : "bg-red-500/30 text-red-200"
+                }`}>
+                  {chatIsUploading ? (
+                    <><span className="w-2 h-2 rounded-full bg-blue-400 animate-ping inline-block" /> إرسال الصوت...</>
+                  ) : (
+                    <><span className="w-2 h-2 rounded-full bg-red-400 animate-pulse inline-block" /> 🎤 {chatRecordSeconds}ث</>
+                  )}
+                </div>
+              )}
+              <div className="flex gap-2 items-center">
+                <Input
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendChat()}
+                  placeholder="أضف تعليقاً..."
+                  className="flex-1 h-10 text-sm rounded-full bg-white/10 border-white/20 text-white placeholder:text-white/40 focus:bg-white/20"
+                  maxLength={200}
+                  disabled={chatIsRecording || chatIsUploading}
+                />
+                <button
+                  onPointerDown={handleChatMicPress}
+                  onPointerUp={handleChatMicRelease}
+                  onPointerLeave={handleChatMicRelease}
+                  onPointerCancel={handleChatMicRelease}
+                  onContextMenu={e => e.preventDefault()}
+                  style={{ touchAction: "none", userSelect: "none" }}
+                  className={`h-10 w-10 rounded-full flex items-center justify-center transition-all flex-shrink-0 ${
+                    chatIsRecording ? "bg-red-500 text-white scale-110" : "bg-white/10 text-white hover:bg-white/20"
+                  }`}
+                  data-testid="btn-stream-voice"
+                >
+                  {chatIsRecording ? <span className="animate-pulse">🎙️</span> : <Mic className="w-4 h-4" />}
+                </button>
+                <Button size="sm" onClick={sendChat} disabled={!chatInput.trim() || chatIsRecording}
+                  className="h-10 w-10 p-0 rounded-full flex-shrink-0"
+                  data-testid="btn-stream-chat-send">
+                  <Send className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="absolute bottom-0 inset-x-0 z-20 px-4 pb-4 bg-gradient-to-t from-black/70 to-transparent">
+              <a href="/login">
+                <Button variant="outline" className="w-full rounded-full border-white/20 text-white bg-white/10 hover:bg-white/20">سجل دخول للمشاركة في الدردشة</Button>
+              </a>
             </div>
           )}
 
-          {/* ── إعلان مدمج للمشاهدين ─────────────────────── */}
-          {!isBroadcast && (
-            <AdWidget variant="banner" className="mt-4" refreshInterval={20000} />
-          )}
+        </div>{/* end TikTok video column */}
 
-          {/* Broadcaster Settings Panel */}
-          {isBroadcast && !streaming && (
-            <div className="mt-4 bg-muted/40 border border-border/50 rounded-2xl p-4">
-              <h3 className="font-bold mb-3 flex items-center gap-2 text-sm"><Settings className="w-4 h-4" /> إعدادات جودة البث</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">جودة الفيديو</label>
-                  <Select value={quality} onValueChange={(v) => setQuality(v as any)}>
-                    <SelectTrigger className="rounded-xl h-9 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1080p">🔥 1080p Full HD</SelectItem>
-                      <SelectItem value="720p">⚡ 720p HD</SelectItem>
-                      <SelectItem value="480p">📱 480p</SelectItem>
-                      <SelectItem value="360p">📶 360p (توفير بيانات)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">مصدر البث</label>
-                  <div className="flex gap-2 h-9">
-                    <button
-                      onClick={() => setSourceMode("camera")}
-                      className={`flex-1 rounded-xl text-xs font-medium flex items-center justify-center gap-1 border transition ${sourceMode === "camera" ? "bg-primary text-white border-primary" : "border-border hover:bg-muted"}`}
-                    >
-                      <Camera className="w-3 h-3" /> كاميرا
-                    </button>
-                    <button
-                      onClick={() => setSourceMode("screen")}
-                      className={`flex-1 rounded-xl text-xs font-medium flex items-center justify-center gap-1 border transition ${sourceMode === "screen" ? "bg-primary text-white border-primary" : "border-border hover:bg-muted"}`}
-                    >
-                      <Monitor className="w-3 h-3" /> شاشة
-                    </button>
-                  </div>
-                </div>
-                {cameras.length > 1 && (
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">الكاميرا</label>
-                    <Select value={selectedCamera} onValueChange={setSelectedCamera}>
-                      <SelectTrigger className="rounded-xl h-9 text-xs">
-                        <SelectValue placeholder="اختر الكاميرا" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {cameras.map(cam => (
-                          <SelectItem key={cam.deviceId} value={cam.deviceId}>
-                            {cam.label || `كاميرا ${cameras.indexOf(cam) + 1}`}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-                {mics.length > 1 && (
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">الميكروفون</label>
-                    <Select value={selectedMic} onValueChange={setSelectedMic}>
-                      <SelectTrigger className="rounded-xl h-9 text-xs">
-                        <SelectValue placeholder="اختر الميكروفون" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {mics.map(mic => (
-                          <SelectItem key={mic.deviceId} value={mic.deviceId}>
-                            {mic.label || `ميكروفون ${mics.indexOf(mic) + 1}`}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-              </div>
-              <div className="mt-3 text-xs text-muted-foreground flex items-center gap-2">
-                <Volume2 className="w-3 h-3" />
-                الصوت: إلغاء الصدى · تصفية الضوضاء · ضبط تلقائي للمستوى
-              </div>
-            </div>
-          )}
-        </div>
+        {/* ══ Desktop Right Panel ══ */}
+        <div className="hidden lg:flex flex-1 flex-col gap-3 bg-zinc-900 border-l border-white/10 p-4 overflow-y-auto" dir="rtl">
 
-        {/* ── Live Chat ── */}
-        <div className="lg:w-80 flex flex-col gap-4">
           {/* Connection Status */}
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium ${connected ? "bg-green-500/10 text-green-600" : "bg-muted text-muted-foreground"}`}>
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium ${connected ? "bg-green-500/10 text-green-500" : "bg-white/5 text-white/40"}`}>
             {connected ? <><Wifi className="w-3 h-3" /> متصل · جودة عالية</> : <><WifiOff className="w-3 h-3" /> جاري الاتصال...</>}
           </div>
 
-          {/* ── Top Gifters Leaderboard ── */}
+          {/* Top Gifters */}
           {topGifters.length > 0 && (
-            <div className="bg-gradient-to-br from-yellow-50 to-orange-50 dark:from-yellow-950/20 dark:to-orange-950/20 border border-yellow-200 dark:border-yellow-800 rounded-2xl p-3" dir="rtl">
-              <h3 className="text-xs font-bold text-yellow-700 dark:text-yellow-400 mb-2 flex items-center gap-1">
+            <div className="bg-white/5 rounded-2xl p-3">
+              <h3 className="text-xs font-bold text-yellow-400 mb-2 flex items-center gap-1">
                 <Trophy className="w-3.5 h-3.5" /> أكثر المُهدين
               </h3>
               <div className="space-y-1.5">
                 {topGifters.slice(0, 5).map((g, i) => (
                   <div key={g.userId} className="flex items-center gap-2">
                     <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 ${
-                      i === 0 ? "bg-yellow-500" : i === 1 ? "bg-gray-400" : i === 2 ? "bg-amber-600" : "bg-muted-foreground"
+                      i === 0 ? "bg-yellow-500" : i === 1 ? "bg-gray-400" : i === 2 ? "bg-amber-600" : "bg-zinc-600"
                     }`}>{i + 1}</span>
                     <span className="text-lg">{g.lastEmoji}</span>
-                    <span className="text-xs font-medium flex-1 truncate">{g.userName}</span>
-                    <span className="text-[10px] text-yellow-600 font-bold">{g.totalCoins} 🪙</span>
+                    <span className="text-xs font-medium flex-1 truncate text-white">{g.userName}</span>
+                    <span className="text-[10px] text-yellow-400 font-bold">{g.totalCoins}🪙</span>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Chat Box */}
-          <div className="bg-card border border-border/50 rounded-2xl overflow-hidden flex flex-col" style={{ height: 460 }}>
-            <div className="p-4 border-b flex items-center justify-between bg-muted/20">
-              <div className="flex items-center gap-2">
-                <MessageCircle className="w-4 h-4 text-primary" />
-                <span className="font-bold text-sm">الدردشة المباشرة</span>
+          {/* Ad Widget */}
+          {!isBroadcast && (
+            <AdWidget variant="banner" refreshInterval={20000} />
+          )}
+
+          {/* Poll Creator (broadcaster) */}
+          {isBroadcast && showPollCreator && (
+            <div className="bg-purple-900/20 border border-purple-500/30 rounded-2xl p-3">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-bold text-xs flex items-center gap-2 text-purple-300">
+                  <TrendingUp className="w-3.5 h-3.5" /> إنشاء استطلاع
+                </h3>
+                {livePoll && (
+                  <button onClick={() => { socketRef.current?.emit("end-poll", id); setLivePoll(null); }}
+                    className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 hover:bg-red-500/30 transition">إنهاء</button>
+                )}
               </div>
-              <Badge variant="outline" className="text-xs gap-1">
-                <Users className="w-3 h-3" /> {viewerCount}
-              </Badge>
+              <input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)}
+                placeholder="سؤال الاستطلاع..."
+                className="w-full h-8 rounded-lg bg-white/10 text-white placeholder:text-white/40 border border-white/10 px-2 text-xs mb-1.5 focus:outline-none focus:border-purple-400" />
+              {pollOptions.map((opt, i) => (
+                <div key={i} className="flex gap-1.5 mb-1.5">
+                  <input value={opt} onChange={e => { const o = [...pollOptions]; o[i] = e.target.value; setPollOptions(o); }}
+                    placeholder={`الخيار ${i + 1}`}
+                    className="flex-1 h-8 rounded-lg bg-white/10 text-white placeholder:text-white/40 border border-white/10 px-2 text-xs focus:outline-none focus:border-purple-400" />
+                  {i >= 2 && <button onClick={() => setPollOptions(prev => prev.filter((_, j) => j !== i))} className="text-red-400 text-base leading-none">×</button>}
+                </div>
+              ))}
+              <div className="flex gap-1.5 mt-1.5">
+                {pollOptions.length < 4 && (
+                  <button onClick={() => setPollOptions(prev => [...prev, ""])}
+                    className="text-[10px] px-2 py-1 rounded-lg border border-purple-500/40 text-purple-400 hover:bg-purple-900/20 transition">+ خيار</button>
+                )}
+                <button onClick={handleCreatePoll}
+                  className="flex-1 h-8 rounded-lg bg-purple-600 text-white text-xs font-bold hover:bg-purple-700 transition">إطلاق 🚀</button>
+              </div>
             </div>
+          )}
 
-            <div className="flex-1 overflow-y-auto p-3 space-y-1.5 scroll-smooth">
-              {/* Pinned Comment */}
-              {pinnedComment && (
-                <div className="bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-300 dark:border-yellow-700 rounded-xl px-3 py-2 mb-2 flex items-start gap-2" dir="rtl">
-                  <span className="text-sm">📌</span>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-[10px] font-bold text-yellow-700 dark:text-yellow-400">{pinnedComment.userName}: </span>
-                    <span className="text-xs text-foreground">{pinnedComment.message}</span>
-                  </div>
-                  {isBroadcast && (
-                    <button onClick={() => { socketRef.current?.emit("unpin-comment", id); setPinnedComment(null); }}
-                      className="text-yellow-600 hover:text-yellow-800 text-sm leading-none flex-shrink-0">×</button>
-                  )}
+          {/* Live Poll (viewers) */}
+          {livePoll && !isBroadcast && (
+            <div className="bg-purple-900/20 border border-purple-500/30 rounded-2xl p-3">
+              <h3 className="font-bold text-xs text-purple-300 mb-2 flex items-center gap-1.5">
+                <TrendingUp className="w-3.5 h-3.5" /> استطلاع مباشر
+              </h3>
+              <p className="text-sm text-white font-semibold mb-2">{livePoll.question}</p>
+              <div className="space-y-1.5">
+                {livePoll.options.map((opt, i) => {
+                  const pct = livePoll.totalVotes > 0 ? Math.round((opt.votes / livePoll.totalVotes) * 100) : 0;
+                  return (
+                    <button key={i} onClick={() => handleVotePoll(i)} disabled={votedPollOption !== null}
+                      className={`w-full relative flex items-center justify-between rounded-lg px-2.5 py-2 text-xs font-medium transition border overflow-hidden ${
+                        votedPollOption === i ? "border-purple-500 bg-purple-700/30 text-purple-200" :
+                        votedPollOption !== null ? "border-white/10 bg-white/5 opacity-60 cursor-not-allowed" :
+                        "border-white/10 hover:border-purple-400/50 hover:bg-purple-900/20 cursor-pointer text-white"
+                      }`}>
+                      {votedPollOption !== null && <div className="absolute inset-y-0 start-0 bg-purple-500/20 rounded-lg" style={{ width: `${pct}%` }} />}
+                      <span className="relative">{opt.text}</span>
+                      {votedPollOption !== null && <span className="relative font-bold text-purple-300">{pct}%</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Broadcaster Settings */}
+          {isBroadcast && !streaming && (
+            <div className="bg-white/5 rounded-2xl p-3">
+              <h3 className="font-bold mb-2 flex items-center gap-2 text-xs text-white"><Settings className="w-3.5 h-3.5" /> إعدادات البث</h3>
+              <div className="space-y-2">
+                <Select value={quality} onValueChange={(v) => setQuality(v as any)}>
+                  <SelectTrigger className="rounded-lg h-8 text-xs bg-white/10 border-white/10 text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1080p">🔥 1080p Full HD</SelectItem>
+                    <SelectItem value="720p">⚡ 720p HD</SelectItem>
+                    <SelectItem value="480p">📱 480p</SelectItem>
+                    <SelectItem value="360p">📶 360p</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="flex gap-1.5">
+                  <button onClick={() => setSourceMode("camera")}
+                    className={`flex-1 h-8 rounded-lg text-xs font-medium flex items-center justify-center gap-1 border transition ${sourceMode === "camera" ? "bg-primary text-white border-primary" : "border-white/10 text-white/60 hover:bg-white/10"}`}>
+                    <Camera className="w-3 h-3" /> كاميرا
+                  </button>
+                  <button onClick={() => setSourceMode("screen")}
+                    className={`flex-1 h-8 rounded-lg text-xs font-medium flex items-center justify-center gap-1 border transition ${sourceMode === "screen" ? "bg-primary text-white border-primary" : "border-white/10 text-white/60 hover:bg-white/10"}`}>
+                    <Monitor className="w-3 h-3" /> شاشة
+                  </button>
                 </div>
-              )}
+              </div>
+            </div>
+          )}
 
+          {/* Full Chat (desktop) */}
+          <div className="flex-1 bg-white/5 rounded-2xl overflow-hidden flex flex-col" style={{ minHeight: 300 }}>
+            <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between">
+              <span className="text-xs font-bold text-white flex items-center gap-1.5"><MessageCircle className="w-3.5 h-3.5 text-primary" /> الدردشة</span>
+              <Badge variant="secondary" className="text-[10px] bg-white/10 text-white/60 border-0"><Users className="w-2.5 h-2.5 ml-1" />{viewerCount}</Badge>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1" ref={chatEndRef}>
               {messages.length === 0 && (
-                <div className="text-center text-muted-foreground text-xs pt-8">
-                  لا توجد رسائل بعد... كن أول من يتفاعل! 💬
-                </div>
+                <p className="text-center text-white/30 text-xs pt-8">كن أول من يتفاعل! 💬</p>
               )}
               {messages.map((msg, i) => (
-                <div key={i} className="group flex items-start gap-2">
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 mt-0.5 ${msg.isOwner ? "bg-red-500" : "bg-gradient-to-br from-primary to-secondary"}`}>
+                <div key={i} className="group flex items-start gap-1.5">
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center text-white text-[8px] font-bold flex-shrink-0 mt-0.5 ${msg.isOwner ? "bg-red-500" : "bg-gradient-to-br from-primary to-secondary"}`}>
                     {msg.isOwner ? "🎙" : msg.userName[0]}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <span className={`text-[11px] font-bold ${msg.isOwner ? "text-red-500" : "text-primary"}`}>
+                    <span className={`text-[10px] font-bold ${msg.isOwner ? "text-red-400" : "text-yellow-300"}`}>
                       {msg.userName}{msg.isOwner ? " 🔴" : ""}{" "}
                     </span>
                     {msg.isVoice && msg.voiceUrl ? (
-                      <span className="flex items-center gap-1 flex-wrap mt-0.5">
-                        <span className="text-[10px] text-muted-foreground">🎤</span>
-                        <audio
-                          controls
-                          src={msg.voiceUrl}
-                          className="h-6 max-w-[160px]"
-                          style={{ height: 24 }}
-                        />
-                        {/* Owner can reply with voice to this voice message */}
-                        {user && stream?.userId === user.id && !msg.isOwner && (
-                          <button
-                            onPointerDown={handleChatMicPress}
-                            onPointerUp={handleChatMicRelease}
-                            onPointerLeave={handleChatMicRelease}
-                            onPointerCancel={handleChatMicRelease}
-                            onContextMenu={e => e.preventDefault()}
-                            style={{ touchAction: "none", userSelect: "none" }}
-                            className="text-[9px] px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 border border-red-200 dark:border-red-800 hover:bg-red-200 transition-all"
-                          >
-                            {chatIsRecording ? "🔴 جارٍ..." : "رد بصوتك"}
-                          </button>
-                        )}
-                      </span>
+                      <audio controls src={msg.voiceUrl} className="h-5 max-w-[140px]" style={{ height: 20 }} />
                     ) : (
-                      <span className="text-sm text-foreground break-words">{msg.message}</span>
+                      <span className="text-xs text-white/80 break-words">{msg.message}</span>
                     )}
                   </div>
-                  {/* Pin button (broadcaster only, on non-voice messages) */}
                   {isBroadcast && !msg.isVoice && (
                     <button onClick={() => handlePinMessage(msg)}
-                      className="opacity-0 group-hover:opacity-100 flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded text-muted-foreground hover:text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 transition-all"
-                      title="تثبيت">📌</button>
+                      className="opacity-0 group-hover:opacity-100 text-[9px] text-white/40 hover:text-yellow-400 transition-all">📌</button>
                   )}
                 </div>
               ))}
-              <div ref={chatEndRef} />
             </div>
 
-            {/* Voice Recording Status */}
-            {(chatIsRecording || chatIsUploading) && (
-              <div className={`mx-3 mb-1 flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium ${
-                chatIsUploading
-                  ? "bg-blue-50 dark:bg-blue-950/30 text-blue-600 border border-blue-200"
-                  : "bg-red-50 dark:bg-red-950/30 text-red-600 border border-red-200"
-              }`}>
-                {chatIsUploading ? (
-                  <><span className="w-2 h-2 rounded-full bg-blue-500 animate-ping inline-block" /> جارٍ إرسال الصوت...</>
-                ) : (
-                  <>
-                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse inline-block" />
-                    🎤 {chatRecordSeconds}ث — ارفع إصبعك للإرسال
-                    <div className="flex items-end gap-0.5 h-3 ms-1">
-                      {[0.3, 0.7, 0.5, 1, 0.6].map((b, j) => (
-                        <div key={j} className="w-0.5 bg-red-500 rounded-full transition-all duration-100"
-                          style={{ height: `${Math.max(20, (b * chatWaveLevel + b * 0.5) * 100)}%` }} />
-                      ))}
-                    </div>
-                  </>
+            {/* Desktop chat input */}
+            {user ? (
+              <div className="p-2 border-t border-white/10 space-y-1.5">
+                {(chatIsRecording || chatIsUploading) && (
+                  <div className={`flex items-center gap-2 px-2 py-1 rounded-lg text-[10px] ${chatIsUploading ? "bg-blue-900/30 text-blue-300" : "bg-red-900/30 text-red-300"}`}>
+                    {chatIsUploading ? <><span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-ping inline-block" /> إرسال...</> : <><span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse inline-block" /> 🎤 {chatRecordSeconds}ث</>}
+                  </div>
                 )}
+                <div className="flex gap-1.5">
+                  <button onClick={() => setShowGiftsPanel(v => !v)}
+                    className={`h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0 text-sm transition ${showGiftsPanel ? "bg-yellow-500" : "bg-white/10 hover:bg-white/20"}`}>🎁</button>
+                  <Input value={chatInput} onChange={e => setChatInput(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendChat()}
+                    placeholder="رسالة..." maxLength={200}
+                    className="flex-1 h-8 text-xs rounded-full bg-white/10 border-white/10 text-white placeholder:text-white/40"
+                    disabled={chatIsRecording || chatIsUploading} />
+                  <button onPointerDown={handleChatMicPress} onPointerUp={handleChatMicRelease} onPointerLeave={handleChatMicRelease} onPointerCancel={handleChatMicRelease} onContextMenu={e => e.preventDefault()} style={{ touchAction: "none", userSelect: "none" }}
+                    className={`h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0 transition ${chatIsRecording ? "bg-red-500 text-white scale-110" : "bg-white/10 hover:bg-white/20 text-white"}`}>
+                    {chatIsRecording ? <span className="animate-pulse text-sm">🎙️</span> : <Mic className="w-3.5 h-3.5" />}
+                  </button>
+                  <Button size="sm" onClick={sendChat} disabled={!chatInput.trim() || chatIsRecording} className="h-8 w-8 p-0 rounded-full flex-shrink-0">
+                    <Send className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-2 border-t border-white/10">
+                <a href="/login"><Button variant="ghost" size="sm" className="w-full text-xs rounded-full text-white/60 hover:text-white hover:bg-white/10">سجل دخول للمشاركة</Button></a>
               </div>
             )}
-
-            <div className="p-3 border-t bg-muted/10 space-y-2">
-              {user ? (
-                <>
-                  {/* Gifts Panel */}
-                  {showGiftsPanel && (
-                    <div className="bg-card border border-border rounded-2xl p-3 mb-1" dir="rtl">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-bold text-foreground">أرسل هدية 🎁</span>
-                        <button onClick={() => setShowGiftsPanel(false)} className="text-muted-foreground hover:text-foreground text-lg leading-none">×</button>
-                      </div>
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {GIFTS.map(gift => (
-                          <button key={gift.id} onClick={() => sendGift(gift)}
-                            className="flex flex-col items-center gap-0.5 p-2 rounded-xl hover:bg-yellow-50 dark:hover:bg-yellow-900/20 border border-transparent hover:border-yellow-200 dark:hover:border-yellow-800 transition group">
-                            <span className="text-2xl group-hover:scale-110 transition-transform">{gift.emoji}</span>
-                            <span className="text-[9px] text-foreground font-medium">{gift.name}</span>
-                            <span className="text-[8px] text-yellow-600">{gift.coins}🪙</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex gap-1.5">
-                    {/* Gift Toggle */}
-                    <button
-                      onClick={() => setShowGiftsPanel(v => !v)}
-                      className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${showGiftsPanel ? "bg-yellow-500 text-white scale-110" : "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 hover:bg-yellow-200 dark:hover:bg-yellow-800/30"}`}
-                      title="أرسل هدية"
-                      data-testid="btn-gifts">
-                      🎁
-                    </button>
-                    <Input
-                      value={chatInput}
-                      onChange={e => setChatInput(e.target.value)}
-                      onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendChat()}
-                      placeholder="رسالة أو 🎤 اضغط مطولاً..."
-                      className="flex-1 h-9 text-sm rounded-full"
-                      maxLength={200}
-                      disabled={chatIsRecording || chatIsUploading}
-                    />
-                    {/* 🎤 Press & Hold Mic — pointer events cover mouse & touch */}
-                    <button
-                      onPointerDown={handleChatMicPress}
-                      onPointerUp={handleChatMicRelease}
-                      onPointerLeave={handleChatMicRelease}
-                      onPointerCancel={handleChatMicRelease}
-                      onContextMenu={e => e.preventDefault()}
-                      disabled={chatIsUploading}
-                      style={{ touchAction: "none", userSelect: "none" }}
-                      className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
-                        chatIsRecording
-                          ? "bg-red-500 text-white scale-110 shadow-lg shadow-red-300"
-                          : "bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30"
-                      } disabled:opacity-50`}
-                      title="اضغط مطولاً للتسجيل الصوتي"
-                      data-testid="btn-stream-voice"
-                    >
-                      {chatIsRecording ? <span className="text-sm animate-pulse">🎙️</span> : <Mic className="w-4 h-4" />}
-                    </button>
-                    {/* Send Text */}
-                    <Button size="sm" onClick={sendChat} disabled={!chatInput.trim() || chatIsRecording} className="h-9 w-9 p-0 rounded-full">
-                      <Send className="w-4 h-4" />
-                    </Button>
-                  </div>
-                  <p className="text-[9px] text-muted-foreground text-center">🎁 أرسل هدية · 🎤 اضغط مطولاً للتسجيل</p>
-                </>
-              ) : (
-                <a href="/login">
-                  <Button variant="outline" size="sm" className="w-full text-xs rounded-full">سجل دخول للمشاركة في الدردشة</Button>
-                </a>
-              )}
-            </div>
           </div>
         </div>
       </div>
