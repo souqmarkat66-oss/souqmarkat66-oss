@@ -31,6 +31,39 @@ interface ChatMsg {
   isOwner?: boolean;
 }
 
+interface LiveGift {
+  id: number;
+  giftEmoji: string;
+  giftName: string;
+  giftCoins: number;
+  userName: string;
+  userId: string;
+}
+
+interface LivePoll {
+  id: number;
+  question: string;
+  options: { text: string; votes: number }[];
+  totalVotes: number;
+}
+
+interface FloatingItem {
+  id: number;
+  emoji?: string;
+  x: number;
+}
+
+const GIFTS = [
+  { id: "rose",    emoji: "🌹", name: "وردة",   coins: 5   },
+  { id: "heart",   emoji: "❤️", name: "قلب",    coins: 10  },
+  { id: "star",    emoji: "⭐", name: "نجمة",   coins: 20  },
+  { id: "fire",    emoji: "🔥", name: "نار",    coins: 50  },
+  { id: "diamond", emoji: "💎", name: "ماسة",   coins: 100 },
+  { id: "crown",   emoji: "👑", name: "تاج",    coins: 200 },
+  { id: "rocket",  emoji: "🚀", name: "صاروخ",  coins: 500 },
+  { id: "trophy",  emoji: "🏆", name: "كأس",    coins: 1000},
+];
+
 const QUALITY_PRESETS = {
   "1080p": { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 }, frameRate: { ideal: 30, max: 30 } },
   "720p":  { width: { ideal: 1280, max: 1280 }, height: { ideal: 720,  max: 720  }, frameRate: { ideal: 30, max: 30 } },
@@ -120,6 +153,20 @@ export default function LiveStream() {
   const chatChunksRef     = useRef<BlobPart[]>([]);
   const chatTimerRef      = useRef<ReturnType<typeof setInterval> | null>(null);
   const chatWaveRef       = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── TikTok-style Live Features ───────────────────────────────
+  const [floatingGifts, setFloatingGifts]   = useState<FloatingItem[]>([]);
+  const [floatingHearts, setFloatingHearts] = useState<FloatingItem[]>([]);
+  const [pinnedComment, setPinnedComment]   = useState<{ message: string; userName: string } | null>(null);
+  const [topGifters, setTopGifters]         = useState<{ userName: string; userId: string; giftCount: number; totalCoins: number; lastEmoji: string }[]>([]);
+  const [livePoll, setLivePoll]             = useState<LivePoll | null>(null);
+  const [votedPollOption, setVotedPollOption] = useState<number | null>(null);
+  const [showGiftsPanel, setShowGiftsPanel] = useState(false);
+  const [showPollCreator, setShowPollCreator] = useState(false);
+  const [pollQuestion, setPollQuestion]     = useState("");
+  const [pollOptions, setPollOptions]       = useState(["", ""]);
+  const [recentGiftBanner, setRecentGiftBanner] = useState<LiveGift | null>(null);
+  const [followerBanners, setFollowerBanners] = useState<{ id: number; userName: string }[]>([]);
 
   const { data: stream, isLoading } = useQuery<LiveStreamType>({
     queryKey: ["/api/streams", Number(id)],
@@ -557,6 +604,51 @@ export default function LiveStream() {
       toast({ title: "👋 انتهت مشاركة الضيف" });
     });
 
+    // ── TikTok-style Live Feature Listeners ──────────────────────
+    socket.on("stream-gift", (data: LiveGift) => {
+      // Update top gifters leaderboard
+      setTopGifters(prev => {
+        const idx = prev.findIndex(g => g.userId === data.userId);
+        let updated;
+        if (idx >= 0) {
+          updated = prev.map((g, i) => i === idx
+            ? { ...g, giftCount: g.giftCount + 1, totalCoins: g.totalCoins + data.giftCoins, lastEmoji: data.giftEmoji }
+            : g
+          );
+        } else {
+          updated = [...prev, { userName: data.userName, userId: data.userId, giftCount: 1, totalCoins: data.giftCoins, lastEmoji: data.giftEmoji }];
+        }
+        return updated.sort((a, b) => b.totalCoins - a.totalCoins).slice(0, 10);
+      });
+      // Floating gift animation
+      const giftId = Date.now() + Math.random();
+      const x = Math.random() * 60 + 20;
+      setFloatingGifts(prev => [...prev, { id: giftId, emoji: data.giftEmoji, x }]);
+      setTimeout(() => setFloatingGifts(prev => prev.filter(g => g.id !== giftId)), 3500);
+      // Gift banner
+      setRecentGiftBanner(data);
+      setTimeout(() => setRecentGiftBanner(null), 5000);
+    });
+
+    socket.on("comment-pinned", (data: { message: string; userName: string }) => setPinnedComment(data));
+    socket.on("comment-unpinned", () => setPinnedComment(null));
+
+    socket.on("poll-created", (data: LivePoll) => { setLivePoll(data); setVotedPollOption(null); });
+    socket.on("poll-ended", () => setLivePoll(null));
+    socket.on("poll-updated", (data: { pollId: number; optionIndex: number }) => {
+      setLivePoll(prev => {
+        if (!prev || prev.id !== data.pollId) return prev;
+        const options = prev.options.map((o, i) => i === data.optionIndex ? { ...o, votes: o.votes + 1 } : o);
+        return { ...prev, options, totalVotes: prev.totalVotes + 1 };
+      });
+    });
+
+    socket.on("new-follower", (data: { userName: string }) => {
+      const fid = Date.now();
+      setFollowerBanners(prev => [...prev, { id: fid, userName: data.userName }]);
+      setTimeout(() => setFollowerBanners(prev => prev.filter(f => f.id !== fid)), 5000);
+    });
+
     // ✅ join-stream emitted AFTER all handlers are ready
     // so cohost-active / viewer-count etc. don't arrive before their handlers
     socket.emit("join-stream", id);
@@ -676,6 +768,15 @@ export default function LiveStream() {
     if (!liked) {
       setLikesCount(c => c + 1);
       socketRef.current?.emit("stream-like", id);
+      // Floating hearts animation
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => {
+          const hid = Date.now() + Math.random();
+          const x = Math.random() * 70 + 15;
+          setFloatingHearts(prev => [...prev, { id: hid, x }]);
+          setTimeout(() => setFloatingHearts(prev => prev.filter(h => h.id !== hid)), 3000);
+        }, i * 150);
+      }
     }
     if (user) {
       fetch("/api/likes", {
@@ -685,6 +786,43 @@ export default function LiveStream() {
         credentials: "include"
       });
     }
+  };
+
+  // ── TikTok Actions ────────────────────────────────────────────
+  const sendGift = (gift: typeof GIFTS[0]) => {
+    if (!user) { window.location.href = "/login"; return; }
+    socketRef.current?.emit("send-gift", {
+      streamId: id,
+      giftType: gift.id,
+      giftEmoji: gift.emoji,
+      giftName: gift.name,
+      giftCoins: gift.coins,
+      userName: user.firstName || "مستخدم",
+      userId: String(user.id),
+    });
+    setShowGiftsPanel(false);
+    toast({ title: `أرسلت ${gift.emoji} ${gift.name}!`, description: `${gift.coins} عملة` });
+  };
+
+  const handleCreatePoll = () => {
+    const validOptions = pollOptions.filter(o => o.trim());
+    if (!pollQuestion.trim() || validOptions.length < 2) {
+      toast({ variant: "destructive", title: "أدخل سؤالاً وخيارين على الأقل" }); return;
+    }
+    socketRef.current?.emit("create-poll", { streamId: id, question: pollQuestion.trim(), options: validOptions });
+    setPollQuestion(""); setPollOptions(["", ""]); setShowPollCreator(false);
+    toast({ title: "✅ تم إنشاء الاستطلاع" });
+  };
+
+  const handleVotePoll = (optionIndex: number) => {
+    if (votedPollOption !== null || !livePoll) return;
+    setVotedPollOption(optionIndex);
+    socketRef.current?.emit("vote-poll", { streamId: id, pollId: livePoll.id, optionIndex });
+  };
+
+  const handlePinMessage = (msg: ChatMsg) => {
+    socketRef.current?.emit("pin-comment", { streamId: id, message: msg.message, userName: msg.userName });
+    toast({ title: "📌 تم تثبيت التعليق" });
   };
 
   const toggleMute = () => {
@@ -739,6 +877,17 @@ export default function LiveStream() {
 
   return (
     <div className="container px-4 py-6" dir="rtl">
+      <style>{`
+        @keyframes floatUp {
+          0%   { transform: translateY(0) scale(1); opacity: 1; }
+          70%  { transform: translateY(-160px) scale(1.3) rotate(10deg); opacity: 0.8; }
+          100% { transform: translateY(-250px) scale(0.5); opacity: 0; }
+        }
+        @keyframes slideInLeft {
+          from { transform: translateX(-30px); opacity: 0; }
+          to   { transform: translateX(0); opacity: 1; }
+        }
+      `}</style>
 
       {/* ── Post-Stream Summary Modal ── */}
       {showSummary && (
@@ -894,6 +1043,42 @@ export default function LiveStream() {
               </button>
             )}
 
+            {/* ── TikTok Floating Hearts ── */}
+            {floatingHearts.map(h => (
+              <div key={h.id} className="absolute bottom-20 pointer-events-none select-none text-2xl"
+                style={{ left: `${h.x}%`, animation: "floatUp 3s ease-out forwards" }}>
+                ❤️
+              </div>
+            ))}
+
+            {/* ── TikTok Floating Gifts ── */}
+            {floatingGifts.map(g => (
+              <div key={g.id} className="absolute bottom-24 pointer-events-none select-none text-3xl"
+                style={{ left: `${g.x}%`, animation: "floatUp 3.5s ease-out forwards", filter: "drop-shadow(0 0 8px gold)" }}>
+                {g.emoji}
+              </div>
+            ))}
+
+            {/* ── Recent Gift Banner (bottom-left) ── */}
+            {recentGiftBanner && (
+              <div className="absolute bottom-16 start-4 flex items-center gap-2 bg-black/70 backdrop-blur rounded-full px-4 py-2 border border-yellow-500/40 text-white text-sm font-bold"
+                style={{ animation: "slideInLeft 0.4s ease-out" }}>
+                <span className="text-2xl">{recentGiftBanner.giftEmoji}</span>
+                <span>{recentGiftBanner.userName}</span>
+                <span className="text-yellow-400">أرسل {recentGiftBanner.giftName}</span>
+              </div>
+            )}
+
+            {/* ── Follower Banners (top-left) ── */}
+            <div className="absolute top-14 start-4 flex flex-col gap-1">
+              {followerBanners.slice(-3).map(f => (
+                <div key={f.id} className="flex items-center gap-2 bg-black/70 backdrop-blur rounded-full px-3 py-1.5 text-white text-xs font-medium"
+                  style={{ animation: "slideInLeft 0.4s ease-out" }}>
+                  <span className="text-pink-400">💗</span> {f.userName} تابع المضيف
+                </div>
+              ))}
+            </div>
+
             {/* Broadcaster controls */}
             {isBroadcast && streaming && (
               <div className="absolute bottom-0 start-0 end-0 bg-gradient-to-t from-black/80 to-transparent p-5">
@@ -923,6 +1108,15 @@ export default function LiveStream() {
                     title={sourceMode === "screen" ? "العودة للكاميرا" : "مشاركة الشاشة"}
                   >
                     {sourceMode === "screen" ? <Camera className="w-5 h-5" /> : <Monitor className="w-5 h-5" />}
+                  </button>
+
+                  {/* Poll Creator Toggle */}
+                  <button
+                    onClick={() => setShowPollCreator(v => !v)}
+                    className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg ${showPollCreator ? "bg-purple-500 text-white scale-110" : "bg-white/20 backdrop-blur text-white hover:bg-white/30"}`}
+                    title="إنشاء استطلاع"
+                  >
+                    <TrendingUp className="w-5 h-5" />
                   </button>
 
                   {/* End stream */}
@@ -1104,6 +1298,78 @@ export default function LiveStream() {
             </div>
           </div>
 
+          {/* ── Poll Creator (broadcaster only) ── */}
+          {isBroadcast && showPollCreator && (
+            <div className="mt-4 bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-2xl p-4" dir="rtl">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-sm flex items-center gap-2 text-purple-700 dark:text-purple-300">
+                  <TrendingUp className="w-4 h-4" /> إنشاء استطلاع مباشر
+                </h3>
+                {livePoll && (
+                  <button onClick={() => { socketRef.current?.emit("end-poll", id); setLivePoll(null); }}
+                    className="text-xs px-3 py-1 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 hover:bg-red-200 transition">
+                    إنهاء الاستطلاع الحالي
+                  </button>
+                )}
+              </div>
+              <input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)}
+                placeholder="اكتب سؤال الاستطلاع..."
+                className="w-full h-9 rounded-xl border border-border px-3 text-sm mb-2 bg-white dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-400" />
+              {pollOptions.map((opt, i) => (
+                <div key={i} className="flex gap-2 mb-2">
+                  <input value={opt} onChange={e => { const o = [...pollOptions]; o[i] = e.target.value; setPollOptions(o); }}
+                    placeholder={`الخيار ${i + 1}`}
+                    className="flex-1 h-9 rounded-xl border border-border px-3 text-sm bg-white dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                  {i >= 2 && <button onClick={() => setPollOptions(prev => prev.filter((_, j) => j !== i))} className="text-red-500 hover:text-red-700 text-lg leading-none">×</button>}
+                </div>
+              ))}
+              <div className="flex gap-2 mt-2">
+                {pollOptions.length < 4 && (
+                  <button onClick={() => setPollOptions(prev => [...prev, ""])}
+                    className="text-xs px-3 py-1.5 rounded-full border border-purple-300 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition">
+                    + إضافة خيار
+                  </button>
+                )}
+                <button onClick={handleCreatePoll}
+                  className="flex-1 h-9 rounded-xl bg-purple-600 text-white text-sm font-bold hover:bg-purple-700 transition">
+                  إطلاق الاستطلاع 🚀
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Live Poll (viewers) ── */}
+          {livePoll && !isBroadcast && (
+            <div className="mt-4 bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-2xl p-4" dir="rtl">
+              <h3 className="font-bold text-sm text-purple-700 dark:text-purple-300 mb-3 flex items-center gap-2">
+                <TrendingUp className="w-4 h-4" /> استطلاع مباشر
+              </h3>
+              <p className="font-semibold mb-3">{livePoll.question}</p>
+              <div className="space-y-2">
+                {livePoll.options.map((opt, i) => {
+                  const pct = livePoll.totalVotes > 0 ? Math.round((opt.votes / livePoll.totalVotes) * 100) : 0;
+                  return (
+                    <button key={i} onClick={() => handleVotePoll(i)} disabled={votedPollOption !== null}
+                      className={`w-full relative flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition border overflow-hidden ${
+                        votedPollOption === i ? "border-purple-500 bg-purple-100 dark:bg-purple-900/40 text-purple-700" :
+                        votedPollOption !== null ? "border-border bg-muted/30 opacity-70 cursor-not-allowed" :
+                        "border-border hover:border-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 cursor-pointer"
+                      }`}>
+                      {votedPollOption !== null && (
+                        <div className="absolute inset-y-0 start-0 bg-purple-300/30 dark:bg-purple-700/30 rounded-xl transition-all" style={{ width: `${pct}%` }} />
+                      )}
+                      <span className="relative">{opt.text}</span>
+                      {votedPollOption !== null && <span className="relative font-bold text-purple-600">{pct}%</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              {livePoll.totalVotes > 0 && (
+                <p className="text-xs text-muted-foreground mt-2 text-center">{livePoll.totalVotes} صوت</p>
+              )}
+            </div>
+          )}
+
           {/* ── إعلان مدمج للمشاهدين ─────────────────────── */}
           {!isBroadcast && (
             <AdWidget variant="banner" className="mt-4" refreshInterval={20000} />
@@ -1195,6 +1461,27 @@ export default function LiveStream() {
             {connected ? <><Wifi className="w-3 h-3" /> متصل · جودة عالية</> : <><WifiOff className="w-3 h-3" /> جاري الاتصال...</>}
           </div>
 
+          {/* ── Top Gifters Leaderboard ── */}
+          {topGifters.length > 0 && (
+            <div className="bg-gradient-to-br from-yellow-50 to-orange-50 dark:from-yellow-950/20 dark:to-orange-950/20 border border-yellow-200 dark:border-yellow-800 rounded-2xl p-3" dir="rtl">
+              <h3 className="text-xs font-bold text-yellow-700 dark:text-yellow-400 mb-2 flex items-center gap-1">
+                <Trophy className="w-3.5 h-3.5" /> أكثر المُهدين
+              </h3>
+              <div className="space-y-1.5">
+                {topGifters.slice(0, 5).map((g, i) => (
+                  <div key={g.userId} className="flex items-center gap-2">
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 ${
+                      i === 0 ? "bg-yellow-500" : i === 1 ? "bg-gray-400" : i === 2 ? "bg-amber-600" : "bg-muted-foreground"
+                    }`}>{i + 1}</span>
+                    <span className="text-lg">{g.lastEmoji}</span>
+                    <span className="text-xs font-medium flex-1 truncate">{g.userName}</span>
+                    <span className="text-[10px] text-yellow-600 font-bold">{g.totalCoins} 🪙</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Chat Box */}
           <div className="bg-card border border-border/50 rounded-2xl overflow-hidden flex flex-col" style={{ height: 460 }}>
             <div className="p-4 border-b flex items-center justify-between bg-muted/20">
@@ -1208,6 +1495,21 @@ export default function LiveStream() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-3 space-y-1.5 scroll-smooth">
+              {/* Pinned Comment */}
+              {pinnedComment && (
+                <div className="bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-300 dark:border-yellow-700 rounded-xl px-3 py-2 mb-2 flex items-start gap-2" dir="rtl">
+                  <span className="text-sm">📌</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[10px] font-bold text-yellow-700 dark:text-yellow-400">{pinnedComment.userName}: </span>
+                    <span className="text-xs text-foreground">{pinnedComment.message}</span>
+                  </div>
+                  {isBroadcast && (
+                    <button onClick={() => { socketRef.current?.emit("unpin-comment", id); setPinnedComment(null); }}
+                      className="text-yellow-600 hover:text-yellow-800 text-sm leading-none flex-shrink-0">×</button>
+                  )}
+                </div>
+              )}
+
               {messages.length === 0 && (
                 <div className="text-center text-muted-foreground text-xs pt-8">
                   لا توجد رسائل بعد... كن أول من يتفاعل! 💬
@@ -1250,6 +1552,12 @@ export default function LiveStream() {
                       <span className="text-sm text-foreground break-words">{msg.message}</span>
                     )}
                   </div>
+                  {/* Pin button (broadcaster only, on non-voice messages) */}
+                  {isBroadcast && !msg.isVoice && (
+                    <button onClick={() => handlePinMessage(msg)}
+                      className="opacity-0 group-hover:opacity-100 flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded text-muted-foreground hover:text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 transition-all"
+                      title="تثبيت">📌</button>
+                  )}
                 </div>
               ))}
               <div ref={chatEndRef} />
@@ -1282,7 +1590,34 @@ export default function LiveStream() {
             <div className="p-3 border-t bg-muted/10 space-y-2">
               {user ? (
                 <>
+                  {/* Gifts Panel */}
+                  {showGiftsPanel && (
+                    <div className="bg-card border border-border rounded-2xl p-3 mb-1" dir="rtl">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-foreground">أرسل هدية 🎁</span>
+                        <button onClick={() => setShowGiftsPanel(false)} className="text-muted-foreground hover:text-foreground text-lg leading-none">×</button>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {GIFTS.map(gift => (
+                          <button key={gift.id} onClick={() => sendGift(gift)}
+                            className="flex flex-col items-center gap-0.5 p-2 rounded-xl hover:bg-yellow-50 dark:hover:bg-yellow-900/20 border border-transparent hover:border-yellow-200 dark:hover:border-yellow-800 transition group">
+                            <span className="text-2xl group-hover:scale-110 transition-transform">{gift.emoji}</span>
+                            <span className="text-[9px] text-foreground font-medium">{gift.name}</span>
+                            <span className="text-[8px] text-yellow-600">{gift.coins}🪙</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div className="flex gap-1.5">
+                    {/* Gift Toggle */}
+                    <button
+                      onClick={() => setShowGiftsPanel(v => !v)}
+                      className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${showGiftsPanel ? "bg-yellow-500 text-white scale-110" : "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 hover:bg-yellow-200 dark:hover:bg-yellow-800/30"}`}
+                      title="أرسل هدية"
+                      data-testid="btn-gifts">
+                      🎁
+                    </button>
                     <Input
                       value={chatInput}
                       onChange={e => setChatInput(e.target.value)}
@@ -1316,7 +1651,7 @@ export default function LiveStream() {
                       <Send className="w-4 h-4" />
                     </Button>
                   </div>
-                  <p className="text-[9px] text-muted-foreground text-center">اضغط مطولاً على 🎤 للتسجيل مباشرة من تليفونك</p>
+                  <p className="text-[9px] text-muted-foreground text-center">🎁 أرسل هدية · 🎤 اضغط مطولاً للتسجيل</p>
                 </>
               ) : (
                 <a href="/login">

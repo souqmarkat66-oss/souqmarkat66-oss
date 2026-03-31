@@ -213,6 +213,36 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       io.to(`stream:${streamId}`).emit("cohost-left");
     });
 
+    // ── TikTok-style Live Features ──────────────────────────────────
+    socket.on("send-gift", (data: { streamId: string; giftType: string; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId: string }) => {
+      io.to(`stream:${data.streamId}`).emit("stream-gift", { id: Date.now() + Math.random(), ...data, timestamp: new Date().toISOString() });
+    });
+
+    socket.on("pin-comment", (data: { streamId: string; message: string; userName: string }) => {
+      io.to(`stream:${data.streamId}`).emit("comment-pinned", { message: data.message, userName: data.userName });
+    });
+
+    socket.on("unpin-comment", (streamId: string) => {
+      io.to(`stream:${streamId}`).emit("comment-unpinned");
+    });
+
+    socket.on("create-poll", (data: { streamId: string; question: string; options: string[] }) => {
+      const poll = { id: Date.now(), question: data.question, options: data.options.map((o: string) => ({ text: o, votes: 0 })), totalVotes: 0 };
+      io.to(`stream:${data.streamId}`).emit("poll-created", poll);
+    });
+
+    socket.on("end-poll", (streamId: string) => {
+      io.to(`stream:${streamId}`).emit("poll-ended");
+    });
+
+    socket.on("vote-poll", (data: { streamId: string; pollId: number; optionIndex: number }) => {
+      io.to(`stream:${data.streamId}`).emit("poll-updated", { pollId: data.pollId, optionIndex: data.optionIndex });
+    });
+
+    socket.on("send-follow-notification", (data: { streamId: string; userName: string }) => {
+      socket.to(`stream:${data.streamId}`).emit("new-follower", { userName: data.userName });
+    });
+
     socket.on("disconnect", () => {
       streamRooms.forEach((room, streamId) => {
         if (room.broadcasterId === socket.id) {
