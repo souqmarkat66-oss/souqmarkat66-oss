@@ -120,6 +120,21 @@ async function runMigrations() {
     await db.execute(sql`ALTER TABLE boost_orders ADD COLUMN IF NOT EXISTS payment_screenshot_url TEXT`);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS is_boosted BOOLEAN DEFAULT FALSE`);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS boosted_until TIMESTAMP`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS renewal_orders (
+      id SERIAL PRIMARY KEY,
+      order_number VARCHAR NOT NULL UNIQUE,
+      ad_id INTEGER NOT NULL,
+      user_id VARCHAR NOT NULL,
+      duration_days INTEGER NOT NULL DEFAULT 30,
+      amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+      status VARCHAR NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES
+      ('renewal_price_30', '50'),
+      ('renewal_price_60', '90'),
+      ('renewal_price_90', '130')
+      ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`CREATE TABLE IF NOT EXISTS referrals (
       id SERIAL PRIMARY KEY,
       referrer_id VARCHAR NOT NULL,

@@ -2545,31 +2545,48 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       let serviceActivated = "الخدمة المطلوبة";
       let adId: number | null = adIdFromMsg;
 
-      // ── Try to find and confirm boost order ──────────────────
+      // ── Try to find and confirm renewal order (RNW-) or boost order ───
       if (orderNum) {
-        const boostRow = await db.execute(sql`SELECT * FROM boost_orders WHERE order_number = ${orderNum} LIMIT 1`);
-        const boostOrder = boostRow.rows[0] as any;
-        if (boostOrder && boostOrder.status === 'pending') {
-          adId = boostOrder.ad_id;
-          // Activate the ad boost for 30 days
-          await db.execute(sql`UPDATE boost_orders SET status = 'confirmed' WHERE order_number = ${orderNum}`);
-          await db.execute(sql`
-            UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '30 days'
-            WHERE id = ${adId}
-          `);
-          // Notify all other users about this boosted ad
-          const ad = await storage.getAd(adId!);
-          if (ad) {
-            const allRows = await db.execute(sql`SELECT id FROM users WHERE id != ${userId} LIMIT 500`);
-            for (const row of allRows.rows as any[]) {
-              await createNotification(row.id, "system",
-                `🚀 إعلان مميز: ${ad.title}`,
-                `✨ عرض مميز لا تفوّته — شاهده الآن!`,
-                `/ads/${adId}`
-              );
-            }
+        if (orderNum.startsWith('RNW-')) {
+          // It's a renewal order
+          const renewRow = await db.execute(sql`SELECT * FROM renewal_orders WHERE order_number = ${orderNum} LIMIT 1`);
+          const renewOrder = renewRow.rows[0] as any;
+          if (renewOrder && renewOrder.status === 'pending') {
+            adId = renewOrder.ad_id;
+            const days = renewOrder.duration_days;
+            await db.execute(sql`UPDATE renewal_orders SET status = 'confirmed' WHERE order_number = ${orderNum}`);
+            await db.execute(sql`
+              UPDATE ads SET
+                expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + (${days} || ' days')::INTERVAL,
+                status = 'active'
+              WHERE id = ${adId}
+            `);
+            serviceActivated = `تجديد إعلان #${adId} لمدة ${days} يوماً`;
           }
-          serviceActivated = `تعزيز إعلان #${adId} لمدة 30 يوماً`;
+        } else {
+          // It's a boost order
+          const boostRow = await db.execute(sql`SELECT * FROM boost_orders WHERE order_number = ${orderNum} LIMIT 1`);
+          const boostOrder = boostRow.rows[0] as any;
+          if (boostOrder && boostOrder.status === 'pending') {
+            adId = boostOrder.ad_id;
+            await db.execute(sql`UPDATE boost_orders SET status = 'confirmed' WHERE order_number = ${orderNum}`);
+            await db.execute(sql`
+              UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '30 days'
+              WHERE id = ${adId}
+            `);
+            const ad = await storage.getAd(adId!);
+            if (ad) {
+              const allRows = await db.execute(sql`SELECT id FROM users WHERE id != ${userId} LIMIT 500`);
+              for (const row of allRows.rows as any[]) {
+                await createNotification(row.id, "system",
+                  `🚀 إعلان مميز: ${ad.title}`,
+                  `✨ عرض مميز لا تفوّته — شاهده الآن!`,
+                  `/ads/${adId}`
+                );
+              }
+            }
+            serviceActivated = `تعزيز إعلان #${adId} لمدة 30 يوماً`;
+          }
         }
       } else if (adIdFromMsg) {
         // No order number but ad ID found → boost the ad directly
@@ -3009,6 +3026,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ================================================================
   // AD RENEW
   // ================================================================
+  // Admin-only direct renew (no payment)
   app.post("/api/ads/:id/renew", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
     const id = parseInt(req.params.id);
@@ -3020,6 +3038,136 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         sql`UPDATE ads SET expires_at = NOW() + INTERVAL '30 days', status = 'active' WHERE id = ${id}`
       );
       res.json({ ok: true, message: "تم تجديد الإعلان لمدة 30 يوماً" });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // GET /api/renewal/settings — get renewal pricing tiers
+  app.get("/api/renewal/settings", async (_req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT key, value FROM platform_settings
+        WHERE key IN ('renewal_price_30', 'renewal_price_60', 'renewal_price_90')
+      `);
+      const settings: Record<string, number> = {};
+      for (const r of rows.rows as any[]) settings[r.key] = parseFloat(r.value);
+      res.json({
+        options: [
+          { days: 30, price: settings['renewal_price_30'] ?? 50, label: "30 يوماً" },
+          { days: 60, price: settings['renewal_price_60'] ?? 90, label: "60 يوماً" },
+          { days: 90, price: settings['renewal_price_90'] ?? 130, label: "90 يوماً" },
+        ]
+      });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // POST /api/ads/:id/renew-order — user requests paid renewal → creates order + notifies admin
+  app.post("/api/ads/:id/renew-order", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const adId = parseInt(req.params.id);
+    const { durationDays, amount } = req.body;
+    if (!durationDays || !amount) return res.status(400).json({ message: "بيانات ناقصة" });
+    try {
+      const adRow = await db.execute(sql`SELECT * FROM ads WHERE id = ${adId} LIMIT 1`);
+      const ad = adRow.rows[0] as any;
+      if (!ad) return res.status(404).json({ message: "الإعلان غير موجود" });
+      if (ad.user_id !== userId) return res.status(403).json({ message: "غير مصرح" });
+
+      // Generate order number: RNW-{timestamp}-{adId}
+      const orderNumber = `RNW-${Date.now()}-${adId}`;
+      await db.execute(sql`
+        INSERT INTO renewal_orders (order_number, ad_id, user_id, duration_days, amount, status)
+        VALUES (${orderNumber}, ${adId}, ${userId}, ${durationDays}, ${amount}, 'pending')
+      `);
+
+      // Notify admin via DM
+      const msg =
+        `🔄 طلب تجديد إعلان\n` +
+        `━━━━━━━━━━━━━━━━━\n` +
+        `📋 رقم الطلب: ${orderNumber}\n` +
+        `📢 رقم الإعلان: #${adId}\n` +
+        `📅 المدة: ${durationDays} يوماً\n` +
+        `💰 قيمة الدفع: ${amount} ج.م\n` +
+        `━━━━━━━━━━━━━━━━━\n` +
+        `⏳ في انتظار تأكيد الدفع...`;
+      await db.execute(sql`
+        INSERT INTO direct_messages (from_user_id, to_user_id, ad_id, message, is_voice, is_payment_proof)
+        VALUES (${userId}, ${ADMIN_USER_ID}, ${adId}, ${msg}, false, false)
+      `);
+
+      // Bell notification to admin
+      await createNotification(ADMIN_USER_ID, "system",
+        `🔄 طلب تجديد إعلان #${adId}`,
+        `رقم الطلب: ${orderNumber} — ${durationDays} يوماً مقابل ${amount} ج.م`,
+        "/admin"
+      );
+
+      res.json({ ok: true, orderNumber, adId, durationDays, amount });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // GET /api/renewal/orders — admin: list all pending renewal orders
+  app.get("/api/renewal/orders", isAuthenticated, async (req: any, res) => {
+    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
+    try {
+      const rows = await db.execute(sql`
+        SELECT ro.*, u.first_name, u.last_name, u.phone, a.title as ad_title
+        FROM renewal_orders ro
+        LEFT JOIN users u ON u.id = ro.user_id
+        LEFT JOIN ads a ON a.id = ro.ad_id
+        ORDER BY ro.created_at DESC LIMIT 100
+      `);
+      res.json(rows.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // PATCH /api/renewal/orders/:id — admin: confirm or reject renewal
+  app.patch("/api/renewal/orders/:id", isAuthenticated, async (req: any, res) => {
+    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
+    const { status } = req.body;
+    try {
+      const orderRow = await db.execute(sql`SELECT * FROM renewal_orders WHERE id = ${req.params.id} LIMIT 1`);
+      const order = orderRow.rows[0] as any;
+      if (!order) return res.status(404).json({ message: "الطلب غير موجود" });
+
+      await db.execute(sql`UPDATE renewal_orders SET status = ${status} WHERE id = ${req.params.id}`);
+
+      if (status === 'confirmed') {
+        // Extend the ad's expires_at
+        const days = order.duration_days;
+        await db.execute(sql`
+          UPDATE ads SET
+            expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + (${days} || ' days')::INTERVAL,
+            status = 'active'
+          WHERE id = ${order.ad_id}
+        `);
+
+        const confirmMsg =
+          `✅ تم تأكيد تجديد إعلانك\n` +
+          `━━━━━━━━━━━━━━━━━\n` +
+          `📋 رقم الطلب: ${order.order_number}\n` +
+          `📢 رقم الإعلان: #${order.ad_id}\n` +
+          `📅 تم التمديد: ${days} يوماً\n` +
+          `💰 المبلغ: ${order.amount} ج.م\n` +
+          `✅ الحالة: تم الدفع بنجاح ✅\n` +
+          `━━━━━━━━━━━━━━━━━\n` +
+          `🎉 إعلانك الآن نشط — شكراً لثقتك في سوق ماركات 🙏`;
+        await db.execute(sql`
+          INSERT INTO direct_messages (from_user_id, to_user_id, ad_id, message, is_voice)
+          VALUES (${ADMIN_USER_ID}, ${order.user_id}, ${order.ad_id}, ${confirmMsg}, false)
+        `);
+        await createNotification(order.user_id, "system",
+          `✅ تم تجديد إعلانك`,
+          `رقم الطلب ${order.order_number} — إعلانك نشط لـ ${days} يوماً إضافية`,
+          `/ads/${order.ad_id}`
+        );
+      } else {
+        await createNotification(order.user_id, "system",
+          `❌ طلب التجديد مرفوض`,
+          `رقم الطلب ${order.order_number} — للاستفسار تواصل مع الإدارة.`,
+          "/messages"
+        );
+      }
+      res.json({ ok: true });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 

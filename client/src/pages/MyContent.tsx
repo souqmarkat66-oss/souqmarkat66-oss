@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   PlusCircle, Video, Image, Play, Eye, Heart, Trash2, Edit, Pencil,
-  LayoutGrid, Radio, User, LogIn, MessageSquare, RefreshCw, Clock, Bookmark, Zap, Loader2
+  LayoutGrid, Radio, User, LogIn, MessageSquare, RefreshCw, Clock, Bookmark, Zap, Loader2, Copy, Check
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -59,6 +59,55 @@ function AuthenticatedContent({ user }: { user: any }) {
   const qc = useQueryClient();
   const [editingAd, setEditingAd] = useState<any | null>(null);
   const [editingReel, setEditingReel] = useState<any | null>(null);
+
+  // ── Renewal state ─────────────────────────────────────────────
+  const [renewDialog, setRenewDialog] = useState<{ ad: any } | null>(null);
+  const [selectedDays, setSelectedDays] = useState<number>(30);
+  const [renewLoading, setRenewLoading] = useState(false);
+  const [renewResult, setRenewResult] = useState<{ orderNumber: string; days: number; amount: number } | null>(null);
+  const [copiedNum, setCopiedNum] = useState<string | null>(null);
+
+  const { data: renewalSettings } = useQuery<{ options: { days: number; price: number; label: string }[] }>({
+    queryKey: ["/api/renewal/settings"],
+    queryFn: () => fetch("/api/renewal/settings").then(r => r.json()),
+  });
+
+  const handleRenewClick = (ad: any) => {
+    setRenewDialog({ ad });
+    setSelectedDays(30);
+    setRenewResult(null);
+  };
+
+  const handleRenewOrder = async () => {
+    if (!renewDialog) return;
+    const option = renewalSettings?.options.find(o => o.days === selectedDays);
+    if (!option) return;
+    setRenewLoading(true);
+    try {
+      const res = await fetch(`/api/ads/${renewDialog.ad.id}/renew-order`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ durationDays: selectedDays, amount: option.price }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRenewResult({ orderNumber: data.orderNumber, days: selectedDays, amount: option.price });
+        toast({ title: "✅ تم إنشاء طلب التجديد", description: "ارفع الإيصال للأدمن لتأكيد الدفع" });
+      } else {
+        toast({ variant: "destructive", title: data.message || "فشل إنشاء الطلب" });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "خطأ في الاتصال" });
+    } finally { setRenewLoading(false); }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedNum(text);
+      setTimeout(() => setCopiedNum(null), 2000);
+    });
+  };
 
   // ── Boost state ──────────────────────────────────────────────
   const [boostSettings, setBoostSettings] = useState<{ enabled: boolean; price: number } | null>(null);
@@ -168,6 +217,7 @@ function AuthenticatedContent({ user }: { user: any }) {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/favorites"] }); toast({ title: "تم الإزالة من المفضلة" }); },
   });
 
+  // renewAdMut kept for backward compat (admin only)
   const renewAdMut = useMutation({
     mutationFn: (id: number) => apiRequest("POST", `/api/ads/${id}/renew`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/ads"] }); toast({ title: "✅ تم تجديد الإعلان 30 يوماً!" }); },
@@ -291,10 +341,9 @@ function AuthenticatedContent({ user }: { user: any }) {
                         {ad.status === "active" ? "✅ نشط" : ad.status}
                       </Badge>
                       <button
-                        onClick={() => renewAdMut.mutate(ad.id)}
-                        disabled={renewAdMut.isPending}
+                        onClick={() => handleRenewClick(ad)}
                         className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-600 hover:bg-blue-100 transition-colors"
-                        title="تجديد الإعلان 30 يوماً"
+                        title="تجديد الإعلان مقابل رسوم"
                         data-testid={`btn-renew-ad-${ad.id}`}
                       >
                         <RefreshCw className="w-2.5 h-2.5" /> تجديد
@@ -598,6 +647,140 @@ function AuthenticatedContent({ user }: { user: any }) {
               data-testid="btn-close-boost-receipt"
             >
               حسناً، شكراً
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── 🔄 Renewal Payment Dialog ── */}
+      <Dialog open={!!renewDialog && !renewResult} onOpenChange={open => { if (!open) setRenewDialog(null); }}>
+        <DialogContent dir="rtl" className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <RefreshCw className="w-5 h-5 text-blue-500" />
+              تجديد الإعلان مقابل الدفع
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="bg-blue-50 dark:bg-blue-950/20 rounded-xl p-3 border border-blue-200 dark:border-blue-800 text-sm">
+              <span className="font-bold">📢 الإعلان: </span>
+              <span className="text-muted-foreground">{renewDialog?.ad?.title}</span>
+            </div>
+
+            {/* Duration options */}
+            <div>
+              <p className="text-sm font-semibold mb-2">اختر مدة التجديد:</p>
+              <div className="grid grid-cols-3 gap-2">
+                {(renewalSettings?.options ?? [
+                  { days: 30, price: 50, label: "30 يوماً" },
+                  { days: 60, price: 90, label: "60 يوماً" },
+                  { days: 90, price: 130, label: "90 يوماً" },
+                ]).map(opt => (
+                  <button
+                    key={opt.days}
+                    onClick={() => setSelectedDays(opt.days)}
+                    className={`flex flex-col items-center p-3 rounded-xl border-2 transition-all ${
+                      selectedDays === opt.days
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30'
+                        : 'border-border hover:border-blue-300'
+                    }`}
+                    data-testid={`btn-renew-days-${opt.days}`}
+                  >
+                    <span className="text-base font-bold text-blue-600">{opt.price}</span>
+                    <span className="text-[10px] text-muted-foreground">ج.م</span>
+                    <span className="text-xs font-medium mt-1">{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Payment methods */}
+            <div>
+              <p className="text-sm font-semibold mb-2">💳 طرق الدفع:</p>
+              <div className="space-y-2">
+                {BOOST_PAYMENTS.map(pm => (
+                  <div key={pm.number} className={`flex items-center gap-3 p-2.5 rounded-lg border text-sm ${pm.color}`}>
+                    <span className="text-lg">{pm.emoji}</span>
+                    <span className="font-medium">{pm.label}</span>
+                    <button
+                      className="ml-auto flex items-center gap-1 font-mono font-bold hover:opacity-70 transition-opacity"
+                      onClick={() => copyToClipboard(pm.number)}
+                      data-testid={`btn-copy-renewal-${pm.number}`}
+                    >
+                      {copiedNum === pm.number
+                        ? <><Check className="w-3 h-3 text-green-500" /><span className="text-green-600">نُسخ!</span></>
+                        : <><Copy className="w-3 h-3" />{pm.number}</>
+                      }
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-yellow-50 dark:bg-yellow-950/20 rounded-lg p-3 border border-yellow-200 dark:border-yellow-800 text-xs text-muted-foreground">
+              💡 ادفع المبلغ المطلوب ثم اضغط "إرسال الطلب" — سيتم تفعيل التجديد خلال 24 ساعة بعد مراجعة الإدارة
+            </div>
+
+            <button
+              disabled={renewLoading}
+              onClick={handleRenewOrder}
+              className="w-full py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-bold text-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              data-testid="btn-submit-renew-order"
+            >
+              {renewLoading
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> جارٍ إنشاء الطلب...</>
+                : <><RefreshCw className="w-4 h-4" /> إرسال طلب التجديد</>
+              }
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── ✅ Renewal Order Receipt Dialog ── */}
+      <Dialog open={!!renewResult} onOpenChange={open => { if (!open) { setRenewResult(null); setRenewDialog(null); } }}>
+        <DialogContent dir="rtl" className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2 text-green-600">
+              ✅ تم إنشاء طلب التجديد
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="bg-green-50 dark:bg-green-950/20 rounded-xl p-4 border border-green-200 dark:border-green-800 space-y-3 text-sm">
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">رقم الطلب</span>
+                <button
+                  className="font-mono font-black text-green-700 dark:text-green-400 text-sm flex items-center gap-1 hover:opacity-70"
+                  onClick={() => renewResult && copyToClipboard(renewResult.orderNumber)}
+                  data-testid="text-renew-order-number"
+                >
+                  {copiedNum === renewResult?.orderNumber
+                    ? <><Check className="w-3 h-3" /> نُسخ!</>
+                    : <><Copy className="w-3 h-3" />{renewResult?.orderNumber}</>
+                  }
+                </button>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">مدة التجديد</span>
+                <span className="font-bold">{renewResult?.days} يوماً</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">المبلغ المدفوع</span>
+                <span className="font-bold text-blue-600">{renewResult?.amount} ج.م</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">الحالة</span>
+                <span className="bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 px-2 py-0.5 rounded-full text-xs font-bold">قيد المراجعة</span>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground text-center bg-blue-50 dark:bg-blue-950/20 rounded-lg p-2 border border-blue-200 dark:border-blue-800">
+              📬 أُرسل طلبك للإدارة — ستصلك رسالة تأكيد فور مراجعة الدفع
+            </p>
+            <button
+              onClick={() => { setRenewResult(null); setRenewDialog(null); }}
+              className="w-full py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white font-bold text-sm transition-all"
+              data-testid="btn-close-renew-receipt"
+            >
+              حسناً، شكراً 🙏
             </button>
           </div>
         </DialogContent>

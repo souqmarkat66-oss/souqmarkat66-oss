@@ -19,7 +19,7 @@ import {
   AlertTriangle, Activity, Menu, ChevronLeft, VideoOff, PieChart,
   Star, MessageSquare, Clock, BanIcon, UserCheck, FolderOpen, FileImage,
   FileVideo, File, Lock, Phone, Mail, Shield, RefreshCw, ToggleLeft, ToggleRight, Zap,
-  Sparkles, Image, Video, Wand2, FileText, Gift
+  Sparkles, Image, Video, Wand2, FileText, Gift, Check
 } from "lucide-react";
 
 const ADMIN_ID = "54219806";
@@ -37,6 +37,7 @@ const NAV = [
   { key: "payments",       label: "طلبات السحب",          icon: Banknote,        color: "text-green-400" },
   { key: "boostorders",    label: "طلبات التعزيز",         icon: Zap,             color: "text-orange-400" },
   { key: "payreceipts",    label: "إيصالات الدفع",          icon: Banknote,        color: "text-emerald-500" },
+  { key: "renewalorders",  label: "طلبات التجديد",           icon: RefreshCw,       color: "text-blue-400" },
   { key: "reports",        label: "البلاغات",             icon: Flag,            color: "text-yellow-400" },
   { key: "fraud",          label: "كشف الاحتيال",         icon: ShieldX,         color: "text-red-500" },
   { key: "revenue",        label: "الإيرادات",            icon: DollarSign,      color: "text-emerald-400" },
@@ -194,8 +195,9 @@ export default function AdminPanel() {
           {section === "campaigns"  && <CampaignsSection logAction={logAction} />}
           {section === "payments"   && <PaymentsSection logAction={logAction} />}
           {section === "boostorders" && <BoostOrdersSection logAction={logAction} />}
-          {section === "payreceipts" && <PayReceiptsSection />}
-          {section === "reports"    && <ReportsSection logAction={logAction} />}
+          {section === "payreceipts"   && <PayReceiptsSection />}
+          {section === "renewalorders" && <RenewalOrdersSection />}
+          {section === "reports"       && <ReportsSection logAction={logAction} />}
           {section === "fraud"      && <FraudSection />}
           {section === "revenue"    && <RevenueSection />}
           {section === "broadcast"  && <BroadcastSection logAction={logAction} />}
@@ -1937,6 +1939,123 @@ function AiPricingSection() {
         {saveMutation.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
         حفظ الأسعار
       </Button>
+    </div>
+  );
+}
+
+// ── RENEWAL ORDERS SECTION ───────────────────────────────────────────────────
+function RenewalOrdersSection() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data: orders = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/renewal/orders"],
+    queryFn: () => fetch("/api/renewal/orders", { credentials: "include" }).then(r => r.json()).then(d => Array.isArray(d) ? d : []),
+    refetchInterval: 30000,
+  });
+
+  const confirmMut = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: string }) =>
+      fetch(`/api/renewal/orders/${id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      }).then(r => r.json()),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["/api/renewal/orders"] });
+      toast({ title: vars.status === 'confirmed' ? "✅ تم تأكيد التجديد وتفعيله" : "❌ تم رفض الطلب" });
+    },
+  });
+
+  const pending = orders.filter((o: any) => o.status === 'pending');
+  const confirmed = orders.filter((o: any) => o.status === 'confirmed');
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold flex items-center gap-2">
+            <RefreshCw className="w-6 h-6 text-blue-500" />
+            طلبات التجديد
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            {pending.length} طلب قيد الانتظار · {confirmed.length} مؤكد
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["/api/renewal/orders"] })}>
+          <RefreshCw className="w-4 h-4 ml-1" /> تحديث
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="text-center py-12 text-muted-foreground">جارٍ التحميل...</div>
+      ) : orders.length === 0 ? (
+        <div className="text-center py-20 text-muted-foreground">
+          <RefreshCw className="w-12 h-12 mx-auto mb-4 opacity-20" />
+          <p>لا توجد طلبات تجديد بعد</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {orders.map((order: any) => (
+            <Card key={order.id} className={`border ${order.status === 'pending' ? 'border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/10' : order.status === 'confirmed' ? 'border-green-200 dark:border-green-800' : 'border-red-200 dark:border-red-800 opacity-60'}`}>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div className="space-y-1 text-sm flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                        order.status === 'pending' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                        : order.status === 'confirmed' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                        : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                      }`}>
+                        {order.status === 'pending' ? '⏳ قيد الانتظار' : order.status === 'confirmed' ? '✅ مؤكد' : '❌ مرفوض'}
+                      </span>
+                      <span className="font-mono text-xs text-muted-foreground">{order.order_number}</span>
+                    </div>
+                    <div className="font-semibold">{order.first_name} {order.last_name}</div>
+                    <div className="text-muted-foreground text-xs">{order.phone}</div>
+                    <div className="flex gap-4 mt-2 text-xs">
+                      <span>📢 إعلان: <strong>#{order.ad_id}</strong></span>
+                      <span>📅 مدة: <strong>{order.duration_days} يوماً</strong></span>
+                      <span>💰 المبلغ: <strong className="text-blue-600">{order.amount} ج.م</strong></span>
+                    </div>
+                    {order.ad_title && (
+                      <div className="text-xs text-muted-foreground mt-1">عنوان الإعلان: {order.ad_title}</div>
+                    )}
+                    <div className="text-xs text-muted-foreground">
+                      {new Date(order.created_at).toLocaleString('ar-EG')}
+                    </div>
+                  </div>
+
+                  {order.status === 'pending' && (
+                    <div className="flex gap-2 shrink-0">
+                      <Button
+                        size="sm"
+                        className="bg-green-500 hover:bg-green-600 text-white h-8 px-3 text-xs gap-1"
+                        disabled={confirmMut.isPending}
+                        onClick={() => confirmMut.mutate({ id: order.id, status: 'confirmed' })}
+                        data-testid={`btn-confirm-renewal-${order.id}`}
+                      >
+                        <Check className="w-3 h-3" /> تأكيد
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-red-300 text-red-600 hover:bg-red-50 h-8 px-3 text-xs gap-1"
+                        disabled={confirmMut.isPending}
+                        onClick={() => confirmMut.mutate({ id: order.id, status: 'rejected' })}
+                        data-testid={`btn-reject-renewal-${order.id}`}
+                      >
+                        <X className="w-3 h-3" /> رفض
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
