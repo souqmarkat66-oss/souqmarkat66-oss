@@ -712,10 +712,29 @@ export default function LiveStream() {
     if (chatHoldingRef.current || chatIsRecording) return;
     chatHoldingRef.current = true;
     try {
-      const stream2 = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      // If broadcaster is live — reuse the existing audio track to avoid conflict/hang
+      let stream2: MediaStream;
+      let shouldStopStream = true;
+      if (localStreamRef.current && localStreamRef.current.getAudioTracks().length > 0) {
+        // Clone just the audio track so we can record without stopping the broadcast
+        const audioTrack = localStreamRef.current.getAudioTracks()[0].clone();
+        stream2 = new MediaStream([audioTrack]);
+        shouldStopStream = true; // stop the clone, not the original
+      } else if (isCoHostRef.current && coHostStreamRef.current && coHostStreamRef.current.getAudioTracks().length > 0) {
+        const audioTrack = coHostStreamRef.current.getAudioTracks()[0].clone();
+        stream2 = new MediaStream([audioTrack]);
+        shouldStopStream = true;
+      } else {
+        // Viewer — request mic with timeout to prevent hanging
+        const micPromise = navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const timeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), 8000)
+        );
+        stream2 = await Promise.race([micPromise, timeout]);
+      }
       // User may have released while permission dialog was open
       if (!chatHoldingRef.current) {
-        stream2.getTracks().forEach(t => t.stop());
+        if (shouldStopStream) stream2.getTracks().forEach(t => t.stop());
         return;
       }
       chatChunksRef.current = [];
@@ -725,7 +744,7 @@ export default function LiveStream() {
       const recorder = new MediaRecorder(stream2, mimeType ? { mimeType } : {});
       recorder.ondataavailable = ev => { if (ev.data.size > 0) chatChunksRef.current.push(ev.data); };
       recorder.onstop = async () => {
-        stream2.getTracks().forEach(t => t.stop());
+        if (shouldStopStream) stream2.getTracks().forEach(t => t.stop());
         if (chatTimerRef.current) clearInterval(chatTimerRef.current);
         if (chatWaveRef.current) clearInterval(chatWaveRef.current);
         setChatRecordSeconds(0); setChatWaveLevel(0);
