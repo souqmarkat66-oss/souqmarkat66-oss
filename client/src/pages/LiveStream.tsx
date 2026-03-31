@@ -85,6 +85,22 @@ const ICE_SERVERS = [
   { urls: "stun:stun2.l.google.com:19302" },
   { urls: "stun:stun3.l.google.com:19302" },
   { urls: "stun:stun4.l.google.com:19302" },
+  // TURN relay servers for NAT traversal (mobile networks, symmetric NAT)
+  {
+    urls: "turn:openrelay.metered.ca:80",
+    username: "openrelayproject",
+    credential: "openrelayproject",
+  },
+  {
+    urls: "turn:openrelay.metered.ca:443",
+    username: "openrelayproject",
+    credential: "openrelayproject",
+  },
+  {
+    urls: "turns:openrelay.metered.ca:443",
+    username: "openrelayproject",
+    credential: "openrelayproject",
+  },
 ];
 
 export default function LiveStream() {
@@ -971,15 +987,33 @@ export default function LiveStream() {
             </div>
           )}
 
+          {/* Group Live Banner */}
+          {coHostActive && (
+            <div className="mb-2 flex items-center justify-center gap-2 py-2 rounded-2xl bg-gradient-to-l from-purple-600/20 to-blue-600/20 border border-purple-500/30">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              <span className="text-sm font-bold text-purple-700 dark:text-purple-300">🔴 بث جماعي مباشر</span>
+              <span className="text-xs text-muted-foreground">— {viewerCount} مشاهد</span>
+            </div>
+          )}
+
           {/* Dual video area when co-host is active */}
-          <div className={`${coHostActive ? "grid grid-cols-2 gap-2" : ""}`}>
-            <div className="relative rounded-3xl overflow-hidden bg-black shadow-2xl shadow-black/50" style={{ aspectRatio: "16/9" }}>
+          <div className={coHostActive ? "grid grid-cols-2 gap-2" : ""}>
+            <div className={`relative overflow-hidden bg-black shadow-2xl shadow-black/50 ${coHostActive ? "rounded-2xl ring-2 ring-red-500/60" : "rounded-3xl"}`} style={{ aspectRatio: "16/9" }}>
+            {/* Host label when in group live — bottom-left to avoid overlap with top badges */}
+            {coHostActive && (
+              <div className="absolute bottom-3 start-3 z-10 flex items-center gap-1.5 bg-black/70 backdrop-blur rounded-full px-3 py-1">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-white text-xs font-bold">
+                  {isBroadcast ? "أنت (المضيف)" : "المضيف الرئيسي"}
+                </span>
+              </div>
+            )}
             <video
               ref={videoRef}
               autoPlay
               playsInline
               controls={!isBroadcast}
-              className="w-full h-full object-contain"
+              className="w-full h-full object-cover"
               style={{ backgroundColor: "#000" }}
             />
 
@@ -990,8 +1024,13 @@ export default function LiveStream() {
                   <Radio className="w-7 h-7 text-red-400" />
                 </div>
                 <p className="text-lg font-medium opacity-70">
-                  {isBroadcast ? "جاري الاتصال بالبث..." : "في انتظار البث المباشر..."}
+                  {isBroadcast ? "جاري تشغيل الكاميرا..." : "في انتظار البث المباشر..."}
                 </p>
+                {isBroadcast && (
+                  <p className="text-sm text-white/40 text-center px-6">
+                    تأكد من السماح للمتصفح بالوصول للكاميرا والميكروفون
+                  </p>
+                )}
               </div>
             )}
 
@@ -1192,17 +1231,23 @@ export default function LiveStream() {
 
           {/* Co-host video (shown when active) */}
           {coHostActive && (
-            <div className="relative rounded-3xl overflow-hidden bg-black shadow-2xl shadow-black/50" style={{ aspectRatio: "16/9" }}>
+            <div className="relative rounded-2xl overflow-hidden bg-black shadow-2xl shadow-black/50 ring-2 ring-purple-500/60" style={{ aspectRatio: "16/9" }}>
               <video
                 ref={coHostVideoRef}
                 autoPlay
                 playsInline
-                className="w-full h-full object-contain"
+                className="w-full h-full object-cover"
                 style={{ backgroundColor: "#000" }}
               />
-              <div className="absolute top-3 start-3">
-                <Badge className="bg-purple-600 text-white gap-1 px-3 py-1 text-xs font-bold shadow-lg">
-                  <Users className="w-3 h-3" /> {coHostName || "ضيف"}
+              {/* Guest label */}
+              <div className="absolute top-2 start-2 z-10 flex items-center gap-1.5 bg-black/70 backdrop-blur rounded-full px-3 py-1">
+                <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+                <span className="text-white text-xs font-bold">{coHostName || "ضيف"}</span>
+              </div>
+              {/* "GUEST" badge */}
+              <div className="absolute top-2 end-2 z-10">
+                <Badge className="bg-purple-600 text-white text-[10px] px-2 py-0.5 font-bold">
+                  <Users className="w-2.5 h-2.5 ml-1" /> ضيف
                 </Badge>
               </div>
               {/* Co-host controls (for isCoHost) */}
