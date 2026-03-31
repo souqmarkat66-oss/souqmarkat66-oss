@@ -103,11 +103,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     startedAt: number;
     totalLikes: number;
     totalComments: number;
+    bannedSockets: Set<string>;
+    giftGoal: number | null;
+    totalGiftCoins: number;
+    socketToUser: Map<string, { userId: string; userName: string }>;
   }> = new Map();
+
+  // Arabic & English bad words basic filter
+  const BAD_WORDS = ["كس","طيز","زب","شرموط","عاهرة","fuck","shit","bitch","ass","dick","pussy","bastard","motherfucker","asshole"];
+  function filterBadWords(text: string): string {
+    let filtered = text;
+    BAD_WORDS.forEach(word => {
+      const regex = new RegExp(word, "gi");
+      filtered = filtered.replace(regex, "*".repeat(word.length));
+    });
+    return filtered;
+  }
 
   function getOrCreateRoom(streamId: string) {
     if (!streamRooms.has(streamId)) {
-      streamRooms.set(streamId, { broadcasterId: null, cohostId: null, viewers: new Set(), peakViewers: 0, startedAt: Date.now(), totalLikes: 0, totalComments: 0 });
+      streamRooms.set(streamId, {
+        broadcasterId: null, cohostId: null, viewers: new Set(),
+        peakViewers: 0, startedAt: Date.now(), totalLikes: 0, totalComments: 0,
+        bannedSockets: new Set(), giftGoal: null, totalGiftCoins: 0,
+        socketToUser: new Map(),
+      });
     }
     return streamRooms.get(streamId)!;
   }

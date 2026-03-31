@@ -33,7 +33,7 @@ export function InterestOnboarding() {
     if (dismissed) return;
     const key = `interests_set_${user.id}`;
     if (localStorage.getItem(key)) return;
-    if (!user.interests || user.interests.trim() === "") {
+    if (!(user as any).interests || ((user as any).interests || "").trim() === "") {
       setOpen(true);
     }
   }, [user, dismissed]);

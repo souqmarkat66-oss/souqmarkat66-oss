@@ -67,9 +67,17 @@ export default function ChannelPage() {
   useEffect(() => {
     if (!channel) return;
     document.title = `${channel.name} | شبكة سوق للإعلانات`;
-    let desc = document.querySelector('meta[name="description"]') as HTMLMetaElement | null;
-    if (!desc) { desc = document.createElement("meta"); desc.name = "description"; document.head.appendChild(desc); }
-    desc.content = (channel.description || `قناة ${channel.name} على شبكة سوق`).substring(0, 160);
+    const setMeta = (sel: string, attr: string, val: string) => {
+      let el = document.querySelector(sel) as HTMLMetaElement | null;
+      if (!el) { el = document.createElement("meta"); el.setAttribute(attr.split("=")[0], attr.split("=")[1] || attr); document.head.appendChild(el); }
+      el.content = val;
+    };
+    setMeta('meta[name="description"]', "name=description", (channel.description || `قناة ${channel.name} على شبكة سوق`).substring(0, 160));
+    setMeta('meta[property="og:title"]', "property=og:title", `${channel.name} | شبكة سوق للإعلانات`);
+    setMeta('meta[property="og:description"]', "property=og:description", (channel.description || `قناة ${channel.name} على شبكة سوق`).substring(0, 160));
+    if (channel.avatarUrl) setMeta('meta[property="og:image"]', "property=og:image", channel.avatarUrl);
+    setMeta('meta[property="og:type"]', "property=og:type", "website");
+    setMeta('meta[property="og:url"]', "property=og:url", window.location.href);
     return () => { document.title = "شبكة سوق للإعلانات"; };
   }, [channel]);
 
