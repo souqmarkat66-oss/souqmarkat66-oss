@@ -206,19 +206,29 @@ export default function Profile() {
       <div className="bg-gradient-to-br from-primary/10 via-background to-secondary/5 border border-border/60 rounded-3xl p-6 mb-6">
         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
           {/* Avatar */}
-          <div className="relative flex-shrink-0">
-            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white text-3xl font-bold shadow-lg overflow-hidden">
+          <div className="relative flex-shrink-0 group">
+            <div
+              className={`w-28 h-28 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white text-3xl font-bold shadow-lg overflow-hidden ${isOwn ? 'cursor-pointer' : ''}`}
+              onClick={() => isOwn && setEditOpen(true)}
+            >
               {avatarSrc ? (
                 <img src={avatarSrc} alt={fullName} className="w-full h-full object-cover" />
               ) : (
                 (fullName[0] || "م")
               )}
+              {/* Hover overlay for owner */}
+              {isOwn && (
+                <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <Camera className="w-7 h-7 text-white" />
+                </div>
+              )}
             </div>
             {isOwn && (
               <button
                 onClick={() => setEditOpen(true)}
-                className="absolute -bottom-1 -left-1 w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white shadow-lg hover:bg-primary/90 transition"
+                className="absolute -bottom-1 -left-1 w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white shadow-lg hover:bg-primary/90 transition hover:scale-110"
                 data-testid="btn-edit-avatar"
+                title="تغيير الصورة"
               >
                 <Camera className="w-4 h-4" />
               </button>
@@ -227,17 +237,35 @@ export default function Profile() {
 
           {/* Info */}
           <div className="flex-1 text-center sm:text-right">
-            <div className="flex items-center justify-center sm:justify-start gap-2 mb-1">
+            <div className="flex items-center justify-center sm:justify-start gap-2 mb-1 flex-wrap">
               <h1 className="text-2xl font-black">{fullName}</h1>
               {channel?.is_verified && (
                 <Badge className="bg-blue-500 text-white gap-1 text-xs">
                   <Shield className="w-3 h-3" /> موثّق
                 </Badge>
               )}
+              {isOwn && (
+                <button
+                  onClick={() => setEditOpen(true)}
+                  className="w-7 h-7 rounded-full bg-primary/10 hover:bg-primary/20 border border-primary/20 flex items-center justify-center text-primary transition-all hover:scale-110"
+                  title="تعديل الاسم والبروفايل"
+                  data-testid="btn-edit-name-inline"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
-            {profileUser.bio && (
+            {profileUser.bio ? (
               <p className="text-sm text-muted-foreground mb-2 max-w-sm">{profileUser.bio}</p>
-            )}
+            ) : isOwn ? (
+              <button
+                onClick={() => setEditOpen(true)}
+                className="text-xs text-primary/60 hover:text-primary mb-2 underline underline-offset-2 transition-colors"
+                data-testid="btn-add-bio"
+              >
+                + أضف وصفاً لبروفايلك
+              </button>
+            ) : null}
             {profileUser.created_at && (
               <p className="text-xs text-muted-foreground mb-3">
                 عضو منذ {format(new Date(profileUser.created_at), "MMMM yyyy", { locale: ar })}
@@ -419,15 +447,18 @@ export default function Profile() {
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent dir="rtl" className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2 text-lg">
               <Edit2 className="w-5 h-5 text-primary" /> تعديل البروفايل
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-5">
-            {/* Avatar Upload */}
-            <div className="flex flex-col items-center gap-3">
-              <div className="relative">
-                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white text-3xl font-bold overflow-hidden shadow-lg">
+            {/* Avatar Upload — clickable */}
+            <div className="flex flex-col items-center gap-2">
+              <div
+                className="relative group cursor-pointer"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <div className="w-28 h-28 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white text-3xl font-bold overflow-hidden shadow-xl ring-4 ring-primary/20">
                   {editPhotoPreview ? (
                     <img src={editPhotoPreview} alt="preview" className="w-full h-full object-cover" />
                   ) : profileUser.profile_image_url ? (
@@ -435,16 +466,24 @@ export default function Profile() {
                   ) : (
                     (fullName[0] || "م")
                   )}
+                  <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
+                    <Camera className="w-6 h-6 text-white" />
+                    <span className="text-white text-[10px] font-medium">تغيير</span>
+                  </div>
                 </div>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="absolute -bottom-1 -left-1 w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white shadow-lg hover:bg-primary/90 transition"
-                  data-testid="btn-change-photo"
-                >
+                <div className="absolute -bottom-1 -left-1 w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white shadow-lg border-2 border-background">
                   <Camera className="w-4 h-4" />
-                </button>
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground">اضغط على الكاميرا لتغيير صورتك</p>
+              <p className="text-xs text-muted-foreground">اضغط على الصورة لتغييرها</p>
+              {editPhotoPreview && (
+                <button
+                  onClick={() => { setEditPhoto(null); setEditPhotoPreview(null); }}
+                  className="text-xs text-red-500 hover:underline"
+                >
+                  إلغاء تغيير الصورة
+                </button>
+              )}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -455,30 +494,39 @@ export default function Profile() {
             </div>
 
             {/* Name */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs mb-1 block">الاسم الأول</Label>
-                <Input
-                  value={editFirstName}
-                  onChange={e => setEditFirstName(e.target.value)}
-                  placeholder="الاسم الأول"
-                  data-testid="input-first-name"
-                />
-              </div>
-              <div>
-                <Label className="text-xs mb-1 block">اسم العائلة</Label>
-                <Input
-                  value={editLastName}
-                  onChange={e => setEditLastName(e.target.value)}
-                  placeholder="اسم العائلة"
-                  data-testid="input-last-name"
-                />
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold flex items-center gap-1.5">
+                <Edit2 className="w-3.5 h-3.5 text-primary" /> الاسم
+              </Label>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">الاسم الأول</Label>
+                  <Input
+                    value={editFirstName}
+                    onChange={e => setEditFirstName(e.target.value)}
+                    placeholder="مثال: أحمد"
+                    className="h-10"
+                    data-testid="input-first-name"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">اسم العائلة</Label>
+                  <Input
+                    value={editLastName}
+                    onChange={e => setEditLastName(e.target.value)}
+                    placeholder="مثال: محمد"
+                    className="h-10"
+                    data-testid="input-last-name"
+                  />
+                </div>
               </div>
             </div>
 
             {/* Bio */}
             <div>
-              <Label className="text-xs mb-1 block">وصف قصير عنك</Label>
+              <Label className="text-sm font-semibold flex items-center gap-1.5 mb-2">
+                <MessageCircle className="w-3.5 h-3.5 text-primary" /> وصف قصير
+              </Label>
               <Textarea
                 value={editBio}
                 onChange={e => setEditBio(e.target.value)}
@@ -491,12 +539,16 @@ export default function Profile() {
             </div>
 
             <Button
-              className="w-full gap-2"
+              className="w-full gap-2 h-11 text-base font-bold"
               onClick={() => editMutation.mutate()}
               disabled={editMutation.isPending}
               data-testid="btn-save-profile"
             >
-              {editMutation.isPending ? "جاري الحفظ..." : "حفظ التغييرات"}
+              {editMutation.isPending ? (
+                <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> جارٍ الحفظ...</>
+              ) : (
+                <><Check className="w-4 h-4" /> حفظ التغييرات</>
+              )}
             </Button>
           </div>
         </DialogContent>
