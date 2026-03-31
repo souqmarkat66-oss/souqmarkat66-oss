@@ -118,6 +118,7 @@ async function runMigrations() {
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(20)`);
     await db.execute(sql`ALTER TABLE boost_orders ADD COLUMN IF NOT EXISTS payment_screenshot_url TEXT`);
+    await db.execute(sql`ALTER TABLE boost_orders ADD COLUMN IF NOT EXISTS payment_method TEXT`);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS is_boosted BOOLEAN DEFAULT FALSE`);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS boosted_until TIMESTAMP`);
     await db.execute(sql`CREATE TABLE IF NOT EXISTS renewal_orders (

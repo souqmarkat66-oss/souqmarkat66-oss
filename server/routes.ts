@@ -712,7 +712,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // POST /api/boost/pay-order — create payment order, notify admin, return order number
   app.post("/api/boost/pay-order", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
-    const { adId, paymentRef, amount } = req.body;
+    const { adId, paymentRef, amount, paymentMethod, screenshotUrl } = req.body;
     if (!adId || !paymentRef) return res.status(400).json({ message: "بيانات ناقصة" });
     try {
       const ad = await storage.getAd(parseInt(adId));
@@ -723,10 +723,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const ts = Date.now().toString().slice(-6);
       const orderNumber = `BOOST-${adId}-${ts}`;
 
-      // Save order in DB
+      // Save order in DB (with payment method and screenshot)
       await db.execute(sql`
-        INSERT INTO boost_orders (order_number, ad_id, user_id, amount, payment_ref, status)
-        VALUES (${orderNumber}, ${adId}, ${userId}, ${amount || 0}, ${paymentRef}, 'pending')
+        INSERT INTO boost_orders (order_number, ad_id, user_id, amount, payment_ref, status, payment_method, payment_screenshot_url)
+        VALUES (${orderNumber}, ${adId}, ${userId}, ${amount || 0}, ${paymentRef}, 'pending', ${paymentMethod || null}, ${screenshotUrl || null})
       `);
 
       // Notify admin

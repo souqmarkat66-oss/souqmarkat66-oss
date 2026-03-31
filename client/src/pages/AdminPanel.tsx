@@ -1528,35 +1528,55 @@ function BoostOrdersSection({ logAction }: { logAction: any }) {
           </CardHeader>
           <CardContent className="space-y-3">
             {pending.map((o: any) => (
-              <div key={o.id} className="flex items-center gap-3 p-3 rounded-xl bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono text-xs font-bold text-orange-700 dark:text-orange-400" data-testid={`text-order-number-${o.id}`}>{o.order_number}</span>
-                    <span className="text-xs text-muted-foreground">إعلان #{o.ad_id}</span>
-                    <span className="text-xs font-bold text-green-600">{o.amount} ج.م</span>
+              <div key={o.id} className="p-3 rounded-xl bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 space-y-2">
+                {/* Row 1: order info */}
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-xs font-bold text-orange-700 dark:text-orange-400" data-testid={`text-order-number-${o.id}`}>{o.order_number}</span>
+                      <span className="text-xs text-muted-foreground">إعلان #{o.ad_id}</span>
+                      <span className="text-xs font-bold text-green-600">{o.amount} ج.م</span>
+                      {o.payment_method && (
+                        <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded-full font-bold">{o.payment_method}</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {o.first_name} {o.last_name} — مرجع: <span className="font-mono font-bold">{o.payment_ref}</span>
+                    </div>
+                    {o.ad_title && <div className="text-xs text-muted-foreground">"{o.ad_title}"</div>}
+                    <div className="text-xs text-muted-foreground">{o.created_at ? format(new Date(o.created_at), "dd/MM HH:mm", { locale: ar }) : ""}</div>
                   </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    {o.first_name} {o.last_name} — مرجع: <span className="font-mono font-bold">{o.payment_ref}</span>
+                  <div className="flex flex-col gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => updateOrder(o.id, "confirmed")}
+                      className="px-3 py-1.5 rounded-lg bg-green-500 hover:bg-green-600 text-white text-xs font-bold transition-all flex items-center gap-1"
+                      data-testid={`btn-confirm-boost-${o.id}`}
+                    >
+                      <CheckCircle className="w-3 h-3" /> تأكيد ✓
+                    </button>
+                    <button
+                      onClick={() => updateOrder(o.id, "rejected")}
+                      className="px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-bold transition-all flex items-center gap-1"
+                      data-testid={`btn-reject-boost-${o.id}`}
+                    >
+                      <XCircle className="w-3 h-3" /> رفض ✗
+                    </button>
                   </div>
-                  {o.ad_title && <div className="text-xs text-muted-foreground">"{o.ad_title}"</div>}
-                  <div className="text-xs text-muted-foreground">{o.created_at ? format(new Date(o.created_at), "dd/MM HH:mm", { locale: ar }) : ""}</div>
                 </div>
-                <div className="flex flex-col gap-1.5 flex-shrink-0">
-                  <button
-                    onClick={() => updateOrder(o.id, "confirmed")}
-                    className="px-3 py-1.5 rounded-lg bg-green-500 hover:bg-green-600 text-white text-xs font-bold transition-all flex items-center gap-1"
-                    data-testid={`btn-confirm-boost-${o.id}`}
-                  >
-                    <CheckCircle className="w-3 h-3" /> تأكيد ✓
-                  </button>
-                  <button
-                    onClick={() => updateOrder(o.id, "rejected")}
-                    className="px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-bold transition-all flex items-center gap-1"
-                    data-testid={`btn-reject-boost-${o.id}`}
-                  >
-                    <XCircle className="w-3 h-3" /> رفض ✗
-                  </button>
-                </div>
+                {/* Row 2: receipt screenshot */}
+                {o.payment_screenshot_url && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1 font-semibold">📸 صورة الإيصال:</p>
+                    <a href={o.payment_screenshot_url} target="_blank" rel="noopener noreferrer">
+                      <img
+                        src={o.payment_screenshot_url}
+                        alt="إيصال الدفع"
+                        className="w-full max-h-48 object-contain rounded-lg border border-orange-200 dark:border-orange-800 cursor-pointer hover:opacity-90 transition-opacity"
+                        data-testid={`img-boost-receipt-${o.id}`}
+                      />
+                    </a>
+                  </div>
+                )}
               </div>
             ))}
           </CardContent>
