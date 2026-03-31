@@ -506,15 +506,37 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const filterUserId = req.query.userId as string | undefined;
     const authUserId = req.user?.claims?.sub;
     if (myAds && authUserId) {
-      const ads = await storage.getAds(undefined, authUserId);
-      return res.json(ads);
+      const adsList = await storage.getAds(undefined, authUserId);
+      return res.json(adsList);
     }
     if (filterUserId) {
-      const ads = await storage.getAds(undefined, filterUserId);
-      return res.json(ads);
+      const adsList = await storage.getAds(undefined, filterUserId);
+      return res.json(adsList);
     }
-    const ads = await storage.getAds(language);
-    res.json(ads);
+    try {
+      // Auto-expire boosts that have passed their expiry
+      await db.execute(sql`
+        UPDATE ads SET is_boosted = false, boosted_until = NULL
+        WHERE is_boosted = true AND boosted_until IS NOT NULL AND boosted_until < NOW()
+      `);
+      // Return ads: boosted first, then newest
+      let result;
+      if (language) {
+        result = await db.execute(sql`
+          SELECT * FROM ads WHERE status = 'active' AND language = ${language}
+          ORDER BY CASE WHEN is_boosted = true THEN 0 ELSE 1 END ASC, created_at DESC
+        `);
+      } else {
+        result = await db.execute(sql`
+          SELECT * FROM ads WHERE status = 'active'
+          ORDER BY CASE WHEN is_boosted = true THEN 0 ELSE 1 END ASC, created_at DESC
+        `);
+      }
+      res.json(result.rows);
+    } catch {
+      const adsList = await storage.getAds(language);
+      res.json(adsList);
+    }
   });
 
   app.get("/api/ads/mine", isAuthenticated, async (req: any, res) => {
@@ -717,6 +739,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await db.execute(sql`UPDATE boost_orders SET status = ${status} WHERE id = ${req.params.id}`);
 
       if (status === 'confirmed') {
+        // ✅ ACTIVATE: mark ad as boosted for 30 days
+        await db.execute(sql`
+          UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '30 days'
+          WHERE id = ${order.ad_id}
+        `);
         // Actually run the boost
         const ad = await storage.getAd(order.ad_id);
         if (ad) {
@@ -743,6 +770,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           `📢 رقم الإعلان: #${order.ad_id}\n` +
           `💰 المبلغ: ${order.amount} ج.م\n` +
           `🚀 الحالة: تم التأكيد — الإعلان يصل للناس الآن!\n` +
+          `📅 مدة التعزيز: 30 يوماً\n` +
           `━━━━━━━━━━━━━━━━━\n` +
           `شكراً لثقتك في سوق ماركات 🙏`;
         await db.execute(sql`
@@ -2504,32 +2532,87 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!msg) return res.status(404).json({ message: "الرسالة غير موجودة" });
 
       const userId = msg.from_user_id;
+      const msgText: string = msg.message || "";
 
-      // Confirmation DM to user
-      const confirmText =
-        `✅ تم تأكيد الدفع وتفعيل الخدمة\n` +
-        `━━━━━━━━━━━━━━━━━\n` +
-        `💰 تم استلام دفعتك بنجاح\n` +
-        `🚀 الخدمة المطلوبة تم تفعيلها فوراً\n` +
-        `━━━━━━━━━━━━━━━━━\n` +
-        `شكراً لثقتك في سوق ماركات 🙏`;
+      // ── Parse order number from message ──────────────────────
+      const orderMatch = msgText.match(/رقم الطلب[:\s]+([A-Z0-9\-]+)/i);
+      const adMatch    = msgText.match(/رقم الإعلان[:\s#]+(\d+)/i);
+      const amountMatch = msgText.match(/قيمة الدفع[:\s]+([\d.]+)/i);
+      const orderNum = orderMatch?.[1]?.trim();
+      const adIdFromMsg = adMatch ? parseInt(adMatch[1]) : null;
+      const amountFromMsg = amountMatch ? parseFloat(amountMatch[1]) : null;
+
+      let serviceActivated = "الخدمة المطلوبة";
+      let adId: number | null = adIdFromMsg;
+
+      // ── Try to find and confirm boost order ──────────────────
+      if (orderNum) {
+        const boostRow = await db.execute(sql`SELECT * FROM boost_orders WHERE order_number = ${orderNum} LIMIT 1`);
+        const boostOrder = boostRow.rows[0] as any;
+        if (boostOrder && boostOrder.status === 'pending') {
+          adId = boostOrder.ad_id;
+          // Activate the ad boost for 30 days
+          await db.execute(sql`UPDATE boost_orders SET status = 'confirmed' WHERE order_number = ${orderNum}`);
+          await db.execute(sql`
+            UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '30 days'
+            WHERE id = ${adId}
+          `);
+          // Notify all other users about this boosted ad
+          const ad = await storage.getAd(adId!);
+          if (ad) {
+            const allRows = await db.execute(sql`SELECT id FROM users WHERE id != ${userId} LIMIT 500`);
+            for (const row of allRows.rows as any[]) {
+              await createNotification(row.id, "system",
+                `🚀 إعلان مميز: ${ad.title}`,
+                `✨ عرض مميز لا تفوّته — شاهده الآن!`,
+                `/ads/${adId}`
+              );
+            }
+          }
+          serviceActivated = `تعزيز إعلان #${adId} لمدة 30 يوماً`;
+        }
+      } else if (adIdFromMsg) {
+        // No order number but ad ID found → boost the ad directly
+        await db.execute(sql`
+          UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '30 days'
+          WHERE id = ${adIdFromMsg}
+        `);
+        serviceActivated = `تعزيز إعلان #${adIdFromMsg} لمدة 30 يوماً`;
+      }
+
+      // ── Build a detailed invoice DM to the user ───────────────
+      const invoiceLines: string[] = [
+        `✅ تم تأكيد الدفع وتفعيل الخدمة`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        `📋 فاتورة الدفع`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+      ];
+      if (orderNum) invoiceLines.push(`🔢 رقم الطلب: ${orderNum}`);
+      if (adId)    invoiceLines.push(`📢 رقم الإعلان: #${adId}`);
+      if (amountFromMsg) invoiceLines.push(`💰 قيمة الدفع: ${amountFromMsg} ج.م`);
+      invoiceLines.push(
+        `🚀 الخدمة: ${serviceActivated}`,
+        `✅ الحالة: تم الدفع بنجاح ✅`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        `🎉 الخدمة تفعّلت فوراً — شكراً لثقتك في سوق ماركات 🙏`
+      );
 
       await db.execute(sql`
         INSERT INTO direct_messages (from_user_id, to_user_id, message, is_voice, image_url, is_payment_proof)
-        VALUES (${ADMIN_USER_ID}, ${userId}, ${confirmText}, false, null, false)
+        VALUES (${ADMIN_USER_ID}, ${userId}, ${invoiceLines.join('\n')}, false, null, false)
       `);
 
-      // Push notification to user
+      // Push notification
       await createNotification(userId, "system",
-        "✅ تم تأكيد الدفع",
-        "تم استلام دفعتك وتفعيل الخدمة فوراً!",
-        "/messages"
+        "✅ تم تأكيد الدفع وتفعيل الخدمة",
+        `تم استلام دفعتك وتفعيل ${serviceActivated} فوراً!`,
+        adId ? `/ads/${adId}` : "/messages"
       );
 
-      // Mark message as read
+      // Mark message as confirmed (is_read = true)
       await db.execute(sql`UPDATE direct_messages SET is_read = true WHERE id = ${req.params.id}`);
 
-      res.json({ ok: true });
+      res.json({ ok: true, serviceActivated, adId });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
