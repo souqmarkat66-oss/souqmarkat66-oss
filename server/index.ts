@@ -159,6 +159,7 @@ async function runMigrations() {
       WHERE referral_code IS NULL
     `);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS whatsapp_clicks INTEGER DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS screenshot_url TEXT`);
     await db.execute(sql`CREATE TABLE IF NOT EXISTS push_subscriptions (
       id SERIAL PRIMARY KEY,
       user_id VARCHAR NOT NULL,

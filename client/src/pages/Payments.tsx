@@ -2,13 +2,13 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone } from "lucide-react";
+import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon } from "lucide-react";
 
 const METHOD_LABELS: Record<string, { label: string; emoji: string; color: string }> = {
   vodafone:  { label: "فودافون كاش",    emoji: "📱", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
@@ -36,6 +36,10 @@ export default function Payments() {
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({ type: "top_up", amountEGP: "", method: "vodafone", phoneNumber: "", adId: "" });
+  const [screenshotUrl, setScreenshotUrl] = useState("");
+  const [screenshotPreview, setScreenshotPreview] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: payments = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/payments"],
@@ -49,12 +53,42 @@ export default function Payments() {
     mutationFn: (data: any) => apiRequest("POST", "/api/payments", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
-      toast({ title: "✅ تم إرسال طلب الدفع", description: "سيتم مراجعته خلال 24 ساعة" });
+      toast({ title: "✅ تم إرسال طلب الدفع", description: "سيتم مراجعته فوراً وتفعيل الخدمة عند القبول" });
       setShowForm(false);
       setFormData({ type: "top_up", amountEGP: "", method: "vodafone", phoneNumber: "", adId: "" });
+      setScreenshotUrl("");
+      setScreenshotPreview("");
     },
     onError: () => toast({ title: "خطأ", description: "فشل إرسال الطلب", variant: "destructive" }),
   });
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const preview = URL.createObjectURL(file);
+      setScreenshotPreview(preview);
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: fd, credentials: "include" });
+      if (!res.ok) throw new Error("Upload failed");
+      const { url } = await res.json();
+      setScreenshotUrl(url);
+      toast({ title: "✅ تم رفع الإيصال بنجاح" });
+    } catch {
+      toast({ title: "خطأ", description: "فشل رفع الصورة", variant: "destructive" });
+      setScreenshotPreview("");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removeScreenshot = () => {
+    setScreenshotUrl("");
+    setScreenshotPreview("");
+    if (fileRef.current) fileRef.current.value = "";
+  };
 
   const filtered = payments.filter(p =>
     !search ||
@@ -123,6 +157,7 @@ export default function Payments() {
                 <th className="text-right px-4 py-3 font-bold">المبلغ (ج.م)</th>
                 <th className="text-right px-4 py-3 font-bold">طريقة الدفع</th>
                 <th className="text-right px-4 py-3 font-bold">الحالة</th>
+                <th className="text-right px-4 py-3 font-bold">الإيصال</th>
                 <th className="text-right px-4 py-3 font-bold">التاريخ</th>
               </tr>
             </thead>
@@ -130,7 +165,7 @@ export default function Payments() {
               {isLoading ? (
                 [...Array(4)].map((_, i) => (
                   <tr key={i} className="border-b">
-                    {[...Array(7)].map((_, j) => (
+                    {[...Array(8)].map((_, j) => (
                       <td key={j} className="px-4 py-3">
                         <div className="h-4 bg-muted animate-pulse rounded w-20" />
                       </td>
@@ -139,7 +174,7 @@ export default function Payments() {
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-muted-foreground">
+                  <td colSpan={8} className="text-center py-12 text-muted-foreground">
                     <Receipt className="w-10 h-10 mx-auto mb-2 opacity-30" />
                     <p className="text-sm">لا توجد طلبات دفع بعد</p>
                     <p className="text-xs mt-1">اضغط "طلب دفع جديد" للبدء</p>
@@ -183,6 +218,15 @@ export default function Payments() {
                         <StatusIcon className="w-3 h-3" />
                         {status.label}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {p.screenshotUrl ? (
+                        <a href={p.screenshotUrl} target="_blank" rel="noopener noreferrer">
+                          <img src={p.screenshotUrl} alt="إيصال" className="w-10 h-10 object-cover rounded-lg border hover:opacity-80 transition-opacity cursor-zoom-in" />
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {new Date(p.createdAt).toLocaleDateString("ar-EG", { year: "numeric", month: "short", day: "numeric" })}
@@ -310,23 +354,76 @@ export default function Payments() {
               </div>
             )}
 
+            {/* Screenshot Upload */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold flex items-center gap-1">
+                <ImageIcon className="w-3 h-3" />
+                صورة إيصال الدفع <span className="text-primary font-bold">(مطلوبة)</span>
+              </label>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleFileUpload}
+                data-testid="input-screenshot"
+              />
+              {screenshotPreview ? (
+                <div className="relative rounded-xl overflow-hidden border border-primary/30">
+                  <img src={screenshotPreview} alt="إيصال الدفع" className="w-full max-h-48 object-contain bg-muted/20" />
+                  <button
+                    type="button"
+                    onClick={removeScreenshot}
+                    className="absolute top-2 left-2 bg-black/60 text-white rounded-full p-1 hover:bg-black/80"
+                    data-testid="btn-remove-screenshot"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                  {screenshotUrl && (
+                    <div className="absolute bottom-2 right-2 bg-green-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">
+                      ✓ تم الرفع
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading}
+                  className="w-full h-24 border-2 border-dashed border-primary/30 rounded-xl flex flex-col items-center justify-center gap-2 hover:border-primary/60 hover:bg-primary/5 transition-all"
+                  data-testid="btn-upload-screenshot"
+                >
+                  {uploading ? (
+                    <div className="text-xs text-muted-foreground">جاري الرفع...</div>
+                  ) : (
+                    <>
+                      <Upload className="w-5 h-5 text-primary/60" />
+                      <span className="text-xs text-muted-foreground">اضغط لرفع صورة الإيصال</span>
+                      <span className="text-[10px] text-muted-foreground/60">PNG, JPG, WEBP</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+
             {/* Submit */}
             <Button
               className="w-full gap-2"
-              disabled={!formData.amountEGP || createMutation.isPending}
+              disabled={!formData.amountEGP || !screenshotUrl || uploading || createMutation.isPending}
               onClick={() => createMutation.mutate({
                 type: formData.type,
                 amountEGP: Number(formData.amountEGP),
                 method: formData.method,
                 phoneNumber: formData.phoneNumber || undefined,
                 adId: formData.adId && formData.adId !== "none" ? Number(formData.adId) : undefined,
+                screenshotUrl: screenshotUrl || undefined,
               })}
               data-testid="btn-submit-payment"
             >
               {createMutation.isPending ? "جاري الإرسال..." : "📤 إرسال الطلب"}
             </Button>
             <p className="text-[10px] text-center text-muted-foreground">
-              سيصلك رقم الطلب عند التأكيد · المراجعة خلال 24 ساعة
+              سيصلك إشعار فور مراجعة الطلب · التفعيل فوري عند القبول
             </p>
           </div>
         </DialogContent>

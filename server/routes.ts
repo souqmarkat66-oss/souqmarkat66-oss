@@ -1837,17 +1837,42 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.put("/api/payments/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { status, adminNote } = req.body;
     const payment = await storage.updatePaymentRequest(Number(req.params.id), status, adminNote);
-    // If approved withdrawal, create debit transaction
-    if (status === 'approved') {
+    if (status === 'approved' || status === 'rejected') {
       const pr = await storage.getPaymentRequests(undefined);
       const p = pr.find(x => x.id === Number(req.params.id));
-      if (p && p.type === 'withdrawal') {
-        await storage.createTransaction({
-          userId: p.userId,
-          type: 'withdrawal',
-          amountEGP: p.amountEGP,
-          description: `سحب رصيد - ${p.method}`,
-        });
+      if (p) {
+        if (status === 'approved') {
+          if (p.type === 'withdrawal') {
+            await storage.createTransaction({
+              userId: p.userId,
+              type: 'withdrawal',
+              amountEGP: p.amountEGP,
+              description: `سحب رصيد - ${p.method}`,
+            });
+          } else if (p.type === 'top_up') {
+            await storage.createTransaction({
+              userId: p.userId,
+              type: 'earning',
+              amountEGP: p.amountEGP,
+              description: `شحن رصيد - ${p.method}`,
+            });
+          }
+          await createNotification(
+            p.userId,
+            'payment',
+            '✅ تم قبول طلب الدفع',
+            `رقم الطلب ${p.orderNumber} — تمت الموافقة وتم ${p.type === 'top_up' ? 'شحن رصيدك بمبلغ' : 'معالجة سحب'} ${p.amountEGP} ج.م`,
+            '/payments'
+          );
+        } else {
+          await createNotification(
+            p.userId,
+            'payment',
+            '❌ تم رفض طلب الدفع',
+            `رقم الطلب ${p.orderNumber} — تم رفض الطلب. ${adminNote || 'للاستفسار تواصل مع الإدارة.'}`,
+            '/payments'
+          );
+        }
       }
     }
     res.json(payment);

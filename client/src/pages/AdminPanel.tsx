@@ -815,21 +815,35 @@ function PaymentsSection({ logAction }: { logAction: any }) {
           <div className="space-y-2">
             {pending.map((p: any) => (
               <Card key={p.id} className="rounded-xl border-yellow-500/20" data-testid={`payment-${p.id}`}>
-                <CardContent className="p-4 flex items-center gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-bold text-lg text-green-600">{p.amountEGP} ج.م</span>
-                      <StatusBadge status={p.status} />
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className="font-bold text-lg text-green-600">{p.amountEGP} ج.م</span>
+                        <StatusBadge status={p.status} />
+                        <span className="text-xs bg-muted px-2 py-0.5 rounded font-mono">{p.type === 'top_up' ? '💰 شحن' : '🏧 سحب'}</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {methodLabel[p.method] || p.method} · {p.phoneNumber} · {p.createdAt ? format(new Date(p.createdAt), "dd MMM yyyy", { locale: ar }) : ""}
+                      </div>
+                      <div className="text-xs text-muted-foreground opacity-60">ORD: {p.orderNumber || p.id} · ID: {p.userId}</div>
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      {methodLabel[p.method] || p.method} · {p.phoneNumber} · {p.createdAt ? format(new Date(p.createdAt), "dd MMM yyyy", { locale: ar }) : ""}
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "approved" })}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
+                      <Button size="sm" variant="destructive" className="text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "rejected" })}><XCircle className="w-3 h-3 me-1" />رفض</Button>
                     </div>
-                    <div className="text-xs text-muted-foreground opacity-60">ID: {p.userId}</div>
                   </div>
-                  <div className="flex gap-1.5 flex-shrink-0">
-                    <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "approved" })}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
-                    <Button size="sm" variant="destructive" className="text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "rejected" })}><XCircle className="w-3 h-3 me-1" />رفض</Button>
-                  </div>
+                  {p.screenshotUrl && (
+                    <a href={p.screenshotUrl} target="_blank" rel="noopener noreferrer" className="block">
+                      <img
+                        src={p.screenshotUrl}
+                        alt="إيصال الدفع"
+                        className="w-full max-h-52 object-contain rounded-xl border bg-muted/20 cursor-zoom-in hover:opacity-90 transition-opacity"
+                        data-testid={`screenshot-payment-${p.id}`}
+                      />
+                      <p className="text-[10px] text-primary mt-1 text-center">📎 صورة إيصال الدفع — اضغط للتكبير</p>
+                    </a>
+                  )}
                 </CardContent>
               </Card>
             ))}
