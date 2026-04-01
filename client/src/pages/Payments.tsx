@@ -10,6 +10,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon } from "lucide-react";
 
+const SERVICE_TYPE_LABELS: Record<string, string> = {
+  ad_boost:   "⚡ تعزيز إعلان",
+  campaign:   "📣 حملة إعلانية",
+  renewal:    "🔄 تجديد إعلان",
+  ai_image:   "🖼️ ذكاء: صورة",
+  ai_video:   "🎬 ذكاء: فيديو",
+  ai_content: "✍️ ذكاء: محتوى",
+  ai_credits: "🤖 رصيد ذكاء",
+  withdrawal: "🏧 سحب أرباح",
+  other:      "📦 أخرى",
+};
+
 const METHOD_LABELS: Record<string, { label: string; emoji: string; color: string }> = {
   vodafone:  { label: "فودافون كاش",    emoji: "📱", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
   etisalat:  { label: "اتصالات e& كاش", emoji: "📲", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
@@ -35,7 +47,7 @@ export default function Payments() {
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ type: "top_up", amountEGP: "", method: "vodafone", phoneNumber: "", adId: "" });
+  const [formData, setFormData] = useState({ type: "top_up", amountEGP: "", method: "vodafone", phoneNumber: "", adId: "", serviceType: "" });
   const [screenshotUrl, setScreenshotUrl] = useState("");
   const [screenshotPreview, setScreenshotPreview] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -55,7 +67,7 @@ export default function Payments() {
       queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
       toast({ title: "✅ تم إرسال طلب الدفع", description: "سيتم مراجعته فوراً وتفعيل الخدمة عند القبول" });
       setShowForm(false);
-      setFormData({ type: "top_up", amountEGP: "", method: "vodafone", phoneNumber: "", adId: "" });
+      setFormData({ type: "top_up", amountEGP: "", method: "vodafone", phoneNumber: "", adId: "", serviceType: "" });
       setScreenshotUrl("");
       setScreenshotPreview("");
     },
@@ -154,6 +166,7 @@ export default function Payments() {
                 <th className="text-right px-4 py-3 font-bold">رقم الطلب</th>
                 <th className="text-right px-4 py-3 font-bold">رقم الإعلان</th>
                 <th className="text-right px-4 py-3 font-bold">النوع</th>
+                <th className="text-right px-4 py-3 font-bold">الخدمة</th>
                 <th className="text-right px-4 py-3 font-bold">المبلغ (ج.م)</th>
                 <th className="text-right px-4 py-3 font-bold">طريقة الدفع</th>
                 <th className="text-right px-4 py-3 font-bold">الحالة</th>
@@ -165,7 +178,7 @@ export default function Payments() {
               {isLoading ? (
                 [...Array(4)].map((_, i) => (
                   <tr key={i} className="border-b">
-                    {[...Array(8)].map((_, j) => (
+                    {[...Array(9)].map((_, j) => (
                       <td key={j} className="px-4 py-3">
                         <div className="h-4 bg-muted animate-pulse rounded w-20" />
                       </td>
@@ -174,7 +187,7 @@ export default function Payments() {
                 ))
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-12 text-muted-foreground">
+                  <td colSpan={9} className="text-center py-12 text-muted-foreground">
                     <Receipt className="w-10 h-10 mx-auto mb-2 opacity-30" />
                     <p className="text-sm">لا توجد طلبات دفع بعد</p>
                     <p className="text-xs mt-1">اضغط "طلب دفع جديد" للبدء</p>
@@ -204,6 +217,15 @@ export default function Payments() {
                       <span className="text-xs font-bold">
                         {p.type === "withdrawal" ? "🏧 سحب" : "💰 إيداع"}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {p.serviceType ? (
+                        <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold whitespace-nowrap">
+                          {SERVICE_TYPE_LABELS[p.serviceType] || p.serviceType}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 font-bold text-green-600">
                       {p.amountEGP?.toLocaleString()} ج.م
@@ -259,13 +281,43 @@ export default function Payments() {
                 <button
                   key={t.value}
                   type="button"
-                  onClick={() => setFormData(f => ({ ...f, type: t.value }))}
+                  onClick={() => setFormData(f => ({ ...f, type: t.value, serviceType: "" }))}
                   className={`flex-1 py-2 rounded-xl text-sm font-bold border transition-all ${formData.type === t.value ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/50"}`}
                   data-testid={`btn-type-${t.value}`}
                 >
                   {t.label}
                 </button>
               ))}
+            </div>
+
+            {/* Service Type */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold flex items-center gap-1">🎯 نوع الخدمة المطلوبة</label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(formData.type === "top_up" ? [
+                  { value: "ad_boost",    label: "⚡ تعزيز إعلان" },
+                  { value: "campaign",    label: "📣 حملة إعلانية" },
+                  { value: "renewal",     label: "🔄 تجديد إعلان" },
+                  { value: "ai_image",    label: "🖼️ ذكاء: صورة" },
+                  { value: "ai_video",    label: "🎬 ذكاء: فيديو" },
+                  { value: "ai_content",  label: "✍️ ذكاء: محتوى" },
+                  { value: "ai_credits",  label: "🤖 شحن رصيد ذكاء" },
+                  { value: "other",       label: "📦 أخرى" },
+                ] : [
+                  { value: "withdrawal",  label: "🏧 سحب أرباح" },
+                  { value: "other",       label: "📦 أخرى" },
+                ]).map(s => (
+                  <button
+                    key={s.value}
+                    type="button"
+                    onClick={() => setFormData(f => ({ ...f, serviceType: f.serviceType === s.value ? "" : s.value }))}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border text-right transition-all ${formData.serviceType === s.value ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/40 hover:bg-primary/5"}`}
+                    data-testid={`btn-service-${s.value}`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Ad ID (optional) */}
@@ -416,6 +468,7 @@ export default function Payments() {
                 method: formData.method,
                 phoneNumber: formData.phoneNumber || undefined,
                 adId: formData.adId && formData.adId !== "none" ? Number(formData.adId) : undefined,
+                serviceType: formData.serviceType || undefined,
                 screenshotUrl: screenshotUrl || undefined,
               })}
               data-testid="btn-submit-payment"

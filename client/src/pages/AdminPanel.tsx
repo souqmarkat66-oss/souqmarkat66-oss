@@ -787,6 +787,18 @@ function CampaignCard({ c, updateCampaign }: any) {
 // ═══════════════════════════════════════════════════════════════
 // PAYMENTS
 // ═══════════════════════════════════════════════════════════════
+const SERVICE_TYPE_LABELS: Record<string, string> = {
+  ad_boost:   "تعزيز إعلان",
+  campaign:   "حملة إعلانية",
+  renewal:    "تجديد إعلان",
+  ai_image:   "ذكاء اصطناعي: صورة",
+  ai_video:   "ذكاء اصطناعي: فيديو",
+  ai_content: "ذكاء اصطناعي: محتوى",
+  ai_credits: "شحن رصيد ذكاء",
+  withdrawal: "سحب أرباح",
+  other:      "أخرى",
+};
+
 function PaymentsSection({ logAction }: { logAction: any }) {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -826,7 +838,12 @@ function PaymentsSection({ logAction }: { logAction: any }) {
                       <div className="text-xs text-muted-foreground">
                         {methodLabel[p.method] || p.method} · {p.phoneNumber} · {p.createdAt ? format(new Date(p.createdAt), "dd MMM yyyy", { locale: ar }) : ""}
                       </div>
-                      <div className="text-xs text-muted-foreground opacity-60">ORD: {p.orderNumber || p.id} · ID: {p.userId}</div>
+                      {p.serviceType && (
+                        <span className="inline-block mt-1 text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold">
+                          🎯 {SERVICE_TYPE_LABELS[p.serviceType] || p.serviceType}
+                        </span>
+                      )}
+                      <div className="text-xs text-muted-foreground opacity-60 mt-0.5">ORD: {p.orderNumber || p.id} · ID: {p.userId}</div>
                     </div>
                     <div className="flex gap-1.5 flex-shrink-0">
                       <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "approved" })}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
