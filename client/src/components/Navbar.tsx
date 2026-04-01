@@ -19,6 +19,7 @@ const navLinks = (user: any) => [
   { href: "/ads", label: "الإعلانات", icon: LayoutGrid },
   { href: "/channels", label: "القنوات", icon: Tv },
   { href: "/reels", label: "ريلز", icon: Radio },
+  { href: "/help", label: "المساعدة", icon: HelpCircle },
   ...(user ? [
     { href: "/my-content", label: "محتواي", icon: UserCircle2 },
     { href: "/create", label: "إعلان جديد", icon: PlusCircle },
