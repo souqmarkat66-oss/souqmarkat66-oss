@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Gift, Share2, Copy, Check, Users, Cake, Clock, Heart, Image,
   Video, Briefcase, MapPin, Smile, Calendar, Star, Send, MessageCircle,
-  ChevronRight, PartyPopper, Sparkles, Trophy
+  ChevronRight, PartyPopper, Sparkles, Trophy, UserPlus, Radio, Tag
 } from "lucide-react";
 import { useLocation } from "wouter";
 
@@ -46,7 +46,7 @@ export default function Social() {
   const [, setLocation] = useLocation();
 
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<"invite"|"memories"|"birthdays"|"profile">("invite");
+  const [activeTab, setActiveTab] = useState<"suggestions"|"invite"|"memories"|"birthdays"|"profile">("suggestions");
 
   // Social profile edit states
   const [birthday, setBirthday] = useState("");
@@ -66,6 +66,12 @@ export default function Social() {
     queryKey: ["/api/social/invite-link"],
     queryFn: () => fetch("/api/social/invite-link", { credentials: "include" }).then(r => r.json()),
     enabled: !!user,
+  });
+
+  const { data: suggestionsData } = useQuery<any>({
+    queryKey: ["/api/social/suggestions"],
+    queryFn: () => fetch("/api/social/suggestions", { credentials: "include" }).then(r => r.json()),
+    enabled: !!user && activeTab === "suggestions",
   });
 
   const { data: memories } = useQuery<any>({
@@ -119,7 +125,15 @@ export default function Social() {
   const today = new Date();
   const todayStr = `${today.getDate()} ${ARABIC_MONTHS[today.getMonth()]} ${today.getFullYear()}`;
 
+  const INTEREST_LABELS: Record<string,string> = {
+    tech: "📱 تقنية", fashion: "👗 أزياء", food: "🍕 طعام",
+    real_estate: "🏠 عقارات", cars: "🚗 سيارات", health: "💊 صحة",
+    education: "📚 تعليم", travel: "✈️ سياحة", sports: "⚽ رياضة",
+    finance: "💰 مال", kids: "👶 أطفال", gaming: "🎮 ألعاب",
+  };
+
   const TABS = [
+    { id: "suggestions", label: "قد تعرفهم", icon: UserPlus },
     { id: "invite", label: "ادعُ أصدقاء", icon: Gift },
     { id: "memories", label: "ذكرياتي", icon: Clock },
     { id: "birthdays", label: "أعياد الميلاد", icon: Cake },
@@ -170,6 +184,154 @@ export default function Social() {
           );
         })}
       </div>
+
+      {/* ── TAB: People You May Know ── */}
+      {activeTab === "suggestions" && (
+        <div className="space-y-3">
+          {/* Header info */}
+          <div className="flex items-center gap-2 p-3 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
+            <UserPlus className="w-4 h-4 text-blue-600 shrink-0" />
+            <p className="text-xs text-blue-700 dark:text-blue-400">
+              مقترحون بناءً على اهتماماتك المشتركة، منطقتك، والقنوات اللي مشترك فيها
+            </p>
+          </div>
+
+          {/* Loading skeleton */}
+          {!suggestionsData && (
+            <div className="space-y-3">
+              {[1,2,3,4,5].map(i => (
+                <div key={i} className="flex items-center gap-3 p-3 rounded-2xl border animate-pulse">
+                  <div className="w-14 h-14 rounded-full bg-muted shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-3 bg-muted rounded w-32" />
+                    <div className="h-2 bg-muted rounded w-24" />
+                    <div className="h-2 bg-muted rounded w-20" />
+                  </div>
+                  <div className="w-20 h-8 bg-muted rounded-xl shrink-0" />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* No suggestions */}
+          {suggestionsData && suggestionsData.suggestions?.length === 0 && (
+            <div className="text-center py-16">
+              <Users className="w-14 h-14 mx-auto mb-4 text-muted-foreground opacity-20" />
+              <h3 className="font-bold text-base mb-1">لا توجد اقتراحات حالياً</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                اشترك في قنوات أكثر وأضف اهتماماتك وهيظهر اقتراحات ليك
+              </p>
+              <Button variant="outline" size="sm" onClick={() => setLocation("/channels")}>
+                تصفح القنوات
+              </Button>
+            </div>
+          )}
+
+          {/* Suggestions grid */}
+          <div className="space-y-2.5">
+            {suggestionsData?.suggestions?.map((person: any) => {
+              const fullName = `${person.first_name || ""} ${person.last_name || ""}`.trim() || "مستخدم";
+              const initials = (person.first_name || "م")[0];
+              const personInterests = (person.interests || "").split(",").filter(Boolean);
+              return (
+                <div
+                  key={person.id}
+                  className="flex items-start gap-3 p-3.5 rounded-2xl border border-border/60 hover:border-primary/30 hover:bg-primary/[0.02] transition-all"
+                >
+                  {/* Avatar */}
+                  <div
+                    className="w-14 h-14 rounded-full overflow-hidden bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white text-xl font-bold shrink-0 cursor-pointer"
+                    onClick={() => setLocation(`/profile/${person.id}`)}
+                  >
+                    {person.profile_image_url ? (
+                      <img src={person.profile_image_url} alt={fullName} className="w-full h-full object-cover" />
+                    ) : initials}
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <p
+                      className="font-bold text-sm leading-tight cursor-pointer hover:text-primary transition-colors"
+                      onClick={() => setLocation(`/profile/${person.id}`)}
+                    >
+                      {fullName}
+                    </p>
+                    {/* Job / Company */}
+                    {(person.job_title || person.company) && (
+                      <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                        <Briefcase className="w-3 h-3" />
+                        {person.job_title}{person.company ? ` · ${person.company}` : ""}
+                      </p>
+                    )}
+                    {/* Location */}
+                    {(person.city || person.governorate) && (
+                      <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                        <MapPin className="w-3 h-3" />
+                        {person.city || person.governorate}
+                      </p>
+                    )}
+                    {/* Why suggested */}
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {person.reasons?.slice(0, 2).map((r: string, i: number) => (
+                        <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-primary/8 text-primary font-medium border border-primary/15">
+                          {r}
+                        </span>
+                      ))}
+                    </div>
+                    {/* Common interests preview */}
+                    {personInterests.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {personInterests.slice(0, 3).map((int: string) => (
+                          <span key={int} className="text-[10px] text-muted-foreground">
+                            {INTEREST_LABELS[int] || int}
+                          </span>
+                        ))}
+                        {personInterests.length > 3 && (
+                          <span className="text-[10px] text-muted-foreground">+{personInterests.length - 3}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-col gap-1.5 shrink-0">
+                    <Button
+                      size="sm"
+                      className="h-8 px-3 text-xs gap-1"
+                      onClick={() => setLocation(`/messages?with=${person.id}`)}
+                      data-testid={`btn-message-suggestion-${person.id}`}
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      راسله
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 px-3 text-xs"
+                      onClick={() => setLocation(`/profile/${person.id}`)}
+                      data-testid={`btn-view-suggestion-${person.id}`}
+                    >
+                      الملف
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Tip to improve suggestions */}
+          {suggestionsData && suggestionsData.suggestions?.length > 0 && (
+            <div className="text-center pt-2">
+              <p className="text-xs text-muted-foreground">
+                لتحسين الاقتراحات —{" "}
+                <button className="text-primary underline" onClick={() => setActiveTab("profile")}>
+                  أضف اهتماماتك ومنطقتك
+                </button>
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── TAB: Invite Friends ── */}
       {activeTab === "invite" && (

@@ -3454,6 +3454,96 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // GET /api/social/suggestions — "أصدقاء قد تعرفهم" People You May Know
+  app.get("/api/social/suggestions", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const meRow = await db.execute(sql`
+        SELECT governorate, city, interests FROM users WHERE id = ${userId} LIMIT 1
+      `);
+      const me = meRow.rows[0] as any;
+      const myGov = me?.governorate || "";
+      const myCity = me?.city || "";
+      const myInterests = (me?.interests || "").split(",").filter(Boolean);
+
+      // 1. People from same channels (mutual subscribers)
+      const channelMates = await db.execute(sql`
+        SELECT DISTINCT u.id, u.first_name, u.last_name, u.profile_image_url,
+               u.governorate, u.city, u.job_title, u.company, u.interests
+        FROM users u
+        INNER JOIN channel_subscriptions cs ON cs.user_id = u.id
+        WHERE cs.channel_id IN (
+          SELECT channel_id FROM channel_subscriptions WHERE user_id = ${userId}
+        )
+        AND u.id != ${userId}
+        LIMIT 30
+      `);
+
+      // 2. People from same governorate or city
+      const regionMates = myGov ? await db.execute(sql`
+        SELECT id, first_name, last_name, profile_image_url,
+               governorate, city, job_title, company, interests
+        FROM users
+        WHERE (governorate = ${myGov} OR city = ${myCity})
+          AND id != ${userId}
+        ORDER BY created_at DESC
+        LIMIT 20
+      `) : { rows: [] };
+
+      // 3. People with same interests (at least 1 overlap)
+      const interestMates = myInterests.length > 0 ? await db.execute(sql`
+        SELECT id, first_name, last_name, profile_image_url,
+               governorate, city, job_title, company, interests
+        FROM users
+        WHERE interests IS NOT NULL
+          AND interests != ''
+          AND id != ${userId}
+        ORDER BY created_at DESC
+        LIMIT 30
+      `) : { rows: [] };
+
+      // Merge, deduplicate, score
+      const seen = new Set<string>();
+      const scored: Array<{ user: any; score: number; reasons: string[] }> = [];
+
+      const addUser = (u: any, baseScore: number, reason: string) => {
+        if (seen.has(u.id)) {
+          const existing = scored.find(s => s.user.id === u.id);
+          if (existing) {
+            existing.score += baseScore;
+            if (!existing.reasons.includes(reason)) existing.reasons.push(reason);
+          }
+          return;
+        }
+        seen.add(u.id);
+        const userInterests = (u.interests || "").split(",").filter(Boolean);
+        const commonInterests = userInterests.filter((i: string) => myInterests.includes(i));
+        let score = baseScore + commonInterests.length * 2;
+        const reasons: string[] = [reason];
+        if (commonInterests.length > 0) reasons.push(`${commonInterests.length} اهتمام مشترك`);
+        if (u.governorate && u.governorate === myGov) { score += 3; if (!reasons.includes("نفس المنطقة")) reasons.push("نفس المنطقة"); }
+        scored.push({ user: u, score, reasons });
+      };
+
+      for (const u of channelMates.rows) addUser(u, 5, "مشترك في نفس القناة");
+      for (const u of regionMates.rows) addUser(u, 3, "نفس المنطقة");
+      for (const u of (interestMates.rows as any[])) {
+        const ui = (u.interests || "").split(",").filter(Boolean);
+        const common = ui.filter((i: string) => myInterests.includes(i));
+        if (common.length > 0) addUser(u, common.length * 2, `${common.length} اهتمام مشترك`);
+      }
+
+      // Sort by score, return top 20
+      scored.sort((a, b) => b.score - a.score);
+      const results = scored.slice(0, 20).map(s => ({
+        ...s.user,
+        reasons: s.reasons,
+      }));
+
+      res.json({ suggestions: results });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   // GET /api/social/invite-link — generate WhatsApp share link with referral code
   app.get("/api/social/invite-link", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
