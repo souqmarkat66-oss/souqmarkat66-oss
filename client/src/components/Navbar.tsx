@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { NotificationBell } from "./NotificationBell";
 import {
   LogIn, LogOut, PlusCircle, Globe, LayoutGrid, Megaphone,
-  Radio, BarChart2, ShieldCheck, DollarSign, Menu, X, Tv, UserCircle2, MessageSquare, Receipt, FolderOpen, PieChart, Users
+  Radio, BarChart2, ShieldCheck, DollarSign, Menu, X, Tv, UserCircle2, MessageSquare, Receipt, FolderOpen, PieChart, Users, HelpCircle
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -165,17 +165,29 @@ export function Navbar() {
                     <Users className="w-4 h-4 text-pink-500" /> الميزات الاجتماعية
                   </Link>
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/help" className="gap-2 cursor-pointer flex items-center">
+                    <HelpCircle className="w-4 h-4 text-amber-500" /> المساعدة والشرح
+                  </Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => logout()} className="gap-2 text-destructive">
                   <LogOut className="w-4 h-4" /> تسجيل الخروج
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <a href="/login">
-              <Button size="sm" className="gap-2 bg-primary text-white shadow-md shadow-primary/30" data-testid="btn-nav-login">
-                <LogIn className="w-4 h-4" /> دخول / تسجيل
-              </Button>
-            </a>
+            <div className="flex items-center gap-1.5">
+              <Link href="/help">
+                <Button variant="ghost" size="icon" className="rounded-full w-8 h-8 hidden sm:flex" title="المساعدة">
+                  <HelpCircle className="w-4 h-4 text-amber-500" />
+                </Button>
+              </Link>
+              <a href="/login">
+                <Button size="sm" className="gap-2 bg-primary text-white shadow-md shadow-primary/30" data-testid="btn-nav-login">
+                  <LogIn className="w-4 h-4" /> دخول / تسجيل
+                </Button>
+              </a>
+            </div>
           )}
 
           {/* Mobile Menu Toggle */}
@@ -232,7 +244,19 @@ export function Navbar() {
                     <Radio className="w-4 h-4" /> بدء البث المباشر
                   </Button>
                 </Link>
+                <Link href="/help" onClick={() => setMobileOpen(false)}>
+                  <Button variant="ghost" className="w-full justify-start gap-2">
+                    <HelpCircle className="w-4 h-4 text-amber-500" /> المساعدة والشرح
+                  </Button>
+                </Link>
               </>
+            )}
+            {!user && (
+              <Link href="/help" onClick={() => setMobileOpen(false)}>
+                <Button variant="ghost" className="w-full justify-start gap-2">
+                  <HelpCircle className="w-4 h-4 text-amber-500" /> المساعدة والشرح
+                </Button>
+              </Link>
             )}
           </div>
         </div>
