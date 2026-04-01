@@ -75,7 +75,7 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
   });
 
   const confirmMutation = useMutation({
-    mutationFn: () => apiRequest('/api/payment-notifications', 'POST', {
+    mutationFn: () => apiRequest('POST', '/api/payment-notifications', {
       adId: ad.id,
       payerName, payerPhone, paidAmount: parseFloat(paidAmount), paymentMethod,
       screenshotUrl: screenshotUrl || undefined,

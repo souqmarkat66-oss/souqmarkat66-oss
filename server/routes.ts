@@ -2422,7 +2422,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const result = await db.execute(
         sql`UPDATE payment_notifications SET status = ${status} WHERE id = ${req.params.id} RETURNING *`
       );
-      res.json(result.rows[0]);
+      const row = result.rows[0] as any;
+      // Send platform notification to buyer on confirmation
+      if (status === "confirmed" && row) {
+        try {
+          const buyerId = row.payer_user_id;
+          if (buyerId) {
+            const adRow = await db.execute(sql`SELECT title FROM ads WHERE id = ${row.ad_id}`);
+            const adTitle = (adRow.rows[0] as any)?.title || "إعلان";
+            await createNotification(
+              buyerId,
+              "system",
+              "✅ تم تأكيد دفعك",
+              `تم تأكيد دفعك بمبلغ ${row.paid_amount} ج.م عبر ${row.payment_method} للإعلان: ${adTitle}`,
+              `/ads/${row.ad_id}`
+            );
+          }
+        } catch (_) {}
+      }
+      res.json(row);
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
