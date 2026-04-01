@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AdCard } from "@/components/AdCard";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MessageCircle, LayoutGrid, Eye, Heart, Tv, Star, Shield, AlertTriangle, Sparkles, Edit2, Camera, Copy, Gift, Check, Users } from "lucide-react";
+import { MessageCircle, LayoutGrid, Eye, Heart, Tv, Star, Shield, AlertTriangle, Sparkles, Edit2, Camera, Copy, Gift, Check, Users, Cake, Briefcase, MapPin, ExternalLink } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect, useRef } from "react";
@@ -267,9 +267,41 @@ export default function Profile() {
               </button>
             ) : null}
             {profileUser.created_at && (
-              <p className="text-xs text-muted-foreground mb-3">
+              <p className="text-xs text-muted-foreground mb-2">
                 عضو منذ {format(new Date(profileUser.created_at), "MMMM yyyy", { locale: ar })}
               </p>
+            )}
+            {/* Social Info */}
+            {(profileUser.birthday || profileUser.job_title || profileUser.company || profileUser.city || profileUser.governorate) && (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2 justify-center sm:justify-start">
+                {profileUser.birthday && (
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Cake className="w-3 h-3 text-pink-500" />
+                    {new Date(profileUser.birthday).toLocaleDateString("ar-EG", { day: "numeric", month: "long" })}
+                  </span>
+                )}
+                {(profileUser.job_title || profileUser.company) && (
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Briefcase className="w-3 h-3 text-blue-500" />
+                    {profileUser.job_title}{profileUser.company ? ` · ${profileUser.company}` : ""}
+                  </span>
+                )}
+                {(profileUser.city || profileUser.governorate) && (
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <MapPin className="w-3 h-3 text-red-500" />
+                    {profileUser.city || profileUser.governorate}
+                  </span>
+                )}
+              </div>
+            )}
+            {isOwn && !(profileUser.birthday || profileUser.job_title) && (
+              <button
+                onClick={() => setLocation("/social")}
+                className="text-xs text-primary/60 hover:text-primary mb-2 underline underline-offset-2 transition-colors flex items-center gap-1"
+                data-testid="btn-add-social-info"
+              >
+                <ExternalLink className="w-3 h-3" /> + أضف معلوماتك الاجتماعية
+              </button>
             )}
             <div className="flex gap-2 justify-center sm:justify-start flex-wrap">
               {channel && (

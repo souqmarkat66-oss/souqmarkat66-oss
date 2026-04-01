@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { NotificationBell } from "./NotificationBell";
 import {
   LogIn, LogOut, PlusCircle, Globe, LayoutGrid, Megaphone,
-  Radio, BarChart2, ShieldCheck, DollarSign, Menu, X, Tv, UserCircle2, MessageSquare, Receipt, FolderOpen, PieChart
+  Radio, BarChart2, ShieldCheck, DollarSign, Menu, X, Tv, UserCircle2, MessageSquare, Receipt, FolderOpen, PieChart, Users
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -160,6 +160,11 @@ export function Navbar() {
                     <Radio className="w-4 h-4 text-red-500" /> الريلز
                   </Link>
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/social" className="gap-2 cursor-pointer flex items-center">
+                    <Users className="w-4 h-4 text-pink-500" /> الميزات الاجتماعية
+                  </Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => logout()} className="gap-2 text-destructive">
                   <LogOut className="w-4 h-4" /> تسجيل الخروج
                 </DropdownMenuItem>
@@ -215,6 +220,11 @@ export function Navbar() {
                 <Link href="/messages" onClick={() => setMobileOpen(false)}>
                   <Button variant="ghost" className="w-full justify-start gap-2">
                     <MessageSquare className="w-4 h-4" /> الرسائل
+                  </Button>
+                </Link>
+                <Link href="/social" onClick={() => setMobileOpen(false)}>
+                  <Button variant="ghost" className="w-full justify-start gap-2">
+                    <Users className="w-4 h-4 text-pink-500" /> الميزات الاجتماعية
                   </Button>
                 </Link>
                 <Link href="/stream/start" onClick={() => setMobileOpen(false)}>

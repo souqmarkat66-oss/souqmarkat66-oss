@@ -2932,7 +2932,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const { userId } = req.params;
     try {
       const [userRow, adsRow, channelRow] = await Promise.all([
-        db.execute(sql`SELECT id, first_name, last_name, profile_image_url, bio, governorate, referral_code, created_at, interests FROM users WHERE id = ${userId}`),
+        db.execute(sql`SELECT id, first_name, last_name, profile_image_url, bio, governorate, referral_code, created_at, interests, birthday, job_title, company, city, relationship_status FROM users WHERE id = ${userId}`),
         db.execute(sql`SELECT COUNT(*) as count, SUM(views_count) as views, SUM(likes_count) as likes FROM ads WHERE user_id = ${userId} AND status = 'active'`),
         db.execute(sql`SELECT * FROM channels WHERE user_id = ${userId} LIMIT 1`),
       ]);
@@ -3358,6 +3358,123 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         );
       }
       res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ================================================================
+  // SOCIAL FEATURES: Memories, Birthdays, Profile Social Info
+  // ================================================================
+
+  // PATCH /api/auth/me/social — update birthday, job, company, city, relationship
+  app.patch("/api/auth/me/social", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const { birthday, jobTitle, company, city, relationshipStatus } = req.body;
+    try {
+      await db.execute(sql`
+        UPDATE users SET
+          birthday = ${birthday || null},
+          job_title = ${jobTitle || null},
+          company = ${company || null},
+          city = ${city || null},
+          relationship_status = ${relationshipStatus || null},
+          updated_at = NOW()
+        WHERE id = ${userId}
+      `);
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // GET /api/social/memories — "في هذا اليوم" — ads/reels created same day/month last year+
+  app.get("/api/social/memories", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const today = new Date();
+      const month = today.getMonth() + 1;
+      const day = today.getDate();
+      const [adsRes, reelsRes] = await Promise.all([
+        db.execute(sql`
+          SELECT id, title, description, media_url, media_type, created_at
+          FROM ads WHERE user_id = ${userId}
+            AND EXTRACT(MONTH FROM created_at) = ${month}
+            AND EXTRACT(DAY FROM created_at) = ${day}
+            AND EXTRACT(YEAR FROM created_at) < ${today.getFullYear()}
+          ORDER BY created_at DESC LIMIT 10
+        `),
+        db.execute(sql`
+          SELECT id, title, description, video_url, thumbnail_url, created_at
+          FROM reels WHERE user_id = ${userId}
+            AND EXTRACT(MONTH FROM created_at) = ${month}
+            AND EXTRACT(DAY FROM created_at) = ${day}
+            AND EXTRACT(YEAR FROM created_at) < ${today.getFullYear()}
+          ORDER BY created_at DESC LIMIT 10
+        `),
+      ]);
+      res.json({
+        ads: adsRes.rows,
+        reels: reelsRes.rows,
+        date: { day, month, year: today.getFullYear() },
+      });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // GET /api/social/birthdays — upcoming birthdays of users you follow (channel subscribers)
+  app.get("/api/social/birthdays", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      // Get users whose channels you subscribed to
+      const result = await db.execute(sql`
+        SELECT u.id, u.first_name, u.last_name, u.profile_image_url, u.birthday
+        FROM users u
+        INNER JOIN channel_subscriptions cs ON cs.channel_id IN (
+          SELECT id FROM channels WHERE user_id = u.id
+        )
+        WHERE cs.user_id = ${userId}
+          AND u.birthday IS NOT NULL
+          AND u.id != ${userId}
+        ORDER BY
+          (EXTRACT(MONTH FROM u.birthday) * 100 + EXTRACT(DAY FROM u.birthday))
+          -
+          (EXTRACT(MONTH FROM NOW()) * 100 + EXTRACT(DAY FROM NOW()))
+        LIMIT 20
+      `);
+      // Also get today's birthdays from all users
+      const todayBirthdays = await db.execute(sql`
+        SELECT u.id, u.first_name, u.last_name, u.profile_image_url, u.birthday
+        FROM users u
+        WHERE u.birthday IS NOT NULL
+          AND EXTRACT(MONTH FROM u.birthday) = EXTRACT(MONTH FROM NOW())
+          AND EXTRACT(DAY FROM u.birthday) = EXTRACT(DAY FROM NOW())
+          AND u.id != ${userId}
+        LIMIT 10
+      `);
+      res.json({
+        upcoming: result.rows,
+        today: todayBirthdays.rows,
+      });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // GET /api/social/invite-link — generate WhatsApp share link with referral code
+  app.get("/api/social/invite-link", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const userRow = await db.execute(sql`SELECT referral_code, first_name FROM users WHERE id = ${userId} LIMIT 1`);
+      const code = (userRow.rows[0] as any)?.referral_code;
+      const name = (userRow.rows[0] as any)?.first_name || "صديقك";
+      const appUrl = `https://app.asouq.shop`;
+      const msg = encodeURIComponent(
+        `🎉 ${name} بيدعوك تنضم لـ شبكة سوق الإعلانات!\n` +
+        `📢 أعلن عن منتجاتك، شاهد البث المباشر، واكسب أرباح\n` +
+        `🔗 سجّل الآن: ${appUrl}\n` +
+        `🎁 استخدم كود الإحالة: ${code} وهتحصل على مكافأة ترحيبية!`
+      );
+      res.json({
+        code,
+        appUrl,
+        whatsappLink: `https://wa.me/?text=${msg}`,
+        telegramLink: `https://t.me/share/url?url=${encodeURIComponent(appUrl)}&text=${encodeURIComponent(`انضم لشبكة سوق الإعلانات باستخدام كود ${code}`)}`,
+        copyText: `انضم لشبكة سوق الإعلانات 🎉\n${appUrl}\nكود الإحالة: ${code}`,
+      });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 

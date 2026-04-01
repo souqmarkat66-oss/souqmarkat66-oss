@@ -28,6 +28,7 @@ import MediaLibrary from "@/pages/MediaLibrary";
 import Messages from "@/pages/Messages";
 import Profile from "@/pages/Profile";
 import MyDashboard from "@/pages/MyDashboard";
+import Social from "@/pages/Social";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import { GlobalAssistant } from "@/components/GlobalAssistant";
 import { PushSetup } from "@/components/PushSetup";
@@ -104,6 +105,9 @@ function Router() {
               </Route>
               <Route path="/my-dashboard">
                 <ProtectedRoute component={MyDashboard} />
+              </Route>
+              <Route path="/social">
+                <ProtectedRoute component={Social} />
               </Route>
               <Route component={NotFound} />
             </Switch>
