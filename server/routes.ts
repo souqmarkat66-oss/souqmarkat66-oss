@@ -2856,7 +2856,34 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // GET /api/admin/pricing — get all platform pricing settings
+  // ── Public pricing endpoint (no auth required) ──────────────────────
+  app.get("/api/pricing", async (_req, res) => {
+    try {
+      const keys = [
+        'boost_price_egp','boost_enabled',
+        'renewal_price_30','renewal_price_60','renewal_price_90',
+        'campaign_min_budget_egp',
+        'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
+        'ai_free_credits','ai_price_per_credit_egp',
+        'cpm_rate_egp','cpc_rate_egp',
+      ];
+      const rows = await db.execute(sql`SELECT key, value FROM platform_settings WHERE key = ANY(${keys})`);
+      const settings: Record<string, string> = {};
+      for (const r of rows.rows as any[]) settings[r.key] = r.value;
+      // defaults if not yet saved
+      const defaults: Record<string, string> = {
+        boost_price_egp: '50', boost_enabled: 'true',
+        renewal_price_30: '30', renewal_price_60: '55', renewal_price_90: '75',
+        campaign_min_budget_egp: '100',
+        ai_price_image: '10', ai_price_video: '25', ai_price_animation: '20',
+        ai_price_content: '5', ai_price_post: '5',
+        ai_free_credits: '3', ai_price_per_credit_egp: '5',
+        cpm_rate_egp: '15', cpc_rate_egp: '0.75',
+      };
+      res.json({ ...defaults, ...settings });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   app.get("/api/admin/pricing", isAuthenticated, async (req: any, res) => {
     if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
     try {

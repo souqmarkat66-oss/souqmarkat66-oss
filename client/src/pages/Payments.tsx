@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon } from "lucide-react";
+import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon, Tag } from "lucide-react";
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {
   ad_boost:   "⚡ تعزيز إعلان",
@@ -21,6 +21,26 @@ const SERVICE_TYPE_LABELS: Record<string, string> = {
   withdrawal: "🏧 سحب أرباح",
   other:      "📦 أخرى",
 };
+
+function buildServiceTypes(p: Record<string, string>) {
+  const fmt = (v: string | undefined, suffix = " ج.م") => v ? `${parseFloat(v)} ${suffix}` : "";
+  return {
+    top_up: [
+      { value: "ad_boost",   label: "⚡ تعزيز إعلان",    price: fmt(p.boost_price_egp),         desc: "ظهور مميز لإعلانك",  amount: p.boost_price_egp },
+      { value: "campaign",   label: "📣 حملة إعلانية",    price: `من ${fmt(p.campaign_min_budget_egp)}`, desc: "CPM=" + fmt(p.cpm_rate_egp) + " / نقرة=" + fmt(p.cpc_rate_egp), amount: p.campaign_min_budget_egp },
+      { value: "renewal",    label: "🔄 تجديد 30 يوم",    price: fmt(p.renewal_price_30),        desc: "تمديد صلاحية إعلانك",  amount: p.renewal_price_30 },
+      { value: "ai_image",   label: "🖼️ ذكاء: صورة",     price: fmt(p.ai_price_image),          desc: "توليد صورة بالذكاء",   amount: p.ai_price_image },
+      { value: "ai_video",   label: "🎬 ذكاء: فيديو",     price: fmt(p.ai_price_video),          desc: "إنشاء مقطع فيديو",     amount: p.ai_price_video },
+      { value: "ai_content", label: "✍️ ذكاء: محتوى",    price: fmt(p.ai_price_content),        desc: "كتابة نص إعلاني",     amount: p.ai_price_content },
+      { value: "ai_credits", label: "🤖 رصيد ذكاء",      price: fmt(p.ai_price_per_credit_egp) + "/كريدت", desc: `${p.ai_free_credits || 3} مجاناً`, amount: p.ai_price_per_credit_egp },
+      { value: "other",      label: "📦 أخرى",            price: "",                              desc: "أي خدمة أخرى",        amount: "" },
+    ],
+    withdrawal: [
+      { value: "withdrawal", label: "🏧 سحب أرباح",  price: `أدنى ${fmt(p.wallet_min_withdrawal_egp || "100")}`, desc: "تحويل أرباحك", amount: "" },
+      { value: "other",      label: "📦 أخرى",        price: "",                                                   desc: "",              amount: "" },
+    ],
+  };
+}
 
 const METHOD_LABELS: Record<string, { label: string; emoji: string; color: string }> = {
   vodafone:  { label: "فودافون كاش",    emoji: "📱", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
@@ -59,6 +79,10 @@ export default function Payments() {
 
   const { data: ads = [] } = useQuery<any[]>({
     queryKey: ["/api/ads"],
+  });
+
+  const { data: pricing = {} } = useQuery<Record<string, string>>({
+    queryKey: ["/api/pricing"],
   });
 
   const createMutation = useMutation({
@@ -290,33 +314,44 @@ export default function Payments() {
               ))}
             </div>
 
-            {/* Service Type */}
+            {/* Service Type with prices */}
             <div className="space-y-2">
-              <label className="text-xs font-bold flex items-center gap-1">🎯 نوع الخدمة المطلوبة</label>
+              <label className="text-xs font-bold flex items-center gap-1">
+                <Tag className="w-3 h-3" />
+                نوع الخدمة المطلوبة
+              </label>
               <div className="grid grid-cols-2 gap-1.5">
-                {(formData.type === "top_up" ? [
-                  { value: "ad_boost",    label: "⚡ تعزيز إعلان" },
-                  { value: "campaign",    label: "📣 حملة إعلانية" },
-                  { value: "renewal",     label: "🔄 تجديد إعلان" },
-                  { value: "ai_image",    label: "🖼️ ذكاء: صورة" },
-                  { value: "ai_video",    label: "🎬 ذكاء: فيديو" },
-                  { value: "ai_content",  label: "✍️ ذكاء: محتوى" },
-                  { value: "ai_credits",  label: "🤖 شحن رصيد ذكاء" },
-                  { value: "other",       label: "📦 أخرى" },
-                ] : [
-                  { value: "withdrawal",  label: "🏧 سحب أرباح" },
-                  { value: "other",       label: "📦 أخرى" },
-                ]).map(s => (
-                  <button
-                    key={s.value}
-                    type="button"
-                    onClick={() => setFormData(f => ({ ...f, serviceType: f.serviceType === s.value ? "" : s.value }))}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold border text-right transition-all ${formData.serviceType === s.value ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/40 hover:bg-primary/5"}`}
-                    data-testid={`btn-service-${s.value}`}
-                  >
-                    {s.label}
-                  </button>
-                ))}
+                {(buildServiceTypes(pricing)[formData.type === "top_up" ? "top_up" : "withdrawal"]).map(s => {
+                  const isSelected = formData.serviceType === s.value;
+                  return (
+                    <button
+                      key={s.value}
+                      type="button"
+                      onClick={() => {
+                        const newSvc = formData.serviceType === s.value ? "" : s.value;
+                        setFormData(f => ({
+                          ...f,
+                          serviceType: newSvc,
+                          amountEGP: newSvc && s.amount ? String(parseFloat(s.amount)) : f.amountEGP,
+                        }));
+                      }}
+                      className={`flex flex-col items-start py-2 px-2.5 rounded-xl border text-right transition-all ${isSelected ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/40 hover:bg-primary/5"}`}
+                      data-testid={`btn-service-${s.value}`}
+                    >
+                      <span className="text-xs font-bold leading-tight">{s.label}</span>
+                      {s.price && (
+                        <span className={`text-[10px] font-mono mt-0.5 ${isSelected ? "text-primary-foreground/80" : "text-primary"}`}>
+                          {s.price}
+                        </span>
+                      )}
+                      {s.desc && (
+                        <span className={`text-[9px] leading-tight mt-0.5 ${isSelected ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                          {s.desc}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
