@@ -3568,5 +3568,55 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // Dynamic Sitemap — includes all ads + channels for SEO
+  app.get("/sitemap-dynamic.xml", async (req, res) => {
+    try {
+      const BASE = "https://app.asouq.shop";
+      const [adsRes, channelsRes] = await Promise.all([
+        db.execute(sql`SELECT id, created_at FROM ads WHERE status = 'active' ORDER BY created_at DESC LIMIT 1000`),
+        db.execute(sql`SELECT id, created_at FROM channels WHERE status = 'active' ORDER BY created_at DESC`),
+      ]);
+
+      const staticPages = [
+        { loc: `${BASE}/`, priority: "1.0", changefreq: "daily" },
+        { loc: `${BASE}/ads`, priority: "0.9", changefreq: "hourly" },
+        { loc: `${BASE}/channels`, priority: "0.8", changefreq: "daily" },
+        { loc: `${BASE}/reels`, priority: "0.8", changefreq: "hourly" },
+        { loc: `${BASE}/campaigns`, priority: "0.7", changefreq: "weekly" },
+      ];
+
+      const adPages = (adsRes.rows as any[]).map(ad => ({
+        loc: `${BASE}/ads/${ad.id}`,
+        priority: "0.7",
+        changefreq: "weekly",
+        lastmod: ad.created_at ? new Date(ad.created_at).toISOString().split("T")[0] : undefined,
+      }));
+
+      const channelPages = (channelsRes.rows as any[]).map(ch => ({
+        loc: `${BASE}/channels/${ch.id}`,
+        priority: "0.6",
+        changefreq: "daily",
+        lastmod: ch.created_at ? new Date(ch.created_at).toISOString().split("T")[0] : undefined,
+      }));
+
+      const allPages = [...staticPages, ...adPages, ...channelPages];
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${allPages.map(p => `  <url>
+    <loc>${p.loc}</loc>
+    <changefreq>${p.changefreq}</changefreq>
+    <priority>${p.priority}</priority>${p.lastmod ? `\n    <lastmod>${p.lastmod}</lastmod>` : ""}
+  </url>`).join("\n")}
+</urlset>`;
+
+      res.header("Content-Type", "application/xml");
+      res.header("Cache-Control", "public, max-age=3600");
+      res.send(xml);
+    } catch (e: any) {
+      res.status(500).send("Sitemap error");
+    }
+  });
+
   return httpServer;
 }

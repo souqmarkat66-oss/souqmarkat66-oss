@@ -2,7 +2,26 @@ User-agent: *
 Allow: /
 Disallow: /api/
 Disallow: /admin
+Disallow: /my-dashboard
+Disallow: /media-library
+Disallow: /payments
+Disallow: /revenue
 
+# Google
+User-agent: Googlebot
+Allow: /
+Disallow: /api/
+Disallow: /admin
+
+# Bing
+User-agent: Bingbot
+Allow: /
+Disallow: /api/
+Disallow: /admin
+
+# Sitemaps
 Sitemap: https://app.asouq.shop/sitemap.xml
+Sitemap: https://app.asouq.shop/sitemap-dynamic.xml
 
 # Souq Ads Network - شبكة سوق للإعلانات
+# Contact: souqmarkat66@gmail.com
