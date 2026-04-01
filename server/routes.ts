@@ -2856,6 +2856,46 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // GET /api/admin/pricing — get all platform pricing settings
+  app.get("/api/admin/pricing", isAuthenticated, async (req: any, res) => {
+    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
+    try {
+      const keys = [
+        'cpm_rate_egp','cpc_rate_egp','publisher_share_pct','campaign_min_budget_egp',
+        'boost_price_egp','boost_enabled',
+        'renewal_price_30','renewal_price_60','renewal_price_90',
+        'wallet_min_withdrawal_egp','wallet_max_deposit_egp',
+        'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
+        'ai_free_credits','ai_price_per_credit_egp','ai_referral_bonus_egp',
+      ];
+      const rows = await db.execute(sql`SELECT key, value FROM platform_settings WHERE key = ANY(${keys})`);
+      const settings: Record<string, string> = {};
+      for (const r of rows.rows as any[]) settings[r.key] = r.value;
+      res.json(settings);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // POST /api/admin/pricing — update platform pricing settings
+  app.post("/api/admin/pricing", isAuthenticated, async (req: any, res) => {
+    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
+    try {
+      const { settings } = req.body;
+      const allowed = [
+        'cpm_rate_egp','cpc_rate_egp','publisher_share_pct','campaign_min_budget_egp',
+        'boost_price_egp','boost_enabled',
+        'renewal_price_30','renewal_price_60','renewal_price_90',
+        'wallet_min_withdrawal_egp','wallet_max_deposit_egp',
+        'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
+        'ai_free_credits','ai_price_per_credit_egp','ai_referral_bonus_egp',
+      ];
+      for (const [key, value] of Object.entries(settings)) {
+        if (!allowed.includes(key)) continue;
+        await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES (${key}, ${String(value)}) ON CONFLICT (key) DO UPDATE SET value = ${String(value)}`);
+      }
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   app.get("/api/profile/:userId", async (req, res) => {
     const { userId } = req.params;
     try {

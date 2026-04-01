@@ -43,6 +43,7 @@ const NAV = [
   { key: "revenue",        label: "الإيرادات",            icon: DollarSign,      color: "text-emerald-400" },
   { key: "broadcast",      label: "إشعارات جماعية",       icon: Bell,            color: "text-cyan-400" },
   { key: "media",          label: "مكتبة الملفات",         icon: FolderOpen,      color: "text-lime-400" },
+  { key: "pricing",        label: "إدارة الأسعار",          icon: DollarSign,      color: "text-yellow-400" },
   { key: "aipricing",      label: "أسعار الذكاء الاصطناعي", icon: Sparkles,       color: "text-violet-400" },
   { key: "settings",       label: "إعدادات المنصة",       icon: Settings,        color: "text-gray-400" },
   { key: "activity",       label: "سجل النشاط",           icon: Activity,        color: "text-slate-400" },
@@ -202,6 +203,7 @@ export default function AdminPanel() {
           {section === "revenue"    && <RevenueSection />}
           {section === "broadcast"  && <BroadcastSection logAction={logAction} />}
           {section === "media"      && <MediaSection logAction={logAction} />}
+          {section === "pricing"    && <PricingSection />}
           {section === "aipricing"  && <AiPricingSection />}
           {section === "settings"   && <SettingsSection logAction={logAction} />}
           {section === "activity"   && <ActivitySection />}
@@ -1902,7 +1904,196 @@ function PayReceiptsSection() {
   );
 }
 
-// ──────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════
+// PRICING MANAGEMENT SECTION
+// ══════════════════════════════════════════════════════════
+function PricingSection() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data: settings, isLoading } = useQuery<Record<string, string>>({
+    queryKey: ["/api/admin/pricing"],
+    queryFn: () => fetch("/api/admin/pricing", { credentials: "include" }).then(r => r.json()).then(d => typeof d === 'object' && !Array.isArray(d) ? d : {}),
+  });
+
+  const [vals, setVals] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (settings) setVals(settings);
+  }, [settings]);
+
+  const v = (key: string, def: string) => vals[key] ?? def;
+  const set = (key: string, val: string) => setVals(prev => ({ ...prev, [key]: val }));
+
+  const saveMutation = useMutation({
+    mutationFn: () => fetch("/api/admin/pricing", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: vals }),
+    }).then(r => r.json()),
+    onSuccess: () => {
+      toast({ title: "✅ تم حفظ الأسعار بنجاح" });
+      qc.invalidateQueries({ queryKey: ["/api/admin/pricing"] });
+    },
+    onError: () => toast({ title: "❌ فشل الحفظ", variant: "destructive" }),
+  });
+
+  if (isLoading) return <div className="py-20 text-center"><Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" /></div>;
+
+  const PriceCard = ({ icon: Icon, color, label, desc, children }: { icon: any; color: string; label: string; desc: string; children: React.ReactNode }) => (
+    <Card className="border-border/60 rounded-2xl overflow-hidden">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-start gap-3">
+          <div className={`w-10 h-10 rounded-xl ${color} flex items-center justify-center flex-shrink-0`}>
+            <Icon className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <p className="font-bold text-sm">{label}</p>
+            <p className="text-xs text-muted-foreground">{desc}</p>
+          </div>
+        </div>
+        {children}
+      </CardContent>
+    </Card>
+  );
+
+  const NumInput = ({ k, label, unit, def, step = "0.5" }: { k: string; label: string; unit: string; def: string; step?: string }) => (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-muted-foreground flex-1">{label}</span>
+      <div className="flex items-center gap-1">
+        <Input
+          type="number" min="0" step={step}
+          value={v(k, def)}
+          onChange={e => set(k, e.target.value)}
+          className="w-24 text-center font-bold"
+          data-testid={`input-pricing-${k}`}
+        />
+        <span className="text-xs text-muted-foreground w-10">{unit}</span>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6 p-1" dir="rtl">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-yellow-500/10 to-orange-500/5 border border-yellow-200/40 rounded-2xl p-5">
+        <div className="flex items-center gap-3 mb-1">
+          <DollarSign className="w-6 h-6 text-yellow-500" />
+          <h2 className="font-bold text-xl">إدارة أسعار المنصة</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">تحكم كامل في جميع أسعار الخدمات — الأسعار تؤثر فوراً على ما يراه العملاء</p>
+      </div>
+
+      {/* ── قسم الحملات الإعلانية ── */}
+      <div>
+        <h3 className="font-bold text-base mb-3 flex items-center gap-2">
+          <BarChart2 className="w-4 h-4 text-teal-500" /> الحملات الإعلانية (CPM / CPC)
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <PriceCard icon={TrendingUp} color="bg-teal-500" label="سعر الـ CPM" desc="تكلفة 1000 ظهور للإعلان">
+            <NumInput k="cpm_rate_egp" label="سعر كل 1000 ظهور" unit="ج.م" def="15" step="0.5" />
+          </PriceCard>
+          <PriceCard icon={Eye} color="bg-blue-500" label="سعر الـ CPC" desc="تكلفة كل نقرة على الإعلان">
+            <NumInput k="cpc_rate_egp" label="سعر كل نقرة" unit="ج.م" def="0.75" step="0.05" />
+          </PriceCard>
+          <PriceCard icon={ArrowUpRight} color="bg-emerald-500" label="نسبة الناشر" desc="النسبة المئوية من إيرادات الإعلان للناشر">
+            <NumInput k="publisher_share_pct" label="نسبة الناشر من كل إعلان" unit="%" def="60" step="1" />
+          </PriceCard>
+          <PriceCard icon={DollarSign} color="bg-cyan-500" label="الحد الأدنى للميزانية" desc="أقل ميزانية يمكن ضبطها للحملة">
+            <NumInput k="campaign_min_budget_egp" label="الحد الأدنى" unit="ج.م" def="50" step="5" />
+          </PriceCard>
+        </div>
+      </div>
+
+      {/* ── تعزيز الإعلان ── */}
+      <div>
+        <h3 className="font-bold text-base mb-3 flex items-center gap-2">
+          <Zap className="w-4 h-4 text-orange-500" /> تعزيز الإعلان (Boost)
+        </h3>
+        <PriceCard icon={Zap} color="bg-orange-500" label="إعدادات التعزيز" desc="سعر وتفعيل خاصية تعزيز الإعلانات">
+          <NumInput k="boost_price_egp" label="سعر التعزيز" unit="ج.م" def="0" step="5" />
+          <div className="flex items-center justify-between mt-2">
+            <span className="text-xs text-muted-foreground">تفعيل التعزيز</span>
+            <button
+              onClick={() => set("boost_enabled", v("boost_enabled", "1") === "0" ? "1" : "0")}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-colors ${v("boost_enabled", "1") !== "0" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}
+              data-testid="btn-toggle-boost"
+            >
+              {v("boost_enabled", "1") !== "0" ? <><ToggleRight className="w-4 h-4" /> مفعّل</> : <><ToggleLeft className="w-4 h-4" /> معطّل</>}
+            </button>
+          </div>
+        </PriceCard>
+      </div>
+
+      {/* ── تجديد الإعلانات ── */}
+      <div>
+        <h3 className="font-bold text-base mb-3 flex items-center gap-2">
+          <RefreshCw className="w-4 h-4 text-blue-500" /> تجديد الإعلانات
+        </h3>
+        <PriceCard icon={RefreshCw} color="bg-blue-500" label="أسعار تجديد الإعلان" desc="تكلفة تمديد مدة الإعلان لكل فترة">
+          <NumInput k="renewal_price_30" label="تجديد 30 يوماً" unit="ج.م" def="50" step="5" />
+          <NumInput k="renewal_price_60" label="تجديد 60 يوماً" unit="ج.م" def="90" step="5" />
+          <NumInput k="renewal_price_90" label="تجديد 90 يوماً" unit="ج.م" def="130" step="5" />
+        </PriceCard>
+      </div>
+
+      {/* ── المحفظة ── */}
+      <div>
+        <h3 className="font-bold text-base mb-3 flex items-center gap-2">
+          <Banknote className="w-4 h-4 text-green-500" /> المحفظة والرصيد
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <PriceCard icon={ArrowDownLeft} color="bg-green-600" label="الحد الأدنى للسحب" desc="أقل مبلغ يمكن طلب سحبه من المحفظة">
+            <NumInput k="wallet_min_withdrawal_egp" label="الحد الأدنى" unit="ج.م" def="100" step="10" />
+          </PriceCard>
+          <PriceCard icon={ArrowUpRight} color="bg-purple-500" label="الحد الأقصى للإيداع" desc="أقصى مبلغ يمكن إيداعه في طلب واحد">
+            <NumInput k="wallet_max_deposit_egp" label="الحد الأقصى" unit="ج.م" def="10000" step="500" />
+          </PriceCard>
+        </div>
+      </div>
+
+      {/* ── الذكاء الاصطناعي ── */}
+      <div>
+        <h3 className="font-bold text-base mb-3 flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-violet-500" /> الذكاء الاصطناعي
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <PriceCard icon={Gift} color="bg-violet-500" label="استخدامات مجانية" desc="عدد مرات الاستخدام المجاني لكل مستخدم جديد">
+            <NumInput k="ai_free_credits" label="عدد الاستخدامات" unit="مرة" def="3" step="1" />
+          </PriceCard>
+          <PriceCard icon={DollarSign} color="bg-violet-600" label="سعر الكريديت" desc="سعر الكريديت الواحد بالجنيه المصري">
+            <NumInput k="ai_price_per_credit_egp" label="سعر الكريديت" unit="ج.م" def="5" step="0.5" />
+          </PriceCard>
+          <PriceCard icon={Image} color="bg-pink-500" label="توليد صورة" desc="عدد الكريديتات لتوليد صورة">
+            <NumInput k="ai_price_image" label="كريديتات الصورة" unit="كريديت" def="1" step="1" />
+          </PriceCard>
+          <PriceCard icon={Video} color="bg-red-500" label="توليد فيديو" desc="عدد الكريديتات لتوليد فيديو">
+            <NumInput k="ai_price_video" label="كريديتات الفيديو" unit="كريديت" def="3" step="1" />
+          </PriceCard>
+          <PriceCard icon={FileText} color="bg-indigo-500" label="كتابة محتوى" desc="عدد الكريديتات لكتابة المحتوى">
+            <NumInput k="ai_price_content" label="كريديتات المحتوى" unit="كريديت" def="1" step="1" />
+          </PriceCard>
+          <PriceCard icon={Gift} color="bg-amber-500" label="مكافأة الإحالة" desc="مبلغ مكافأة الإحالة للمستخدم بالجنيه">
+            <NumInput k="ai_referral_bonus_egp" label="مكافأة الإحالة" unit="ج.م" def="10" step="5" />
+          </PriceCard>
+        </div>
+      </div>
+
+      {/* Save */}
+      <Button
+        className="w-full gap-2 h-12 text-base font-bold bg-yellow-500 hover:bg-yellow-600 text-black"
+        onClick={() => saveMutation.mutate()}
+        disabled={saveMutation.isPending}
+        data-testid="btn-save-pricing"
+      >
+        {saveMutation.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+        حفظ جميع الأسعار
+      </Button>
+    </div>
+  );
+}
+
 // AI PRICING SECTION
 // ──────────────────────────────────────────────────────────
 function AiPricingSection() {
