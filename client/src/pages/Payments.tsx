@@ -2,13 +2,13 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon, Tag } from "lucide-react";
+import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon, Tag, CheckSquare, Square, Calculator } from "lucide-react";
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {
   ad_boost:   "⚡ تعزيز إعلان",
@@ -23,21 +23,22 @@ const SERVICE_TYPE_LABELS: Record<string, string> = {
 };
 
 function buildServiceTypes(p: Record<string, string>) {
+  const num = (v: string | undefined) => v ? parseFloat(v) : 0;
   const fmt = (v: string | undefined, suffix = " ج.م") => v ? `${parseFloat(v)} ${suffix}` : "";
   return {
     top_up: [
-      { value: "ad_boost",   label: "⚡ تعزيز إعلان",    price: fmt(p.boost_price_egp),         desc: "ظهور مميز لإعلانك",  amount: p.boost_price_egp },
-      { value: "campaign",   label: "📣 حملة إعلانية",    price: `من ${fmt(p.campaign_min_budget_egp)}`, desc: "CPM=" + fmt(p.cpm_rate_egp) + " / نقرة=" + fmt(p.cpc_rate_egp), amount: p.campaign_min_budget_egp },
-      { value: "renewal",    label: "🔄 تجديد 30 يوم",    price: fmt(p.renewal_price_30),        desc: "تمديد صلاحية إعلانك",  amount: p.renewal_price_30 },
-      { value: "ai_image",   label: "🖼️ ذكاء: صورة",     price: fmt(p.ai_price_image),          desc: "توليد صورة بالذكاء",   amount: p.ai_price_image },
-      { value: "ai_video",   label: "🎬 ذكاء: فيديو",     price: fmt(p.ai_price_video),          desc: "إنشاء مقطع فيديو",     amount: p.ai_price_video },
-      { value: "ai_content", label: "✍️ ذكاء: محتوى",    price: fmt(p.ai_price_content),        desc: "كتابة نص إعلاني",     amount: p.ai_price_content },
-      { value: "ai_credits", label: "🤖 رصيد ذكاء",      price: fmt(p.ai_price_per_credit_egp) + "/كريدت", desc: `${p.ai_free_credits || 3} مجاناً`, amount: p.ai_price_per_credit_egp },
-      { value: "other",      label: "📦 أخرى",            price: "",                              desc: "أي خدمة أخرى",        amount: "" },
+      { value: "ad_boost",   label: "⚡ تعزيز إعلان",    price: fmt(p.boost_price_egp),         desc: "ظهور مميز لإعلانك",        amount: num(p.boost_price_egp) },
+      { value: "campaign",   label: "📣 حملة إعلانية",    price: `من ${fmt(p.campaign_min_budget_egp)}`, desc: "CPM=" + fmt(p.cpm_rate_egp) + " / نقرة=" + fmt(p.cpc_rate_egp), amount: num(p.campaign_min_budget_egp) },
+      { value: "renewal",    label: "🔄 تجديد 30 يوم",    price: fmt(p.renewal_price_30),        desc: "تمديد صلاحية إعلانك",       amount: num(p.renewal_price_30) },
+      { value: "ai_image",   label: "🖼️ ذكاء: صورة",     price: fmt(p.ai_price_image),          desc: "توليد صورة بالذكاء",        amount: num(p.ai_price_image) },
+      { value: "ai_video",   label: "🎬 ذكاء: فيديو",     price: fmt(p.ai_price_video),          desc: "إنشاء مقطع فيديو",          amount: num(p.ai_price_video) },
+      { value: "ai_content", label: "✍️ ذكاء: محتوى",    price: fmt(p.ai_price_content),        desc: "كتابة نص إعلاني",           amount: num(p.ai_price_content) },
+      { value: "ai_credits", label: "🤖 رصيد ذكاء",      price: fmt(p.ai_price_per_credit_egp) + "/كريدت", desc: `${p.ai_free_credits || 3} مجاناً`, amount: num(p.ai_price_per_credit_egp) },
+      { value: "other",      label: "📦 أخرى",            price: "",                              desc: "أي خدمة أخرى",              amount: 0 },
     ],
     withdrawal: [
-      { value: "withdrawal", label: "🏧 سحب أرباح",  price: `أدنى ${fmt(p.wallet_min_withdrawal_egp || "100")}`, desc: "تحويل أرباحك", amount: "" },
-      { value: "other",      label: "📦 أخرى",        price: "",                                                   desc: "",              amount: "" },
+      { value: "withdrawal", label: "🏧 سحب أرباح",  price: `أدنى ${fmt(p.wallet_min_withdrawal_egp || "100")}`, desc: "تحويل أرباحك", amount: 0 },
+      { value: "other",      label: "📦 أخرى",        price: "",                                                   desc: "",              amount: 0 },
     ],
   };
 }
@@ -67,7 +68,10 @@ export default function Payments() {
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ type: "top_up", amountEGP: "", method: "vodafone", phoneNumber: "", adId: "", serviceType: "" });
+  const [formData, setFormData] = useState({ type: "top_up", method: "vodafone", phoneNumber: "", adId: "" });
+  const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
+  const [manualAmount, setManualAmount] = useState("");
+  const [amountOverride, setAmountOverride] = useState(false);
   const [screenshotUrl, setScreenshotUrl] = useState("");
   const [screenshotPreview, setScreenshotPreview] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -85,13 +89,63 @@ export default function Payments() {
     queryKey: ["/api/pricing"],
   });
 
+  const serviceList = buildServiceTypes(pricing)[formData.type === "top_up" ? "top_up" : "withdrawal"];
+
+  // Auto-calculate total from selected services
+  const autoTotal = serviceList
+    .filter(s => selectedServices.has(s.value))
+    .reduce((sum, s) => sum + (s.amount || 0), 0);
+
+  const effectiveAmount = amountOverride ? manualAmount : (autoTotal > 0 ? String(autoTotal) : manualAmount);
+
+  // Reset services when type changes
+  useEffect(() => {
+    setSelectedServices(new Set());
+    setManualAmount("");
+    setAmountOverride(false);
+  }, [formData.type]);
+
+  // When selected services change, sync auto total into manual if no override
+  useEffect(() => {
+    if (!amountOverride && autoTotal > 0) {
+      setManualAmount(String(autoTotal));
+    }
+  }, [autoTotal, amountOverride]);
+
+  const toggleService = (value: string) => {
+    setSelectedServices(prev => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+    setAmountOverride(false);
+  };
+
+  const selectAll = () => {
+    setSelectedServices(new Set(serviceList.map(s => s.value)));
+    setAmountOverride(false);
+  };
+
+  const clearAll = () => {
+    setSelectedServices(new Set());
+    setManualAmount("");
+    setAmountOverride(false);
+  };
+
+  const allSelected = serviceList.every(s => selectedServices.has(s.value));
+  const noneSelected = selectedServices.size === 0;
+
   const createMutation = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/payments", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
       toast({ title: "✅ تم إرسال طلب الدفع", description: "سيتم مراجعته فوراً وتفعيل الخدمة عند القبول" });
       setShowForm(false);
-      setFormData({ type: "top_up", amountEGP: "", method: "vodafone", phoneNumber: "", adId: "", serviceType: "" });
+      setFormData({ type: "top_up", method: "vodafone", phoneNumber: "", adId: "" });
+      setSelectedServices(new Set());
+      setManualAmount("");
+      setAmountOverride(false);
       setScreenshotUrl("");
       setScreenshotPreview("");
     },
@@ -135,6 +189,10 @@ export default function Payments() {
 
   const selectedMethod = PAYMENT_METHODS.find(m => m.value === formData.method);
   const userAds = ads.filter((a: any) => a.userId === (user as any)?.id);
+
+  // Breakdown of selected services with prices
+  const selectedWithPrices = serviceList.filter(s => selectedServices.has(s.value) && s.amount > 0);
+  const hasZeroPriceSelected = serviceList.some(s => selectedServices.has(s.value) && s.amount === 0);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6" dir="rtl">
@@ -221,6 +279,9 @@ export default function Payments() {
                 const method = METHOD_LABELS[p.method] || { label: p.method, emoji: "💰", color: "" };
                 const status = STATUS_MAP[p.status] || STATUS_MAP.pending;
                 const StatusIcon = status.icon;
+                const svcLabels = p.serviceType
+                  ? p.serviceType.split(",").map((s: string) => SERVICE_TYPE_LABELS[s.trim()] || s.trim()).join(" + ")
+                  : null;
                 return (
                   <tr key={p.id} className="border-b hover:bg-muted/10 transition-colors" data-testid={`row-payment-${p.id}`}>
                     <td className="px-4 py-3">
@@ -243,9 +304,9 @@ export default function Payments() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {p.serviceType ? (
+                      {svcLabels ? (
                         <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold whitespace-nowrap">
-                          {SERVICE_TYPE_LABELS[p.serviceType] || p.serviceType}
+                          {svcLabels}
                         </span>
                       ) : (
                         <span className="text-muted-foreground text-xs">—</span>
@@ -287,7 +348,7 @@ export default function Payments() {
 
       {/* New Payment Dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
-        <DialogContent dir="rtl" className="max-w-md">
+        <DialogContent dir="rtl" className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CreditCard className="w-5 h-5 text-primary" />
@@ -305,7 +366,7 @@ export default function Payments() {
                 <button
                   key={t.value}
                   type="button"
-                  onClick={() => setFormData(f => ({ ...f, type: t.value, serviceType: "" }))}
+                  onClick={() => setFormData(f => ({ ...f, type: t.value }))}
                   className={`flex-1 py-2 rounded-xl text-sm font-bold border transition-all ${formData.type === t.value ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/50"}`}
                   data-testid={`btn-type-${t.value}`}
                 >
@@ -314,30 +375,61 @@ export default function Payments() {
               ))}
             </div>
 
-            {/* Service Type with prices */}
+            {/* Service Multi-Select */}
             <div className="space-y-2">
-              <label className="text-xs font-bold flex items-center gap-1">
-                <Tag className="w-3 h-3" />
-                نوع الخدمة المطلوبة
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold flex items-center gap-1">
+                  <Tag className="w-3 h-3" />
+                  الخدمات المطلوبة
+                  {selectedServices.size > 0 && (
+                    <span className="mr-1 bg-primary text-primary-foreground text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+                      {selectedServices.size}
+                    </span>
+                  )}
+                </label>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={allSelected ? clearAll : selectAll}
+                    className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1 ${allSelected ? "bg-primary/10 text-primary border-primary/30" : "border-border hover:border-primary/40 hover:bg-primary/5"}`}
+                    data-testid="btn-select-all-services"
+                  >
+                    {allSelected ? <CheckSquare className="w-3 h-3" /> : <Square className="w-3 h-3" />}
+                    {allSelected ? "إلغاء الكل" : "اختيار الكل"}
+                  </button>
+                  {!noneSelected && !allSelected && (
+                    <button
+                      type="button"
+                      onClick={clearAll}
+                      className="text-[10px] font-bold px-2 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-950/30 transition-all"
+                      data-testid="btn-clear-services"
+                    >
+                      مسح
+                    </button>
+                  )}
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-1.5">
-                {(buildServiceTypes(pricing)[formData.type === "top_up" ? "top_up" : "withdrawal"]).map(s => {
-                  const isSelected = formData.serviceType === s.value;
+                {serviceList.map(s => {
+                  const isSelected = selectedServices.has(s.value);
                   return (
                     <button
                       key={s.value}
                       type="button"
-                      onClick={() => {
-                        const newSvc = formData.serviceType === s.value ? "" : s.value;
-                        setFormData(f => ({
-                          ...f,
-                          serviceType: newSvc,
-                          amountEGP: newSvc && s.amount ? String(parseFloat(s.amount)) : f.amountEGP,
-                        }));
-                      }}
-                      className={`flex flex-col items-start py-2 px-2.5 rounded-xl border text-right transition-all ${isSelected ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/40 hover:bg-primary/5"}`}
+                      onClick={() => toggleService(s.value)}
+                      className={`flex flex-col items-start py-2 px-2.5 rounded-xl border text-right transition-all relative ${
+                        isSelected
+                          ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                          : "border-border hover:border-primary/40 hover:bg-primary/5"
+                      }`}
                       data-testid={`btn-service-${s.value}`}
                     >
+                      {isSelected && (
+                        <span className="absolute top-1.5 left-1.5 w-4 h-4 rounded-full bg-white/30 flex items-center justify-center">
+                          <CheckSquare className="w-2.5 h-2.5 text-white" />
+                        </span>
+                      )}
                       <span className="text-xs font-bold leading-tight">{s.label}</span>
                       {s.price && (
                         <span className={`text-[10px] font-mono mt-0.5 ${isSelected ? "text-primary-foreground/80" : "text-primary"}`}>
@@ -354,6 +446,34 @@ export default function Payments() {
                 })}
               </div>
             </div>
+
+            {/* Total Breakdown */}
+            {selectedServices.size > 0 && (
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-1.5">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-primary mb-2">
+                  <Calculator className="w-3.5 h-3.5" />
+                  تفاصيل المبلغ الإجمالي
+                </div>
+                {selectedWithPrices.map(s => (
+                  <div key={s.value} className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">{s.label}</span>
+                    <span className="font-bold font-mono">{s.amount.toLocaleString()} ج.م</span>
+                  </div>
+                ))}
+                {hasZeroPriceSelected && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">خدمات بسعر مخصص</span>
+                    <span className="text-muted-foreground text-[10px]">أدخل المبلغ يدوياً</span>
+                  </div>
+                )}
+                {selectedWithPrices.length > 1 && (
+                  <div className="border-t border-primary/20 pt-1.5 flex items-center justify-between text-sm font-extrabold">
+                    <span className="text-primary">الإجمالي التلقائي</span>
+                    <span className="text-primary font-mono">{autoTotal.toLocaleString()} ج.م</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Ad ID (optional) */}
             <div className="space-y-1">
@@ -386,16 +506,40 @@ export default function Payments() {
 
             {/* Amount */}
             <div className="space-y-1">
-              <label className="text-xs font-bold">💵 المبلغ (جنيه مصري)</label>
-              <Input
-                type="number"
-                min="10"
-                placeholder="مثال: 500"
-                value={formData.amountEGP}
-                onChange={e => setFormData(f => ({ ...f, amountEGP: e.target.value }))}
-                className="text-sm h-9"
-                data-testid="input-amount"
-              />
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold">💵 المبلغ الإجمالي (جنيه مصري)</label>
+                {autoTotal > 0 && amountOverride && (
+                  <button
+                    type="button"
+                    onClick={() => { setAmountOverride(false); setManualAmount(String(autoTotal)); }}
+                    className="text-[10px] text-primary underline"
+                    data-testid="btn-reset-amount"
+                  >
+                    إعادة الحساب التلقائي
+                  </button>
+                )}
+              </div>
+              <div className="relative">
+                <Input
+                  type="number"
+                  min="10"
+                  placeholder={autoTotal > 0 ? `مجموع الخدمات: ${autoTotal} ج.م` : "مثال: 500"}
+                  value={effectiveAmount}
+                  onChange={e => { setManualAmount(e.target.value); setAmountOverride(true); }}
+                  className={`text-sm h-9 ${autoTotal > 0 && !amountOverride ? "border-primary/50 bg-primary/5" : ""}`}
+                  data-testid="input-amount"
+                />
+                {autoTotal > 0 && !amountOverride && (
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-primary font-bold bg-primary/10 px-1.5 py-0.5 rounded">
+                    تلقائي
+                  </span>
+                )}
+              </div>
+              {autoTotal > 0 && !amountOverride && (
+                <p className="text-[10px] text-muted-foreground">
+                  المبلغ محسوب تلقائياً من الخدمات المختارة · يمكنك تعديله يدوياً
+                </p>
+              )}
             </div>
 
             {/* Method */}
@@ -496,19 +640,28 @@ export default function Payments() {
             {/* Submit */}
             <Button
               className="w-full gap-2"
-              disabled={!formData.amountEGP || !screenshotUrl || uploading || createMutation.isPending}
+              disabled={!effectiveAmount || Number(effectiveAmount) <= 0 || !screenshotUrl || uploading || createMutation.isPending}
               onClick={() => createMutation.mutate({
                 type: formData.type,
-                amountEGP: Number(formData.amountEGP),
+                amountEGP: Number(effectiveAmount),
                 method: formData.method,
                 phoneNumber: formData.phoneNumber || undefined,
                 adId: formData.adId && formData.adId !== "none" ? Number(formData.adId) : undefined,
-                serviceType: formData.serviceType || undefined,
+                serviceType: selectedServices.size > 0 ? Array.from(selectedServices).join(",") : undefined,
                 screenshotUrl: screenshotUrl || undefined,
               })}
               data-testid="btn-submit-payment"
             >
-              {createMutation.isPending ? "جاري الإرسال..." : "📤 إرسال الطلب"}
+              {createMutation.isPending ? "جاري الإرسال..." : (
+                <>
+                  📤 إرسال الطلب
+                  {effectiveAmount && Number(effectiveAmount) > 0 && (
+                    <span className="mr-1 bg-white/20 px-2 py-0.5 rounded-lg font-mono text-sm">
+                      {Number(effectiveAmount).toLocaleString()} ج.م
+                    </span>
+                  )}
+                </>
+              )}
             </Button>
             <p className="text-[10px] text-center text-muted-foreground">
               سيصلك إشعار فور مراجعة الطلب · التفعيل فوري عند القبول
