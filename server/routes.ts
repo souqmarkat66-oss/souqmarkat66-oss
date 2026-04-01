@@ -2789,8 +2789,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.patch("/api/auth/me/profile", isAuthenticated, upload.single("photo"), async (req: any, res) => {
     const userId = req.user.claims.sub;
     try {
-      const firstName = req.body.firstName ?? null;
-      const lastName = req.body.lastName ?? null;
+      const firstName = (req.body.firstName && req.body.firstName.trim()) ? req.body.firstName.trim() : null;
+      const lastName  = (req.body.lastName  && req.body.lastName.trim())  ? req.body.lastName.trim()  : null;
       const bio = req.body.bio ?? null;
       const profileImageUrl = req.file ? `/uploads/${req.file.filename}` : null;
       await db.execute(sql`
@@ -2802,7 +2802,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         WHERE id = ${userId}
       `);
       const row = await db.execute(sql`SELECT id, first_name, last_name, profile_image_url, bio, governorate, referral_code FROM users WHERE id = ${userId} LIMIT 1`);
-      res.json({ ok: true, user: row.rows[0] });
+      const updated = row.rows[0] as any;
+      // ── Update session so GET /api/auth/user returns the fresh name ──
+      if (req.session?.customUser) {
+        req.session.customUser.firstName      = updated.first_name      || req.session.customUser.firstName;
+        req.session.customUser.lastName       = updated.last_name       || req.session.customUser.lastName;
+        req.session.customUser.profileImageUrl = updated.profile_image_url || req.session.customUser.profileImageUrl;
+        req.session.save?.(() => {});
+      }
+      res.json({ ok: true, user: updated });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
