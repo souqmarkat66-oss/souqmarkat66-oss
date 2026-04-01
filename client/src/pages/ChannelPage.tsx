@@ -384,7 +384,7 @@ fetch('${base}/api/campaigns/random')
                         <h3 className="font-bold group-hover:text-primary transition-colors line-clamp-1">{s.title}</h3>
                         <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
                           <span>{(s.viewerCount || 0).toLocaleString()} مشاهد</span>
-                          {s.likesCount > 0 && <span>❤ {s.likesCount}</span>}
+                          {(s.likesCount ?? 0) > 0 && <span>❤ {s.likesCount}</span>}
                         </div>
                       </div>
                     </div>

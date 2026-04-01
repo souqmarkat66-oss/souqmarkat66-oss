@@ -736,7 +736,7 @@ export default function AdDetails() {
       <div className="container px-4 py-20 text-center" dir="rtl">
         <h1 className="text-2xl font-bold">الإعلان غير موجود</h1>
         <Link href="/ads">
-          <Button variant="link" className="mt-4">العودة للإعلانات</Button>
+          <Button variant="ghost" className="mt-4">العودة للإعلانات</Button>
         </Link>
       </div>
     );
@@ -777,7 +777,7 @@ export default function AdDetails() {
                   {ad.targetRegion && (
                     <Badge variant="secondary" className="text-xs">📍 {ad.targetRegion}</Badge>
                   )}
-                  {ad.priceEGP > 0 && (
+                  {(ad.priceEGP ?? 0) > 0 && (
                     <Badge className="bg-green-500 text-white">{ad.priceEGP?.toLocaleString()} ج.م</Badge>
                   )}
                 </div>

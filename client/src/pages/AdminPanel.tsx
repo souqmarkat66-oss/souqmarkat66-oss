@@ -1245,7 +1245,7 @@ function SettingsSection({ logAction }: { logAction: any }) {
     { key: "ai_price_per_credit_egp", label: "سعر رصيد AI الإضافي",          suffix: "ج.م/رصيد",   default: "5",    group: "الذكاء الاصطناعي" },
   ];
 
-  const groups = [...new Set(numFields.map(f => f.group))];
+  const groups = Array.from(new Set(numFields.map(f => f.group)));
 
   return (
     <div className="max-w-2xl space-y-6">

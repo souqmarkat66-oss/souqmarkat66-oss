@@ -63,8 +63,8 @@ export interface IStorage {
   createAdCampaign(campaign: InsertAdCampaign): Promise<AdCampaign>;
   updateAdCampaign(id: number, data: Partial<InsertAdCampaign>): Promise<AdCampaign | undefined>;
   getActiveCampaigns(): Promise<AdCampaign[]>;
-  recordImpression(campaignId: number, channelId?: number, userId?: string): Promise<void>;
-  recordClick(campaignId: number, channelId?: number, userId?: string): Promise<void>;
+  recordImpression(campaignId: number, channelId?: number, userId?: string): Promise<{ budgetWarning?: boolean; budgetRatio?: number; advertiserId?: string; campaignName?: string }>;
+  recordClick(campaignId: number, channelId?: number, userId?: string): Promise<{ budgetWarning?: boolean; budgetRatio?: number; advertiserId?: string; campaignName?: string }>;
 
   // Revenue
   getRevenueTransactions(userId: string): Promise<RevenueTransaction[]>;

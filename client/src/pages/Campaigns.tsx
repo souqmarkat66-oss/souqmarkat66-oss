@@ -291,7 +291,7 @@ export default function Campaigns() {
       ) : (
         <div className="space-y-4">
           {campaigns.map((campaign) => {
-            const ctr = campaign.impressions > 0 ? ((campaign.clicks / campaign.impressions) * 100).toFixed(2) : "0";
+            const ctr = (campaign.impressions ?? 0) > 0 ? (((campaign.clicks ?? 0) / (campaign.impressions ?? 1)) * 100).toFixed(2) : "0";
             const spentEGP = campaign.spentEGP || 0;
             const budgetEGP = campaign.budgetEGP || 0;
             const budgetPct = budgetEGP > 0 ? Math.min(100, (spentEGP / budgetEGP) * 100) : 0;
@@ -310,7 +310,7 @@ export default function Campaigns() {
                           <Badge className={`${statusColor[campaign.status || 'pending']} text-white text-xs`}>
                             {statusLabel[campaign.status || 'pending']}
                           </Badge>
-                          {(campaign.targetRegions as string[] | null)?.length > 0 && (
+                          {((campaign.targetRegions as string[] | null)?.length ?? 0) > 0 && (
                             <Badge variant="outline" className="text-xs gap-1">
                               <MapPin className="w-2.5 h-2.5" />
                               {(campaign.targetRegions as string[]).slice(0, 2).join('، ')}
@@ -561,7 +561,7 @@ export default function Campaigns() {
                 </div>
 
                 {/* Target Regions */}
-                {(analyticsCampaign.targetRegions as string[] | null)?.length > 0 && (
+                {((analyticsCampaign.targetRegions as string[] | null)?.length ?? 0) > 0 && (
                   <div>
                     <p className="text-xs font-bold text-muted-foreground mb-2">📍 المناطق المستهدفة</p>
                     <div className="flex flex-wrap gap-1.5">

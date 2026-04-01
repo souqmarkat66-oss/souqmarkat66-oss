@@ -129,7 +129,7 @@ export function EgyptTargetingMap({
     if (allSelected) {
       onRegionsChange(selectedRegions.filter(r => !all.includes(r)));
     } else {
-      const merged = [...new Set([...selectedRegions, ...all])];
+      const merged = Array.from(new Set([...selectedRegions, ...all]));
       onRegionsChange(merged);
     }
   };

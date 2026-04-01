@@ -191,7 +191,7 @@ export default function Profile() {
   if (!profile || profile.message) return (
     <div className="container px-4 py-20 text-center" dir="rtl">
       <p className="text-muted-foreground">المستخدم غير موجود</p>
-      <Button variant="link" onClick={() => setLocation("/")}>الرئيسية</Button>
+      <Button variant="ghost" onClick={() => setLocation("/")}>الرئيسية</Button>
     </div>
   );
 

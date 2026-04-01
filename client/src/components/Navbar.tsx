@@ -128,7 +128,7 @@ export function Navbar() {
                   {user.firstName}
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52" dir="rtl">
+              <DropdownMenuContent align="end" className="w-52" {...({ dir: "rtl" } as any)}>
                 <DropdownMenuItem asChild>
                   <Link href={`/profile/${user.id}`} className="gap-2 cursor-pointer flex items-center">
                     <UserCircle2 className="w-4 h-4 text-primary" /> ملفي الشخصي واهتماماتي

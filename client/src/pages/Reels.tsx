@@ -1214,7 +1214,7 @@ export default function Reels() {
 
       {editingReel && (
         <EditReelDialog
-          reel={editingReel}
+          reel={editingReel as any}
           open={!!editingReel}
           onClose={() => setEditingReel(null)}
         />

@@ -140,7 +140,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const count = room.viewers.size;
       if (count > room.peakViewers) room.peakViewers = count;
       io.to(`stream:${streamId}`).emit("viewer-count", count);
-      storage.updateLiveStream(Number(streamId), { viewerCount: count }).catch(() => {});
+      storage.updateLiveStream(Number(streamId), { viewerCount: count } as any).catch(() => {});
       // Inform new viewer if co-host is active
       if (room.cohostId) socket.emit("cohost-active", room.cohostId);
     });
@@ -1362,9 +1362,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const campaign = await storage.getAdCampaign(Number(req.params.id));
     if (!campaign) return res.status(404).json({ message: "Not found" });
     if (campaign.advertiserId !== req.user.claims.sub && !isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
-    const ctr = campaign.impressions > 0 ? ((campaign.clicks / campaign.impressions) * 100).toFixed(2) : '0';
+    const ctr = (campaign.impressions ?? 0) > 0 ? (((campaign.clicks ?? 0) / (campaign.impressions ?? 1)) * 100).toFixed(2) : '0';
     const cpmEGP = campaign.cpmRateEGP || 15;
-    const cpcEGP = campaign.clicks > 0 ? ((campaign.spentEGP || 0) / campaign.clicks).toFixed(2) : '0';
+    const cpcEGP = (campaign.clicks ?? 0) > 0 ? ((campaign.spentEGP || 0) / (campaign.clicks ?? 1)).toFixed(2) : '0';
     res.json({ ...campaign, ctr, cpmEGP, cpcEGP });
   });
 
@@ -1851,6 +1851,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               type: 'withdrawal',
               amountEGP: p.amountEGP,
               description: `سحب رصيد - ${p.method}`,
+              channelId: null,
+              campaignId: null,
             });
           } else if (p.type === 'top_up') {
             await storage.createTransaction({
@@ -1858,6 +1860,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               type: 'earning',
               amountEGP: p.amountEGP,
               description: `شحن رصيد - ${p.method}`,
+              channelId: null,
+              campaignId: null,
             });
           }
           await createNotification(
@@ -2127,7 +2131,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     let count = 0;
     for (const row of rows.rows as any[]) {
       try {
-        await storage.createNotification(row.id, 'system', title, body, link || undefined);
+        await createNotification(row.id, 'system', title, body, link || undefined);
         count++;
       } catch {}
     }
@@ -2177,7 +2181,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
       await storage.recordAiUsage(userId, 'copy');
       if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد نص بالذكاء الاصطناعي' });
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد نص بالذكاء الاصطناعي', channelId: null, campaignId: null });
       }
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
@@ -2200,7 +2204,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
       await storage.recordAiUsage(userId, 'article');
       if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد مقالة بالذكاء الاصطناعي' });
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد مقالة بالذكاء الاصطناعي', channelId: null, campaignId: null });
       }
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
@@ -2223,7 +2227,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
       await storage.recordAiUsage(userId, 'video_script');
       if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد سكريبت فيديو' });
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد سكريبت فيديو', channelId: null, campaignId: null });
       }
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
@@ -2243,8 +2247,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         size: (size || "1024x1024") as any,
       });
       // gpt-image-1 returns b64_json, save to file
-      const b64 = response.data[0]?.b64_json;
-      const imageUrl = response.data[0]?.url;
+      const b64 = response.data?.[0]?.b64_json;
+      const imageUrl = response.data?.[0]?.url;
       let finalUrl = imageUrl;
       if (!finalUrl && b64) {
         const buf = Buffer.from(b64, 'base64');
@@ -2256,7 +2260,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!finalUrl) throw new Error("No image generated");
       await storage.recordAiUsage(userId, 'image');
       if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد صورة بالذكاء الاصطناعي' });
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد صورة بالذكاء الاصطناعي', channelId: null, campaignId: null });
       }
       res.json({ url: finalUrl, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
@@ -2368,7 +2372,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         audioFilePath = audioUrl.startsWith('/uploads/')
           ? path.join(process.cwd(), audioUrl)
           : audioUrl;
-        ffmpegArgs.push("-i", audioFilePath);
+        ffmpegArgs.push("-i", audioFilePath!);
       }
 
       ffmpegArgs.push(
@@ -2837,7 +2841,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const referrerId = referrerRow.rows[0].id;
       if (referrerId === userId) return res.status(400).json({ message: "self_referral" });
       const bonusRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'ai_referral_bonus_egp' LIMIT 1`);
-      const bonus = parseFloat(bonusRow.rows[0]?.value || '5');
+      const bonus = parseFloat(String(bonusRow.rows[0]?.value || '5'));
       await db.execute(sql`INSERT INTO referrals (referrer_id, referred_id, bonus_egp, status) VALUES (${referrerId}, ${userId}, ${bonus}, 'confirmed')`);
       res.json({ ok: true, bonus });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -3585,7 +3589,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         db.execute(sql`SELECT id, created_at FROM channels WHERE status = 'active' ORDER BY created_at DESC`),
       ]);
 
-      const staticPages = [
+      const staticPages: Array<{ loc: string; priority: string; changefreq: string; lastmod?: string }> = [
         { loc: `${BASE}/`, priority: "1.0", changefreq: "daily" },
         { loc: `${BASE}/ads`, priority: "0.9", changefreq: "hourly" },
         { loc: `${BASE}/channels`, priority: "0.8", changefreq: "daily" },

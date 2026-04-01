@@ -1479,7 +1479,7 @@ export default function LiveStream() {
                   title={stream?.title || "بث مباشر على سوق"}
                   description={stream?.description || ""}
                   variant="ghost"
-                  size="icon"
+                  size="sm"
                   data-testid="btn-stream-share"
                 />
               </div>

@@ -171,7 +171,7 @@ export function LikeCommentBar({ targetType, targetId, initialLikes = 0, showCom
     queryKey: ["/api/likes", targetType, targetId],
     queryFn: () => fetch(`/api/likes/${targetType}/${targetId}`, { credentials: "include" }).then(r => r.json()),
     enabled: !!user,
-    onSuccess: (d) => setLiked(d.liked),
+    onSuccess: (d: { liked: boolean }) => setLiked(d.liked),
   } as any);
 
   const likeMutation = useMutation({

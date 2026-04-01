@@ -76,7 +76,7 @@ export default function MediaLibrary() {
 
   const deleteSelected = async () => {
     if (!confirm(`حذف ${selected.size} ملف؟`)) return;
-    for (const id of selected) { await deleteFile.mutateAsync(id).catch(() => {}); }
+    for (const id of Array.from(selected)) { await deleteFile.mutateAsync(id).catch(() => {}); }
     setSelected(new Set());
   };
 

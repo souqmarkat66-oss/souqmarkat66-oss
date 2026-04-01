@@ -696,7 +696,7 @@ export default function CreateAd() {
                 <FormItem>
                   <FormLabel>السعر (ج.م)</FormLabel>
                   <FormControl>
-                    <Input type="number" placeholder="مثال: 500" {...field} data-testid="input-price" />
+                    <Input type="number" placeholder="مثال: 500" {...field} value={field.value ?? ""} data-testid="input-price" />
                   </FormControl>
                 </FormItem>
               )} />
@@ -704,7 +704,7 @@ export default function CreateAd() {
                 <FormItem>
                   <FormLabel>رقم الواتساب</FormLabel>
                   <FormControl>
-                    <Input placeholder="01xxxxxxxxx" {...field} dir="ltr" data-testid="input-whatsapp" />
+                    <Input placeholder="01xxxxxxxxx" {...field} value={field.value ?? ""} dir="ltr" data-testid="input-whatsapp" />
                   </FormControl>
                 </FormItem>
               )} />
