@@ -410,8 +410,13 @@ export default function LiveStream() {
       toast({ title: "انتهى البث المباشر" });
     });
 
-    socket.on("offer", async (_: string, desc: RTCSessionDescriptionInit) => {
-      const pc = createPeer(socket);
+    // FIXED: capture senderId from offer so we can route answer + ICE candidates correctly
+    socket.on("offer", async (senderId: string, desc: RTCSessionDescriptionInit) => {
+      // Close any previous connection
+      peersRef.current.get("broadcaster")?.close();
+
+      // Pass senderId as targetId so ICE candidates are sent to the right socket
+      const pc = createPeer(socket, senderId);
       peersRef.current.set("broadcaster", pc);
 
       pc.ontrack = (e) => {
@@ -433,14 +438,18 @@ export default function LiveStream() {
         }
       };
 
-      socket.on("candidate", async (_id: string, candidate: RTCIceCandidateInit) => {
-        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
-      });
-
       await pc.setRemoteDescription(new RTCSessionDescription(desc));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      socket.emit("answer", "broadcaster", pc.localDescription);
+      // FIXED: send answer to real broadcaster socket ID, not the string "broadcaster"
+      socket.emit("answer", senderId, pc.localDescription);
+    });
+
+    // FIXED: moved outside offer handler — registered once, routes ICE to the right PC
+    socket.on("candidate", async (_senderId: string, candidate: RTCIceCandidateInit) => {
+      try {
+        await peersRef.current.get("broadcaster")?.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch {}
     });
   }, [id, createPeer]);
 
