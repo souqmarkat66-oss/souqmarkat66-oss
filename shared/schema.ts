@@ -141,6 +141,7 @@ export const liveStreams = pgTable("live_streams", {
   totalEarningsEGP: real("total_earnings_egp").default(0),
   startedAt: timestamp("started_at"),
   endedAt: timestamp("ended_at"),
+  recordingUrl: text("recording_url"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
