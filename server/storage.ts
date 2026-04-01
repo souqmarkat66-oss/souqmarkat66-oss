@@ -335,11 +335,29 @@ export class DatabaseStorage implements IStorage {
     return active;
   }
 
+  // ─── helper: read live platform rates from platform_settings ───
+  private async getPlatformRates(): Promise<{ cpmRate: number; cpcRate: number; pubPct: number }> {
+    const rows = await db.execute(
+      sql`SELECT key, value FROM platform_settings WHERE key IN ('cpm_rate_egp','cpc_rate_egp','publisher_share_pct')`
+    );
+    const map: Record<string, string> = {};
+    for (const r of rows.rows as any[]) map[r.key] = r.value;
+    return {
+      cpmRate: parseFloat(map['cpm_rate_egp']  || '15'),
+      cpcRate: parseFloat(map['cpc_rate_egp']  || '0.75'),
+      pubPct:  parseFloat(map['publisher_share_pct'] || '60') / 100,
+    };
+  }
+
   async recordImpression(campaignId: number, channelId?: number, userId?: string): Promise<{ budgetWarning?: boolean; budgetRatio?: number; advertiserId?: string; campaignName?: string }> {
     const campaign = await this.getAdCampaign(campaignId);
     if (!campaign) return {};
-    const revenueEGP = (campaign.cpmRateEGP || 15) / 1000;
-    const publisherShareEGP = revenueEGP * (campaign.publisherRevShare || 0.6);
+
+    // ── أسعار المنصة من لوحة الأدمن (تُحدَّث فوراً) ──
+    const { cpmRate, pubPct } = await this.getPlatformRates();
+    const revenueEGP = cpmRate / 1000;
+    const publisherShareEGP = revenueEGP * pubPct;
+
     const newSpent = (campaign.spentEGP || 0) + revenueEGP;
     await db.update(adCampaigns).set({
       impressions: sql`${adCampaigns.impressions} + 1`,
@@ -350,12 +368,11 @@ export class DatabaseStorage implements IStorage {
       if (ch) {
         await db.update(channels).set({ earningsEGP: sql`${channels.earningsEGP} + ${publisherShareEGP}` }).where(eq(channels.id, channelId));
         await db.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id, channel_id)
-          VALUES (${ch.userId}, 'earning', ${publisherShareEGP}, ${publisherShareEGP}, ${'إيراد إعلان - حملة #' + campaignId}, ${campaignId}, ${channelId})`);
+          VALUES (${ch.userId}, 'earning', ${publisherShareEGP}, ${publisherShareEGP}, ${'إيراد إعلان - حملة #' + campaignId + ' (CPM=' + cpmRate + ' ج.م)'}, ${campaignId}, ${channelId})`);
       }
     }
     await db.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id)
-      VALUES (${campaign.advertiserId}, 'spending', ${revenueEGP}, ${revenueEGP}, ${'تكلفة مشاهدة - حملة ' + campaign.name}, ${campaignId})`);
-    // تحقق من نسبة الميزانية المستهلكة
+      VALUES (${campaign.advertiserId}, 'spending', ${revenueEGP}, ${revenueEGP}, ${'تكلفة مشاهدة - حملة ' + campaign.name + ' (CPM=' + cpmRate + ' ج.م)'}, ${campaignId})`);
     const budget = campaign.budgetEGP || 0;
     if (budget > 0) {
       const ratio = newSpent / budget;
@@ -369,14 +386,15 @@ export class DatabaseStorage implements IStorage {
   async recordClick(campaignId: number, channelId?: number, userId?: string): Promise<{ budgetWarning?: boolean; budgetRatio?: number; advertiserId?: string; campaignName?: string }> {
     const campaign = await this.getAdCampaign(campaignId);
     if (!campaign) return {};
-    // سعر النقرة = CPM / 20  (افتراضي: 15 EGP CPM → 0.75 EGP للنقرة)
-    const cpcEGP = (campaign.cpmRateEGP || 15) / 20;
-    const publisherShareEGP = cpcEGP * (campaign.publisherRevShare || 0.6);
+
+    // ── أسعار المنصة من لوحة الأدمن (تُحدَّث فوراً) ──
+    const { cpcRate, pubPct } = await this.getPlatformRates();
+    const publisherShareEGP = cpcRate * pubPct;
+
     await db.update(adCampaigns).set({
       clicks: sql`${adCampaigns.clicks} + 1`,
-      spentEGP: sql`${adCampaigns.spentEGP} + ${cpcEGP}`
+      spentEGP: sql`${adCampaigns.spentEGP} + ${cpcRate}`
     }).where(eq(adCampaigns.id, campaignId));
-    // إيراد صاحب القناة (60%)
     if (channelId) {
       const ch = await this.getChannel(channelId);
       if (ch) {
@@ -384,14 +402,12 @@ export class DatabaseStorage implements IStorage {
           earningsEGP: sql`${channels.earningsEGP} + ${publisherShareEGP}`
         }).where(eq(channels.id, channelId));
         await db.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id, channel_id)
-          VALUES (${ch.userId}, 'earning', ${publisherShareEGP}, ${publisherShareEGP}, ${'إيراد نقرة - حملة #' + campaignId}, ${campaignId}, ${channelId})`);
+          VALUES (${ch.userId}, 'earning', ${publisherShareEGP}, ${publisherShareEGP}, ${'إيراد نقرة - حملة #' + campaignId + ' (CPC=' + cpcRate + ' ج.م)'}, ${campaignId}, ${channelId})`);
       }
     }
-    // خصم من المعلن
     await db.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id)
-      VALUES (${campaign.advertiserId}, 'spending', ${cpcEGP}, ${cpcEGP}, ${'تكلفة نقرة - حملة ' + campaign.name}, ${campaignId})`);
-    // تحقق من نسبة الميزانية
-    const newSpent = (campaign.spentEGP || 0) + cpcEGP;
+      VALUES (${campaign.advertiserId}, 'spending', ${cpcRate}, ${cpcRate}, ${'تكلفة نقرة - حملة ' + campaign.name + ' (CPC=' + cpcRate + ' ج.م)'}, ${campaignId})`);
+    const newSpent = (campaign.spentEGP || 0) + cpcRate;
     const budget = campaign.budgetEGP || 0;
     if (budget > 0 && newSpent / budget >= 0.8) {
       return { budgetWarning: true, budgetRatio: newSpent / budget, advertiserId: campaign.advertiserId, campaignName: campaign.name };
