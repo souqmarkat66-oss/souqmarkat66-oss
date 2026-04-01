@@ -2809,10 +2809,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const updated = row.rows[0] as any;
       // ── Update session so GET /api/auth/user returns the fresh name ──
       if (req.session?.customUser) {
-        req.session.customUser.firstName      = updated.first_name      || req.session.customUser.firstName;
-        req.session.customUser.lastName       = updated.last_name       || req.session.customUser.lastName;
-        req.session.customUser.profileImageUrl = updated.profile_image_url || req.session.customUser.profileImageUrl;
-        req.session.save?.(() => {});
+        req.session.customUser.firstName       = updated.first_name       ?? req.session.customUser.firstName;
+        req.session.customUser.lastName        = updated.last_name        ?? req.session.customUser.lastName;
+        req.session.customUser.profileImageUrl = updated.profile_image_url ?? req.session.customUser.profileImageUrl;
+        await new Promise<void>((resolve) => {
+          if (req.session?.save) req.session.save(() => resolve());
+          else resolve();
+        });
       }
       res.json({ ok: true, user: updated });
     } catch (e: any) { res.status(500).json({ message: e.message }); }

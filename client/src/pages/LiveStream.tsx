@@ -85,6 +85,8 @@ const ICE_SERVERS = [
   { urls: "stun:stun2.l.google.com:19302" },
   { urls: "stun:stun3.l.google.com:19302" },
   { urls: "stun:stun4.l.google.com:19302" },
+  { urls: "stun:stun.cloudflare.com:3478" },
+  { urls: "stun:stun.relay.metered.ca:80" },
   // TURN relay servers for NAT traversal (mobile networks, symmetric NAT)
   {
     urls: "turn:openrelay.metered.ca:80",
@@ -100,6 +102,16 @@ const ICE_SERVERS = [
     urls: "turns:openrelay.metered.ca:443",
     username: "openrelayproject",
     credential: "openrelayproject",
+  },
+  {
+    urls: "turn:standard.relay.metered.ca:80",
+    username: "e8dd65f14a5b9ded8f8dea53",
+    credential: "uBVhDd7gfhD3UJYX",
+  },
+  {
+    urls: "turns:standard.relay.metered.ca:443",
+    username: "e8dd65f14a5b9ded8f8dea53",
+    credential: "uBVhDd7gfhD3UJYX",
   },
 ];
 
@@ -136,8 +148,10 @@ export default function LiveStream() {
   const [showSharePanel, setShowSharePanel] = useState(false);
   const [viewerMuted, setViewerMuted]       = useState(true);
   const [audioBlocked, setAudioBlocked]     = useState(false);
+  const [viewerDisconnected, setViewerDisconnected] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const statsIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // ── Co-host states ──────────────────────────────────────────
   const coHostVideoRef    = useRef<HTMLVideoElement>(null);
@@ -466,6 +480,21 @@ export default function LiveStream() {
       const pc = createPeer(socket, senderId);
       peersRef.current.set("broadcaster", pc);
 
+      // ── Monitor ICE state for viewer reconnect ──
+      pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+          setViewerDisconnected(true);
+          // Auto-retry after 3 seconds
+          if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = setTimeout(() => {
+            if (socket.connected) socket.emit("watcher", id);
+          }, 3000);
+        } else if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
+          setViewerDisconnected(false);
+          if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+        }
+      };
+
       pc.ontrack = (e) => {
         if (videoRef.current && e.streams[0]) {
           videoRef.current.srcObject = e.streams[0];
@@ -474,6 +503,7 @@ export default function LiveStream() {
           videoRef.current.play().then(() => {
             setViewerMuted(false);
             setAudioBlocked(false);
+            setViewerDisconnected(false);
           }).catch(() => {
             // Autoplay with audio blocked — play muted first
             videoRef.current!.muted = true;
@@ -731,10 +761,21 @@ export default function LiveStream() {
       setupWatcher(socket);
     }
 
+    // ── Socket.IO reconnect: re-join the stream room after a network drop ──
+    socket.io.on("reconnect", () => {
+      socket.emit("join-stream", id);
+      if (!isBroadcast) {
+        setViewerDisconnected(false);
+        socket.emit("watcher", id);
+      }
+    });
+
     return () => {
       if (statsIntervalRef.current) clearInterval(statsIntervalRef.current);
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (isCoHostRef.current) socket.emit("cohost-leave", id);
       socket.emit("leave-stream", id);
+      socket.io.off("reconnect");
       socket.disconnect();
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       coHostStreamRef.current?.getTracks().forEach(t => t.stop());
@@ -1204,7 +1245,7 @@ export default function LiveStream() {
             )}
 
             {/* 🔊 Enable Audio Button for viewers (browser blocks autoplay with audio) */}
-            {!isBroadcast && streaming && (audioBlocked || viewerMuted) && (
+            {!isBroadcast && streaming && (audioBlocked || viewerMuted) && !viewerDisconnected && (
               <button
                 onClick={() => {
                   if (videoRef.current) {
@@ -1216,12 +1257,33 @@ export default function LiveStream() {
                     }).catch(() => {});
                   }
                 }}
-                className="absolute bottom-4 start-4 flex items-center gap-2 px-4 py-2.5 rounded-full bg-white/20 backdrop-blur border border-white/30 text-white text-sm font-bold hover:bg-white/30 transition animate-pulse"
+                className="absolute bottom-4 start-4 flex items-center gap-2 px-5 py-3 rounded-full bg-yellow-500/90 backdrop-blur border-2 border-yellow-300 text-white text-sm font-bold hover:bg-yellow-400 transition shadow-lg animate-pulse"
                 data-testid="btn-enable-audio"
               >
-                <Volume2 className="w-4 h-4 text-yellow-300" />
-                انقر لتفعيل الصوت
+                <Volume2 className="w-5 h-5" />
+                🔊 انقر لتشغيل الصوت
               </button>
+            )}
+
+            {/* 🔄 Reconnect Button for viewers (ICE connection dropped) */}
+            {!isBroadcast && viewerDisconnected && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm rounded-2xl">
+                <div className="text-center space-y-3">
+                  <WifiOff className="w-10 h-10 text-red-400 mx-auto animate-pulse" />
+                  <p className="text-white font-bold text-sm">انقطع الاتصال...</p>
+                  <button
+                    onClick={() => {
+                      setViewerDisconnected(false);
+                      socketRef.current?.emit("watcher", id);
+                    }}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-black text-sm font-bold hover:bg-gray-100 transition mx-auto"
+                    data-testid="btn-reconnect-stream"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    إعادة الاتصال
+                  </button>
+                </div>
+              </div>
             )}
 
             {/* ── TikTok Floating Hearts ── */}
