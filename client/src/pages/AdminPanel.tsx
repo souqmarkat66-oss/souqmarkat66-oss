@@ -1625,12 +1625,21 @@ function PayReceiptsSection() {
     refetchInterval: 30000,
   });
 
-  const handleConfirm = async (id: number) => {
+  const handleConfirm = async (id: number, sourceType: string) => {
     setConfirming(id);
     try {
-      const r = await fetch(`/api/messages/${id}/confirm-payment`, { method: "POST" });
+      let r: Response;
+      if (sourceType === "pn") {
+        r = await fetch(`/api/payment-notifications/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "confirmed" }),
+        });
+      } else {
+        r = await fetch(`/api/messages/${id}/confirm-payment`, { method: "POST" });
+      }
       if (!r.ok) throw new Error("فشل التأكيد");
-      toast({ title: "✅ تم تأكيد الدفع", description: "تم إرسال إشعار للمستخدم" });
+      toast({ title: "✅ تم تأكيد الدفع بنجاح", description: "تم إرسال إشعار للمستخدم" });
       qc.invalidateQueries({ queryKey: ["/api/admin/payment-receipts"] });
     } catch {
       toast({ title: "خطأ", description: "فشل تأكيد الدفع", variant: "destructive" });
@@ -1641,7 +1650,7 @@ function PayReceiptsSection() {
 
   const filtered = receipts.filter((r: any) => {
     if (!search) return true;
-    const name = `${r.first_name || ""} ${r.last_name || ""} ${r.username || ""} ${r.phone_number || ""} ${r.email || ""}`.toLowerCase();
+    const name = `${r.first_name || ""} ${r.last_name || ""} ${r.payer_name || ""} ${r.payer_phone || ""} ${r.username || ""} ${r.phone_number || ""} ${r.email || ""}`.toLowerCase();
     return name.includes(search.toLowerCase());
   });
 
@@ -1746,13 +1755,23 @@ function PayReceiptsSection() {
                     {/* User info */}
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-sm">
-                        {r.first_name || ""} {r.last_name || ""}
+                        {r.source_type === "pn"
+                          ? (r.payer_name || (r.first_name ? `${r.first_name} ${r.last_name || ""}` : "—"))
+                          : `${r.first_name || ""} ${r.last_name || ""}`}
                       </span>
-                      {r.username && (
-                        <Badge variant="outline" className="text-xs">@{r.username}</Badge>
+                      {r.source_type === "pn" && r.payment_method && (
+                        <Badge variant="outline" className="text-xs border-blue-400 text-blue-600">{r.payment_method}</Badge>
+                      )}
+                      {r.source_type === "pn" && r.paid_amount && (
+                        <Badge className="bg-green-600/10 text-green-700 text-xs border border-green-400">
+                          {Number(r.paid_amount).toLocaleString("ar-EG")} ج.م
+                        </Badge>
+                      )}
+                      {r.source_type === "pn" && (
+                        <Badge variant="outline" className="text-xs border-purple-400 text-purple-600">من الإعلان</Badge>
                       )}
                       {!r.is_read && (
-                        <Badge className="bg-orange-500 text-white text-xs">جديد ⏳</Badge>
+                        <Badge className="bg-orange-500 text-white text-xs">قيد المراجعة ⏳</Badge>
                       )}
                       {r.is_read && (
                         <Badge className="bg-green-600 text-white text-xs">✅ تم التأكيد</Badge>
@@ -1761,9 +1780,9 @@ function PayReceiptsSection() {
 
                     {/* Contact */}
                     <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                      {r.phone && (
+                      {(r.source_type === "pn" ? r.payer_phone : r.phone) && (
                         <span className="flex items-center gap-1">
-                          <Phone className="w-3 h-3" /> {r.phone}
+                          <Phone className="w-3 h-3" /> {r.source_type === "pn" ? r.payer_phone : r.phone}
                         </span>
                       )}
                       {r.email && (
@@ -1785,7 +1804,9 @@ function PayReceiptsSection() {
                     )}
 
                     {/* User ID */}
-                    <p className="text-xs text-muted-foreground font-mono">ID: {r.from_user_id}</p>
+                    {r.from_user_id && (
+                      <p className="text-xs text-muted-foreground font-mono">ID: {r.from_user_id}</p>
+                    )}
                   </div>
 
                   {/* Actions */}
@@ -1794,7 +1815,7 @@ function PayReceiptsSection() {
                       <Button
                         size="sm"
                         className="bg-green-600 hover:bg-green-700 text-white text-xs rounded-xl"
-                        onClick={() => handleConfirm(r.id)}
+                        onClick={() => handleConfirm(r.id, r.source_type || "dm")}
                         disabled={confirming === r.id}
                         data-testid={`btn-confirm-receipt-${r.id}`}
                       >

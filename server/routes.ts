@@ -2383,12 +2383,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ─── PAYMENT NOTIFICATIONS (from ad buyers) ──────────────────
   app.post("/api/payment-notifications", async (req, res) => {
     try {
-      const { adId, payerName, payerPhone, paidAmount, paymentMethod } = req.body;
+      const { adId, payerName, payerPhone, paidAmount, paymentMethod, screenshotUrl } = req.body;
       if (!adId || !payerName || !payerPhone || !paidAmount || !paymentMethod)
         return res.status(400).json({ message: "بيانات ناقصة" });
+      const payerUserId = (req as any).session?.customUser?.id || null;
       const result = await db.execute(
-        sql`INSERT INTO payment_notifications (ad_id, payer_name, payer_phone, paid_amount, payment_method, status)
-            VALUES (${adId}, ${payerName}, ${payerPhone}, ${paidAmount}, ${paymentMethod}, 'pending')
+        sql`INSERT INTO payment_notifications (ad_id, payer_name, payer_phone, paid_amount, payment_method, status, screenshot_url, payer_user_id)
+            VALUES (${adId}, ${payerName}, ${payerPhone}, ${paidAmount}, ${paymentMethod}, 'pending', ${screenshotUrl || null}, ${payerUserId})
             RETURNING *`
       );
       res.json(result.rows[0]);
@@ -2687,17 +2688,39 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/admin/payment-receipts", isAuthenticated, async (req: any, res) => {
     if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
     try {
-      const rows = await db.execute(sql`
-        SELECT dm.id, dm.from_user_id, dm.to_user_id, dm.message, dm.image_url,
-               dm.is_payment_proof, dm.is_read, dm.created_at,
-               u.first_name, u.last_name, u.phone, u.email
-        FROM direct_messages dm
-        LEFT JOIN users u ON u.id = dm.from_user_id
-        WHERE dm.is_payment_proof = true
-        ORDER BY dm.created_at DESC
-        LIMIT 100
-      `);
-      res.json(rows.rows);
+      const [dmRows, pnRows] = await Promise.all([
+        db.execute(sql`
+          SELECT dm.id, dm.from_user_id, dm.to_user_id, dm.message, dm.image_url,
+                 dm.is_payment_proof, dm.is_read, dm.created_at,
+                 u.first_name, u.last_name, u.phone, u.email,
+                 'dm' as source_type, null as payer_name, null as payer_phone,
+                 null as paid_amount, null as payment_method, null as pn_status
+          FROM direct_messages dm
+          LEFT JOIN users u ON u.id = dm.from_user_id
+          WHERE dm.is_payment_proof = true
+          ORDER BY dm.created_at DESC
+          LIMIT 100
+        `),
+        db.execute(sql`
+          SELECT pn.id, pn.payer_user_id as from_user_id, null as to_user_id,
+                 null as message, pn.screenshot_url as image_url,
+                 true as is_payment_proof,
+                 CASE WHEN pn.status = 'confirmed' THEN true ELSE false END as is_read,
+                 pn.created_at,
+                 u.first_name, u.last_name, u.phone, u.email,
+                 'pn' as source_type, pn.payer_name, pn.payer_phone,
+                 pn.paid_amount, pn.payment_method, pn.status as pn_status
+          FROM payment_notifications pn
+          LEFT JOIN users u ON u.id = pn.payer_user_id
+          WHERE pn.screenshot_url IS NOT NULL
+          ORDER BY pn.created_at DESC
+          LIMIT 100
+        `)
+      ]);
+      const combined = [...dmRows.rows, ...pnRows.rows].sort((a: any, b: any) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      res.json(combined);
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 

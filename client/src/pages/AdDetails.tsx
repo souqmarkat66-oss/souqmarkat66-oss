@@ -36,6 +36,8 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
   const [paidAmount, setPaidAmount] = useState(ad.priceEGP?.toString() || "");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [open, setOpen] = useState(false);
+  const [screenshotUrl, setScreenshotUrl] = useState("");
+  const [screenshotUploading, setScreenshotUploading] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
   const [msgOpen, setMsgOpen] = useState(false);
@@ -76,13 +78,34 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
     mutationFn: () => apiRequest('/api/payment-notifications', 'POST', {
       adId: ad.id,
       payerName, payerPhone, paidAmount: parseFloat(paidAmount), paymentMethod,
+      screenshotUrl: screenshotUrl || undefined,
     }),
     onSuccess: () => {
       setOpen(false);
+      setScreenshotUrl("");
       toast({ title: "✅ تم إرسال إشعار الدفع لصاحب الإعلان. سيتواصل معك قريباً." });
     },
     onError: () => toast({ variant: "destructive", title: "خطأ في إرسال إشعار الدفع" }),
   });
+
+  const handleScreenshotUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setScreenshotUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const r = await fetch("/api/upload", { method: "POST", body: formData });
+      if (!r.ok) throw new Error("فشل الرفع");
+      const data = await r.json();
+      setScreenshotUrl(data.url);
+      toast({ title: "✅ تم رفع الإيصال بنجاح" });
+    } catch {
+      toast({ variant: "destructive", title: "خطأ في رفع الصورة، حاول مرة أخرى" });
+    } finally {
+      setScreenshotUploading(false);
+    }
+  };
 
   const offerMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/offers", {
@@ -256,32 +279,76 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
       )}
 
       {/* Payment Confirmation Dialog */}
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={o => { setOpen(o); if (!o) setScreenshotUrl(""); }}>
         <DialogContent dir="rtl">
           <DialogHeader>
             <DialogTitle>تأكيد الدفع — {paymentMethod}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            {/* Payment method number reminder */}
+            {(() => {
+              const pm = PLATFORM_PAYMENTS.find(p => p.label === paymentMethod);
+              return pm ? (
+                <div className={`flex items-center gap-3 p-3 rounded-xl border ${pm.color}`}>
+                  <span className="text-xl">{pm.emoji}</span>
+                  <div>
+                    <div className="text-xs font-bold">{pm.label}</div>
+                    <div className="text-sm font-mono font-bold">{pm.number}</div>
+                  </div>
+                </div>
+              ) : null;
+            })()}
             <div className="bg-yellow-50 dark:bg-yellow-950/20 rounded-xl p-3">
               <p className="text-sm text-yellow-700 dark:text-yellow-400">
-                ⚠️ قبل الإرسال، تأكد من تحويل المبلغ لرقم المنصة أعلاه، ثم أدخل بياناتك لتأكيد الدفع.
+                ⚠️ قبل الإرسال، تأكد من تحويل المبلغ للرقم أعلاه، ثم أدخل بياناتك وارفع صورة الإيصال.
               </p>
             </div>
             <div>
               <label className="text-sm font-medium">اسمك الكامل</label>
-              <Input value={payerName} onChange={e => setPayerName(e.target.value)} placeholder="أحمد محمد علي" className="mt-1" />
+              <Input value={payerName} onChange={e => setPayerName(e.target.value)} placeholder="أحمد محمد علي" className="mt-1" data-testid="input-payer-name" />
             </div>
             <div>
               <label className="text-sm font-medium">رقم هاتفك</label>
-              <Input value={payerPhone} onChange={e => setPayerPhone(e.target.value)} placeholder="01xxxxxxxxx" className="mt-1 font-mono" dir="ltr" />
+              <Input value={payerPhone} onChange={e => setPayerPhone(e.target.value)} placeholder="01xxxxxxxxx" className="mt-1 font-mono" dir="ltr" data-testid="input-payer-phone" />
             </div>
             <div>
               <label className="text-sm font-medium">المبلغ المدفوع (ج.م)</label>
-              <Input type="number" value={paidAmount} onChange={e => setPaidAmount(e.target.value)} placeholder={ad.priceEGP?.toString() || "0"} className="mt-1" />
+              <Input type="number" value={paidAmount} onChange={e => setPaidAmount(e.target.value)} placeholder={ad.priceEGP?.toString() || "0"} className="mt-1" data-testid="input-paid-amount" />
+            </div>
+            {/* Screenshot upload */}
+            <div>
+              <label className="text-sm font-medium">صورة الإيصال / لقطة الشاشة <span className="text-muted-foreground text-xs">(اختياري)</span></label>
+              {screenshotUrl ? (
+                <div className="mt-2 relative w-fit">
+                  <img src={screenshotUrl} alt="إيصال الدفع" className="w-32 h-32 object-cover rounded-xl border border-border" />
+                  <button
+                    onClick={() => setScreenshotUrl("")}
+                    className="absolute -top-2 -left-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-600"
+                    data-testid="btn-remove-screenshot"
+                  >✕</button>
+                  <p className="text-xs text-green-600 mt-1">✅ تم رفع الإيصال</p>
+                </div>
+              ) : (
+                <label className="mt-2 flex items-center gap-2 cursor-pointer border border-dashed border-border rounded-xl p-3 hover:border-primary transition-colors" data-testid="upload-payment-screenshot">
+                  {screenshotUploading ? (
+                    <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" opacity=".3"/><path d="M21 12a9 9 0 00-9-9"/></svg>
+                      جاري الرفع...
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                      ارفع صورة الإيصال أو لقطة الشاشة
+                    </span>
+                  )}
+                  <input type="file" accept="image/*" className="hidden" onChange={handleScreenshotUpload} disabled={screenshotUploading} />
+                </label>
+              )}
             </div>
             <Button
               className="w-full gap-2" onClick={() => confirmMutation.mutate()}
-              disabled={!payerName || !payerPhone || !paidAmount || confirmMutation.isPending}
+              disabled={!payerName || !payerPhone || !paidAmount || confirmMutation.isPending || screenshotUploading}
+              data-testid="btn-confirm-payment"
             >
               <CheckCircle className="w-4 h-4" /> أرسل تأكيد الدفع
             </Button>
