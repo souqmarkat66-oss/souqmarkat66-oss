@@ -97,7 +97,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   const streamRooms: Map<string, {
     broadcasterId: string | null;
-    cohostId: string | null;
+    cohostIds: string[];          // up to 3 co-hosts
+    cohostNames: Map<string, string>; // socketId → display name
     viewers: Set<string>;
     peakViewers: number;
     startedAt: number;
@@ -123,7 +124,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   function getOrCreateRoom(streamId: string) {
     if (!streamRooms.has(streamId)) {
       streamRooms.set(streamId, {
-        broadcasterId: null, cohostId: null, viewers: new Set(),
+        broadcasterId: null, cohostIds: [], cohostNames: new Map(), viewers: new Set(),
         peakViewers: 0, startedAt: Date.now(), totalLikes: 0, totalComments: 0,
         bannedSockets: new Set(), giftGoal: null, totalGiftCoins: 0,
         socketToUser: new Map(),
@@ -141,8 +142,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (count > room.peakViewers) room.peakViewers = count;
       io.to(`stream:${streamId}`).emit("viewer-count", count);
       storage.updateLiveStream(Number(streamId), { viewerCount: count } as any).catch(() => {});
-      // Inform new viewer if co-host is active
-      if (room.cohostId) socket.emit("cohost-active", room.cohostId);
+      // Inform new viewer of ALL active co-hosts
+      for (const cohostId of room.cohostIds) {
+        socket.emit("cohost-active", cohostId, room.cohostNames.get(cohostId) || "ضيف");
+      }
     });
 
     socket.on("leave-stream", (streamId: string) => {
@@ -197,13 +200,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     // ── Co-host Signaling ──
     socket.on("request-cohost", (data: { streamId: string; userId: string; userName: string }) => {
       const room = streamRooms.get(data.streamId);
-      if (!room?.broadcasterId || room.cohostId) return; // already has co-host
+      if (!room?.broadcasterId) return;
+      if (room.cohostIds.length >= 3) {
+        // Max 3 co-hosts
+        socket.emit("cohost-rejected", { reason: "max_cohosts" });
+        return;
+      }
       socket.to(room.broadcasterId).emit("cohost-request", { socketId: socket.id, userId: data.userId, userName: data.userName });
     });
 
-    socket.on("accept-cohost", (data: { streamId: string; guestSocketId: string }) => {
+    socket.on("accept-cohost", (data: { streamId: string; guestSocketId: string; guestName?: string }) => {
       const room = streamRooms.get(data.streamId);
-      if (room) room.cohostId = data.guestSocketId;
+      if (room && !room.cohostIds.includes(data.guestSocketId)) {
+        room.cohostIds.push(data.guestSocketId);
+        if (data.guestName) room.cohostNames.set(data.guestSocketId, data.guestName);
+      }
       io.to(data.guestSocketId).emit("cohost-accepted", { broadcasterId: socket.id });
     });
 
@@ -211,11 +222,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       io.to(data.guestSocketId).emit("cohost-rejected");
     });
 
-    socket.on("cohost-broadcaster", (streamId: string) => {
+    socket.on("cohost-broadcaster", (data: string | { streamId: string; name?: string }) => {
+      const streamId = typeof data === "string" ? data : data.streamId;
+      const name = typeof data === "object" ? data.name : undefined;
       const room = streamRooms.get(streamId);
-      if (room) room.cohostId = socket.id;
-      // Notify all viewers that co-host is live
-      socket.to(`stream:${streamId}`).emit("cohost-active", socket.id);
+      if (room && !room.cohostIds.includes(socket.id)) {
+        room.cohostIds.push(socket.id);
+        if (name) room.cohostNames.set(socket.id, name);
+      }
+      // Notify all viewers that a new co-host is live
+      socket.to(`stream:${streamId}`).emit("cohost-active", socket.id, name || "ضيف");
     });
 
     socket.on("cohost-watcher", (data: { cohostId: string }) => {
@@ -229,8 +245,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     socket.on("cohost-leave", (streamId: string) => {
       const room = streamRooms.get(streamId);
-      if (room) room.cohostId = null;
-      io.to(`stream:${streamId}`).emit("cohost-left");
+      if (room) {
+        room.cohostIds = room.cohostIds.filter(id => id !== socket.id);
+        room.cohostNames.delete(socket.id);
+      }
+      io.to(`stream:${streamId}`).emit("cohost-left", socket.id);
     });
 
     // ── TikTok-style Live Features ──────────────────────────────────
@@ -266,14 +285,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socket.on("disconnect", () => {
       streamRooms.forEach((room, streamId) => {
         if (room.broadcasterId === socket.id) {
-          const durationSec = Math.round((Date.now() - room.startedAt) / 1000);
           room.broadcasterId = null;
           io.to(`stream:${streamId}`).emit("broadcaster-disconnected");
-          // Send summary to broadcaster (they may have already disconnected, that's ok)
         }
-        if (room.cohostId === socket.id) {
-          room.cohostId = null;
-          io.to(`stream:${streamId}`).emit("cohost-left");
+        if (room.cohostIds.includes(socket.id)) {
+          room.cohostIds = room.cohostIds.filter(id => id !== socket.id);
+          room.cohostNames.delete(socket.id);
+          io.to(`stream:${streamId}`).emit("cohost-left", socket.id);
         }
         room.viewers.delete(socket.id);
       });
@@ -1125,6 +1143,33 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const updateData: any = { status: 'ended', endedAt: new Date() };
     if (recordingUrl) updateData.recordingUrl = recordingUrl;
     const updated = await storage.updateLiveStream(Number(req.params.id), updateData);
+
+    // ── Notify followers that stream ended (with replay link if available) ──
+    (async () => {
+      try {
+        if (stream.channelId) {
+          const broadcasterName = req.user.claims?.first_name || "المذيع";
+          const streamLink = `/streams/${stream.id}`;
+          const hasReplay = !!recordingUrl;
+          const notifTitle = `📴 ${broadcasterName} أنهى البث المباشر`;
+          const notifBody = hasReplay
+            ? `"${stream.title || 'البث'}" — يمكنك مشاهدة التسجيل الآن!`
+            : `"${stream.title || 'البث'}" انتهى — شكراً لمشاهدتك`;
+          const followerRows = await db.execute(
+            sql`SELECT follower_id FROM follows WHERE channel_id = ${stream.channelId}`
+          );
+          const followerIds: string[] = (followerRows.rows as any[]).map((r: any) => r.follower_id);
+          for (const followerId of followerIds) {
+            if (followerId !== req.user.claims.sub) {
+              await createNotification(followerId, "system", notifTitle, notifBody, streamLink);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[Stream End Notify] Error:', e);
+      }
+    })();
+
     res.json(updated);
   });
 

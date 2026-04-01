@@ -154,15 +154,16 @@ export default function LiveStream() {
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // ── Co-host states ──────────────────────────────────────────
-  const coHostVideoRef    = useRef<HTMLVideoElement>(null);
-  const coHostPCRef         = useRef<RTCPeerConnection | null>(null);
-  const coHostStreamRef     = useRef<MediaStream | null>(null);
-  const cohostViewerPCsRef  = useRef<Map<string, RTCPeerConnection>>(new Map());
-  const isCoHostRef         = useRef(false);          // ref version (for socket closures)
-  const [coHostActive, setCoHostActive]         = useState(false);
-  const [coHostName, setCoHostName]             = useState("");
+  // Maps socketId → resources for watching co-host streams
+  const coHostVideoEls     = useRef<Map<string, HTMLVideoElement>>(new Map()); // callback refs
+  const coHostPCsRef       = useRef<Map<string, RTCPeerConnection>>(new Map()); // watching PCs
+  const myCoHostStreamRef  = useRef<MediaStream | null>(null); // MY stream (when I'm a co-host)
+  const cohostViewerPCsRef = useRef<Map<string, RTCPeerConnection>>(new Map()); // my viewers' PCs
+  const isCoHostRef        = useRef(false);          // ref version (for socket closures)
+  // coHosts array: all active co-hosts in this room
+  const [coHosts, setCoHosts]                   = useState<{ socketId: string; name: string }[]>([]);
   const [isCoHost, setIsCoHost]                 = useState(false);
-  const [cohostRequest, setCohostRequest]       = useState<{ socketId: string; userName: string } | null>(null);
+  const [cohostRequests, setCohostRequests]     = useState<{ socketId: string; userName: string }[]>([]);
   const [requestingJoin, setRequestingJoin]     = useState(false);
   const [coHostMuted, setCoHostMuted]           = useState(false);
   const [coHostVideoOff, setCoHostVideoOff]     = useState(false);
@@ -530,26 +531,35 @@ export default function LiveStream() {
     });
   }, [id, createPeer]);
 
-  // ── Connect to co-host as a watcher (viewer/broadcaster side) ──
-  // Only creates the PC and emits watcher event.
-  // All socket signaling is handled in the top-level useEffect handlers below.
-  const connectToCoHost = useCallback((socket: Socket, cohostSocketId: string) => {
-    if (coHostPCRef.current) { coHostPCRef.current.close(); coHostPCRef.current = null; }
+  // ── Connect to a co-host as watcher (viewer/broadcaster side) ──
+  // Creates a dedicated PC per co-host socket and registers a callback ref for the video element.
+  const connectToCoHost = useCallback((socket: Socket, cohostSocketId: string, cohostName?: string) => {
+    // Close existing connection for this co-host if any
+    const existing = coHostPCsRef.current.get(cohostSocketId);
+    if (existing) { existing.close(); coHostPCsRef.current.delete(cohostSocketId); }
+
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    coHostPCRef.current = pc;
+    coHostPCsRef.current.set(cohostSocketId, pc);
+
     pc.ontrack = (e) => {
-      if (coHostVideoRef.current && e.streams[0]) {
-        coHostVideoRef.current.srcObject = e.streams[0];
-        setCoHostActive(true);
-        coHostVideoRef.current.muted = false;
-        coHostVideoRef.current.play().catch(() => {
-          if (coHostVideoRef.current) { coHostVideoRef.current.muted = true; coHostVideoRef.current.play().catch(() => {}); }
-        });
+      const videoEl = coHostVideoEls.current.get(cohostSocketId);
+      if (videoEl && e.streams[0]) {
+        videoEl.srcObject = e.streams[0];
+        videoEl.muted = false;
+        videoEl.play().catch(() => { videoEl.muted = true; videoEl.play().catch(() => {}); });
       }
+      // Add to coHosts list (dedup)
+      setCoHosts(prev =>
+        prev.some(c => c.socketId === cohostSocketId)
+          ? prev
+          : [...prev, { socketId: cohostSocketId, name: cohostName || "ضيف" }]
+      );
     };
+
     pc.onicecandidate = (e) => {
       if (e.candidate) socket.emit("cohost-candidate", cohostSocketId, e.candidate);
     };
+
     // Tell co-host we want their stream
     socket.emit("cohost-watcher", { cohostId: cohostSocketId });
   }, []);
@@ -571,13 +581,13 @@ export default function LiveStream() {
     // CO-HOST SIGNALING  (all handlers at top level — no nesting)
     // ══════════════════════════════════════════════════════════
 
-    // Broadcaster receives a join-request from a viewer
+    // Broadcaster receives join-request from a viewer (max 3)
     socket.on("cohost-request", (data: { socketId: string; userName: string }) => {
-      setCohostRequest(data);
+      setCohostRequests(prev => [...prev.filter(r => r.socketId !== data.socketId), data]);
       toast({ title: `👤 ${data.userName} يطلب المشاركة في البث`, description: "يمكنك قبول أو رفض الطلب" });
     });
 
-    // Guest (requesting viewer) got accepted — open camera & announce
+    // Guest got accepted — open camera & announce as co-host
     socket.on("cohost-accepted", async () => {
       isCoHostRef.current = true;
       setIsCoHost(true);
@@ -588,16 +598,16 @@ export default function LiveStream() {
           video: { facingMode: "user" },
           audio: HIGH_QUALITY_AUDIO,
         });
-        coHostStreamRef.current = mediaStream;
-        // Show self-preview (muted so no echo)
-        if (coHostVideoRef.current) {
-          coHostVideoRef.current.srcObject = mediaStream;
-          coHostVideoRef.current.muted = true;
-          coHostVideoRef.current.play().catch(() => {});
-        }
-        setCoHostActive(true);
-        // Tell server: I'm now a co-broadcaster, notify all viewers
-        socket.emit("cohost-broadcaster", id);
+        myCoHostStreamRef.current = mediaStream;
+        // Show my own preview via my own socketId
+        const myId = socket.id || "me";
+        const myVideoEl = coHostVideoEls.current.get(myId);
+        if (myVideoEl) { myVideoEl.srcObject = mediaStream; myVideoEl.muted = true; myVideoEl.play().catch(() => {}); }
+        // Add myself to coHosts so a slot appears
+        const myName = "أنت";
+        setCoHosts(prev => prev.some(c => c.socketId === myId) ? prev : [...prev, { socketId: myId, name: myName }]);
+        // Tell server I'm now a co-broadcaster with my display name
+        socket.emit("cohost-broadcaster", { streamId: id, name: myName });
       } catch (err: any) {
         isCoHostRef.current = false;
         setIsCoHost(false);
@@ -605,31 +615,30 @@ export default function LiveStream() {
       }
     });
 
-    socket.on("cohost-rejected", () => {
+    socket.on("cohost-rejected", (data?: { reason?: string }) => {
       setRequestingJoin(false);
-      toast({ variant: "destructive", title: "❌ رُفض طلب المشاركة" });
+      const msg = data?.reason === "max_cohosts"
+        ? "❌ البث وصل للحد الأقصى من الضيوف (3)"
+        : "❌ رُفض طلب المشاركة";
+      toast({ variant: "destructive", title: msg });
     });
 
-    // SERVER → viewer/broadcaster: a co-host just went live, connect to their stream
-    socket.on("cohost-active", (cohostSocketId: string) => {
-      setCoHostActive(true);
-      if (!isCoHostRef.current) {
-        // We're a viewer or the main broadcaster — pull the co-host stream
-        connectToCoHost(socket, cohostSocketId);
-      }
+    // SERVER → everyone in room: a co-host just went live with their socketId and name
+    socket.on("cohost-active", (cohostSocketId: string, cohostName?: string) => {
+      // Don't connect to our own stream
+      if (cohostSocketId === socket.id) return;
+      connectToCoHost(socket, cohostSocketId, cohostName);
     });
 
-    // ── CO-HOST sends stream to each watcher (viewer / broadcaster) ──
-    // Triggered when a viewer emits cohost-watcher to the server
+    // ── I am co-host: a viewer/broadcaster wants my stream ──
     socket.on("cohost-watcher", async (watcherId: string) => {
-      if (!coHostStreamRef.current) return;  // only the active co-host handles this
-      // Close any existing connection for this watcher
+      if (!myCoHostStreamRef.current) return;
       const existing = cohostViewerPCsRef.current.get(watcherId);
-      if (existing) { existing.close(); }
+      if (existing) existing.close();
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       cohostViewerPCsRef.current.set(watcherId, pc);
-      coHostStreamRef.current.getTracks().forEach(track =>
-        pc.addTrack(track, coHostStreamRef.current!)
+      myCoHostStreamRef.current.getTracks().forEach(track =>
+        pc.addTrack(track, myCoHostStreamRef.current!)
       );
       pc.onicecandidate = (e) => {
         if (e.candidate) socket.emit("cohost-candidate", watcherId, e.candidate);
@@ -641,27 +650,29 @@ export default function LiveStream() {
       } catch {}
     });
 
-    // ── VIEWER receives co-host's offer → answers it ──
+    // ── I receive a co-host offer (I'm a viewer watching them) ──
     socket.on("cohost-offer", async (senderId: string, desc: RTCSessionDescriptionInit) => {
-      // Self-heal: if PC was lost, recreate it
-      if (!coHostPCRef.current) {
-        const pc2 = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-        coHostPCRef.current = pc2;
-        pc2.ontrack = (e) => {
-          if (coHostVideoRef.current && e.streams[0]) {
-            coHostVideoRef.current.srcObject = e.streams[0];
-            setCoHostActive(true);
-            coHostVideoRef.current.muted = false;
-            coHostVideoRef.current.play().catch(() => {
-              if (coHostVideoRef.current) { coHostVideoRef.current.muted = true; coHostVideoRef.current.play().catch(() => {}); }
-            });
+      let pc = coHostPCsRef.current.get(senderId);
+      if (!pc) {
+        pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+        coHostPCsRef.current.set(senderId, pc);
+        pc.ontrack = (e) => {
+          const videoEl = coHostVideoEls.current.get(senderId);
+          if (videoEl && e.streams[0]) {
+            videoEl.srcObject = e.streams[0];
+            videoEl.muted = false;
+            videoEl.play().catch(() => { videoEl.muted = true; videoEl.play().catch(() => {}); });
           }
+          setCoHosts(prev =>
+            prev.some(c => c.socketId === senderId)
+              ? prev
+              : [...prev, { socketId: senderId, name: "ضيف" }]
+          );
         };
-        pc2.onicecandidate = (e) => {
+        pc.onicecandidate = (e) => {
           if (e.candidate) socket.emit("cohost-candidate", senderId, e.candidate);
         };
       }
-      const pc = coHostPCRef.current;
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(desc));
         const answer = await pc.createAnswer();
@@ -670,40 +681,49 @@ export default function LiveStream() {
       } catch (err) { console.warn("cohost-offer handling failed", err); }
     });
 
-    // ── CO-HOST receives viewer's answer → finalises connection ──
+    // ── I'm a co-host: viewer finalized answer ──
     socket.on("cohost-answer", async (senderId: string, desc: RTCSessionDescriptionInit) => {
       const pc = cohostViewerPCsRef.current.get(senderId);
       if (pc) await pc.setRemoteDescription(new RTCSessionDescription(desc)).catch(() => {});
     });
 
-    // ── ICE candidates — route to the right PC ──
+    // ── Route ICE candidates to the correct PC ──
     socket.on("cohost-candidate", async (senderId: string, candidate: RTCIceCandidateInit) => {
-      // If we're the co-host and this is from a viewer:
       const viewerPC = cohostViewerPCsRef.current.get(senderId);
-      if (viewerPC) {
-        await viewerPC.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
-        return;
-      }
-      // If we're a viewer and this is from the co-host:
-      if (coHostPCRef.current) {
-        await coHostPCRef.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
-      }
+      if (viewerPC) { await viewerPC.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {}); return; }
+      const watchPC = coHostPCsRef.current.get(senderId);
+      if (watchPC) await watchPC.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
     });
 
-    socket.on("cohost-left", () => {
-      isCoHostRef.current = false;
-      setCoHostActive(false);
-      setIsCoHost(false);
-      setCohostRequest(null);
-      if (coHostVideoRef.current) coHostVideoRef.current.srcObject = null;
-      coHostPCRef.current?.close();
-      coHostPCRef.current = null;
-      coHostStreamRef.current?.getTracks().forEach(t => t.stop());
-      coHostStreamRef.current = null;
-      // Close all viewer connections on co-host side
-      cohostViewerPCsRef.current.forEach(pc => pc.close());
-      cohostViewerPCsRef.current.clear();
-      toast({ title: "👋 انتهت مشاركة الضيف" });
+    // ── A specific co-host left (server passes their socketId) ──
+    socket.on("cohost-left", (leavingSocketId?: string) => {
+      if (leavingSocketId) {
+        // Clean up their resources
+        coHostPCsRef.current.get(leavingSocketId)?.close();
+        coHostPCsRef.current.delete(leavingSocketId);
+        const el = coHostVideoEls.current.get(leavingSocketId);
+        if (el) el.srcObject = null;
+        coHostVideoEls.current.delete(leavingSocketId);
+        setCoHosts(prev => prev.filter(c => c.socketId !== leavingSocketId));
+        toast({ title: "👋 انتهت مشاركة ضيف" });
+      } else {
+        // Legacy: clear all co-hosts
+        coHostPCsRef.current.forEach(pc => pc.close());
+        coHostPCsRef.current.clear();
+        coHostVideoEls.current.clear();
+        setCoHosts([]);
+        toast({ title: "👋 انتهى البث الجماعي" });
+      }
+      // If I was the co-host that left
+      if (!leavingSocketId || leavingSocketId === socket.id) {
+        isCoHostRef.current = false;
+        setIsCoHost(false);
+        myCoHostStreamRef.current?.getTracks().forEach(t => t.stop());
+        myCoHostStreamRef.current = null;
+        cohostViewerPCsRef.current.forEach(pc => pc.close());
+        cohostViewerPCsRef.current.clear();
+        setCohostRequests([]);
+      }
     });
 
     // ── TikTok-style Live Feature Listeners ──────────────────────
@@ -778,8 +798,9 @@ export default function LiveStream() {
       socket.io.off("reconnect");
       socket.disconnect();
       localStreamRef.current?.getTracks().forEach(t => t.stop());
-      coHostStreamRef.current?.getTracks().forEach(t => t.stop());
-      coHostPCRef.current?.close();
+      myCoHostStreamRef.current?.getTracks().forEach(t => t.stop());
+      coHostPCsRef.current.forEach(pc => pc.close());
+      coHostPCsRef.current.clear();
       cohostViewerPCsRef.current.forEach(pc => pc.close());
       cohostViewerPCsRef.current.clear();
       peersRef.current.forEach(pc => pc.close());
@@ -817,8 +838,8 @@ export default function LiveStream() {
         const audioTrack = localStreamRef.current.getAudioTracks()[0].clone();
         stream2 = new MediaStream([audioTrack]);
         shouldStopStream = true; // stop the clone, not the original
-      } else if (isCoHostRef.current && coHostStreamRef.current && coHostStreamRef.current.getAudioTracks().length > 0) {
-        const audioTrack = coHostStreamRef.current.getAudioTracks()[0].clone();
+      } else if (isCoHostRef.current && myCoHostStreamRef.current && myCoHostStreamRef.current.getAudioTracks().length > 0) {
+        const audioTrack = myCoHostStreamRef.current.getAudioTracks()[0].clone();
         stream2 = new MediaStream([audioTrack]);
         shouldStopStream = true;
       } else {
@@ -1100,55 +1121,66 @@ export default function LiveStream() {
         {/* ══ TikTok-style Full-Screen Video Area ══ */}
         <div className="relative flex-1 overflow-hidden bg-black flex items-center justify-center lg:max-w-[480px] lg:mx-auto"
           style={{ minHeight: "100dvh" }}>
-          {/* Co-host request popup — floating overlay at top */}
-          {isBroadcast && cohostRequest && (
-            <div className="absolute top-16 inset-x-3 z-30 p-3 rounded-2xl bg-black/80 backdrop-blur border border-blue-500/50 flex items-center gap-3" dir="rtl">
+          {/* Co-host request popups (one per pending request, stacked) */}
+          {isBroadcast && cohostRequests.map((req, i) => (
+            <div key={req.socketId} className="absolute inset-x-3 z-30 p-3 rounded-2xl bg-black/80 backdrop-blur border border-blue-500/50 flex items-center gap-3" style={{ top: `${64 + i * 72}px` }} dir="rtl">
               <UserPlus className="w-5 h-5 text-blue-400 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="font-bold text-sm text-white">👤 {cohostRequest.userName} يطلب المشاركة</p>
+                <p className="font-bold text-sm text-white">👤 {req.userName} يطلب المشاركة</p>
+                {coHosts.length >= 3 && <p className="text-yellow-400 text-[10px]">الحد الأقصى (3 ضيوف)</p>}
               </div>
               <div className="flex gap-2 flex-shrink-0">
                 <button
                   onClick={() => {
-                    socketRef.current?.emit("accept-cohost", { streamId: id, guestSocketId: cohostRequest.socketId });
-                    setCoHostName(cohostRequest.userName);
-                    setCohostRequest(null);
+                    if (coHosts.length >= 3) { toast({ variant: "destructive", title: "الحد الأقصى 3 ضيوف" }); return; }
+                    socketRef.current?.emit("accept-cohost", { streamId: id, guestSocketId: req.socketId, guestName: req.userName });
+                    setCohostRequests(prev => prev.filter(r => r.socketId !== req.socketId));
                     toast({ title: "✅ تم قبول الضيف" });
                   }}
-                  className="px-3 py-1.5 rounded-xl bg-green-500 text-white text-xs font-bold hover:bg-green-600 transition"
-                  data-testid="btn-accept-cohost"
+                  disabled={coHosts.length >= 3}
+                  className="px-3 py-1.5 rounded-xl bg-green-500 text-white text-xs font-bold hover:bg-green-600 transition disabled:opacity-50"
+                  data-testid={`btn-accept-cohost-${req.socketId}`}
                 >
                   <UserCheck className="w-3.5 h-3.5 inline ml-1" />قبول
                 </button>
                 <button
-                  onClick={() => { socketRef.current?.emit("reject-cohost", { guestSocketId: cohostRequest.socketId }); setCohostRequest(null); }}
+                  onClick={() => { socketRef.current?.emit("reject-cohost", { guestSocketId: req.socketId }); setCohostRequests(prev => prev.filter(r => r.socketId !== req.socketId)); }}
                   className="px-3 py-1.5 rounded-xl bg-red-500 text-white text-xs font-bold hover:bg-red-600 transition"
-                  data-testid="btn-reject-cohost"
+                  data-testid={`btn-reject-cohost-${req.socketId}`}
                 >رفض</button>
               </div>
             </div>
-          )}
+          ))}
 
-          {/* Group Live Banner — absolute top center */}
-          {coHostActive && (
+          {/* Group Live Banner */}
+          {coHosts.length > 0 && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-4 py-1.5 rounded-full bg-black/70 backdrop-blur border border-purple-500/50">
               <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-              <span className="text-xs font-bold text-white">🔴 بث جماعي — {viewerCount} مشاهد</span>
+              <span className="text-xs font-bold text-white">🔴 بث جماعي ({coHosts.length + 1} مذيعين) — {viewerCount} مشاهد</span>
             </div>
           )}
 
-          {/* Dual video area — TikTok full-height portrait */}
-          <div className={coHostActive ? "absolute inset-0 grid grid-cols-2 gap-0" : "absolute inset-0"}>
-            <div className={`relative overflow-hidden bg-black ${coHostActive ? "ring-2 ring-red-500/60" : ""}`}>
-            {/* Host label when in group live — bottom-left to avoid overlap with top badges */}
-            {coHostActive && (
-              <div className="absolute bottom-3 start-3 z-10 flex items-center gap-1.5 bg-black/70 backdrop-blur rounded-full px-3 py-1">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-white text-xs font-bold">
-                  {isBroadcast ? "أنت (المضيف)" : "المضيف الرئيسي"}
-                </span>
-              </div>
-            )}
+          {/* ── Dynamic video grid (1–4 hosts) ── */}
+          <div className={
+            coHosts.length === 0 ? "absolute inset-0" :
+            coHosts.length === 1 ? "absolute inset-0 grid grid-cols-2 gap-0" :
+            coHosts.length === 2 ? "absolute inset-0 grid grid-rows-2 gap-0" :
+            "absolute inset-0 grid grid-cols-2 grid-rows-2 gap-0"
+          }>
+            {/* ── Main broadcaster / host slot ── */}
+            <div className={
+              coHosts.length === 0 ? "absolute inset-0 overflow-hidden bg-black" :
+              coHosts.length === 2 ? "relative overflow-hidden bg-black ring-2 ring-red-500/60 col-span-2" :
+              "relative overflow-hidden bg-black ring-2 ring-red-500/60"
+            }>
+              {coHosts.length > 0 && (
+                <div className="absolute bottom-2 start-2 z-10 flex items-center gap-1.5 bg-black/70 backdrop-blur rounded-full px-2 py-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                  <span className="text-white text-[10px] font-bold">
+                    {isBroadcast ? "أنت (المضيف)" : "المضيف"}
+                  </span>
+                </div>
+              )}
             <video
               ref={videoRef}
               autoPlay
