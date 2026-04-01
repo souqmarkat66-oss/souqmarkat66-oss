@@ -2386,7 +2386,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { adId, payerName, payerPhone, paidAmount, paymentMethod, screenshotUrl } = req.body;
       if (!adId || !payerName || !payerPhone || !paidAmount || !paymentMethod)
         return res.status(400).json({ message: "بيانات ناقصة" });
-      const payerUserId = (req as any).session?.customUser?.id || null;
+      const payerUserId = (req as any).session?.customUser?.id || (req as any).user?.claims?.sub || null;
       const result = await db.execute(
         sql`INSERT INTO payment_notifications (ad_id, payer_name, payer_phone, paid_amount, payment_method, status, screenshot_url, payer_user_id)
             VALUES (${adId}, ${payerName}, ${payerPhone}, ${paidAmount}, ${paymentMethod}, 'pending', ${screenshotUrl || null}, ${payerUserId})
@@ -2418,6 +2418,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.put("/api/payment-notifications/:id", isAuthenticated, async (req: any, res) => {
     if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
     const { status } = req.body;
+    if (!["pending", "confirmed", "rejected"].includes(status))
+      return res.status(400).json({ message: "حالة غير صالحة" });
     try {
       const result = await db.execute(
         sql`UPDATE payment_notifications SET status = ${status} WHERE id = ${req.params.id} RETURNING *`

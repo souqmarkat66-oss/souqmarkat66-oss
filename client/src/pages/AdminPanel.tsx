@@ -1724,13 +1724,13 @@ function PayReceiptsSection() {
         <div className="space-y-3">
           {filtered.map((r: any) => (
             <Card
-              key={r.id}
+              key={`${r.source_type || "dm"}-${r.id}`}
               className={`rounded-2xl border transition-all ${
                 !r.is_read
                   ? "border-orange-500/60 bg-orange-500/5 shadow-md"
                   : "border-border/40 bg-muted/20"
               }`}
-              data-testid={`card-receipt-${r.id}`}
+              data-testid={`card-receipt-${r.source_type || "dm"}-${r.id}`}
             >
               <CardContent className="p-4">
                 <div className="flex flex-col md:flex-row gap-4">
