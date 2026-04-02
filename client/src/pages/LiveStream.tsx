@@ -1500,20 +1500,24 @@ export default function LiveStream() {
             })()}
           </div>
 
-          {/* Co-host video (shown when active) — fills its half of the split */}
-          {coHostActive && (
-            <div className="relative overflow-hidden bg-black ring-2 ring-purple-500/60 h-full">
+          {/* Co-host video slots — one per active co-host */}
+          {coHosts.map((ch) => (
+            <div key={ch.socketId} className="relative overflow-hidden bg-black ring-2 ring-purple-500/60 h-full">
               <video
-                ref={coHostVideoRef}
+                ref={(el) => {
+                  if (el) coHostVideoEls.current.set(ch.socketId, el);
+                  else coHostVideoEls.current.delete(ch.socketId);
+                }}
                 autoPlay
                 playsInline
+                muted={ch.name === "أنت"}
                 className="w-full h-full object-cover"
                 style={{ backgroundColor: "#000" }}
               />
               {/* Guest label */}
               <div className="absolute top-2 start-2 z-10 flex items-center gap-1.5 bg-black/70 backdrop-blur rounded-full px-3 py-1">
                 <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
-                <span className="text-white text-xs font-bold">{coHostName || "ضيف"}</span>
+                <span className="text-white text-xs font-bold">{ch.name}</span>
               </div>
               {/* "GUEST" badge */}
               <div className="absolute top-2 end-2 z-10">
@@ -1521,13 +1525,13 @@ export default function LiveStream() {
                   <Users className="w-2.5 h-2.5 ml-1" /> ضيف
                 </Badge>
               </div>
-              {/* Co-host controls (for isCoHost) */}
-              {isCoHost && (
+              {/* Co-host mic/video/leave controls — only shown on the co-host's own slot */}
+              {isCoHost && ch.name === "أنت" && (
                 <div className="absolute bottom-4 inset-x-0 flex items-center justify-center gap-3">
                   <button
                     onClick={() => {
-                      if (coHostStreamRef.current) {
-                        const aTrack = coHostStreamRef.current.getAudioTracks()[0];
+                      if (myCoHostStreamRef.current) {
+                        const aTrack = myCoHostStreamRef.current.getAudioTracks()[0];
                         if (aTrack) { aTrack.enabled = !aTrack.enabled; setCoHostMuted(!aTrack.enabled); }
                       }
                     }}
@@ -1537,8 +1541,8 @@ export default function LiveStream() {
                   </button>
                   <button
                     onClick={() => {
-                      if (coHostStreamRef.current) {
-                        const vTrack = coHostStreamRef.current.getVideoTracks()[0];
+                      if (myCoHostStreamRef.current) {
+                        const vTrack = myCoHostStreamRef.current.getVideoTracks()[0];
                         if (vTrack) { vTrack.enabled = !vTrack.enabled; setCoHostVideoOff(!vTrack.enabled); }
                       }
                     }}
@@ -1550,9 +1554,10 @@ export default function LiveStream() {
                     onClick={() => {
                       socketRef.current?.emit("cohost-leave", id);
                       setIsCoHost(false);
-                      setCoHostActive(false);
-                      coHostStreamRef.current?.getTracks().forEach(t => t.stop());
-                      coHostStreamRef.current = null;
+                      isCoHostRef.current = false;
+                      myCoHostStreamRef.current?.getTracks().forEach(t => t.stop());
+                      myCoHostStreamRef.current = null;
+                      setCoHosts(prev => prev.filter(c => c.name !== "أنت"));
                     }}
                     className="px-4 h-11 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5 text-xs font-bold shadow-lg transition"
                     data-testid="btn-leave-cohost"
@@ -1562,7 +1567,7 @@ export default function LiveStream() {
                 </div>
               )}
             </div>
-          )}
+          ))}
           </div>{/* end grid wrapper */}
 
           {/* ── TikTok Top Bar Overlay ── */}
@@ -1612,7 +1617,7 @@ export default function LiveStream() {
               <span className="text-white text-[10px] font-bold drop-shadow">مشاركة</span>
             </div>
             {/* Cohost join (viewer) */}
-            {!isBroadcast && streaming && !isCoHost && !coHostActive && user && (
+            {!isBroadcast && streaming && !isCoHost && coHosts.length === 0 && user && (
               <button
                 onClick={() => {
                   if (requestingJoin) return;
