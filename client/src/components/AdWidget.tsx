@@ -20,8 +20,9 @@ interface AdWidgetProps {
 }
 
 // ─── Widget Image with fallback placeholder ────────────────────────────
-function WidgetImage({ src, alt, className }: { src: string; alt: string; className: string }) {
+function WidgetImage({ src, alt, className, onLoad }: { src: string; alt: string; className: string; onLoad?: () => void }) {
   const [err, setErr] = useState(false);
+  useEffect(() => { setErr(false); }, [src]);
   if (err) {
     return (
       <div className={`${className} flex items-center justify-center bg-zinc-800 text-white/20`}>
@@ -29,7 +30,7 @@ function WidgetImage({ src, alt, className }: { src: string; alt: string; classN
       </div>
     );
   }
-  return <img src={src} alt={alt} className={className} onError={() => setErr(true)} />;
+  return <img src={src} alt={alt} className={className} onLoad={onLoad} onError={() => setErr(true)} />;
 }
 
 // ─── Minimal Spinner ───────────────────────────────────────────────────
@@ -255,7 +256,7 @@ export function AdWidget({
           ) : (
             <>
               {!imgLoaded && <div className="absolute inset-0 bg-zinc-900 animate-pulse" />}
-              <img
+              <WidgetImage
                 src={ad.mediaUrl || ""}
                 alt={ad.name}
                 onLoad={() => setImgLoaded(true)}
