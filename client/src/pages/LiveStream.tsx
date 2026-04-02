@@ -1350,6 +1350,11 @@ export default function LiveStream() {
               </div>
             )}
 
+            {/* ── Ad Overlay (viewer only, TikTok style) ── */}
+            {!isBroadcast && streaming && (
+              <AdWidget variant="overlay" refreshInterval={45000} dismissible={true} />
+            )}
+
             {/* ── TikTok Floating Hearts ── */}
             {floatingHearts.map(h => (
               <div key={h.id} className="absolute bottom-20 pointer-events-none select-none text-2xl"
@@ -1617,7 +1622,7 @@ export default function LiveStream() {
               <span className="text-white text-[10px] font-bold drop-shadow">مشاركة</span>
             </div>
             {/* Cohost join (viewer) */}
-            {!isBroadcast && streaming && !isCoHost && coHosts.length === 0 && user && (
+            {!isBroadcast && streaming && !isCoHost && coHosts.length < 3 && user && (
               <button
                 onClick={() => {
                   if (requestingJoin) return;

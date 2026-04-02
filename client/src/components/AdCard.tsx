@@ -244,6 +244,7 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
                 loop
                 playsInline
                 muted
+                preload="metadata"
                 onEnded={() => setPlaying(false)}
                 onPause={() => setPlaying(false)}
                 onPlay={() => setPlaying(true)}

@@ -81,7 +81,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── DB Migrations (safe — ADD COLUMN IF NOT EXISTS) ──
   try {
     await db.execute(sql`ALTER TABLE reels ADD COLUMN IF NOT EXISTS audio_url text`);
-  } catch { /* column may already exist */ }
+    // User social / profile columns
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio text`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS governorate text`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code text`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS interests text`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthday date`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title text`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS company text`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS city text`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS relationship_status text`);
+  } catch { /* columns may already exist */ }
 
   // Serve uploads directory
   const uploadsDir = path.join(process.cwd(), "uploads");
