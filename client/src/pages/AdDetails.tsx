@@ -537,26 +537,28 @@ function VideoPlayer({ src }: { src: string }) {
 
 function ImageSlideshow({ images }: { images: string[] }) {
   const [current, setCurrent] = useState(0);
-  const [imgErr, setImgErr] = useState(false);
+  const [imgErrors, setImgErrors] = useState<Record<number, boolean>>({});
   useEffect(() => {
     if (images.length <= 1) return;
     const timer = setInterval(() => setCurrent(c => (c + 1) % images.length), 3000);
     return () => clearInterval(timer);
   }, [images.length]);
   if (images.length === 0) return null;
+  const hasCurError = !!imgErrors[current];
   return (
     <div className="relative w-full h-full bg-black">
-      {imgErr ? (
+      {hasCurError ? (
         <div className="w-full h-full flex flex-col items-center justify-center text-white/30">
           <span className="text-5xl mb-2">📷</span>
           <span className="text-sm">تعذّر تحميل الصورة</span>
         </div>
       ) : (
         <img
+          key={images[current]}
           src={images[current]}
           alt=""
           className="w-full h-full object-contain transition-opacity duration-500"
-          onError={() => setImgErr(true)}
+          onError={() => setImgErrors(prev => ({ ...prev, [current]: true }))}
         />
       )}
       {images.length > 1 && (

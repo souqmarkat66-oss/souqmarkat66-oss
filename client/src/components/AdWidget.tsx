@@ -19,6 +19,19 @@ interface AdWidgetProps {
   refreshInterval?: number;
 }
 
+// ─── Widget Image with fallback placeholder ────────────────────────────
+function WidgetImage({ src, alt, className }: { src: string; alt: string; className: string }) {
+  const [err, setErr] = useState(false);
+  if (err) {
+    return (
+      <div className={`${className} flex items-center justify-center bg-zinc-800 text-white/20`}>
+        <span className="text-2xl">📷</span>
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} className={className} onError={() => setErr(true)} />;
+}
+
 // ─── Minimal Spinner ───────────────────────────────────────────────────
 function Spinner() {
   return (
@@ -318,7 +331,7 @@ export function AdWidget({
             isVideo
               ? <video ref={videoRef} src={ad.mediaUrl} autoPlay muted loop playsInline
                   onTimeUpdate={handleTimeUpdate} className="w-full h-32 object-cover" />
-              : <img src={ad.mediaUrl} alt={ad.name} className="w-full h-32 object-cover group-hover:scale-105 transition-transform duration-500" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+              : <WidgetImage src={ad.mediaUrl} alt={ad.name} className="w-full h-32 object-cover group-hover:scale-105 transition-transform duration-500" />
           )}
           {/* progress */}
           {isVideo && (
@@ -370,7 +383,7 @@ export function AdWidget({
               {isVideo
                 ? <video ref={videoRef} src={ad.mediaUrl} autoPlay muted={muted} loop playsInline
                     onTimeUpdate={handleTimeUpdate} className="w-full h-40 object-cover" />
-                : <img src={ad.mediaUrl} alt={ad.name} className="w-full h-40 object-cover group-hover:scale-105 transition-transform duration-500" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />}
+                : <WidgetImage src={ad.mediaUrl} alt={ad.name} className="w-full h-40 object-cover group-hover:scale-105 transition-transform duration-500" />}
               {isVideo && (
                 <>
                   <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/10">
@@ -423,7 +436,7 @@ export function AdWidget({
           <div className="relative w-16 h-16 rounded-xl overflow-hidden shrink-0 bg-zinc-900">
             {isVideo
               ? <video ref={videoRef} src={ad.mediaUrl} autoPlay muted loop playsInline className="w-full h-full object-cover" />
-              : <img src={ad.mediaUrl} alt={ad.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />}
+              : <WidgetImage src={ad.mediaUrl} alt={ad.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />}
           </div>
         )}
         <div className="flex-1 min-w-0">

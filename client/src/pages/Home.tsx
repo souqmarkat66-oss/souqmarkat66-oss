@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Link } from "wouter";
 import { ArrowRight, Sparkles, Radio, Users, Megaphone, TrendingUp, BarChart2, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
@@ -16,6 +16,30 @@ export default function Home() {
   const { t, language } = useLanguage();
   const [, setLocation] = useLocation();
   const [homeSearch, setHomeSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(homeSearch), 300);
+    return () => clearTimeout(timer);
+  }, [homeSearch]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+  const { data: suggestions = [], isFetching: suggFetching } = useQuery<any[]>({
+    queryKey: ["/api/ads/search", debouncedSearch],
+    queryFn: () => fetch(`/api/ads/search?q=${encodeURIComponent(debouncedSearch)}`).then(r => r.json()),
+    enabled: debouncedSearch.trim().length >= 2,
+  });
+
   const { data: ads, isLoading: adsLoading } = useQuery({ queryKey: ["/api/ads"], queryFn: () => fetch(`/api/ads?language=${language}`).then(r => r.json()) });
   const { data: streams, isLoading: streamsLoading } = useQuery({ queryKey: ["/api/streams"], queryFn: () => fetch("/api/streams").then(r => r.json()) });
   const { data: channels } = useQuery({ queryKey: ["/api/channels"], queryFn: () => fetch("/api/channels").then(r => r.json()) });
@@ -40,27 +64,90 @@ export default function Home() {
             <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto leading-relaxed">
               منصة متكاملة للإعلانات والبث المباشر وإدارة الحملات بذكاء اصطناعي
             </p>
-            {/* Global Search Bar */}
+            {/* Global Search Bar with instant suggestions */}
             <form
-              className="flex items-center gap-2 max-w-xl mx-auto mb-8"
+              className="max-w-xl mx-auto mb-8"
               onSubmit={e => {
                 e.preventDefault();
+                setShowSuggestions(false);
                 if (homeSearch.trim()) setLocation(`/ads?q=${encodeURIComponent(homeSearch.trim())}`);
               }}
             >
-              <div className="relative flex-1">
-                <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground pointer-events-none" />
-                <Input
-                  value={homeSearch}
-                  onChange={e => setHomeSearch(e.target.value)}
-                  placeholder="ابحث عن إعلانات، منتجات، خدمات..."
-                  className="pr-12 h-13 rounded-2xl text-base bg-background/80 backdrop-blur border-border/60 shadow-lg focus-visible:ring-primary"
-                  data-testid="input-home-search"
-                />
+              <div ref={searchRef} className="relative">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground pointer-events-none" />
+                    <Input
+                      value={homeSearch}
+                      onChange={e => { setHomeSearch(e.target.value); setShowSuggestions(true); }}
+                      onFocus={() => homeSearch.trim().length >= 2 && setShowSuggestions(true)}
+                      placeholder="ابحث عن إعلانات، منتجات، خدمات..."
+                      className="pr-12 h-12 rounded-2xl text-base bg-background/80 backdrop-blur border-border/60 shadow-lg focus-visible:ring-primary"
+                      data-testid="input-home-search"
+                    />
+                    {suggFetching && (
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xs text-muted-foreground animate-pulse">جاري البحث...</span>
+                    )}
+                  </div>
+                  <Button type="submit" size="lg" className="h-12 px-6 rounded-2xl shadow-lg shadow-primary/20 shrink-0" data-testid="btn-home-search-submit">
+                    بحث
+                  </Button>
+                </div>
+                {/* Suggestions Dropdown */}
+                {showSuggestions && debouncedSearch.trim().length >= 2 && suggestions.length > 0 && (
+                  <div className="absolute top-full mt-2 w-full bg-background border border-border/60 rounded-2xl shadow-xl z-50 overflow-hidden" data-testid="search-suggestions-dropdown">
+                    {suggestions.slice(0, 6).map((ad: any) => (
+                      <button
+                        key={ad.id}
+                        type="button"
+                        className="flex items-center gap-3 w-full px-4 py-3 hover:bg-muted/60 transition-colors text-right border-b border-border/30 last:border-b-0"
+                        data-testid={`suggestion-ad-${ad.id}`}
+                        onClick={() => {
+                          setShowSuggestions(false);
+                          setLocation(`/ads/${ad.id}`);
+                        }}
+                      >
+                        <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 bg-muted">
+                          {ad.mediaUrl && ad.mediaType !== 'video' ? (
+                            <img
+                              src={ad.mediaUrl}
+                              alt={ad.title}
+                              className="w-full h-full object-cover"
+                              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xl">📢</div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate">{ad.title}</p>
+                          {(ad.priceEGP ?? 0) > 0 && (
+                            <p className="text-xs text-primary font-bold">{ad.priceEGP?.toLocaleString()} ج.م</p>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                    {suggestions.length > 6 && (
+                      <button
+                        type="button"
+                        className="w-full px-4 py-2.5 text-sm text-primary font-medium text-center hover:bg-muted/40 transition-colors"
+                        data-testid="btn-show-all-search-results"
+                        onClick={() => {
+                          setShowSuggestions(false);
+                          setLocation(`/ads?q=${encodeURIComponent(homeSearch.trim())}`);
+                        }}
+                      >
+                        عرض جميع النتائج ({suggestions.length})
+                      </button>
+                    )}
+                  </div>
+                )}
+                {showSuggestions && debouncedSearch.trim().length >= 2 && !suggFetching && suggestions.length === 0 && (
+                  <div className="absolute top-full mt-2 w-full bg-background border border-border/60 rounded-2xl shadow-xl z-50 px-4 py-4 text-sm text-muted-foreground text-center" data-testid="search-no-results">
+                    لا توجد نتائج لـ «{debouncedSearch}»
+                  </div>
+                )}
               </div>
-              <Button type="submit" size="lg" className="h-13 px-6 rounded-2xl shadow-lg shadow-primary/20" data-testid="btn-home-search-submit">
-                بحث
-              </Button>
             </form>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link href="/create">
