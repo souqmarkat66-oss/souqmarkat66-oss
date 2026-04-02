@@ -30,6 +30,7 @@ import Profile from "@/pages/Profile";
 import MyDashboard from "@/pages/MyDashboard";
 import Social from "@/pages/Social";
 import Help from "@/pages/Help";
+import Consultations from "@/pages/Consultations";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import { GlobalAssistant } from "@/components/GlobalAssistant";
 import { PushSetup } from "@/components/PushSetup";
@@ -111,6 +112,9 @@ function Router() {
                 <ProtectedRoute component={Social} />
               </Route>
               <Route path="/help" component={Help} />
+              <Route path="/consultations">
+                <ProtectedRoute component={Consultations} />
+              </Route>
               <Route component={NotFound} />
             </Switch>
           </main>
@@ -226,6 +230,7 @@ function AppFooter() {
               <li><a href="/media-library" className="hover:text-foreground transition-colors">مكتبة الوسائط</a></li>
               <li><a href="/revenue" className="hover:text-foreground transition-colors">الإيرادات</a></li>
               <li><a href="/embed-guide" className="hover:text-foreground transition-colors font-bold text-primary">دليل ربط الإعلانات</a></li>
+              <li><a href="/consultations" className="hover:text-foreground transition-colors font-bold text-primary">💬 الاستشارات</a></li>
               <li><a href="/help" className="hover:text-foreground transition-colors font-bold text-amber-600 dark:text-amber-400">مركز المساعدة</a></li>
             </ul>
           </div>

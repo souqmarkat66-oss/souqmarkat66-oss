@@ -3688,5 +3688,79 @@ ${allPages.map(p => `  <url>
     }
   });
 
+  // ── Consultations ──────────────────────────────────────────────────────────
+  // Create consultation table on startup (already done via migrations block ideally)
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS consultations (
+        id SERIAL PRIMARY KEY,
+        user_id text NOT NULL,
+        user_name text,
+        package_id text NOT NULL,
+        package_label text,
+        amount_egp numeric(10,2) DEFAULT 0,
+        title text NOT NULL,
+        description text,
+        file_urls text,
+        status text DEFAULT 'pending',
+        admin_note text,
+        reply text,
+        payment_ref text,
+        payment_method text,
+        payment_screenshot_url text,
+        created_at timestamp DEFAULT now(),
+        updated_at timestamp DEFAULT now()
+      )
+    `);
+  } catch {}
+
+  // GET /api/consultations — list (admin sees all, user sees own)
+  app.get("/api/consultations", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const rows = isAdminUser(req)
+        ? (await db.execute(sql`SELECT * FROM consultations ORDER BY created_at DESC`)).rows
+        : (await db.execute(sql`SELECT * FROM consultations WHERE user_id = ${userId} ORDER BY created_at DESC`)).rows;
+      res.json(rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // POST /api/consultations — submit new
+  app.post("/api/consultations", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { packageId, packageLabel, amountEGP, title, description, fileUrls, paymentRef, paymentMethod, paymentScreenshotUrl } = req.body;
+      if (!packageId || !title) return res.status(400).json({ message: "بيانات ناقصة" });
+      const user = await storage.getUser(userId);
+      const userName = `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || "مستخدم";
+      const result = await db.execute(sql`
+        INSERT INTO consultations (user_id, user_name, package_id, package_label, amount_egp, title, description, file_urls, payment_ref, payment_method, payment_screenshot_url)
+        VALUES (${userId}, ${userName}, ${packageId}, ${packageLabel || packageId}, ${amountEGP || 0}, ${title}, ${description || null}, ${fileUrls ? JSON.stringify(fileUrls) : null}, ${paymentRef || null}, ${paymentMethod || null}, ${paymentScreenshotUrl || null})
+        RETURNING *
+      `);
+      // Notify admin
+      await createNotification(userId, "payment", `📋 استشارة جديدة من ${userName}: ${title}`, undefined, `/consultations`);
+      res.status(201).json(result.rows[0]);
+    } catch (e: any) { res.status(400).json({ message: e.message }); }
+  });
+
+  // PUT /api/consultations/:id — admin reply/update status
+  app.put("/api/consultations/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      const { status, adminNote, reply } = req.body;
+      const result = await db.execute(sql`
+        UPDATE consultations SET status = ${status || 'pending'}, admin_note = ${adminNote || null}, reply = ${reply || null}, updated_at = now()
+        WHERE id = ${Number(req.params.id)} RETURNING *
+      `);
+      if (result.rows[0]) {
+        await createNotification((result.rows[0] as any).user_id, "payment",
+          status === "approved" ? "✅ تمت الموافقة على استشارتك" : status === "rejected" ? "❌ تم رفض استشارتك" : "🔄 تم تحديث استشارتك",
+          undefined, `/consultations`
+        );
+      }
+      res.json(result.rows[0]);
+    } catch (e: any) { res.status(400).json({ message: e.message }); }
+  });
+
   return httpServer;
 }
