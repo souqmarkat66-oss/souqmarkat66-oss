@@ -537,6 +537,7 @@ function VideoPlayer({ src }: { src: string }) {
 
 function ImageSlideshow({ images }: { images: string[] }) {
   const [current, setCurrent] = useState(0);
+  const [imgErr, setImgErr] = useState(false);
   useEffect(() => {
     if (images.length <= 1) return;
     const timer = setInterval(() => setCurrent(c => (c + 1) % images.length), 3000);
@@ -545,7 +546,19 @@ function ImageSlideshow({ images }: { images: string[] }) {
   if (images.length === 0) return null;
   return (
     <div className="relative w-full h-full bg-black">
-      <img src={images[current]} alt="" className="w-full h-full object-contain transition-opacity duration-500" />
+      {imgErr ? (
+        <div className="w-full h-full flex flex-col items-center justify-center text-white/30">
+          <span className="text-5xl mb-2">📷</span>
+          <span className="text-sm">تعذّر تحميل الصورة</span>
+        </div>
+      ) : (
+        <img
+          src={images[current]}
+          alt=""
+          className="w-full h-full object-contain transition-opacity duration-500"
+          onError={() => setImgErr(true)}
+        />
+      )}
       {images.length > 1 && (
         <>
           <button onClick={() => setCurrent(c => (c - 1 + images.length) % images.length)} className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 flex items-center justify-center text-white"><ChevronLeft className="w-4 h-4" /></button>

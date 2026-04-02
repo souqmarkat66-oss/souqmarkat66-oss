@@ -18,7 +18,7 @@ import { Sparkles, Loader2, Film, Volume2, ImageIcon, AlertCircle, CreditCard, P
 import MediaPickerModal from "@/components/MediaPickerModal";
 import { UploadZone } from "@/components/UploadZone";
 import { motion, AnimatePresence } from "framer-motion";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { EgyptTargetingMap } from "@/components/EgyptTargetingMap";
 import LocationPickerMap from "@/components/LocationPickerMap";
 import { useTTS } from "@/hooks/use-tts";
@@ -71,6 +71,7 @@ export default function CreateAd() {
   const { mutateAsync: createAd, isPending: isCreating } = useCreateAd();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
+  const qc = useQueryClient();
   const [aiMode, setAiMode] = useState(false);
   const [videoScript, setVideoScript] = useState<any>(null);
   const [generatingScript, setGeneratingScript] = useState(false);
@@ -176,6 +177,7 @@ export default function CreateAd() {
         } : {}),
       });
       toast({ title: "🎉 تم نشر الإعلان بنجاح!", className: "bg-green-500 text-white border-none" });
+      qc.invalidateQueries({ queryKey: ["/api/ads"] });
       if (newAd?.id) {
         setLocation(`/ads/${newAd.id}`);
       } else {

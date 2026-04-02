@@ -3,7 +3,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "wouter";
-import { ArrowRight, Sparkles, Radio, Users, Megaphone, TrendingUp, BarChart2 } from "lucide-react";
+import { ArrowRight, Sparkles, Radio, Users, Megaphone, TrendingUp, BarChart2, Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { useState } from "react";
+import { useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { AdCard } from "@/components/AdCard";
@@ -11,6 +14,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Home() {
   const { t, language } = useLanguage();
+  const [, setLocation] = useLocation();
+  const [homeSearch, setHomeSearch] = useState("");
   const { data: ads, isLoading: adsLoading } = useQuery({ queryKey: ["/api/ads"], queryFn: () => fetch(`/api/ads?language=${language}`).then(r => r.json()) });
   const { data: streams, isLoading: streamsLoading } = useQuery({ queryKey: ["/api/streams"], queryFn: () => fetch("/api/streams").then(r => r.json()) });
   const { data: channels } = useQuery({ queryKey: ["/api/channels"], queryFn: () => fetch("/api/channels").then(r => r.json()) });
@@ -35,6 +40,28 @@ export default function Home() {
             <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto leading-relaxed">
               منصة متكاملة للإعلانات والبث المباشر وإدارة الحملات بذكاء اصطناعي
             </p>
+            {/* Global Search Bar */}
+            <form
+              className="flex items-center gap-2 max-w-xl mx-auto mb-8"
+              onSubmit={e => {
+                e.preventDefault();
+                if (homeSearch.trim()) setLocation(`/ads?q=${encodeURIComponent(homeSearch.trim())}`);
+              }}
+            >
+              <div className="relative flex-1">
+                <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground pointer-events-none" />
+                <Input
+                  value={homeSearch}
+                  onChange={e => setHomeSearch(e.target.value)}
+                  placeholder="ابحث عن إعلانات، منتجات، خدمات..."
+                  className="pr-12 h-13 rounded-2xl text-base bg-background/80 backdrop-blur border-border/60 shadow-lg focus-visible:ring-primary"
+                  data-testid="input-home-search"
+                />
+              </div>
+              <Button type="submit" size="lg" className="h-13 px-6 rounded-2xl shadow-lg shadow-primary/20" data-testid="btn-home-search-submit">
+                بحث
+              </Button>
+            </form>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link href="/create">
                 <Button size="lg" className="h-14 px-8 text-lg gap-2 shadow-xl shadow-primary/25 hover:shadow-primary/40 transition-all hover:-translate-y-1">

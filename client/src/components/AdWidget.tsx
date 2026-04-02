@@ -318,7 +318,7 @@ export function AdWidget({
             isVideo
               ? <video ref={videoRef} src={ad.mediaUrl} autoPlay muted loop playsInline
                   onTimeUpdate={handleTimeUpdate} className="w-full h-32 object-cover" />
-              : <img src={ad.mediaUrl} alt={ad.name} className="w-full h-32 object-cover group-hover:scale-105 transition-transform duration-500" />
+              : <img src={ad.mediaUrl} alt={ad.name} className="w-full h-32 object-cover group-hover:scale-105 transition-transform duration-500" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
           )}
           {/* progress */}
           {isVideo && (
@@ -370,7 +370,7 @@ export function AdWidget({
               {isVideo
                 ? <video ref={videoRef} src={ad.mediaUrl} autoPlay muted={muted} loop playsInline
                     onTimeUpdate={handleTimeUpdate} className="w-full h-40 object-cover" />
-                : <img src={ad.mediaUrl} alt={ad.name} className="w-full h-40 object-cover group-hover:scale-105 transition-transform duration-500" />}
+                : <img src={ad.mediaUrl} alt={ad.name} className="w-full h-40 object-cover group-hover:scale-105 transition-transform duration-500" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />}
               {isVideo && (
                 <>
                   <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/10">
@@ -423,7 +423,7 @@ export function AdWidget({
           <div className="relative w-16 h-16 rounded-xl overflow-hidden shrink-0 bg-zinc-900">
             {isVideo
               ? <video ref={videoRef} src={ad.mediaUrl} autoPlay muted loop playsInline className="w-full h-full object-cover" />
-              : <img src={ad.mediaUrl} alt={ad.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />}
+              : <img src={ad.mediaUrl} alt={ad.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />}
           </div>
         )}
         <div className="flex-1 min-w-0">

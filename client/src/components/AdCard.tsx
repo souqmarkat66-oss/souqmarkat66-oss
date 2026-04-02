@@ -129,6 +129,7 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
+  const [imgError, setImgError] = useState(false);
   const tts = useTTS();
   const [cardVoice, setCardVoice] = useState<"nova" | "onyx">("nova");
   const [boosting, setBoosting]     = useState(false);
@@ -314,18 +315,20 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
                 </button>
               )}
             </>
-          ) : hasMedia ? (
+          ) : hasMedia && !imgError ? (
             <div className="w-full h-full relative">
               <img
                 src={ad.mediaUrl}
                 alt={ad.title}
                 className="absolute inset-0 w-full h-full object-cover blur-md scale-105 opacity-40"
                 aria-hidden
+                onError={() => setImgError(true)}
               />
               <img
                 src={ad.mediaUrl}
                 alt={ad.title}
                 className="relative w-full h-full object-contain transition-transform duration-700 group-hover:scale-105"
+                onError={() => setImgError(true)}
               />
             </div>
           ) : (

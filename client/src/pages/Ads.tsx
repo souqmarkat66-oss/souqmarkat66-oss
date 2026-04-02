@@ -15,7 +15,8 @@ const CATEGORIES = ["الكل", "عقارات", "سيارات", "إلكترون�
 
 export default function Ads() {
   const { t } = useLanguage();
-  const [search, setSearch] = useState("");
+  const initialQ = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("q") ?? "" : "";
+  const [search, setSearch] = useState(initialQ);
   const [selectedCat, setSelectedCat] = useState("الكل");
 
   const { data: allAds = [], isLoading: adsLoading } = useQuery<any[]>({
