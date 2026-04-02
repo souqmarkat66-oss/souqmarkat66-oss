@@ -254,13 +254,13 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
               {!playing && (
                 <button
                   onClick={handlePlayClick}
-                  className="absolute inset-0 flex items-center justify-center bg-black/40 hover:bg-black/50 transition-colors cursor-pointer"
+                  className="absolute inset-0 flex items-center justify-center bg-black/10 hover:bg-black/20 transition-colors cursor-pointer"
                   data-testid={`btn-play-video-${ad.id}`}
                 >
-                  <div className="w-16 h-16 rounded-full bg-white/90 flex items-center justify-center shadow-2xl hover:scale-110 transition-transform">
+                  <div className="w-16 h-16 rounded-full bg-white/95 flex items-center justify-center shadow-2xl hover:scale-110 transition-transform">
                     <Play className="w-7 h-7 text-gray-900 fill-gray-900 ms-1" />
                   </div>
-                  <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-white text-xs font-bold bg-black/50 rounded-full px-3 py-1">
+                  <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-white text-xs font-bold bg-black/60 rounded-full px-3 py-1 backdrop-blur-sm">
                     🎬 فيديو • اضغط للتشغيل بصوت
                   </span>
                 </button>
@@ -293,11 +293,19 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
               )}
             </>
           ) : hasMedia ? (
-            <img
-              src={ad.mediaUrl}
-              alt={ad.title}
-              className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-            />
+            <div className="w-full h-full relative">
+              <img
+                src={ad.mediaUrl}
+                alt={ad.title}
+                className="absolute inset-0 w-full h-full object-cover blur-md scale-105 opacity-40"
+                aria-hidden
+              />
+              <img
+                src={ad.mediaUrl}
+                alt={ad.title}
+                className="relative w-full h-full object-contain transition-transform duration-700 group-hover:scale-105"
+              />
+            </div>
           ) : (
             /* Placeholder when no media */
             <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground bg-gradient-to-br from-muted to-muted/50">
