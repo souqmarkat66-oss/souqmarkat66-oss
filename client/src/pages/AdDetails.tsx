@@ -320,7 +320,7 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
               <label className="text-sm font-medium">صورة الإيصال / لقطة الشاشة <span className="text-muted-foreground text-xs">(اختياري)</span></label>
               {screenshotUrl ? (
                 <div className="mt-2 relative w-fit">
-                  <img src={screenshotUrl} alt="إيصال الدفع" className="w-32 h-32 object-cover rounded-xl border border-border" />
+                  <img src={screenshotUrl} alt="إيصال الدفع" className="w-32 h-32 object-cover rounded-xl border border-border" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
                   <button
                     onClick={() => setScreenshotUrl("")}
                     className="absolute -top-2 -left-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-600"

@@ -20,17 +20,17 @@ interface AdWidgetProps {
 }
 
 // ─── Widget Image with fallback placeholder ────────────────────────────
-function WidgetImage({ src, alt, className, onLoad }: { src: string; alt: string; className: string; onLoad?: () => void }) {
+function WidgetImage({ src, alt, className, onLoad, onError }: { src: string; alt: string; className: string; onLoad?: () => void; onError?: () => void }) {
   const [err, setErr] = useState(false);
   useEffect(() => { setErr(false); }, [src]);
   if (err) {
     return (
-      <div className={`${className} flex items-center justify-center bg-zinc-800 text-white/20`}>
+      <div className={`${className} flex items-center justify-center bg-zinc-800 text-white/20`} style={{ opacity: 1 }}>
         <span className="text-2xl">📷</span>
       </div>
     );
   }
-  return <img src={src} alt={alt} className={className} onLoad={onLoad} onError={() => setErr(true)} />;
+  return <img src={src} alt={alt} className={className} onLoad={onLoad} onError={() => { setErr(true); onError?.(); }} />;
 }
 
 // ─── Minimal Spinner ───────────────────────────────────────────────────
@@ -260,6 +260,7 @@ export function AdWidget({
                 src={ad.mediaUrl || ""}
                 alt={ad.name}
                 onLoad={() => setImgLoaded(true)}
+                onError={() => setImgLoaded(true)}
                 className={`w-full h-full object-cover transition-opacity duration-500 ${imgLoaded ? "opacity-100" : "opacity-0"}`}
               />
               {/* close on image */}
