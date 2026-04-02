@@ -30,12 +30,13 @@ function QuickRating({
 }) {
   const { toast } = useToast();
   const [hovered, setHovered] = useState(0);
-  const [myRating, setMyRating] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const [myRating, setMyRating] = useState(0);
 
   const handleRate = async (star: number) => {
     if (!userId) { window.location.href = "/login"; return; }
+    if (done) return;
     setSubmitting(true);
     try {
       const res = await fetch("/api/ratings", {
@@ -57,43 +58,63 @@ function QuickRating({
 
   const displayAvg = ratingData?.avg ?? 0;
   const displayCount = ratingData?.count ?? 0;
+  // active fill: hover > my submitted > average
+  const activeFill = hovered || (done ? myRating : 0) || displayAvg;
 
   return (
-    <div className="flex items-center gap-1.5 mt-2" onClick={e => { e.preventDefault(); e.stopPropagation(); }}>
-      {/* Stars */}
-      {[1, 2, 3, 4, 5].map(i => {
-        const isFilled = userId && !done ? (hovered || myRating) >= i : i <= Math.round(displayAvg);
-        return (
-          <button
-            key={i}
-            disabled={submitting || done}
-            onClick={() => handleRate(i)}
-            onMouseEnter={() => !done && setHovered(i)}
-            onMouseLeave={() => !done && setHovered(0)}
-            className="focus:outline-none disabled:cursor-default transition-transform hover:scale-110"
-            data-testid={`btn-rate-${adId}-${i}`}
-          >
-            <Star
-              className={`w-3.5 h-3.5 transition-colors ${
-                isFilled ? "fill-yellow-400 text-yellow-400" : "text-gray-200 dark:text-gray-700"
-              }`}
-            />
-          </button>
-        );
-      })}
+    <div className="flex items-center gap-1 mt-2" onClick={e => { e.preventDefault(); e.stopPropagation(); }}>
+      {/* Stars row */}
+      <div className="flex items-center gap-0.5">
+        {[1, 2, 3, 4, 5].map(i => {
+          const filled = i <= Math.floor(activeFill);
+          const half = !filled && i <= activeFill + 0.5;
+          return (
+            <button
+              key={i}
+              disabled={submitting || done}
+              onClick={() => handleRate(i)}
+              onMouseEnter={() => !done && setHovered(i)}
+              onMouseLeave={() => !done && setHovered(0)}
+              className="focus:outline-none disabled:cursor-default transition-transform hover:scale-125 active:scale-95"
+              data-testid={`btn-rate-${adId}-${i}`}
+              title={`${i} نجوم`}
+            >
+              <Star
+                className={`w-4 h-4 transition-colors ${
+                  filled
+                    ? "fill-yellow-400 text-yellow-400"
+                    : half
+                      ? "fill-yellow-200 text-yellow-400"
+                      : "fill-transparent text-gray-300 dark:text-gray-600"
+                }`}
+              />
+            </button>
+          );
+        })}
+      </div>
 
-      {/* Avg + count OR prompt */}
+      {/* Score display */}
       {displayCount > 0 ? (
-        <>
-          <span className="text-xs font-bold text-yellow-600 dark:text-yellow-400">{displayAvg.toFixed(1)}</span>
-          <span className="text-xs text-muted-foreground">({displayCount})</span>
-        </>
+        <div className="flex items-center gap-1 ms-1">
+          <span className="text-xs font-bold text-yellow-600 dark:text-yellow-400 tabular-nums">
+            {displayAvg.toFixed(1)}
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            ({displayCount} {displayCount === 1 ? "تقييم" : "تقييمات"})
+          </span>
+        </div>
       ) : (
-        <span className="text-[10px] text-muted-foreground/60 ms-0.5">
-          {done ? "شكراً!" : userId ? "قيّم الإعلان" : "لا يوجد تقييم"}
+        <span className="text-[10px] text-muted-foreground/70 ms-1">
+          {done ? "" : userId ? "اضغط نجمة لتقييم" : "لم يُقيَّم بعد"}
         </span>
       )}
-      {done && <span className="text-[10px] text-green-600 font-bold">✓ تم</span>}
+
+      {/* Done badge */}
+      {done && (
+        <span className="text-[10px] text-green-600 dark:text-green-400 font-bold ms-1 flex items-center gap-0.5">
+          ✓ قيّمت بـ {myRating}⭐
+        </span>
+      )}
     </div>
   );
 }
