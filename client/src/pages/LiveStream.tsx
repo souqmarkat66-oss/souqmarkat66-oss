@@ -1594,7 +1594,7 @@ export default function LiveStream() {
           </div>
 
           {/* ── TikTok Right Action Buttons ── */}
-          <div className="absolute end-3 bottom-28 z-20 flex flex-col gap-4 items-center">
+          <div className="absolute end-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-3 items-center">
             {/* Like */}
             <button
               onClick={handleLike}
