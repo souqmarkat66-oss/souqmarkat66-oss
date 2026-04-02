@@ -12,6 +12,20 @@ import { useQuery } from "@tanstack/react-query";
 import { AdCard } from "@/components/AdCard";
 import { Skeleton } from "@/components/ui/skeleton";
 
+function SuggestionThumb({ src }: { src?: string | null }) {
+  const [err, setErr] = useState(false);
+  if (!src || err) {
+    return (
+      <div className="w-12 h-12 rounded-xl shrink-0 bg-muted flex items-center justify-center text-muted-foreground text-xl">📢</div>
+    );
+  }
+  return (
+    <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 bg-muted">
+      <img src={src} alt="" className="w-full h-full object-cover" onError={() => setErr(true)} />
+    </div>
+  );
+}
+
 export default function Home() {
   const { t, language } = useLanguage();
   const [, setLocation] = useLocation();
@@ -108,18 +122,7 @@ export default function Home() {
                           setLocation(`/ads?q=${encodeURIComponent(ad.title)}`);
                         }}
                       >
-                        <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 bg-muted">
-                          {ad.mediaUrl && ad.mediaType !== 'video' ? (
-                            <img
-                              src={ad.mediaUrl}
-                              alt={ad.title}
-                              className="w-full h-full object-cover"
-                              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xl">📢</div>
-                          )}
-                        </div>
+                        <SuggestionThumb src={ad.mediaType !== 'video' ? ad.mediaUrl : null} />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold truncate">{ad.title}</p>
                           {(ad.priceEGP ?? 0) > 0 && (

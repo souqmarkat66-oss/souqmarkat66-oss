@@ -320,7 +320,7 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
               <label className="text-sm font-medium">صورة الإيصال / لقطة الشاشة <span className="text-muted-foreground text-xs">(اختياري)</span></label>
               {screenshotUrl ? (
                 <div className="mt-2 relative w-fit">
-                  <img src={screenshotUrl} alt="إيصال الدفع" className="w-32 h-32 object-cover rounded-xl border border-border" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                  <ReceiptImg src={screenshotUrl} />
                   <button
                     onClick={() => setScreenshotUrl("")}
                     className="absolute -top-2 -left-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-600"
@@ -468,6 +468,19 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
       </Dialog>
     </div>
   );
+}
+
+function ReceiptImg({ src }: { src: string }) {
+  const [err, setErr] = useState(false);
+  if (err) {
+    return (
+      <div className="w-32 h-32 flex flex-col items-center justify-center rounded-xl border border-border bg-muted text-muted-foreground text-xs gap-1">
+        <span className="text-2xl">📷</span>
+        <span>تعذّر التحميل</span>
+      </div>
+    );
+  }
+  return <img src={src} alt="إيصال الدفع" className="w-32 h-32 object-cover rounded-xl border border-border" onError={() => setErr(true)} />;
 }
 
 function VideoPlayer({ src }: { src: string }) {
