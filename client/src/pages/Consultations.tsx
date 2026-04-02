@@ -13,6 +13,7 @@ import {
   MessageSquare, Upload, X, FileText, Image, Clock, CheckCircle2,
   XCircle, Plus, Send, Star, Package, Loader2, ChevronDown, ChevronUp,
 } from "lucide-react";
+import { PayFromAppButton } from "@/components/PayFromAppButton";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 
@@ -511,6 +512,14 @@ export default function Consultations() {
                     </button>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Pay from App alternative */}
+            {amount > 0 && (
+              <div className="text-center">
+                <p className="text-xs text-muted-foreground mb-2">— أو ادفع مباشرة من التطبيق —</p>
+                <PayFromAppButton price={amount} label="ادفع من تطبيق سوق ماركات" className="w-full" />
               </div>
             )}
 

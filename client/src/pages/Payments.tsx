@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon, Tag, CheckSquare, Square, Calculator } from "lucide-react";
+import { PayFromAppButton } from "@/components/PayFromAppButton";
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {
   ad_boost:   "⚡ تعزيز إعلان",
@@ -636,6 +637,14 @@ export default function Payments() {
                 </button>
               )}
             </div>
+
+            {/* Pay from App */}
+            {effectiveAmount && Number(effectiveAmount) > 0 && (
+              <div className="text-center space-y-1">
+                <p className="text-xs text-muted-foreground">— أو ادفع مباشرة من التطبيق —</p>
+                <PayFromAppButton price={Number(effectiveAmount)} className="w-full" />
+              </div>
+            )}
 
             {/* Submit */}
             <Button

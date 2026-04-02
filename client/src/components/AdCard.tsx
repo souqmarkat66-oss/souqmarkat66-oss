@@ -18,6 +18,7 @@ import { LikeCommentBar } from "./LikeCommentBar";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { ShareMenu } from "./ShareMenu";
+import { PayFromAppButton } from "./PayFromAppButton";
 
 // ── Quick Rating Component (inline, no navigation needed) ─────────────────
 function QuickRating({
@@ -385,12 +386,13 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
             {ad.description}
           </p>
 
-          {/* Price if set */}
+          {/* Price + Pay from App */}
           {ad.priceEGP && (
-            <div className="mt-2">
+            <div className="mt-2 space-y-2">
               <span className="text-lg font-bold text-green-600 dark:text-green-400">
                 {ad.priceEGP.toLocaleString()} ج.م
               </span>
+              <PayFromAppButton price={ad.priceEGP} size="sm" className="w-full" />
             </div>
           )}
 
