@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, Loader2, Film, Volume2, ImageIcon, AlertCircle, CreditCard, Plus, X, Music, FolderOpen } from "lucide-react";
+import { Sparkles, Loader2, Film, Volume2, ImageIcon, AlertCircle, CreditCard, Plus, X, Music, FolderOpen, Upload, Languages, Download, Eye, Camera, FileText, Wand2, RefreshCw } from "lucide-react";
 import MediaPickerModal from "@/components/MediaPickerModal";
 import { UploadZone } from "@/components/UploadZone";
 import { motion, AnimatePresence } from "framer-motion";
@@ -102,6 +102,14 @@ export default function CreateAd() {
   const [generatingScriptAudio, setGeneratingScriptAudio] = useState(false);
   const fileAdImagesRef = useRef<HTMLInputElement>(null);
   const tts = useTTS();
+  // AI ref images
+  const [refImages, setRefImages] = useState<string[]>([]);
+  const [uploadingRefImg, setUploadingRefImg] = useState(false);
+  const [analyzingImage, setAnalyzingImage] = useState(false);
+  const [translating, setTranslating] = useState(false);
+  const [editImagePrompt, setEditImagePrompt] = useState("");
+  const [editingImage, setEditingImage] = useState(false);
+  const refImgInputRef = useRef<HTMLInputElement>(null);
   const [ttsVoice, setTtsVoice] = useState<"nova" | "onyx">("nova");
 
   // Auto-advance cinema slideshow
@@ -270,6 +278,111 @@ export default function CreateAd() {
     setTimeout(() => setSpeakingScene(null), 3000);
   };
 
+  // Upload reference images for AI analysis
+  const handleUploadRefImages = async (files: FileList) => {
+    setUploadingRefImg(true);
+    const urls: string[] = [];
+    for (let i = 0; i < Math.min(files.length, 5); i++) {
+      const fd = new FormData();
+      fd.append("file", files[i]);
+      const r = await fetch("/api/upload", { method: "POST", body: fd, credentials: "include" });
+      const d = await r.json();
+      if (d.url) urls.push(d.url);
+    }
+    setRefImages(prev => [...prev, ...urls].slice(0, 5));
+    setUploadingRefImg(false);
+    toast({ title: `✅ تم رفع ${urls.length} صورة` });
+  };
+
+  // Analyze ref images and generate ad copy
+  const handleAnalyzeImages = async () => {
+    if (!refImages.length) { toast({ variant: "destructive", title: "ارفع صورة أولاً" }); return; }
+    setAnalyzingImage(true);
+    try {
+      const { productName, targetAudience, language: lang } = form.getValues();
+      const res = await fetch("/api/ai/analyze-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrls: refImages, productName, targetAudience, language: lang }),
+        credentials: "include"
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "فشل التحليل");
+      if (data.title) form.setValue("title", data.title);
+      if (data.description) form.setValue("description", data.description);
+      toast({ title: "🔍 تم تحليل الصورة وإنشاء الإعلان!" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "فشل التحليل", description: e.message });
+    } finally { setAnalyzingImage(false); }
+  };
+
+  // Translate generated text
+  const handleTranslate = async () => {
+    const title = form.getValues("title");
+    const description = form.getValues("description");
+    if (!title && !description) { toast({ variant: "destructive", title: "لا يوجد نص للترجمة" }); return; }
+    setTranslating(true);
+    try {
+      const lang = form.getValues("language");
+      const targetLang = lang === "ar" ? "en" : "ar";
+      const res = await fetch("/api/ai/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, description, targetLanguage: targetLang }),
+        credentials: "include"
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "فشل الترجمة");
+      if (data.title) form.setValue("title", data.title);
+      if (data.description) form.setValue("description", data.description);
+      form.setValue("language", targetLang as any);
+      toast({ title: `🌐 تم الترجمة إلى ${targetLang === "ar" ? "العربية" : "الإنجليزية"}!` });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "فشل الترجمة", description: e.message });
+    } finally { setTranslating(false); }
+  };
+
+  // Edit image with AI
+  const handleEditImage = async () => {
+    if (!refImages.length && !aiImageUrl) { toast({ variant: "destructive", title: "لا توجد صورة للتعديل" }); return; }
+    if (!editImagePrompt.trim()) { toast({ variant: "destructive", title: "اكتب وصف التعديل أولاً" }); return; }
+    setEditingImage(true);
+    try {
+      const baseImage = aiImageUrl || refImages[0];
+      const { productName, adTitle } = form.getValues();
+      const prompt = `Edit this advertisement image: ${editImagePrompt}. Context: ${adTitle || productName || "Arabic ad"}. Keep it professional and high quality.`;
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, size: "1024x1024", referenceUrl: baseImage }),
+        credentials: "include"
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "فشل التعديل");
+      setAiImageUrl(data.url);
+      form.setValue("mediaUrl", data.url);
+      form.setValue("mediaType", "image");
+      setEditImagePrompt("");
+      toast({ title: "✏️ تم تعديل الصورة!" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "فشل التعديل", description: e.message });
+    } finally { setEditingImage(false); }
+  };
+
+  // Download generated text as file
+  const handleDownloadText = () => {
+    const title = form.getValues("title");
+    const description = form.getValues("description");
+    if (!title && !description) { toast({ variant: "destructive", title: "لا يوجد نص للتحميل" }); return; }
+    const content = `العنوان:\n${title}\n\nالوصف:\n${description}${videoScript ? `\n\nالسكريبت:\n${videoScript.scenes?.map((s: any, i: number) => `مشهد ${i+1}: ${s.narration}`).join('\n')}` : ''}`;
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `إعلان-${title?.substring(0,20) || 'جديد'}.txt`;
+    a.click(); URL.revokeObjectURL(url);
+    toast({ title: "📄 تم تحميل الملف!" });
+  };
+
   return (
     <div className="container max-w-3xl px-4 py-12">
     {/* ===== FULLSCREEN CINEMA OVERLAY ===== */}
@@ -434,6 +547,56 @@ export default function CreateAd() {
                         </FormItem>
                       )} />
                     </div>
+                    {/* Reference images upload */}
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                        <Camera className="w-3 h-3" /> صور مرجعية للذكاء الاصطناعي (حتى 5 صور)
+                      </p>
+                      <div className="flex flex-wrap gap-2 items-center">
+                        {refImages.map((url, i) => (
+                          <div key={i} className="relative group">
+                            <img src={url} alt="" className="w-16 h-16 rounded-lg object-cover border border-border" />
+                            <button
+                              type="button"
+                              onClick={() => setRefImages(prev => prev.filter((_, j) => j !== i))}
+                              className="absolute -top-1 -right-1 bg-destructive text-white rounded-full w-4 h-4 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                            >×</button>
+                          </div>
+                        ))}
+                        {refImages.length < 5 && (
+                          <button
+                            type="button"
+                            onClick={() => refImgInputRef.current?.click()}
+                            disabled={uploadingRefImg}
+                            className="w-16 h-16 rounded-lg border-2 border-dashed border-primary/40 flex flex-col items-center justify-center gap-1 text-primary/60 hover:text-primary hover:border-primary transition-colors text-xs"
+                          >
+                            {uploadingRefImg ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Upload className="w-4 h-4" /><span>رفع</span></>}
+                          </button>
+                        )}
+                        <input
+                          ref={refImgInputRef}
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          className="hidden"
+                          onChange={e => e.target.files && handleUploadRefImages(e.target.files)}
+                        />
+                        {refImages.length > 0 && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={handleAnalyzeImages}
+                            disabled={analyzingImage}
+                            className="gap-1 h-8 text-xs bg-violet-600 hover:bg-violet-700 text-white"
+                            data-testid="btn-analyze-image"
+                          >
+                            {analyzingImage ? <Loader2 className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3" />}
+                            تحليل وإنشاء إعلان
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" onClick={handleGenerateCopy} disabled={generatingCopy} size="sm" className="gap-2" data-testid="btn-gen-copy">
                         {generatingCopy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
@@ -447,7 +610,55 @@ export default function CreateAd() {
                         {generatingScript ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
                         سكريبت فيديو سينمائي
                       </Button>
+                      <Button type="button" onClick={handleTranslate} disabled={translating} size="sm" variant="outline" className="gap-2" data-testid="btn-translate">
+                        {translating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Languages className="w-4 h-4" />}
+                        ترجمة النص
+                      </Button>
+                      <Button type="button" onClick={handleDownloadText} size="sm" variant="outline" className="gap-2" data-testid="btn-download-text">
+                        <Download className="w-4 h-4" />
+                        تحميل كملف
+                      </Button>
                     </div>
+
+                    {/* AI Image Edit section */}
+                    {(aiImageUrl || refImages.length > 0) && (
+                      <div className="border rounded-xl p-3 bg-background/60 space-y-2">
+                        <p className="text-xs font-medium flex items-center gap-1">
+                          <Wand2 className="w-3 h-3 text-primary" /> تعديل الصورة بالذكاء الاصطناعي
+                        </p>
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="مثال: غير الخلفية إلى اللون الأزرق واجعل النص أكبر..."
+                            value={editImagePrompt}
+                            onChange={e => setEditImagePrompt(e.target.value)}
+                            className="text-sm h-8"
+                            data-testid="input-edit-image-prompt"
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={handleEditImage}
+                            disabled={editingImage}
+                            className="h-8 gap-1 text-xs whitespace-nowrap"
+                            data-testid="btn-edit-image"
+                          >
+                            {editingImage ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+                            عدّل
+                          </Button>
+                        </div>
+                        {aiImageUrl && (
+                          <div className="flex items-center gap-2">
+                            <img src={aiImageUrl} alt="AI" className="w-20 h-20 rounded-lg object-cover border" />
+                            <div className="text-xs text-muted-foreground space-y-1">
+                              <p>الصورة الحالية</p>
+                              <a href={aiImageUrl} download className="flex items-center gap-1 text-primary hover:underline">
+                                <Download className="w-3 h-3" /> تحميل الصورة
+                              </a>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Video Script Display */}
                     {videoScript && (

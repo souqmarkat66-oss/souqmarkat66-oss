@@ -2325,6 +2325,75 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ─── AI ANALYZE IMAGE → generate ad copy ─────────────────────
+  app.post("/api/ai/analyze-image", isAuthenticated, checkAiCredits, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { imageUrls, productName, targetAudience, language = "ar" } = req.body;
+      if (!imageUrls || !imageUrls.length) return res.status(400).json({ message: "imageUrls مطلوب" });
+
+      const imageContents: any[] = imageUrls.slice(0, 3).map((url: string) => {
+        const fullUrl = url.startsWith('/') ? `https://${req.headers.host}${url}` : url;
+        return { type: "image_url", image_url: { url: fullUrl, detail: "auto" } };
+      });
+
+      const systemPrompt = language === 'ar'
+        ? "أنت خبير تسويق إبداعي متخصص في الإعلانات العربية. حلّل الصور وأنشئ محتوى إعلاني احترافي."
+        : "You are a creative marketing expert. Analyze images and create professional ad content.";
+
+      const userPrompt = language === 'ar'
+        ? `حلّل هذه الصور وأنشئ إعلاناً احترافياً${productName ? ` لـ ${productName}` : ''}${targetAudience ? ` يستهدف ${targetAudience}` : ''}.\nأرجع JSON: {"title": "...", "description": "..."}`
+        : `Analyze these images and create a professional ad${productName ? ` for ${productName}` : ''}${targetAudience ? ` targeting ${targetAudience}` : ''}.\nReturn JSON: {"title": "...", "description": "..."}`;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: [{ type: "text", text: userPrompt }, ...imageContents] }
+        ],
+        response_format: { type: "json_object" },
+        max_tokens: 500,
+      });
+
+      const result = JSON.parse(response.choices[0].message.content || "{}");
+      await storage.recordAiUsage(userId, 'text');
+      if (req.aiChargeEGP) {
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم تحليل صورة بالذكاء الاصطناعي', channelId: null, campaignId: null });
+      }
+      res.json({ title: result.title || "", description: result.description || "" });
+    } catch (error: any) {
+      res.status(500).json({ message: "فشل تحليل الصورة: " + error.message });
+    }
+  });
+
+  // ─── AI TRANSLATE ─────────────────────────────────────────────
+  app.post("/api/ai/translate", isAuthenticated, checkAiCredits, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { title, description, targetLanguage = "en" } = req.body;
+      if (!title && !description) return res.status(400).json({ message: "النص مطلوب" });
+
+      const langName = targetLanguage === "ar" ? "Arabic (Egyptian dialect, RTL)" : "English";
+      const prompt = `Translate the following ad content to ${langName}. Keep it natural, catchy and suitable for advertising.\n\nTitle: ${title || ""}\nDescription: ${description || ""}\n\nReturn JSON: {"title": "translated title", "description": "translated description"}`;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+        max_tokens: 400,
+      });
+
+      const result = JSON.parse(response.choices[0].message.content || "{}");
+      await storage.recordAiUsage(userId, 'text');
+      if (req.aiChargeEGP) {
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم ترجمة بالذكاء الاصطناعي', channelId: null, campaignId: null });
+      }
+      res.json({ title: result.title || "", description: result.description || "" });
+    } catch (error: any) {
+      res.status(500).json({ message: "فشل الترجمة: " + error.message });
+    }
+  });
+
   // ─── AI TEXT-TO-SPEECH (Egyptian Arabic via gpt-audio) ───────
   app.post("/api/ai/tts", isAuthenticated, async (req: any, res) => {
     try {
