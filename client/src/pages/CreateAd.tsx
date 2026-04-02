@@ -29,6 +29,7 @@ const formSchema = insertAdSchema.extend({
   description: z.string().min(5, "الوصف مطلوب (5 أحرف على الأقل)"),
   productName: z.string().optional(),
   targetAudience: z.string().optional(),
+  adTitle: z.string().optional(),
   userId: z.string().optional(),
   mediaUrl: z.string().optional().default(""),
   appStoreUrl: z.string().optional(),
@@ -145,7 +146,7 @@ export default function CreateAd() {
     defaultValues: {
       title: "", description: "", mediaUrl: "", mediaType: "image",
       language: language as 'ar' | 'en', status: "active",
-      userId: "", productName: "", targetAudience: "", targetRegion: "",
+      userId: "", productName: "", targetAudience: "", adTitle: "", targetRegion: "",
       appStoreUrl: "", googlePlayUrl: "", appGalleryUrl: "",
       paymentLink: "", whatsappNumber: "",
     },
@@ -153,7 +154,7 @@ export default function CreateAd() {
 
   const onSubmit = async (values: FormValues) => {
     try {
-      const { productName, targetAudience, ...adData } = values;
+      const { productName, targetAudience, adTitle, ...adData } = values;
       const newAd = await createAd({
         ...adData,
         userId: "temp",
@@ -178,14 +179,14 @@ export default function CreateAd() {
   };
 
   const handleGenerateCopy = async () => {
-    const { productName, targetAudience, language: lang } = form.getValues();
+    const { productName, targetAudience, adTitle, language: lang } = form.getValues();
     if (!productName) { toast({ variant: "destructive", title: "أدخل اسم المنتج أولاً" }); return; }
     setGeneratingCopy(true);
     try {
       const res = await fetch("/api/ai/generate-copy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productName, targetAudience, language: lang }),
+        body: JSON.stringify({ productName, targetAudience, adTitle, language: lang }),
         credentials: "include"
       });
       const data = await res.json();
@@ -206,8 +207,8 @@ export default function CreateAd() {
   };
 
   const handleGenerateImage = async () => {
-    const { description, productName, title } = form.getValues();
-    const prompt = `Professional Arabic advertisement image for ${productName || title || description}. High quality, vibrant colors, suitable for Egyptian market.`;
+    const { description, productName, adTitle, title } = form.getValues();
+    const prompt = `Professional Arabic advertisement image for ${adTitle || productName || title || description}. High quality, vibrant colors, suitable for Egyptian market.`;
     setGeneratingImage(true);
     try {
       const res = await fetch("/api/ai/generate-image", {
@@ -235,14 +236,14 @@ export default function CreateAd() {
   };
 
   const handleGenerateVideoScript = async () => {
-    const { productName } = form.getValues();
+    const { productName, adTitle } = form.getValues();
     if (!productName) { toast({ variant: "destructive", title: "أدخل اسم المنتج أولاً" }); return; }
     setGeneratingScript(true);
     try {
       const res = await fetch("/api/ai/generate-video-script", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productName, duration: 30, language: form.getValues("language") }),
+        body: JSON.stringify({ productName, adTitle, duration: 30, language: form.getValues("language") }),
         credentials: "include"
       });
       const data = await res.json();
@@ -413,6 +414,12 @@ export default function CreateAd() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                    <FormField control={form.control} name="adTitle" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>عنوان الإعلان <span className="text-xs text-muted-foreground">(اختياري — يساعد الذكاء الاصطناعي)</span></FormLabel>
+                        <FormControl><Input placeholder="مثال: الهاتف الأقوى لعام 2025" {...field} data-testid="input-ad-title-ai" /></FormControl>
+                      </FormItem>
+                    )} />
                     <div className="grid grid-cols-2 gap-4">
                       <FormField control={form.control} name="productName" render={({ field }) => (
                         <FormItem>
@@ -1238,7 +1245,7 @@ export default function CreateAd() {
               {form.formState.errors.title && <p className="text-sm text-red-500">• العنوان: {String(form.formState.errors.title.message)}</p>}
               {form.formState.errors.description && <p className="text-sm text-red-500">• الوصف: {String(form.formState.errors.description.message)}</p>}
               {Object.entries(form.formState.errors)
-                .filter(([k]) => !['title','description','mediaUrl','userId','productName','targetAudience'].includes(k))
+                .filter(([k]) => !['title','description','mediaUrl','userId','productName','targetAudience','adTitle'].includes(k))
                 .map(([k, v]: any) => <p key={k} className="text-sm text-red-500">• {k}: {String(v?.message)}</p>)
               }
             </div>
