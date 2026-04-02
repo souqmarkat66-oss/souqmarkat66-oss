@@ -1276,7 +1276,7 @@ export default function LiveStream() {
               </button>
             )}
 
-            {/* 🔊 Enable Audio Button for viewers (browser blocks autoplay with audio) */}
+            {/* 🔊 Enable Audio — large centered overlay (mobile-friendly) */}
             {!isBroadcast && streaming && (audioBlocked || viewerMuted) && !viewerDisconnected && (
               <button
                 onClick={() => {
@@ -1288,12 +1288,44 @@ export default function LiveStream() {
                       setAudioBlocked(false);
                     }).catch(() => {});
                   }
+                  // Enable audio on all co-host streams too
+                  coHostVideoEls.current.forEach(el => {
+                    el.muted = false;
+                    el.volume = 1;
+                    el.play().catch(() => {});
+                  });
                 }}
-                className="absolute bottom-4 start-4 flex items-center gap-2 px-5 py-3 rounded-full bg-yellow-500/90 backdrop-blur border-2 border-yellow-300 text-white text-sm font-bold hover:bg-yellow-400 transition shadow-lg animate-pulse"
+                className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm z-20 cursor-pointer"
                 data-testid="btn-enable-audio"
               >
+                <div className="flex flex-col items-center gap-3 px-8 py-6 rounded-3xl bg-yellow-500/90 border-2 border-yellow-300 shadow-2xl animate-pulse">
+                  <Volume2 className="w-10 h-10 text-white" />
+                  <span className="text-white text-xl font-bold">🔊 انقر لتشغيل الصوت</span>
+                  <span className="text-yellow-100 text-sm opacity-80">المتصفح يحتاج إذنك لتشغيل الصوت</span>
+                </div>
+              </button>
+            )}
+
+            {/* 🔇 Persistent mute/unmute toggle for viewer (visible after audio is enabled) */}
+            {!isBroadcast && streaming && !viewerMuted && !viewerDisconnected && (
+              <button
+                onClick={() => {
+                  if (videoRef.current) {
+                    const nowMuting = !videoRef.current.muted;
+                    videoRef.current.muted = nowMuting;
+                    videoRef.current.volume = nowMuting ? 0 : 1;
+                    setViewerMuted(nowMuting);
+                    coHostVideoEls.current.forEach(el => {
+                      el.muted = nowMuting;
+                      el.volume = nowMuting ? 0 : 1;
+                    });
+                  }
+                }}
+                className="absolute bottom-4 start-4 w-10 h-10 rounded-full bg-black/60 backdrop-blur flex items-center justify-center text-white hover:bg-black/80 transition shadow-lg"
+                data-testid="btn-toggle-viewer-audio"
+                title="كتم / تشغيل الصوت"
+              >
                 <Volume2 className="w-5 h-5" />
-                🔊 انقر لتشغيل الصوت
               </button>
             )}
 
