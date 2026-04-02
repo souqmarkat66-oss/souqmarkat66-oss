@@ -398,3 +398,29 @@ export const offers = pgTable("offers", {
 export const insertOfferSchema = createInsertSchema(offers).omit({ id: true, createdAt: true, status: true });
 export type Offer = typeof offers.$inferSelect;
 export type InsertOffer = z.infer<typeof insertOfferSchema>;
+
+// ============================================================
+// COUPONS TABLE (AI-generated promo codes)
+// ============================================================
+export const coupons = pgTable("coupons", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  businessName: text("business_name").notNull(),
+  title: text("title").notNull(),
+  code: text("code").notNull(),
+  discountType: text("discount_type", { enum: ["percentage", "fixed", "free_shipping", "buy_x_get_y"] }).default("percentage"),
+  discountValue: real("discount_value"),
+  imageUrl: text("image_url"),
+  description: text("description"),
+  termsAr: text("terms_ar"),
+  isActive: boolean("is_active").default(true),
+  expiresAt: timestamp("expires_at"),
+  usageLimit: integer("usage_limit"),
+  usedCount: integer("used_count").default(0),
+  amountPaidEGP: real("amount_paid_egp").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCouponSchema = createInsertSchema(coupons).omit({ id: true, createdAt: true, usedCount: true });
+export type Coupon = typeof coupons.$inferSelect;
+export type InsertCoupon = z.infer<typeof insertCouponSchema>;

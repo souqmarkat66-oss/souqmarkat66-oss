@@ -93,6 +93,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS relationship_status text`);
   } catch { /* columns may already exist */ }
 
+  // ── Coupons table migration ──
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS coupons (
+        id serial PRIMARY KEY,
+        user_id varchar REFERENCES users(id) NOT NULL,
+        business_name text NOT NULL DEFAULT '',
+        title text NOT NULL DEFAULT '',
+        code text NOT NULL,
+        discount_type text DEFAULT 'percentage',
+        discount_value real,
+        image_url text,
+        description text,
+        terms_ar text,
+        is_active boolean DEFAULT true,
+        expires_at timestamp,
+        usage_limit integer,
+        used_count integer DEFAULT 0,
+        amount_paid_egp real DEFAULT 0,
+        created_at timestamp DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('coupon_price_egp', '15') ON CONFLICT (key) DO NOTHING`);
+  } catch { /* table may already exist */ }
+
   // Serve uploads directory
   const uploadsDir = path.join(process.cwd(), "uploads");
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -3831,6 +3856,147 @@ ${allPages.map(p => `  <url>
       }
       res.json(result.rows[0]);
     } catch (e: any) { res.status(400).json({ message: e.message }); }
+  });
+
+  // ================================================================
+  // COUPONS — AI-generated promo codes (paid service)
+  // ================================================================
+
+  // GET /api/coupons — user's own coupons
+  app.get("/api/coupons", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const rows = await db.execute(sql`
+        SELECT * FROM coupons WHERE user_id = ${userId} ORDER BY created_at DESC
+      `);
+      res.json(rows.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // GET /api/coupons/all — admin: all coupons
+  app.get("/api/coupons/all", isAuthenticated, requireAdmin, async (_req, res) => {
+    try {
+      const rows = await db.execute(sql`SELECT * FROM coupons ORDER BY created_at DESC`);
+      res.json(rows.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // GET /api/coupons/price — get coupon service price
+  app.get("/api/coupons/price", async (_req, res) => {
+    try {
+      const price = parseFloat(await storage.getSetting('coupon_price_egp') || '15');
+      res.json({ priceEGP: price });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // POST /api/coupons/generate — AI generate + save coupon
+  app.post("/api/coupons/generate", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { businessName, productDescription, discountType, discountValue, imageUrl, expiresAt, usageLimit } = req.body;
+      if (!businessName || !productDescription) return res.status(400).json({ message: "اسم النشاط التجاري والوصف مطلوبان" });
+
+      const priceEGP = parseFloat(await storage.getSetting('coupon_price_egp') || '15');
+
+      // Admin is free
+      if (!isAdminUser(req)) {
+        const balance = await storage.getUserBalanceEGP(userId);
+        if (balance < priceEGP) {
+          return res.status(402).json({ message: "insufficient_balance", required: priceEGP, balance });
+        }
+        // Deduct balance
+        await db.execute(sql`
+          UPDATE users SET balance_egp = COALESCE(balance_egp, 0) - ${priceEGP} WHERE id = ${userId}
+        `);
+      }
+
+      // Generate coupon code
+      const rawCode = `${businessName.replace(/\s+/g, '').substring(0, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Date.now().toString(36).toUpperCase().slice(-4)}`;
+
+      // AI generate: title, description, terms
+      const discountLabel = discountType === 'percentage' ? `خصم ${discountValue}%`
+        : discountType === 'fixed' ? `خصم ${discountValue} ج.م`
+        : discountType === 'free_shipping' ? 'شحن مجاني'
+        : 'اشتري X احصل على Y';
+
+      const aiResponse = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{
+          role: "user",
+          content: `أنت خبير تسويق محترف. قم بإنشاء كوبون خصم احترافي وجذاب للمنشأة التالية:
+اسم المنشأة: ${businessName}
+وصف المنتج/الخدمة: ${productDescription}
+نوع الخصم: ${discountLabel}
+كود الكوبون: ${rawCode}
+
+أنشئ ما يلي بالعربية فقط، في صيغة JSON:
+{
+  "title": "عنوان جذاب قصير للكوبون (أقل من 60 حرف)",
+  "description": "نص تسويقي مقنع لعرض الكوبون (3-4 جمل)",
+  "terms": "الشروط والأحكام المختصرة للكوبون (3 نقاط)"
+}`
+        }],
+        max_tokens: 500,
+      });
+
+      let generated: any = {};
+      try {
+        const content = aiResponse.choices[0].message.content || '{}';
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        generated = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+      } catch { generated = {}; }
+
+      const title = generated.title || `عرض خاص من ${businessName} - ${discountLabel}`;
+      const description = generated.description || `استمتع بـ ${discountLabel} حصري من ${businessName}. استخدم الكود: ${rawCode}`;
+      const termsAr = generated.terms || `• الكوبون للاستخدام لمرة واحدة فقط\n• لا يمكن دمجه مع عروض أخرى\n• العرض سار حتى نفاد الكمية`;
+
+      const expires = expiresAt ? new Date(expiresAt) : null;
+      const result = await db.execute(sql`
+        INSERT INTO coupons (user_id, business_name, title, code, discount_type, discount_value, image_url, description, terms_ar, expires_at, usage_limit, amount_paid_egp)
+        VALUES (${userId}, ${businessName}, ${title}, ${rawCode}, ${discountType || 'percentage'}, ${discountValue || null}, ${imageUrl || null}, ${description}, ${termsAr}, ${expires}, ${usageLimit || null}, ${isAdminUser(req) ? 0 : priceEGP})
+        RETURNING *
+      `);
+
+      res.status(201).json(result.rows[0]);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // PATCH /api/coupons/:id — update coupon image / toggle active
+  app.patch("/api/coupons/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { imageUrl, isActive, title, description } = req.body;
+      const result = await db.execute(sql`
+        UPDATE coupons SET
+          image_url = COALESCE(${imageUrl ?? null}, image_url),
+          is_active = COALESCE(${isActive ?? null}, is_active),
+          title = COALESCE(${title ?? null}, title),
+          description = COALESCE(${description ?? null}, description)
+        WHERE id = ${Number(req.params.id)} AND user_id = ${userId}
+        RETURNING *
+      `);
+      if (!result.rows[0]) return res.status(404).json({ message: "Coupon not found" });
+      res.json(result.rows[0]);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // DELETE /api/coupons/:id
+  app.delete("/api/coupons/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      await db.execute(sql`DELETE FROM coupons WHERE id = ${Number(req.params.id)} AND (user_id = ${userId} OR ${isAdminUser(req)})`);
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // PATCH /api/settings/coupon_price — admin update coupon price
+  app.patch("/api/settings/coupon_price", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      const { price } = req.body;
+      if (!price || isNaN(Number(price))) return res.status(400).json({ message: "سعر غير صالح" });
+      await db.execute(sql`UPDATE platform_settings SET value = ${String(price)}, updated_at = now() WHERE key = 'coupon_price_egp'`);
+      res.json({ ok: true, price: Number(price) });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   return httpServer;

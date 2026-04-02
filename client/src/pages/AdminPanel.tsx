@@ -1243,6 +1243,7 @@ function SettingsSection({ logAction }: { logAction: any }) {
     { key: "min_withdrawal_egp",      label: "الحد الأدنى للسحب",            suffix: "ج.م",         default: "50",   group: "المحفظة" },
     { key: "ai_free_credits",         label: "رصيد AI المجاني (يوزر جديد)",  suffix: "رصيد",        default: "3",    group: "الذكاء الاصطناعي" },
     { key: "ai_price_per_credit_egp", label: "سعر رصيد AI الإضافي",          suffix: "ج.م/رصيد",   default: "5",    group: "الذكاء الاصطناعي" },
+    { key: "coupon_price_egp",        label: "سعر توليد كوبون بالـ AI 🎟️",  suffix: "ج.م",         default: "15",   group: "الكوبونات" },
   ];
 
   const groups = Array.from(new Set(numFields.map(f => f.group)));
