@@ -130,6 +130,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       )
     `);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('coupon_price_egp', '15') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('platform_name', 'شبكة سوق للإعلانات') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('platform_tagline', 'أفضل منصة إعلانية في مصر والعالم العربي') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('app_play_store', 'https://play.google.com/store/apps/details?id=com.apmo.souqmarket') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('app_app_store', 'https://apps.apple.com/eg/app/as-souqmarket/id6740153334') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('app_huawei', 'https://app.as-souqmarkat.com/?from-splash=false') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_vodafone_cash', '01098553911') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_instapay', '01285558567') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_whatsapp', '') ON CONFLICT (key) DO NOTHING`);
   } catch { /* table may already exist */ }
 
   // Serve uploads directory

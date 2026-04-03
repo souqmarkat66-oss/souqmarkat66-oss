@@ -19,7 +19,7 @@ import {
   AlertTriangle, Activity, Menu, ChevronLeft, VideoOff, PieChart,
   Star, MessageSquare, Clock, BanIcon, UserCheck, FolderOpen, FileImage,
   FileVideo, File, Lock, Phone, Mail, Shield, RefreshCw, ToggleLeft, ToggleRight, Zap,
-  Sparkles, Image, Video, Wand2, FileText, Gift, Check
+  Sparkles, Image, Video, Wand2, FileText, Gift, Check, Globe
 } from "lucide-react";
 
 const ADMIN_ID = "54219806";
@@ -1315,12 +1315,80 @@ function SettingsSection({ logAction }: { logAction: any }) {
         </Card>
       ))}
 
+      {/* ── Platform Info Settings ── */}
+      <Card className="rounded-2xl">
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Globe className="w-4 h-4 text-primary" />
+            معلومات المنصة والتواصل
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">تعديل اسم المنصة وروابط التطبيق وأرقام التواصل — تُطبَّق فوراً</p>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {/* Platform Identity */}
+          <div className="space-y-3">
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">هوية المنصة</p>
+            <div>
+              <label className="text-xs font-medium block mb-1">اسم المنصة</label>
+              <Input value={get("platform_name", "شبكة سوق للإعلانات")} onChange={e => set("platform_name", e.target.value)} placeholder="شبكة سوق للإعلانات" data-testid="setting-platform-name" />
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1">شعار المنصة (tagline)</label>
+              <Input value={get("platform_tagline", "أفضل منصة إعلانية في مصر والعالم العربي")} onChange={e => set("platform_tagline", e.target.value)} placeholder="أفضل منصة إعلانية..." data-testid="setting-platform-tagline" />
+            </div>
+          </div>
+
+          {/* App Store Links */}
+          <div className="space-y-3">
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">روابط تطبيق سوق ماركات</p>
+            <div>
+              <label className="text-xs font-medium block mb-1 flex items-center gap-1">
+                <span className="w-4 h-4 rounded bg-[#01875f] inline-flex items-center justify-center"><span className="text-white text-[8px]">▶</span></span>
+                Google Play
+              </label>
+              <Input dir="ltr" value={get("app_play_store", "https://play.google.com/store/apps/details?id=com.apmo.souqmarket")} onChange={e => set("app_play_store", e.target.value)} data-testid="setting-app-play-store" className="text-xs" />
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1 flex items-center gap-1">
+                <span className="w-4 h-4 rounded bg-gray-800 inline-flex items-center justify-center"><span className="text-white text-[8px]"></span></span>
+                App Store (iOS)
+              </label>
+              <Input dir="ltr" value={get("app_app_store", "https://apps.apple.com/eg/app/as-souqmarket/id6740153334")} onChange={e => set("app_app_store", e.target.value)} data-testid="setting-app-app-store" className="text-xs" />
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1 flex items-center gap-1">
+                <span className="w-4 h-4 rounded bg-[#cf0a2c] inline-flex items-center justify-center"><span className="text-white text-[8px]">H</span></span>
+                AppGallery (Huawei)
+              </label>
+              <Input dir="ltr" value={get("app_huawei", "https://app.as-souqmarkat.com/?from-splash=false")} onChange={e => set("app_huawei", e.target.value)} data-testid="setting-app-huawei" className="text-xs" />
+            </div>
+          </div>
+
+          {/* Contact Numbers */}
+          <div className="space-y-3">
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">أرقام التواصل والدفع</p>
+            <div>
+              <label className="text-xs font-medium block mb-1">رقم واتساب الدعم</label>
+              <Input dir="ltr" value={get("contact_whatsapp", "")} onChange={e => set("contact_whatsapp", e.target.value)} placeholder="201234567890" data-testid="setting-contact-whatsapp" />
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1">رقم فودافون كاش</label>
+              <Input dir="ltr" value={get("contact_vodafone_cash", "01098553911")} onChange={e => set("contact_vodafone_cash", e.target.value)} placeholder="01xxxxxxxxx" data-testid="setting-contact-vodafone" />
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1">رقم إنستاباي</label>
+              <Input dir="ltr" value={get("contact_instapay", "")} onChange={e => set("contact_instapay", e.target.value)} placeholder="01xxxxxxxxx" data-testid="setting-contact-instapay" />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <Button
         className="w-full gap-2" disabled={Object.keys(form).length === 0 || save.isPending}
         onClick={() => save.mutate(form)} data-testid="btn-save-settings"
       >
         {save.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-        حفظ الإعدادات
+        حفظ جميع الإعدادات
       </Button>
       <p className="text-xs text-muted-foreground text-center">تغيير سعر CPM يؤثر على الحملات الجديدة فقط</p>
     </div>

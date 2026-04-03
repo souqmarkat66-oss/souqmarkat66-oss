@@ -1,6 +1,6 @@
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LanguageProvider } from "@/components/LanguageProvider";
@@ -132,6 +132,21 @@ function Router() {
 }
 
 function AppFooter() {
+  const { data: settings } = useQuery<Record<string, string>>({
+    queryKey: ["/api/settings"],
+    queryFn: () => fetch("/api/settings").then(r => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const g = (key: string, def: string) => settings?.[key] || def;
+
+  const playStoreUrl  = g("app_play_store", "https://play.google.com/store/apps/details?id=com.apmo.souqmarket");
+  const appStoreUrl   = g("app_app_store",  "https://apps.apple.com/eg/app/as-souqmarket/id6740153334");
+  const huaweiUrl     = g("app_huawei",     "https://app.as-souqmarkat.com/?from-splash=false");
+  const vodafoneCash  = g("contact_vodafone_cash", "01098553911");
+  const instaPay      = g("contact_instapay",      "01285558567");
+  const platformName  = g("platform_name",  "شبكة سوق للإعلانات");
+
   return (
     <footer className="border-t py-10 bg-muted/20">
       <div className="container px-4">
@@ -141,7 +156,7 @@ function AppFooter() {
             <h3 className="font-bold text-sm mb-3">حمّل تطبيق سوق ماركات</h3>
             <div className="flex flex-col gap-2">
               <a
-                href="https://apps.apple.com/eg/app/as-souqmarket/id6740153334"
+                href={appStoreUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-3 text-white rounded-xl px-4 py-2.5 transition-all hover:opacity-90 hover:scale-[1.02]"
@@ -157,7 +172,7 @@ function AppFooter() {
                 </div>
               </a>
               <a
-                href="https://play.google.com/store/apps/details?id=com.apmo.souqmarket"
+                href={playStoreUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-3 text-white rounded-xl px-4 py-2.5 transition-all hover:opacity-90 hover:scale-[1.02]"
@@ -173,7 +188,7 @@ function AppFooter() {
                 </div>
               </a>
               <a
-                href="https://app.as-souqmarkat.com/?from-splash=false"
+                href={huaweiUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-3 text-white rounded-xl px-4 py-2.5 transition-all hover:opacity-90 hover:scale-[1.02]"
@@ -199,7 +214,7 @@ function AppFooter() {
                 <span className="text-xl">📱</span>
                 <div>
                   <div className="text-xs font-bold text-red-700 dark:text-red-400">فودافون كاش</div>
-                  <div className="text-sm font-mono font-bold">01098553911</div>
+                  <div className="text-sm font-mono font-bold">{vodafoneCash}</div>
                 </div>
               </div>
               <div className="flex items-center gap-3 bg-orange-50 dark:bg-orange-950/20 rounded-xl p-3 border border-orange-200 dark:border-orange-900">
@@ -213,7 +228,7 @@ function AppFooter() {
                 <span className="text-xl">💳</span>
                 <div>
                   <div className="text-xs font-bold text-blue-700 dark:text-blue-400">InstaPay</div>
-                  <div className="text-sm font-mono font-bold">01285558567</div>
+                  <div className="text-sm font-mono font-bold">{instaPay}</div>
                 </div>
               </div>
               <div className="flex items-center gap-3 bg-primary/5 rounded-xl p-3 border border-primary/20">
@@ -244,7 +259,7 @@ function AppFooter() {
           </div>
         </div>
         <div className="text-center text-sm text-muted-foreground border-t pt-6">
-          <p className="font-bold text-base text-foreground mb-1">شبكة سوق للإعلانات</p>
+          <p className="font-bold text-base text-foreground mb-1">{platformName}</p>
           <p>© {new Date().getFullYear()} Souq Ads Network. جميع الحقوق محفوظة. جميع التعاملات بالجنيه المصري.</p>
         </div>
       </div>
