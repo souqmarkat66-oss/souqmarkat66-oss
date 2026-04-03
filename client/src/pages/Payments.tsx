@@ -83,7 +83,8 @@ export default function Payments() {
   });
 
   const { data: ads = [] } = useQuery<any[]>({
-    queryKey: ["/api/ads"],
+    queryKey: ["/api/ads/mine"],
+    queryFn: () => fetch("/api/ads/mine", { credentials: "include" }).then(r => r.json()),
   });
 
   const { data: pricing = {} } = useQuery<Record<string, string>>({

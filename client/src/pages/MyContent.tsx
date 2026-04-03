@@ -209,8 +209,8 @@ function AuthenticatedContent({ user }: { user: any }) {
   };
 
   const { data: allAds = [], isLoading: adsLoading } = useQuery<any[]>({
-    queryKey: ["/api/ads"],
-    queryFn: () => fetch("/api/ads").then(r => r.json()),
+    queryKey: ["/api/ads/mine"],
+    queryFn: () => fetch("/api/ads/mine", { credentials: "include" }).then(r => r.json()),
   });
 
   const { data: reels = [], isLoading: reelsLoading } = useQuery<any[]>({
@@ -230,7 +230,7 @@ function AuthenticatedContent({ user }: { user: any }) {
 
   const deleteAdMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/ads/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/ads"] }); toast({ title: "تم حذف الإعلان" }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/ads/mine"] }); toast({ title: "تم حذف الإعلان" }); },
   });
 
   const deleteReelMut = useMutation({
@@ -251,7 +251,7 @@ function AuthenticatedContent({ user }: { user: any }) {
   // renewAdMut kept for backward compat (admin only)
   const renewAdMut = useMutation({
     mutationFn: (id: number) => apiRequest("POST", `/api/ads/${id}/renew`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/ads"] }); toast({ title: "✅ تم تجديد الإعلان 30 يوماً!" }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/ads/mine"] }); toast({ title: "✅ تم تجديد الإعلان 30 يوماً!" }); },
   });
 
   return (

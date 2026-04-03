@@ -14,7 +14,7 @@ import { tmpdir } from "os";
 import { upload } from "./upload";
 import path from "path";
 import fs from "fs";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
 import express from "express";
 import * as webpushModule from "web-push";
@@ -641,10 +641,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ADS ROUTES (isolated - users see only their own ads when authenticated)
   // ================================================================
   app.get("/api/ads", async (req: any, res) => {
-    const language = req.query.language as string | undefined;
-    const myAds = req.query.mine === 'true';
-    const filterUserId = req.query.userId as string | undefined;
+    const language   = req.query.language   as string | undefined;
+    const myAds      = req.query.mine === 'true';
+    const filterUserId = req.query.userId   as string | undefined;
     const authUserId = req.user?.claims?.sub;
+
+    // ── My ads / user ads (no pagination needed) ──
     if (myAds && authUserId) {
       const adsList = await storage.getAds(undefined, authUserId);
       return res.json(adsList);
@@ -653,29 +655,71 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const adsList = await storage.getAds(undefined, filterUserId);
       return res.json(adsList);
     }
+
     try {
-      // Auto-expire boosts that have passed their expiry
+      // Auto-expire boosts
       await db.execute(sql`
         UPDATE ads SET is_boosted = false, boosted_until = NULL
         WHERE is_boosted = true AND boosted_until IS NOT NULL AND boosted_until < NOW()
       `);
-      // Return ads: boosted first, then newest
-      let result;
-      if (language) {
-        result = await db.execute(sql`
-          SELECT * FROM ads WHERE status = 'active' AND language = ${language}
-          ORDER BY CASE WHEN is_boosted = true THEN 0 ELSE 1 END ASC, created_at DESC
-        `);
-      } else {
-        result = await db.execute(sql`
-          SELECT * FROM ads WHERE status = 'active'
-          ORDER BY CASE WHEN is_boosted = true THEN 0 ELSE 1 END ASC, created_at DESC
-        `);
-      }
-      res.json(result.rows);
-    } catch {
+
+      // ── Pagination & Filter params ──
+      const page     = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit    = Math.min(50, Math.max(1, parseInt(req.query.limit as string) || 20));
+      const offset   = (page - 1) * limit;
+      const priceMin = req.query.priceMin ? parseFloat(req.query.priceMin as string) : null;
+      const priceMax = req.query.priceMax ? parseFloat(req.query.priceMax as string) : null;
+      const region   = (req.query.region as string) || "";
+      const sortBy   = (req.query.sortBy as string) || "boost";   // boost | newest | oldest | price_asc | price_desc | views
+      const mediaType = (req.query.mediaType as string) || "";
+
+      // ── Build WHERE clauses ──
+      const conditions: string[] = ["status = 'active'"];
+      const params: any[]        = [];
+      let pi = 1;
+
+      if (language) { conditions.push(`language = $${pi++}`);   params.push(language); }
+      if (region)   { conditions.push(`target_region ILIKE $${pi++}`); params.push(`%${region}%`); }
+      if (mediaType){ conditions.push(`media_type = $${pi++}`); params.push(mediaType); }
+      if (priceMin !== null) { conditions.push(`price_egp >= $${pi++}`); params.push(priceMin); }
+      if (priceMax !== null) { conditions.push(`price_egp <= $${pi++}`); params.push(priceMax); }
+
+      const where = conditions.join(" AND ");
+
+      // ── ORDER BY ──
+      const orderMap: Record<string, string> = {
+        boost:      "CASE WHEN is_boosted = true THEN 0 ELSE 1 END ASC, created_at DESC",
+        newest:     "created_at DESC",
+        oldest:     "created_at ASC",
+        price_asc:  "price_egp ASC NULLS LAST",
+        price_desc: "price_egp DESC NULLS LAST",
+        views:      "views_count DESC",
+      };
+      const orderBy = orderMap[sortBy] || orderMap.boost;
+
+      // ── Count total ──
+      const countRes = await pool.query(`SELECT COUNT(*) AS total FROM ads WHERE ${where}`, params);
+      const total = parseInt(countRes.rows[0]?.total || "0");
+
+      // ── Fetch page ──
+      params.push(limit, offset);
+      const dataRes = await pool.query(
+        `SELECT * FROM ads WHERE ${where} ORDER BY ${orderBy} LIMIT $${pi++} OFFSET $${pi++}`,
+        params
+      );
+
+      res.json({
+        ads:   dataRes.rows,
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+        hasMore: page * limit < total,
+      });
+    } catch (e: any) {
+      // Fallback: return simple list
       const adsList = await storage.getAds(language);
-      res.json(adsList);
+      res.json({ ads: adsList, total: adsList.length, page: 1, limit: adsList.length, pages: 1, hasMore: false });
     }
   });
 

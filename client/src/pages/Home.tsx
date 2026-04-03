@@ -54,7 +54,8 @@ export default function Home() {
     enabled: debouncedSearch.trim().length >= 2,
   });
 
-  const { data: ads, isLoading: adsLoading } = useQuery({ queryKey: ["/api/ads"], queryFn: () => fetch(`/api/ads?language=${language}`).then(r => r.json()) });
+  const { data: adsResp, isLoading: adsLoading } = useQuery({ queryKey: ["/api/ads"], queryFn: () => fetch(`/api/ads?language=${language}&limit=8`).then(r => r.json()) });
+  const ads: any[] = adsResp?.ads ?? adsResp ?? [];
   const { data: streams, isLoading: streamsLoading } = useQuery({ queryKey: ["/api/streams"], queryFn: () => fetch("/api/streams").then(r => r.json()) });
   const { data: channels } = useQuery({ queryKey: ["/api/channels"], queryFn: () => fetch("/api/channels").then(r => r.json()) });
 
