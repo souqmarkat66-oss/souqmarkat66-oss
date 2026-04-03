@@ -65,6 +65,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerCustomAuthRoutes(app);
   registerImageRoutes(app);
 
+  // ── Redirect www.ads-as.com → ads-as.com (permanent 301) ──
+  app.use((req, res, next) => {
+    const host = req.headers.host || "";
+    if (host.startsWith("www.")) {
+      const canonical = host.replace(/^www\./, "");
+      const proto = req.headers["x-forwarded-proto"] || "https";
+      return res.redirect(301, `${proto}://${canonical}${req.url}`);
+    }
+    next();
+  });
+
   // ── Initialize webpush VAPID keys from DB ──
   try {
     const pubRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'vapid_public_key' LIMIT 1`);
@@ -547,15 +558,33 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           sql`SELECT * FROM ads
               WHERE status = 'active'
                 AND language = ${lang}
-                AND (title ILIKE ${pattern} OR description ILIKE ${pattern})
-              ORDER BY created_at DESC LIMIT 30`
+                AND (
+                  title ILIKE ${pattern}
+                  OR description ILIKE ${pattern}
+                  OR target_region ILIKE ${pattern}
+                  OR whatsapp_number ILIKE ${pattern}
+                  OR payment_link ILIKE ${pattern}
+                  OR app_store_url ILIKE ${pattern}
+                  OR google_play_url ILIKE ${pattern}
+                  OR app_gallery_url ILIKE ${pattern}
+                )
+              ORDER BY created_at DESC LIMIT 50`
         );
       } else {
         result = await db.execute(
           sql`SELECT * FROM ads
               WHERE status = 'active'
-                AND (title ILIKE ${pattern} OR description ILIKE ${pattern})
-              ORDER BY created_at DESC LIMIT 30`
+                AND (
+                  title ILIKE ${pattern}
+                  OR description ILIKE ${pattern}
+                  OR target_region ILIKE ${pattern}
+                  OR whatsapp_number ILIKE ${pattern}
+                  OR payment_link ILIKE ${pattern}
+                  OR app_store_url ILIKE ${pattern}
+                  OR google_play_url ILIKE ${pattern}
+                  OR app_gallery_url ILIKE ${pattern}
+                )
+              ORDER BY created_at DESC LIMIT 50`
         );
       }
       res.json(result.rows);
