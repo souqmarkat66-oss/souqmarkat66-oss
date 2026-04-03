@@ -60,6 +60,9 @@ export const ads = pgTable("ads", {
   targetInterests: text("target_interests"),
   targetAges: text("target_ages"),
   whatsappClicks: integer("whatsapp_clicks").default(0),
+  couponCode: text("coupon_code"),
+  couponDiscountType: text("coupon_discount_type"),
+  couponDiscountValue: real("coupon_discount_value"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square, Heart, Star, Zap, CreditCard, Copy } from "lucide-react";
+import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square, Heart, Star, Zap, CreditCard, Copy, Tag } from "lucide-react";
 import { format } from "date-fns";
 import { ar, enUS } from "date-fns/locale";
 import { useAuth } from "@/hooks/use-auth";
@@ -401,6 +401,39 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
 
           {/* ⭐ Star Rating — Quick Rate from Card */}
           <QuickRating adId={ad.id} ratingData={ratingData} userId={user?.id} onRated={() => qc.invalidateQueries({ queryKey: ["/api/ratings/ad", ad.id] })} />
+
+          {/* 🏷️ Coupon Badge */}
+          {(ad as any).coupon_code && (
+            <div className="flex items-center gap-2 bg-gradient-to-l from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/20 border border-orange-200 dark:border-orange-800/50 rounded-xl p-2 mt-1">
+              <div className="w-6 h-6 rounded-lg bg-orange-500 flex items-center justify-center flex-shrink-0">
+                <Tag className="w-3 h-3 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] text-orange-600 dark:text-orange-400 font-semibold">كوبون خصم</p>
+                <p className="font-mono font-extrabold text-xs text-orange-800 dark:text-orange-300 truncate">{(ad as any).coupon_code}</p>
+              </div>
+              {(ad as any).coupon_discount_value && (
+                <Badge className="bg-orange-500 text-white text-[10px] px-2 border-none flex-shrink-0">
+                  {(ad as any).coupon_discount_type === "percentage"
+                    ? `${(ad as any).coupon_discount_value}%`
+                    : (ad as any).coupon_discount_type === "fixed"
+                    ? `${(ad as any).coupon_discount_value} ج.م`
+                    : (ad as any).coupon_discount_type === "free_shipping"
+                    ? "شحن مجاني"
+                    : "عرض"}
+                </Badge>
+              )}
+              <button
+                type="button"
+                onClick={e => { e.preventDefault(); e.stopPropagation(); navigator.clipboard.writeText((ad as any).coupon_code); }}
+                className="p-1 rounded-lg hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors flex-shrink-0"
+                data-testid={`btn-copy-coupon-${ad.id}`}
+                title="نسخ الكود"
+              >
+                <Copy className="w-3 h-3 text-orange-500" />
+              </button>
+            </div>
+          )}
 
           <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/40">
             <div className="flex items-center text-xs text-muted-foreground/80 gap-1.5">

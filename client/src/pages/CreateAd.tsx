@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, Loader2, Film, Volume2, ImageIcon, AlertCircle, CreditCard, Plus, X, Music, FolderOpen, Upload, Languages, Download, Eye, Camera, FileText, Wand2, RefreshCw } from "lucide-react";
+import { Sparkles, Loader2, Film, Volume2, ImageIcon, AlertCircle, CreditCard, Plus, X, Music, FolderOpen, Upload, Languages, Download, Eye, Camera, FileText, Wand2, RefreshCw, Tag, Copy, CheckCircle2, ToggleLeft, ToggleRight } from "lucide-react";
 import MediaPickerModal from "@/components/MediaPickerModal";
 import { UploadZone } from "@/components/UploadZone";
 import { motion, AnimatePresence } from "framer-motion";
@@ -85,6 +85,11 @@ export default function CreateAd() {
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [paymentMode, setPaymentMode] = useState<"cash" | "installment">("cash");
   const [adDuration, setAdDuration] = useState<number>(30); // days, 0 = no expiry
+  const [addCoupon, setAddCoupon] = useState(false);
+  const [couponDiscountType, setCouponDiscountType] = useState("percentage");
+  const [couponDiscountValue, setCouponDiscountValue] = useState("");
+  const [generatedCouponCode, setGeneratedCouponCode] = useState("");
+  const [couponGenerating, setCouponGenerating] = useState(false);
   // Targeting map states
   const [targetRegions, setTargetRegions] = useState<string[]>([]);
   const [targetInterests, setTargetInterests] = useState<string[]>([]);
@@ -1504,6 +1509,129 @@ export default function CreateAd() {
                 ? `سينتهي إعلانك في: ${new Date(Date.now() + adDuration * 86400000).toLocaleDateString("ar-EG", { day: "numeric", month: "long", year: "numeric" })}`
                 : "إعلانك سيظل نشطاً إلى أجل غير مسمى"}
             </div>
+          </div>
+
+          {/* ── قسم الكوبون ── */}
+          <div className="border rounded-2xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => { setAddCoupon(v => !v); setGeneratedCouponCode(""); }}
+              className="w-full flex items-center justify-between p-4 bg-orange-50/60 dark:bg-orange-950/10 hover:bg-orange-50 dark:hover:bg-orange-950/20 transition-colors"
+              data-testid="btn-toggle-coupon"
+            >
+              <div className="flex items-center gap-2">
+                <Tag className="w-4 h-4 text-orange-500" />
+                <span className="font-bold text-sm">أضف كوبون خصم لإعلانك</span>
+                <Badge variant="secondary" className="text-[10px] bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400">15 ج.م</Badge>
+              </div>
+              {addCoupon
+                ? <ToggleRight className="w-6 h-6 text-orange-500" />
+                : <ToggleLeft className="w-6 h-6 text-muted-foreground" />
+              }
+            </button>
+
+            {addCoupon && (
+              <div className="p-4 space-y-3 border-t bg-background">
+                <p className="text-xs text-muted-foreground">سيظهر كود الخصم على بطاقة إعلانك ويتم خصم 15 ج.م من رصيدك</p>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-bold block mb-1">نوع الخصم</label>
+                    <Select value={couponDiscountType} onValueChange={setCouponDiscountType}>
+                      <SelectTrigger className="h-9 text-xs" data-testid="select-discount-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="percentage">نسبة خصم %</SelectItem>
+                        <SelectItem value="fixed">خصم بالجنيه ج.م</SelectItem>
+                        <SelectItem value="free_shipping">شحن مجاني</SelectItem>
+                        <SelectItem value="buy_x_get_y">اشتري X احصل على Y</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {couponDiscountType !== "free_shipping" && couponDiscountType !== "buy_x_get_y" && (
+                    <div>
+                      <label className="text-xs font-bold block mb-1">
+                        {couponDiscountType === "percentage" ? "نسبة الخصم %" : "قيمة الخصم ج.م"}
+                      </label>
+                      <Input
+                        type="number"
+                        placeholder={couponDiscountType === "percentage" ? "20" : "50"}
+                        value={couponDiscountValue}
+                        onChange={e => setCouponDiscountValue(e.target.value)}
+                        className="h-9 text-sm"
+                        data-testid="input-discount-value"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {generatedCouponCode ? (
+                  <div className="flex items-center gap-2 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-xl p-3">
+                    <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-[10px] text-muted-foreground">كود الكوبون</p>
+                      <p className="font-mono font-extrabold text-sm text-green-700 dark:text-green-400">{generatedCouponCode}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { navigator.clipboard.writeText(generatedCouponCode); toast({ title: "✅ تم نسخ الكود" }); }}
+                      className="p-1.5 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors"
+                    >
+                      <Copy className="w-3.5 h-3.5 text-green-600" />
+                    </button>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full gap-2 border-orange-300 text-orange-600 hover:bg-orange-50"
+                    disabled={couponGenerating || (!couponDiscountValue && couponDiscountType !== "free_shipping" && couponDiscountType !== "buy_x_get_y")}
+                    onClick={async () => {
+                      setCouponGenerating(true);
+                      try {
+                        const title = form.getValues("title") || "منتج";
+                        const desc  = form.getValues("description") || "";
+                        const res = await fetch("/api/coupons/generate", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          credentials: "include",
+                          body: JSON.stringify({
+                            businessName: title,
+                            productDescription: desc || title,
+                            discountType: couponDiscountType,
+                            discountValue: parseFloat(couponDiscountValue) || 0,
+                          }),
+                        });
+                        if (!res.ok) {
+                          const err = await res.json();
+                          if (err.message === "insufficient_balance") {
+                            toast({ variant: "destructive", title: "رصيد غير كافٍ", description: `تحتاج ${err.required} ج.م في رصيدك` });
+                          } else {
+                            toast({ variant: "destructive", title: "خطأ", description: err.message });
+                          }
+                          return;
+                        }
+                        const data = await res.json();
+                        setGeneratedCouponCode(data.code);
+                        form.setValue("couponCode" as any, data.code);
+                        form.setValue("couponDiscountType" as any, couponDiscountType);
+                        form.setValue("couponDiscountValue" as any, parseFloat(couponDiscountValue) || 0);
+                        toast({ title: "✅ تم إنشاء الكوبون!", description: `كود: ${data.code}` });
+                      } catch {
+                        toast({ variant: "destructive", title: "خطأ في الاتصال" });
+                      } finally {
+                        setCouponGenerating(false);
+                      }
+                    }}
+                    data-testid="btn-generate-coupon"
+                  >
+                    {couponGenerating ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري الإنشاء...</> : <><Sparkles className="w-4 h-4" /> إنشاء كوبون بالذكاء (15 ج.م)</>}
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
 
           <Button

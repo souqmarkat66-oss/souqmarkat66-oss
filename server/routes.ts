@@ -91,6 +91,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── DB Migrations (safe — ADD COLUMN IF NOT EXISTS) ──
   try {
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS coupon_code text`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS coupon_discount_type text`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS coupon_discount_value real`);
     await db.execute(sql`ALTER TABLE reels ADD COLUMN IF NOT EXISTS audio_url text`);
     // User social / profile columns
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio text`);
