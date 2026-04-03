@@ -608,7 +608,7 @@ export default function Payments() {
                     </div>
                     <Download className="w-3.5 h-3.5 opacity-70" />
                   </a>
-                  <a href="https://apps.apple.com/app/id6743621961"
+                  <a href="https://apps.apple.com/eg/app/as-souqmarket/id6740153334"
                     target="_blank" rel="noopener noreferrer"
                     className="flex items-center gap-2.5 w-full bg-black hover:bg-gray-900 text-white rounded-xl px-3 py-2.5 transition-colors">
                     <Apple className="w-5 h-5 flex-shrink-0" />
