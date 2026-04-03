@@ -649,7 +649,11 @@ export default function AdDetails() {
     og.content = ad.title;
     let ogImg = document.querySelector('meta[property="og:image"]') as HTMLMetaElement | null;
     if (!ogImg) { ogImg = document.createElement("meta"); ogImg.setAttribute("property","og:image"); document.head.appendChild(ogImg); }
-    ogImg.content = ad.mediaUrl || "";
+    const mediaUrl = ad.mediaUrl || "";
+    ogImg.content = mediaUrl.startsWith("http") ? mediaUrl : mediaUrl ? `https://app.asouq.shop${mediaUrl}` : "";
+    let ogUrl = document.querySelector('meta[property="og:url"]') as HTMLMetaElement | null;
+    if (!ogUrl) { ogUrl = document.createElement("meta"); ogUrl.setAttribute("property","og:url"); document.head.appendChild(ogUrl); }
+    ogUrl.content = `https://app.asouq.shop${window.location.pathname}`;
     return () => { document.title = "شبكة سوق للإعلانات"; };
   }, [ad]);
 
@@ -827,7 +831,7 @@ export default function AdDetails() {
                   )}
                   {/* Share Menu */}
                   <ShareMenu
-                    url={window.location.pathname}
+                    url={`https://app.asouq.shop${window.location.pathname}`}
                     title={`شوف الإعلان ده: "${ad.title}" على سوق`}
                     description={ad.description || ""}
                     variant="outline"
