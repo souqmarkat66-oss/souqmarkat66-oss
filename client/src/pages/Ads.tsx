@@ -6,12 +6,49 @@ import { motion } from "framer-motion";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
-import { PlusCircle, LayoutGrid, Video, Search, Megaphone, ExternalLink, Star } from "lucide-react";
+import { PlusCircle, LayoutGrid, Video, Search, Megaphone, ExternalLink, Star, Globe } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 
 const CATEGORIES = ["الكل", "عقارات", "سيارات", "إلكترونيات", "ملابس", "طعام", "صحة", "تعليم", "ترفيه"];
+
+const PLATFORM_KEYWORDS = [
+  "ads", "ad", "سوق", "souq", "asouq", "إعلان", "إعلانات", "منصة",
+  "شبكة", "مبوبة", "ads-as", "adsas", "ads as", "سوق للإعلانات",
+  "مصرية", "مصر", "egypt", "classified"
+];
+
+function PlatformCard() {
+  return (
+    <motion.a
+      href="https://ads-as.com"
+      target="_blank"
+      rel="noopener noreferrer"
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="block mb-6 rounded-2xl overflow-hidden border border-primary/30 bg-gradient-to-br from-primary/10 via-violet-50 to-purple-50 dark:from-primary/20 dark:via-violet-950/30 dark:to-purple-950/20 hover:border-primary/60 transition-all group cursor-pointer"
+      data-testid="platform-search-card"
+    >
+      <div className="flex items-center gap-4 p-4">
+        <div className="w-14 h-14 rounded-xl bg-primary flex items-center justify-center flex-shrink-0 shadow-lg shadow-primary/30">
+          <Globe className="w-7 h-7 text-white" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="font-extrabold text-lg text-foreground">شبكة سوق للإعلانات</span>
+            <Badge className="bg-primary/20 text-primary border-primary/30 text-xs">🏆 المنصة الرسمية</Badge>
+          </div>
+          <p className="text-sm text-muted-foreground line-clamp-1">
+            أكبر منصة إعلانات مبوبة مصرية — إعلانات، بث مباشر، قنوات، ريلز
+          </p>
+          <p className="text-xs text-primary/80 mt-0.5 font-medium">ads-as.com</p>
+        </div>
+        <ExternalLink className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
+      </div>
+    </motion.a>
+  );
+}
 
 export default function Ads() {
   const { t } = useLanguage();
@@ -32,6 +69,9 @@ export default function Ads() {
 
   const isLoading = adsLoading;
   const ads = search.trim().length >= 2 ? searchResults : allAds;
+
+  const showPlatformCard = search.trim().length >= 2 &&
+    PLATFORM_KEYWORDS.some(kw => search.toLowerCase().includes(kw.toLowerCase()));
 
   const { data: sponsoredAd } = useQuery<any>({
     queryKey: ["/api/campaigns/random"],
@@ -243,6 +283,9 @@ export default function Ads() {
           </div>
         </Link>
       </div>
+
+      {/* Platform result card when searching platform-related terms */}
+      {showPlatformCard && <PlatformCard />}
 
       {isLoading ? (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
