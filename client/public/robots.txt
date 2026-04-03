@@ -1,27 +1,75 @@
 User-agent: *
 Allow: /
+Crawl-delay: 1
 Disallow: /api/
 Disallow: /admin
 Disallow: /my-dashboard
 Disallow: /media-library
 Disallow: /payments
 Disallow: /revenue
+Disallow: /create
+Disallow: /edit-ad/
 
 # Google
 User-agent: Googlebot
 Allow: /
+Crawl-delay: 0
 Disallow: /api/
 Disallow: /admin
+
+# Google Images
+User-agent: Googlebot-Image
+Allow: /uploads/
+Allow: /icons/
 
 # Bing
 User-agent: Bingbot
 Allow: /
+Crawl-delay: 1
 Disallow: /api/
 Disallow: /admin
+
+# Yandex
+User-agent: YandexBot
+Allow: /
+Crawl-delay: 2
+Disallow: /api/
+Disallow: /admin
+
+# DuckDuckGo
+User-agent: DuckDuckBot
+Allow: /
+Disallow: /api/
+Disallow: /admin
+
+# Baidu
+User-agent: Baiduspider
+Allow: /
+Crawl-delay: 3
+Disallow: /api/
+Disallow: /admin
+
+# Apple
+User-agent: Applebot
+Allow: /
+Disallow: /api/
+
+# Facebook / WhatsApp preview
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: WhatsApp
+Allow: /
+
+User-agent: Twitterbot
+Allow: /
+
+User-agent: LinkedInBot
+Allow: /
 
 # Sitemaps
 Sitemap: https://ads-as.com/sitemap.xml
 Sitemap: https://ads-as.com/sitemap-dynamic.xml
 
 # Souq Ads Network - شبكة سوق للإعلانات
-# Contact: souqmarkat66@gmail.com
+# ads-as.com | souqmarkat66@gmail.com

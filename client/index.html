@@ -8,9 +8,18 @@
     <!-- Primary SEO -->
     <title>شبكة سوق للإعلانات | إعلانات مبوبة مصرية - Souq Ads Network</title>
     <meta name="description" content="شبكة سوق للإعلانات — أكبر منصة إعلانات مبوبة مصرية. أنشئ إعلانك، استهدف محافظتك، وتواصل مع ملايين المصريين عبر بث مباشر وقنوات رقمية وريلز. سوق أعلاناتك الآن!" />
-    <meta name="keywords" content="إعلانات مبوبة مصر, اعلانات مصرية, سوق للاعلانات, اعلانات اون لاين مصر, بث مباشر اعلانات, تسويق رقمي مصر, souq ads, egypt classifieds, egyptian ads network, اعلانات القاهرة, اعلانات الجيزة, اعلانات الاسكندرية, اعلانات مجانية مصر" />
+    <meta name="keywords" content="إعلانات مبوبة مصر, اعلانات مصرية, سوق للاعلانات, اعلانات اون لاين مصر, بث مباشر اعلانات, تسويق رقمي مصر, souq ads, egypt classifieds, egyptian ads network, اعلانات القاهرة, اعلانات الجيزة, اعلانات الاسكندرية, اعلانات مجانية مصر, ads-as.com, شبكة سوق, سوق الاعلانات, اعلانات مبوبة, نشر اعلان, اعلان مجاني, موقع اعلانات, بيع وشراء مصر, ريلز اعلانات, قنوات اعلانية, حملات تسويقية, كوبونات خصم مصر" />
     <meta name="author" content="شبكة سوق للإعلانات" />
     <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+    <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+    <meta name="bingbot" content="index, follow" />
+    <meta name="rating" content="general" />
+    <meta name="revisit-after" content="1 days" />
+    <meta name="language" content="Arabic" />
+    <meta name="geo.region" content="EG" />
+    <meta name="geo.placename" content="Egypt" />
+    <meta name="geo.position" content="26.8206;30.8025" />
+    <meta name="ICBM" content="26.8206, 30.8025" />
     <link rel="canonical" href="https://ads-as.com/" />
 
     <!-- Open Graph / Facebook -->
@@ -42,13 +51,16 @@
       "@context": "https://schema.org",
       "@type": "WebSite",
       "name": "شبكة سوق للإعلانات",
-      "alternateName": "Souq Ads Network",
+      "alternateName": ["Souq Ads Network", "ads-as.com", "سوق للإعلانات", "شبكة سوق"],
       "url": "https://ads-as.com/",
       "description": "أكبر منصة إعلانات مبوبة مصرية — إعلانات، بث مباشر، قنوات رقمية، ريلز",
       "inLanguage": "ar",
       "potentialAction": {
         "@type": "SearchAction",
-        "target": "https://ads-as.com/ads?q={search_term_string}",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": "https://ads-as.com/ads?q={search_term_string}"
+        },
         "query-input": "required name=search_term_string"
       }
     }
@@ -59,18 +71,75 @@
       "@context": "https://schema.org",
       "@type": "Organization",
       "name": "شبكة سوق للإعلانات",
+      "alternateName": "Souq Ads Network",
       "url": "https://ads-as.com/",
-      "logo": "https://ads-as.com/icons/icon-512.png",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://ads-as.com/icons/icon-512.png",
+        "width": 512,
+        "height": 512
+      },
+      "image": "https://ads-as.com/icons/icon-512.png",
+      "description": "أكبر منصة إعلانات مبوبة مصرية — إعلانات، بث مباشر، قنوات رقمية، ريلز، كوبونات",
+      "email": "souqmarkat66@gmail.com",
+      "telephone": "+20-109-855-3911",
+      "foundingDate": "2026",
       "contactPoint": {
         "@type": "ContactPoint",
         "telephone": "+20-109-855-3911",
         "contactType": "customer service",
-        "availableLanguage": "Arabic"
+        "availableLanguage": ["Arabic"],
+        "areaServed": "EG"
       },
       "areaServed": {
         "@type": "Country",
         "name": "Egypt"
+      },
+      "sameAs": [
+        "https://ads-as.com",
+        "https://www.ads-as.com"
+      ]
+    }
+    </script>
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      "name": "شبكة سوق للإعلانات | إعلانات مبوبة مصرية",
+      "url": "https://ads-as.com/",
+      "description": "شبكة سوق للإعلانات — أكبر منصة إعلانات مبوبة مصرية. أنشئ إعلانك، استهدف محافظتك.",
+      "inLanguage": "ar",
+      "isPartOf": {
+        "@type": "WebSite",
+        "url": "https://ads-as.com/"
+      },
+      "breadcrumb": {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {"@type": "ListItem", "position": 1, "name": "الرئيسية", "item": "https://ads-as.com/"},
+          {"@type": "ListItem", "position": 2, "name": "الإعلانات", "item": "https://ads-as.com/ads"},
+          {"@type": "ListItem", "position": 3, "name": "القنوات", "item": "https://ads-as.com/channels"},
+          {"@type": "ListItem", "position": 4, "name": "الريلز", "item": "https://ads-as.com/reels"}
+        ]
       }
+    }
+    </script>
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "ItemList",
+      "name": "خدمات شبكة سوق للإعلانات",
+      "description": "المنصة تقدم إعلانات مبوبة، بث مباشر، قنوات رقمية، ريلز، وحملات تسويقية",
+      "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "إعلانات مبوبة", "url": "https://ads-as.com/ads"},
+        {"@type": "ListItem", "position": 2, "name": "بث مباشر", "url": "https://ads-as.com/livestream"},
+        {"@type": "ListItem", "position": 3, "name": "قنوات رقمية", "url": "https://ads-as.com/channels"},
+        {"@type": "ListItem", "position": 4, "name": "ريلز إعلانية", "url": "https://ads-as.com/reels"},
+        {"@type": "ListItem", "position": 5, "name": "حملات تسويقية", "url": "https://ads-as.com/campaigns"},
+        {"@type": "ListItem", "position": 6, "name": "كوبونات خصم", "url": "https://ads-as.com/coupons"}
+      ]
     }
     </script>
 

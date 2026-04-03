@@ -396,45 +396,53 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ── Sitemap.xml (SEO) ─────────────────────────────────────────
+  // ── Sitemap Index ──
   app.get("/sitemap.xml", async (_req, res) => {
     const BASE = "https://ads-as.com";
     const now = new Date().toISOString().split("T")[0];
-    const staticPages = [
-      { loc: "/",          priority: "1.0", freq: "daily"   },
-      { loc: "/ads",       priority: "0.9", freq: "hourly"  },
-      { loc: "/reels",     priority: "0.8", freq: "daily"   },
-      { loc: "/channels",  priority: "0.8", freq: "daily"   },
-      { loc: "/streams",   priority: "0.8", freq: "hourly"  },
-      { loc: "/login",     priority: "0.5", freq: "monthly" },
-      { loc: "/register",  priority: "0.5", freq: "monthly" },
-    ];
-    // Dynamic ad pages
-    let adRows: any[] = [];
-    try {
-      const result = await db.execute(sql`SELECT id, updated_at, created_at FROM ads WHERE status = 'active' ORDER BY id DESC LIMIT 1000`);
-      adRows = result.rows as any[];
-    } catch {}
-
-    const urlTags = [
-      ...staticPages.map(p => `
-    <url>
-      <loc>${BASE}${p.loc}</loc>
-      <lastmod>${now}</lastmod>
-      <changefreq>${p.freq}</changefreq>
-      <priority>${p.priority}</priority>
-    </url>`),
-      ...adRows.map(ad => `
-    <url>
-      <loc>${BASE}/ads/${ad.id}</loc>
-      <lastmod>${(ad.updated_at || ad.created_at || now).toString().split("T")[0]}</lastmod>
-      <changefreq>weekly</changefreq>
-      <priority>0.7</priority>
-    </url>`),
-    ].join("");
-
     res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600");
     res.send(`<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urlTags}
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap>
+    <loc>${BASE}/sitemap-pages.xml</loc>
+    <lastmod>${now}</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>${BASE}/sitemap-dynamic.xml</loc>
+    <lastmod>${now}</lastmod>
+  </sitemap>
+</sitemapindex>`);
+  });
+
+  // ── Static Pages Sitemap ──
+  app.get("/sitemap-pages.xml", async (_req, res) => {
+    const BASE = "https://ads-as.com";
+    const now = new Date().toISOString().split("T")[0];
+    const pages = [
+      { loc: "/",            priority: "1.0", freq: "daily"   },
+      { loc: "/ads",         priority: "0.95", freq: "hourly" },
+      { loc: "/reels",       priority: "0.9",  freq: "hourly" },
+      { loc: "/channels",    priority: "0.85", freq: "daily"  },
+      { loc: "/livestream",  priority: "0.85", freq: "always" },
+      { loc: "/campaigns",   priority: "0.8",  freq: "daily"  },
+      { loc: "/coupons",     priority: "0.75", freq: "daily"  },
+      { loc: "/store",       priority: "0.75", freq: "daily"  },
+      { loc: "/create",      priority: "0.7",  freq: "monthly"},
+      { loc: "/login",       priority: "0.6",  freq: "monthly"},
+    ];
+    const urlTags = pages.map(p => `
+  <url>
+    <loc>${BASE}${p.loc}</loc>
+    <lastmod>${now}</lastmod>
+    <changefreq>${p.freq}</changefreq>
+    <priority>${p.priority}</priority>
+  </url>`).join("");
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">${urlTags}
 </urlset>`);
   });
 
@@ -3780,46 +3788,57 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/sitemap-dynamic.xml", async (req, res) => {
     try {
       const BASE = "https://ads-as.com";
-      const [adsRes, channelsRes] = await Promise.all([
-        db.execute(sql`SELECT id, created_at FROM ads WHERE status = 'active' ORDER BY created_at DESC LIMIT 1000`),
-        db.execute(sql`SELECT id, created_at FROM channels WHERE status = 'active' ORDER BY created_at DESC`),
+      const [adsRes, channelsRes, reelsRes] = await Promise.all([
+        db.execute(sql`SELECT id, title, media_url, media_type, created_at FROM ads WHERE status = 'active' ORDER BY created_at DESC LIMIT 2000`),
+        db.execute(sql`SELECT id, name, avatar_url, created_at FROM channels WHERE status = 'active' ORDER BY created_at DESC`),
+        db.execute(sql`SELECT id, title, thumbnail_url, created_at FROM reels ORDER BY created_at DESC LIMIT 500`),
       ]);
 
-      const staticPages: Array<{ loc: string; priority: string; changefreq: string; lastmod?: string }> = [
-        { loc: `${BASE}/`, priority: "1.0", changefreq: "daily" },
-        { loc: `${BASE}/ads`, priority: "0.9", changefreq: "hourly" },
-        { loc: `${BASE}/channels`, priority: "0.8", changefreq: "daily" },
-        { loc: `${BASE}/reels`, priority: "0.8", changefreq: "hourly" },
-        { loc: `${BASE}/campaigns`, priority: "0.7", changefreq: "weekly" },
-      ];
+      const escXml = (s: string) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-      const adPages = (adsRes.rows as any[]).map(ad => ({
-        loc: `${BASE}/ads/${ad.id}`,
-        priority: "0.7",
-        changefreq: "weekly",
-        lastmod: ad.created_at ? new Date(ad.created_at).toISOString().split("T")[0] : undefined,
-      }));
+      const adTags = (adsRes.rows as any[]).map(ad => {
+        const lastmod = ad.created_at ? new Date(ad.created_at).toISOString().split("T")[0] : "";
+        const isImage = ad.media_type === "image" && ad.media_url;
+        const imgUrl = isImage ? (ad.media_url.startsWith("http") ? ad.media_url : `${BASE}${ad.media_url}`) : "";
+        return `  <url>
+    <loc>${BASE}/ads/${ad.id}</loc>
+    ${lastmod ? `<lastmod>${lastmod}</lastmod>` : ""}
+    <changefreq>weekly</changefreq>
+    <priority>0.75</priority>
+    ${imgUrl ? `<image:image><image:loc>${escXml(imgUrl)}</image:loc><image:title>${escXml(ad.title || "")}</image:title></image:image>` : ""}
+  </url>`;
+      }).join("\n");
 
-      const channelPages = (channelsRes.rows as any[]).map(ch => ({
-        loc: `${BASE}/channels/${ch.id}`,
-        priority: "0.6",
-        changefreq: "daily",
-        lastmod: ch.created_at ? new Date(ch.created_at).toISOString().split("T")[0] : undefined,
-      }));
+      const channelTags = (channelsRes.rows as any[]).map(ch => {
+        const lastmod = ch.created_at ? new Date(ch.created_at).toISOString().split("T")[0] : "";
+        return `  <url>
+    <loc>${BASE}/channels/${ch.id}</loc>
+    ${lastmod ? `<lastmod>${lastmod}</lastmod>` : ""}
+    <changefreq>daily</changefreq>
+    <priority>0.65</priority>
+  </url>`;
+      }).join("\n");
 
-      const allPages = [...staticPages, ...adPages, ...channelPages];
+      const reelTags = (reelsRes.rows as any[]).map(r => {
+        const lastmod = r.created_at ? new Date(r.created_at).toISOString().split("T")[0] : "";
+        return `  <url>
+    <loc>${BASE}/reels?reel=${r.id}</loc>
+    ${lastmod ? `<lastmod>${lastmod}</lastmod>` : ""}
+    <changefreq>weekly</changefreq>
+    <priority>0.6</priority>
+  </url>`;
+      }).join("\n");
 
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${allPages.map(p => `  <url>
-    <loc>${p.loc}</loc>
-    <changefreq>${p.changefreq}</changefreq>
-    <priority>${p.priority}</priority>${p.lastmod ? `\n    <lastmod>${p.lastmod}</lastmod>` : ""}
-  </url>`).join("\n")}
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+${adTags}
+${channelTags}
+${reelTags}
 </urlset>`;
 
-      res.header("Content-Type", "application/xml");
-      res.header("Cache-Control", "public, max-age=3600");
+      res.setHeader("Content-Type", "application/xml; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=3600");
       res.send(xml);
     } catch (e: any) {
       res.status(500).send("Sitemap error");
