@@ -1998,6 +1998,51 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Helper: activate service after payment approval ──
+  async function activateServiceForPayment(p: any) {
+    if (!p || p.type !== 'top_up') return;
+    const svcType   = (p.serviceType || "").split(",")[0].trim();
+    const adId      = p.adId ? Number(p.adId) : null;
+    const userId    = p.userId;
+
+    try {
+      if (svcType === 'ad_boost' && adId) {
+        await pool.query(
+          `UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '30 days' WHERE id = $1`,
+          [adId]
+        );
+        await createNotification(userId, 'system', '⚡ تم تعزيز إعلانك!',
+          `إعلانك #${adId} أصبح مميزاً في الصدارة لمدة 30 يوماً`, `/ads/${adId}`);
+      } else if (svcType === 'renewal' && adId) {
+        await pool.query(
+          `UPDATE ads SET status = 'active', expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + INTERVAL '30 days' WHERE id = $1`,
+          [adId]
+        );
+        await createNotification(userId, 'system', '🔄 تم تجديد إعلانك!',
+          `إعلانك #${adId} تم تجديده لمدة 30 يوماً إضافية`, `/ads/${adId}`);
+      } else if (svcType === 'ai_credits') {
+        const creditsRow = await pool.query(
+          `SELECT value FROM platform_settings WHERE key = 'ai_free_credits' LIMIT 1`
+        );
+        const credits = parseInt(creditsRow.rows[0]?.value || '3');
+        await pool.query(
+          `INSERT INTO ai_usage (user_id, credits_used, credits_limit)
+           VALUES ($1, 0, $2)
+           ON CONFLICT (user_id) DO UPDATE SET credits_limit = ai_usage.credits_limit + $2`,
+          [userId, credits]
+        );
+        await createNotification(userId, 'system', '🤖 تم إضافة رصيد AI!',
+          `تمت إضافة ${credits} كريديت للذكاء الاصطناعي لحسابك`, '/create');
+      } else {
+        // Generic: just notify
+        await createNotification(userId, 'payment', '✅ تم تفعيل خدمتك!',
+          `تم تفعيل خدمة "${svcType}" — رقم الطلب: ${p.orderNumber}`, '/payments');
+      }
+    } catch (e: any) {
+      console.error('[activateService] error:', e?.message);
+    }
+  }
+
   app.put("/api/payments/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { status, adminNote } = req.body;
     const payment = await storage.updatePaymentRequest(Number(req.params.id), status, adminNote);
@@ -2025,11 +2070,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               campaignId: null,
             });
           }
+          // ── Auto-activate the paid service ──
+          await activateServiceForPayment(p);
           await createNotification(
             p.userId,
             'payment',
-            '✅ تم قبول طلب الدفع',
-            `رقم الطلب ${p.orderNumber} — تمت الموافقة وتم ${p.type === 'top_up' ? 'شحن رصيدك بمبلغ' : 'معالجة سحب'} ${p.amountEGP} ج.م`,
+            '✅ تم قبول طلب الدفع وتفعيل الخدمة',
+            `رقم الطلب ${p.orderNumber} — تمت الموافقة وتفعيل الخدمة تلقائياً`,
             '/payments'
           );
         } else {
@@ -2112,6 +2159,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.put("/api/admin/payments/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { status, adminNote } = req.body;
     const payment = await storage.updatePaymentRequest(Number(req.params.id), status, adminNote);
+    if (status === 'approved') {
+      const pr = await storage.getPaymentRequests(undefined);
+      const p = pr.find(x => x.id === Number(req.params.id));
+      if (p) {
+        await activateServiceForPayment(p);
+        await createNotification(
+          p.userId,
+          'payment',
+          '✅ تم قبول طلب الدفع وتفعيل الخدمة',
+          `رقم الطلب ${p.orderNumber} — تمت الموافقة وتفعيل الخدمة تلقائياً`,
+          '/payments'
+        );
+      }
+    } else if (status === 'rejected') {
+      const pr = await storage.getPaymentRequests(undefined);
+      const p = pr.find(x => x.id === Number(req.params.id));
+      if (p) {
+        await createNotification(
+          p.userId,
+          'payment',
+          '❌ تم رفض طلب الدفع',
+          `رقم الطلب ${p.orderNumber} — ${adminNote || 'للاستفسار تواصل مع الإدارة.'}`,
+          '/payments'
+        );
+      }
+    }
     res.json(payment);
   });
 
