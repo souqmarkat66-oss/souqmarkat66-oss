@@ -556,7 +556,7 @@ const AI_CONTEXT = `أنت "مساعد سوق"، المساعد الذكي ال�
 - نظام الإحالة
 - تطبيق موبايل على App Store و Google Play
 - الأدمن: Ahmed Mohamed (souqmarkat66@gmail.com)
-- الرابط: app.asouq.shop
+- الرابط: ads-as.com
 
 قواعد الرد:
 1. ردّ دائماً بالعربية الواضحة

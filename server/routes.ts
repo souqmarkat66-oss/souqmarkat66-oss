@@ -386,7 +386,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Sitemap.xml (SEO) ─────────────────────────────────────────
   app.get("/sitemap.xml", async (_req, res) => {
-    const BASE = "https://app.asouq.shop";
+    const BASE = "https://ads-as.com";
     const now = new Date().toISOString().split("T")[0];
     const staticPages = [
       { loc: "/",          priority: "1.0", freq: "daily"   },
@@ -3727,7 +3727,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const userRow = await db.execute(sql`SELECT referral_code, first_name FROM users WHERE id = ${userId} LIMIT 1`);
       const code = (userRow.rows[0] as any)?.referral_code;
       const name = (userRow.rows[0] as any)?.first_name || "صديقك";
-      const appUrl = `https://app.asouq.shop`;
+      const appUrl = `https://ads-as.com`;
       const msg = encodeURIComponent(
         `🎉 ${name} بيدعوك تنضم لـ شبكة سوق الإعلانات!\n` +
         `📢 أعلن عن منتجاتك، شاهد البث المباشر، واكسب أرباح\n` +
@@ -3747,7 +3747,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Dynamic Sitemap — includes all ads + channels for SEO
   app.get("/sitemap-dynamic.xml", async (req, res) => {
     try {
-      const BASE = "https://app.asouq.shop";
+      const BASE = "https://ads-as.com";
       const [adsRes, channelsRes] = await Promise.all([
         db.execute(sql`SELECT id, created_at FROM ads WHERE status = 'active' ORDER BY created_at DESC LIMIT 1000`),
         db.execute(sql`SELECT id, created_at FROM channels WHERE status = 'active' ORDER BY created_at DESC`),

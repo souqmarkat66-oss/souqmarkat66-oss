@@ -20,8 +20,8 @@ Disallow: /api/
 Disallow: /admin
 
 # Sitemaps
-Sitemap: https://app.asouq.shop/sitemap.xml
-Sitemap: https://app.asouq.shop/sitemap-dynamic.xml
+Sitemap: https://ads-as.com/sitemap.xml
+Sitemap: https://ads-as.com/sitemap-dynamic.xml
 
 # Souq Ads Network - شبكة سوق للإعلانات
 # Contact: souqmarkat66@gmail.com

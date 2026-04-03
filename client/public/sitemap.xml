@@ -3,37 +3,37 @@
         xmlns:xhtml="http://www.w3.org/1999/xhtml">
 
   <url>
-    <loc>https://app.asouq.shop/</loc>
+    <loc>https://ads-as.com/</loc>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
 
   <url>
-    <loc>https://app.asouq.shop/ads</loc>
+    <loc>https://ads-as.com/ads</loc>
     <changefreq>hourly</changefreq>
     <priority>0.9</priority>
   </url>
 
   <url>
-    <loc>https://app.asouq.shop/channels</loc>
+    <loc>https://ads-as.com/channels</loc>
     <changefreq>daily</changefreq>
     <priority>0.8</priority>
   </url>
 
   <url>
-    <loc>https://app.asouq.shop/reels</loc>
+    <loc>https://ads-as.com/reels</loc>
     <changefreq>hourly</changefreq>
     <priority>0.8</priority>
   </url>
 
   <url>
-    <loc>https://app.asouq.shop/campaigns</loc>
+    <loc>https://ads-as.com/campaigns</loc>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
 
   <url>
-    <loc>https://app.asouq.shop/login</loc>
+    <loc>https://ads-as.com/login</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
