@@ -1477,37 +1477,65 @@ export default function CreateAd() {
           {/* Ad Duration Selector */}
           <div className="border rounded-2xl p-4 bg-blue-50/40 dark:bg-blue-950/10 space-y-3">
             <h3 className="font-bold text-sm flex items-center gap-2">⏳ مدة الإعلان</h3>
-            <p className="text-xs text-muted-foreground">اختر كم يوماً يظهر إعلانك على المنصة</p>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { days: 7,  label: "7 أيام",   sub: "أسبوع" },
-                { days: 14, label: "14 يوماً",  sub: "أسبوعان" },
-                { days: 30, label: "30 يوماً",  sub: "شهر ✨" },
-                { days: 60, label: "60 يوماً",  sub: "شهران" },
-                { days: 90, label: "90 يوماً",  sub: "3 أشهر" },
-                { days: 0,  label: "بلا حد",    sub: "دائم ♾️" },
-              ].map(opt => (
+            <p className="text-xs text-muted-foreground">حدد عدد الأيام اللي تريد إعلانك يظهر فيها — أي عدد تختاره</p>
+
+            {/* اختصارات سريعة */}
+            <div className="flex flex-wrap gap-1.5">
+              {[7, 14, 30, 60, 90, 180, 365].map(d => (
                 <button
-                  key={opt.days}
+                  key={d}
                   type="button"
-                  onClick={() => setAdDuration(opt.days)}
-                  className={`flex flex-col items-center justify-center py-3 px-2 rounded-xl border-2 text-sm font-bold transition-all ${
-                    adDuration === opt.days
-                      ? "border-primary bg-primary text-white shadow-md shadow-primary/30"
-                      : "border-border bg-white dark:bg-background text-foreground hover:border-primary/50"
+                  onClick={() => setAdDuration(d)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition-all ${
+                    adDuration === d
+                      ? "border-primary bg-primary text-white shadow shadow-primary/30"
+                      : "border-border bg-white dark:bg-background hover:border-primary/50"
                   }`}
-                  data-testid={`duration-${opt.days}`}
+                  data-testid={`duration-${d}`}
                 >
-                  <span>{opt.label}</span>
-                  <span className={`text-[10px] font-normal mt-0.5 ${adDuration === opt.days ? "text-white/80" : "text-muted-foreground"}`}>{opt.sub}</span>
+                  {d} يوم
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => setAdDuration(0)}
+                className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition-all ${
+                  adDuration === 0
+                    ? "border-primary bg-primary text-white shadow shadow-primary/30"
+                    : "border-border bg-white dark:bg-background hover:border-primary/50"
+                }`}
+                data-testid="duration-0"
+              >
+                ♾️ بلا حد
+              </button>
             </div>
+
+            {/* إدخال حر */}
+            <div className="flex items-center gap-2">
+              <div className="flex-1 relative">
+                <Input
+                  type="number"
+                  min={1}
+                  max={3650}
+                  placeholder="أو اكتب عدد الأيام يدوياً..."
+                  value={adDuration > 0 ? adDuration : ""}
+                  onChange={e => {
+                    const v = parseInt(e.target.value);
+                    if (!isNaN(v) && v > 0) setAdDuration(v);
+                    else if (e.target.value === "") setAdDuration(0);
+                  }}
+                  className="h-10 text-sm ps-4"
+                  data-testid="input-duration-custom"
+                />
+              </div>
+              <span className="text-xs text-muted-foreground font-bold flex-shrink-0">يوم</span>
+            </div>
+
             <div className="flex items-center gap-2 bg-blue-100/60 dark:bg-blue-900/20 rounded-xl px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
               <span>📅</span>
               {adDuration > 0
-                ? `سينتهي إعلانك في: ${new Date(Date.now() + adDuration * 86400000).toLocaleDateString("ar-EG", { day: "numeric", month: "long", year: "numeric" })}`
-                : "إعلانك سيظل نشطاً إلى أجل غير مسمى"}
+                ? `سينتهي إعلانك في: ${new Date(Date.now() + adDuration * 86400000).toLocaleDateString("ar-EG", { day: "numeric", month: "long", year: "numeric" })} (${adDuration} يوم)`
+                : "إعلانك سيظل نشطاً إلى أجل غير مسمى ♾️"}
             </div>
           </div>
 
