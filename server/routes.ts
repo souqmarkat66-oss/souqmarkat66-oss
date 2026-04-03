@@ -2963,11 +2963,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         req.session.customUser.firstName       = updated.first_name       ?? req.session.customUser.firstName;
         req.session.customUser.lastName        = updated.last_name        ?? req.session.customUser.lastName;
         req.session.customUser.profileImageUrl = updated.profile_image_url ?? req.session.customUser.profileImageUrl;
-        await new Promise<void>((resolve) => {
-          if (req.session?.save) req.session.save(() => resolve());
-          else resolve();
-        });
+      } else {
+        // Replit OAuth user — persist profile overrides in session so /api/auth/user reflects changes
+        (req.session as any).customUser = {
+          id:              userId,
+          email:           req.user?.claims?.email || null,
+          phone:           null,
+          firstName:       updated.first_name || req.user?.claims?.first_name || null,
+          lastName:        updated.last_name  || req.user?.claims?.last_name  || null,
+          profileImageUrl: updated.profile_image_url || null,
+        };
       }
+      await new Promise<void>((resolve) => {
+        if (req.session?.save) req.session.save(() => resolve());
+        else resolve();
+      });
       res.json({ ok: true, user: updated });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });

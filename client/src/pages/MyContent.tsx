@@ -223,10 +223,10 @@ function AuthenticatedContent({ user }: { user: any }) {
     queryFn: () => fetch("/api/streams").then(r => r.json()),
   });
 
-  // Filter by current user
-  const myAds = allAds.filter(ad => ad.userId === user.id);
-  const myReels = reels.filter((r: any) => r.userId === user.id);
-  const myStreams = streams.filter((s: any) => s.userId === user.id);
+  // Filter by current user — handle both camelCase (Drizzle) and snake_case (raw SQL) field names
+  const myAds = allAds.filter(ad => (ad.userId ?? ad.user_id) === user.id);
+  const myReels = reels.filter((r: any) => (r.userId ?? r.user_id) === user.id);
+  const myStreams = streams.filter((s: any) => (s.userId ?? s.user_id) === user.id);
 
   const deleteAdMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/ads/${id}`),
