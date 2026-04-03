@@ -82,21 +82,25 @@ function ReelVoicePlayer({ url }: { url: string }) {
   );
 }
 
-function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded }: {
+function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMuted, onGlobalMute }: {
   reel: Reel;
   isActive: boolean;
   isOwner?: boolean;
   onEdit?: () => void;
   onDelete?: () => void;
   onEnded?: () => void;
+  globalMuted: boolean;
+  onGlobalMute: (m: boolean) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [liked, setLiked] = useState(false);
   const [localLikes, setLocalLikes] = useState(reel.likesCount);
-  const [muted, setMuted] = useState(true);
+  const muted = globalMuted;
+  const setMuted = (m: boolean) => onGlobalMute(m);
   const [showUnmuteHint, setShowUnmuteHint] = useState(true);
   const [showComments, setShowComments] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   const [comment, setComment] = useState("");
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgIndex, setImgIndex] = useState(0);
@@ -218,16 +222,17 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded }: {
     }
   }, [muted]);
 
-  // Auto-play/pause video when active
+  // Auto-play/pause video when active — honour global mute state
   useEffect(() => {
     if (!videoRef.current || isImageMode) return;
     if (isActive) {
-      videoRef.current.muted = true;
+      videoRef.current.muted = globalMuted;
+      videoRef.current.volume = globalMuted ? 0 : 1;
       videoRef.current.play().catch(() => {});
     } else {
       videoRef.current.pause();
     }
-  }, [isActive, isImageMode]);
+  }, [isActive, isImageMode, globalMuted]);
 
   // Auto-advance slideshow every 3s when active
   useEffect(() => {
@@ -264,6 +269,7 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded }: {
     }
     setMuted(false);
     setShowUnmuteHint(false);
+    localStorage.setItem("reels_unmuted", "1");
   };
 
   const handleToggleMute = () => {
@@ -273,7 +279,19 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded }: {
       videoRef.current.volume = newMuted ? 0 : 1;
     }
     setMuted(newMuted);
-    if (!newMuted) setShowUnmuteHint(false);
+    if (!newMuted) {
+      setShowUnmuteHint(false);
+      localStorage.setItem("reels_unmuted", "1");
+    }
+  };
+
+  const reelShareUrl = `${window.location.origin}/reels?id=${reel.id}`;
+  const handleShare = () => {
+    if (navigator.share) {
+      navigator.share({ title: reel.title, url: reelShareUrl }).catch(() => setShowShare(true));
+    } else {
+      setShowShare(v => !v);
+    }
   };
 
   const currentImgUrl = isImageMode ? urls[imgIndex] : "";
@@ -498,10 +516,11 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded }: {
         </button>
 
         <button
-          onClick={() => { navigator.share?.({ title: reel.title, url: window.location.href }); }}
+          onClick={handleShare}
           className="flex flex-col items-center gap-1"
+          data-testid={`btn-share-reel-${reel.id}`}
         >
-          <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-white">
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${showShare ? "bg-white text-gray-900 scale-110" : "bg-white/20 text-white"}`}>
             <Share2 className="w-5 h-5" />
           </div>
           <span className="text-white text-xs font-bold">شارك</span>
@@ -548,6 +567,61 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded }: {
           </>
         )}
       </div>
+
+      {/* ── Share Panel ── */}
+      <AnimatePresence>
+        {showShare && (
+          <motion.div
+            initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            className="absolute bottom-0 left-0 right-0 bg-zinc-900/95 backdrop-blur-md rounded-t-3xl p-4 z-40 border-t border-white/10"
+            dir="rtl"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-white font-bold text-sm flex items-center gap-2">
+                <Share2 className="w-4 h-4 text-primary" /> مشاركة الريل
+              </p>
+              <button onClick={() => setShowShare(false)} className="text-white/50 hover:text-white text-xl leading-none">×</button>
+            </div>
+            {/* Platform buttons */}
+            <div className="grid grid-cols-4 gap-3 mb-4">
+              {[
+                { name: "واتساب", icon: "💬", color: "bg-[#25D366]", href: `https://wa.me/?text=${encodeURIComponent(reel.title + "\n" + reelShareUrl)}` },
+                { name: "فيسبوك", icon: "👥", color: "bg-[#1877F2]", href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(reelShareUrl)}` },
+                { name: "تيليجرام", icon: "✈️", color: "bg-[#229ED9]", href: `https://t.me/share/url?url=${encodeURIComponent(reelShareUrl)}&text=${encodeURIComponent(reel.title)}` },
+                { name: "تويتر X", icon: "𝕏", color: "bg-black border border-white/20", href: `https://twitter.com/intent/tweet?url=${encodeURIComponent(reelShareUrl)}&text=${encodeURIComponent(reel.title)}` },
+              ].map(p => (
+                <a
+                  key={p.name}
+                  href={p.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setShowShare(false)}
+                  className={`${p.color} flex flex-col items-center gap-1.5 rounded-2xl py-3 text-white text-center hover:opacity-90 transition`}
+                >
+                  <span className="text-2xl leading-none">{p.icon}</span>
+                  <span className="text-[10px] font-semibold">{p.name}</span>
+                </a>
+              ))}
+            </div>
+            {/* Copy link */}
+            <div className="flex items-center gap-2 bg-white/10 rounded-2xl px-3 py-2.5">
+              <span className="text-white/60 text-xs truncate flex-1 font-mono">{reelShareUrl}</span>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(reelShareUrl);
+                  toast({ title: "✅ تم نسخ الرابط!" });
+                  setShowShare(false);
+                }}
+                className="bg-primary text-white text-xs px-4 py-1.5 rounded-xl font-bold whitespace-nowrap hover:bg-primary/90 transition"
+                data-testid={`btn-copy-reel-link-${reel.id}`}
+              >
+                نسخ الرابط
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Comments Sheet */}
       <AnimatePresence>
@@ -1103,6 +1177,10 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
 export default function Reels() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [editingReel, setEditingReel] = useState<Reel | null>(null);
+  // Global muted state — remembered across reels and across sessions
+  const [globalMuted, setGlobalMuted] = useState(() => {
+    return localStorage.getItem("reels_unmuted") !== "1";
+  });
   const containerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -1184,6 +1262,11 @@ export default function Reels() {
             onEdit={() => setEditingReel(reel)}
             onDelete={() => deleteReelMut.mutate(reel.id)}
             onEnded={scrollToNext}
+            globalMuted={globalMuted}
+            onGlobalMute={(m) => {
+              setGlobalMuted(m);
+              if (!m) localStorage.setItem("reels_unmuted", "1");
+            }}
           />
         ))}
       </div>
