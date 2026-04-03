@@ -217,6 +217,7 @@ export default function AdminPanel() {
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════════
 function DashboardSection() {
+  const { toast } = useToast();
   const { data: stats } = useQuery<any>({
     queryKey: ["/api/admin/stats"],
     queryFn: () => fetch("/api/admin/stats", { credentials: "include" }).then(r => r.json()),
@@ -226,9 +227,50 @@ function DashboardSection() {
     queryKey: ["/api/admin/revenue"],
     queryFn: () => fetch("/api/admin/revenue", { credentials: "include" }).then(r => r.json()),
   });
+  const { data: settings, refetch: refetchSettings } = useQuery<Record<string, string>>({
+    queryKey: ["/api/settings"],
+    queryFn: () => fetch("/api/settings").then(r => r.json()),
+  });
+
+  const publish = useMutation({
+    mutationFn: () => fetch("/api/admin/publish", { method: "POST", credentials: "include" }).then(r => r.json()),
+    onSuccess: () => {
+      refetchSettings();
+      toast({ title: "✅ تم النشر بنجاح!", description: "التغييرات أصبحت مرئية لجميع المستخدمين الآن" });
+    },
+  });
+
+  const lastPublished = settings?.["last_published_at"]
+    ? new Date(settings["last_published_at"]).toLocaleString("ar-EG", { timeZone: "Africa/Cairo", dateStyle: "short", timeStyle: "short" })
+    : null;
 
   return (
     <div className="space-y-6">
+      {/* Publish Banner */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 rounded-2xl border-2 border-primary/30 bg-gradient-to-l from-primary/5 to-transparent">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center">
+            <Megaphone className="w-6 h-6 text-primary" />
+          </div>
+          <div>
+            <p className="font-bold text-base">نشر التغييرات للمستخدمين</p>
+            <p className="text-xs text-muted-foreground">
+              {lastPublished ? `آخر نشر: ${lastPublished}` : "لم يتم النشر بعد"}
+            </p>
+          </div>
+        </div>
+        <Button
+          onClick={() => publish.mutate()}
+          disabled={publish.isPending}
+          className="gap-2 bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/30 px-6"
+          data-testid="btn-admin-publish"
+        >
+          {publish.isPending
+            ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري النشر...</>
+            : <><Zap className="w-4 h-4" /> نشر الآن</>}
+        </Button>
+      </div>
+
       {/* Primary stats */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">

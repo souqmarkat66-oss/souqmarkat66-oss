@@ -475,6 +475,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ── Admin PIN ────────────────────────────────────────────────────
+  app.post("/api/admin/publish", isAuthenticated, requireAdmin, async (_req: any, res) => {
+    const now = new Date().toISOString();
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('last_published_at', ${now}) ON CONFLICT (key) DO UPDATE SET value = ${now}`);
+    res.json({ success: true, publishedAt: now });
+  });
+
   app.post("/api/admin/pin/set", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { pin, recoveryEmail, recoveryPhone } = req.body;
     if (!pin || pin.length < 4) return res.status(400).json({ message: "PIN لازم يكون 4 أرقام على الأقل" });
