@@ -13,40 +13,143 @@ import { useQuery } from "@tanstack/react-query";
 
 const CATEGORIES = ["الكل", "عقارات", "سيارات", "إلكترونيات", "ملابس", "طعام", "صحة", "تعليم", "ترفيه"];
 
-const PLATFORM_KEYWORDS = [
-  "ads", "ad", "سوق", "souq", "asouq", "إعلان", "إعلانات", "منصة",
-  "شبكة", "مبوبة", "ads-as", "adsas", "ads as", "سوق للإعلانات",
-  "مصرية", "مصر", "egypt", "classified"
+// كل صفحة من صفحات المنصة مع كلماتها المفتاحية
+const PLATFORM_PAGES = [
+  {
+    href: "https://ads-as.com/ads",
+    icon: "🗂️",
+    title: "الإعلانات المبوبة",
+    desc: "تصفح جميع الإعلانات المنشورة على المنصة",
+    path: "ads-as.com/ads",
+    keywords: ["ads", "ad", "إعلان", "إعلانات", "مبوبة", "classified", "نشر", "بيع", "شراء", "سوق", "souq", "asouq", "شبكة", "منصة", "مصر", "egypt", "ads-as", "adsas"],
+  },
+  {
+    href: "https://ads-as.com/reels",
+    icon: "🎬",
+    title: "الريلز الإعلانية",
+    desc: "فيديوهات قصيرة للإعلانات — شاهد وتفاعل",
+    path: "ads-as.com/reels",
+    keywords: ["ريلز", "reels", "reel", "فيديو", "video", "قصير", "short", "تيك", "tik", "ريلز إعلانات"],
+  },
+  {
+    href: "https://ads-as.com/channels",
+    icon: "📺",
+    title: "القنوات الرقمية",
+    desc: "اشترك في قنوات المعلنين وتابع محتواهم",
+    path: "ads-as.com/channels",
+    keywords: ["قناة", "قنوات", "channel", "channels", "اشتراك", "subscribe", "محتوى", "content", "ناشر"],
+  },
+  {
+    href: "https://ads-as.com/livestream",
+    icon: "🔴",
+    title: "البث المباشر",
+    desc: "شاهد أو ابدأ بثاً مباشراً الآن",
+    path: "ads-as.com/livestream",
+    keywords: ["بث", "مباشر", "live", "livestream", "stream", "streaming", "يوتيوب", "بث مباشر"],
+  },
+  {
+    href: "https://ads-as.com/campaigns",
+    icon: "📣",
+    title: "الحملات الإعلانية",
+    desc: "أطلق حملتك الإعلانية واستهدف جمهورك",
+    path: "ads-as.com/campaigns",
+    keywords: ["حملة", "حملات", "campaign", "campaigns", "ممول", "sponsored", "تسويق", "marketing", "ترويج"],
+  },
+  {
+    href: "https://ads-as.com/coupons",
+    icon: "🎟️",
+    title: "الكوبونات والخصومات",
+    desc: "احصل على أفضل كوبونات الخصم المصرية",
+    path: "ads-as.com/coupons",
+    keywords: ["كوبون", "كوبونات", "coupon", "coupons", "خصم", "discount", "offer", "عرض", "تخفيض"],
+  },
+  {
+    href: "https://ads-as.com/store",
+    icon: "🛒",
+    title: "المتجر الرقمي",
+    desc: "اشترِ وبِع المنتجات عبر المنصة",
+    path: "ads-as.com/store",
+    keywords: ["متجر", "store", "shop", "تسوق", "shopping", "منتج", "product", "بيع", "شراء"],
+  },
+  {
+    href: "https://ads-as.com/create",
+    icon: "✏️",
+    title: "أنشئ إعلانك",
+    desc: "انشر إعلانك على المنصة مجاناً الآن",
+    path: "ads-as.com/create",
+    keywords: ["إنشاء", "create", "new", "جديد", "نشر", "publish", "اضافة", "add", "انشئ إعلان"],
+  },
 ];
 
-function PlatformCard() {
+// جميع كلمات المنصة لإظهار البطاقة الشاملة
+const ALL_PLATFORM_KEYWORDS = Array.from(new Set(PLATFORM_PAGES.flatMap(p => p.keywords)));
+
+function getMatchedPages(query: string) {
+  const q = query.toLowerCase().trim();
+  if (q.length < 2) return [];
+  return PLATFORM_PAGES.filter(p =>
+    p.keywords.some(kw => q.includes(kw.toLowerCase()) || kw.toLowerCase().includes(q))
+  );
+}
+
+function PlatformCard({ query }: { query: string }) {
+  const matched = getMatchedPages(query);
+  const primary = matched[0];
+  const others = PLATFORM_PAGES.filter(p => p !== primary).slice(0, 5);
+
   return (
-    <motion.a
-      href="https://ads-as.com"
-      target="_blank"
-      rel="noopener noreferrer"
+    <motion.div
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="block mb-6 rounded-2xl overflow-hidden border border-primary/30 bg-gradient-to-br from-primary/10 via-violet-50 to-purple-50 dark:from-primary/20 dark:via-violet-950/30 dark:to-purple-950/20 hover:border-primary/60 transition-all group cursor-pointer"
+      className="mb-6 rounded-2xl overflow-hidden border border-primary/30 bg-gradient-to-br from-primary/8 via-violet-50/60 to-purple-50/40 dark:from-primary/15 dark:via-violet-950/20 dark:to-purple-950/10"
       data-testid="platform-search-card"
     >
-      <div className="flex items-center gap-4 p-4">
-        <div className="w-14 h-14 rounded-xl bg-primary flex items-center justify-center flex-shrink-0 shadow-lg shadow-primary/30">
-          <Globe className="w-7 h-7 text-white" />
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 pt-4 pb-2">
+        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 shadow shadow-primary/30">
+          <Globe className="w-4 h-4 text-white" />
         </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="font-extrabold text-lg text-foreground">شبكة سوق للإعلانات</span>
-            <Badge className="bg-primary/20 text-primary border-primary/30 text-xs">🏆 المنصة الرسمية</Badge>
-          </div>
-          <p className="text-sm text-muted-foreground line-clamp-1">
-            أكبر منصة إعلانات مبوبة مصرية — إعلانات، بث مباشر، قنوات، ريلز
-          </p>
-          <p className="text-xs text-primary/80 mt-0.5 font-medium">ads-as.com</p>
+        <div>
+          <span className="font-extrabold text-sm text-foreground">شبكة سوق للإعلانات</span>
+          <span className="text-xs text-primary/70 mr-2">ads-as.com</span>
         </div>
-        <ExternalLink className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
+        <Badge className="mr-auto bg-primary/15 text-primary border-primary/25 text-xs">🏆 رسمي</Badge>
       </div>
-    </motion.a>
+
+      {/* Primary match */}
+      {primary && (
+        <a
+          href={primary.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 mx-3 mb-2 p-3 rounded-xl bg-white/70 dark:bg-white/5 border border-primary/20 hover:border-primary/50 hover:bg-white dark:hover:bg-white/10 transition-all group"
+        >
+          <span className="text-2xl flex-shrink-0">{primary.icon}</span>
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-sm text-foreground">{primary.title}</p>
+            <p className="text-xs text-muted-foreground">{primary.desc}</p>
+            <p className="text-xs text-primary/60 mt-0.5">{primary.path}</p>
+          </div>
+          <ExternalLink className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
+        </a>
+      )}
+
+      {/* Quick links to other pages */}
+      <div className="flex flex-wrap gap-2 px-3 pb-3 pt-1">
+        {(primary ? others : PLATFORM_PAGES.slice(0, 6)).map(page => (
+          <a
+            key={page.href}
+            href={page.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/60 dark:bg-white/5 border border-border hover:border-primary/40 hover:bg-white dark:hover:bg-white/10 transition-all text-xs font-medium text-foreground"
+          >
+            <span>{page.icon}</span>
+            <span>{page.title}</span>
+          </a>
+        ))}
+      </div>
+    </motion.div>
   );
 }
 
@@ -71,7 +174,7 @@ export default function Ads() {
   const ads = search.trim().length >= 2 ? searchResults : allAds;
 
   const showPlatformCard = search.trim().length >= 2 &&
-    PLATFORM_KEYWORDS.some(kw => search.toLowerCase().includes(kw.toLowerCase()));
+    ALL_PLATFORM_KEYWORDS.some(kw => search.toLowerCase().includes(kw.toLowerCase()) || kw.toLowerCase().includes(search.toLowerCase()));
 
   const { data: sponsoredAd } = useQuery<any>({
     queryKey: ["/api/campaigns/random"],
@@ -285,7 +388,7 @@ export default function Ads() {
       </div>
 
       {/* Platform result card when searching platform-related terms */}
-      {showPlatformCard && <PlatformCard />}
+      {showPlatformCard && <PlatformCard query={search} />}
 
       {isLoading ? (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
