@@ -1321,7 +1321,7 @@ export default function LiveStream() {
                     });
                   }
                 }}
-                className="absolute bottom-4 start-4 w-10 h-10 rounded-full bg-black/60 backdrop-blur flex items-center justify-center text-white hover:bg-black/80 transition shadow-lg"
+                className="absolute bottom-20 start-4 w-10 h-10 rounded-full bg-black/60 backdrop-blur flex items-center justify-center text-white hover:bg-black/80 transition shadow-lg"
                 data-testid="btn-toggle-viewer-audio"
                 title="كتم / تشغيل الصوت"
               >
@@ -1393,7 +1393,7 @@ export default function LiveStream() {
 
             {/* Broadcaster controls */}
             {isBroadcast && streaming && (
-              <div className="absolute bottom-0 start-0 end-0 bg-gradient-to-t from-black/80 to-transparent p-5">
+              <div className="absolute bottom-16 start-0 end-0 bg-gradient-to-t from-black/60 to-transparent px-5 pb-3 pt-6 z-30">
                 <div className="flex items-center justify-center gap-3 flex-wrap">
                   {/* Mute */}
                   <button
@@ -1660,7 +1660,7 @@ export default function LiveStream() {
           </div>
 
           {/* ── TikTok Floating Chat Messages ── */}
-          <div className="absolute bottom-24 start-0 w-3/4 px-3 z-20 max-h-52 overflow-hidden flex flex-col-reverse gap-1 pointer-events-none">
+          <div className="absolute bottom-[72px] start-0 w-[58%] px-3 z-20 max-h-52 overflow-hidden flex flex-col-reverse gap-1 pointer-events-none">
             {/* Pinned comment */}
             {pinnedComment && (
               <div className="flex items-start gap-1.5 bg-yellow-500/20 backdrop-blur rounded-xl px-2.5 py-1.5 mb-1 pointer-events-auto">
@@ -1674,14 +1674,14 @@ export default function LiveStream() {
               </div>
             )}
             {messages.slice(-8).reverse().map((msg, i) => (
-              <div key={i} className="tiktok-chat-msg flex items-baseline gap-1.5 py-0.5">
-                <span className={`text-[11px] font-bold shrink-0 ${msg.isOwner ? "text-red-400" : "text-yellow-300"}`}>
+              <div key={i} className="tiktok-chat-msg flex items-baseline gap-1.5 py-0.5 px-1.5 rounded-lg bg-black/30 backdrop-blur-sm">
+                <span className={`text-[11px] font-bold shrink-0 drop-shadow-md ${msg.isOwner ? "text-red-400" : "text-yellow-300"}`}>
                   {msg.userName}{msg.isOwner ? " 🔴" : ""}
                 </span>
                 {msg.isVoice ? (
-                  <span className="text-white/80 text-xs">🎤 رسالة صوتية</span>
+                  <span className="text-white text-xs drop-shadow-md">🎤 رسالة صوتية</span>
                 ) : (
-                  <span className="text-white text-xs leading-snug">{msg.message}</span>
+                  <span className="text-white text-xs leading-snug drop-shadow-md">{msg.message}</span>
                 )}
               </div>
             ))}
