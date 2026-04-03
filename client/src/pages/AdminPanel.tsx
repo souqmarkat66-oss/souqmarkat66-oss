@@ -1306,27 +1306,33 @@ function SettingsSection({ logAction }: { logAction: any }) {
           {features.map(({ key, label, desc, icon: Icon }) => {
             const isOn = get(key, "1") === "1";
             return (
-              <div key={key} className="flex items-center justify-between p-3 rounded-xl bg-muted/40 hover:bg-muted/60 transition-colors">
+              <div
+                key={key}
+                onClick={() => toggleFeature(key, get(key, "1"))}
+                data-testid={`toggle-${key}`}
+                className={`flex items-center justify-between p-3 rounded-xl border-2 cursor-pointer transition-all select-none
+                  ${isOn
+                    ? "border-green-500/40 bg-green-500/5 hover:bg-green-500/10"
+                    : "border-red-400/30 bg-red-500/5 hover:bg-red-500/10"
+                  }`}
+              >
                 <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isOn ? "bg-green-500/15" : "bg-gray-500/15"}`}>
-                    <Icon className={`w-4 h-4 ${isOn ? "text-green-500" : "text-gray-400"}`} />
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isOn ? "bg-green-500/20" : "bg-red-400/20"}`}>
+                    <Icon className={`w-5 h-5 ${isOn ? "text-green-600" : "text-red-400"}`} />
                   </div>
                   <div>
-                    <p className="text-sm font-medium">{label}</p>
+                    <p className={`text-sm font-bold ${isOn ? "text-foreground" : "text-muted-foreground"}`}>{label}</p>
                     <p className="text-xs text-muted-foreground">{desc}</p>
                   </div>
                 </div>
-                <button
-                  onClick={() => toggleFeature(key, get(key, "1"))}
-                  className="flex items-center gap-1.5 text-xs font-medium transition-colors"
-                  data-testid={`toggle-${key}`}
+                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold
+                  ${isOn ? "bg-green-500 text-white" : "bg-red-400/80 text-white"}`}
                 >
-                  {isOn ? (
-                    <><ToggleRight className="w-8 h-8 text-green-500" /><span className="text-green-600">مفعّل</span></>
-                  ) : (
-                    <><ToggleLeft className="w-8 h-8 text-gray-400" /><span className="text-gray-500">موقوف</span></>
-                  )}
-                </button>
+                  {isOn
+                    ? <><CheckCircle className="w-3.5 h-3.5" /> ظاهر</>
+                    : <><XCircle className="w-3.5 h-3.5" /> مخفي</>
+                  }
+                </div>
               </div>
             );
           })}
