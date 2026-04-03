@@ -19,7 +19,9 @@ const PLATFORM_PAGES = [
     href: "https://ads-as.com/ads",
     icon: "🗂️",
     title: "الإعلانات المبوبة",
+    titleEn: "Classified Ads",
     desc: "تصفح جميع الإعلانات المنشورة على المنصة",
+    descEn: "Browse all ads published on the platform",
     path: "ads-as.com/ads",
     keywords: ["ads", "ad", "إعلان", "إعلانات", "مبوبة", "classified", "نشر", "بيع", "شراء", "سوق", "souq", "asouq", "شبكة", "منصة", "مصر", "egypt", "ads-as", "adsas"],
   },
@@ -27,7 +29,9 @@ const PLATFORM_PAGES = [
     href: "https://ads-as.com/reels",
     icon: "🎬",
     title: "الريلز الإعلانية",
+    titleEn: "Ad Reels",
     desc: "فيديوهات قصيرة للإعلانات — شاهد وتفاعل",
+    descEn: "Short ad videos — watch and interact",
     path: "ads-as.com/reels",
     keywords: ["ريلز", "reels", "reel", "فيديو", "video", "قصير", "short", "تيك", "tik", "ريلز إعلانات"],
   },
@@ -35,7 +39,9 @@ const PLATFORM_PAGES = [
     href: "https://ads-as.com/channels",
     icon: "📺",
     title: "القنوات الرقمية",
+    titleEn: "Digital Channels",
     desc: "اشترك في قنوات المعلنين وتابع محتواهم",
+    descEn: "Subscribe to advertiser channels and follow their content",
     path: "ads-as.com/channels",
     keywords: ["قناة", "قنوات", "channel", "channels", "اشتراك", "subscribe", "محتوى", "content", "ناشر"],
   },
@@ -43,7 +49,9 @@ const PLATFORM_PAGES = [
     href: "https://ads-as.com/livestream",
     icon: "🔴",
     title: "البث المباشر",
+    titleEn: "Live Stream",
     desc: "شاهد أو ابدأ بثاً مباشراً الآن",
+    descEn: "Watch or start a live broadcast now",
     path: "ads-as.com/livestream",
     keywords: ["بث", "مباشر", "live", "livestream", "stream", "streaming", "يوتيوب", "بث مباشر"],
   },
@@ -51,7 +59,9 @@ const PLATFORM_PAGES = [
     href: "https://ads-as.com/campaigns",
     icon: "📣",
     title: "الحملات الإعلانية",
+    titleEn: "Ad Campaigns",
     desc: "أطلق حملتك الإعلانية واستهدف جمهورك",
+    descEn: "Launch your ad campaign and target your audience",
     path: "ads-as.com/campaigns",
     keywords: ["حملة", "حملات", "campaign", "campaigns", "ممول", "sponsored", "تسويق", "marketing", "ترويج"],
   },
@@ -59,7 +69,9 @@ const PLATFORM_PAGES = [
     href: "https://ads-as.com/coupons",
     icon: "🎟️",
     title: "الكوبونات والخصومات",
+    titleEn: "Coupons & Discounts",
     desc: "احصل على أفضل كوبونات الخصم المصرية",
+    descEn: "Get the best Egyptian discount coupons",
     path: "ads-as.com/coupons",
     keywords: ["كوبون", "كوبونات", "coupon", "coupons", "خصم", "discount", "offer", "عرض", "تخفيض"],
   },
@@ -67,7 +79,9 @@ const PLATFORM_PAGES = [
     href: "https://ads-as.com/store",
     icon: "🛒",
     title: "المتجر الرقمي",
+    titleEn: "Digital Store",
     desc: "اشترِ وبِع المنتجات عبر المنصة",
+    descEn: "Buy and sell products through the platform",
     path: "ads-as.com/store",
     keywords: ["متجر", "store", "shop", "تسوق", "shopping", "منتج", "product", "بيع", "شراء"],
   },
@@ -75,7 +89,9 @@ const PLATFORM_PAGES = [
     href: "https://ads-as.com/create",
     icon: "✏️",
     title: "أنشئ إعلانك",
+    titleEn: "Create Your Ad",
     desc: "انشر إعلانك على المنصة مجاناً الآن",
+    descEn: "Post your ad on the platform for free now",
     path: "ads-as.com/create",
     keywords: ["إنشاء", "create", "new", "جديد", "نشر", "publish", "اضافة", "add", "انشئ إعلان"],
   },
@@ -95,7 +111,7 @@ function getMatchedPages(query: string) {
 function PlatformCard({ query }: { query: string }) {
   const matched = getMatchedPages(query);
   const primary = matched[0];
-  const others = PLATFORM_PAGES.filter(p => p !== primary).slice(0, 5);
+  const others = PLATFORM_PAGES.filter(p => p !== primary).slice(0, 6);
 
   return (
     <motion.div
@@ -109,14 +125,18 @@ function PlatformCard({ query }: { query: string }) {
         <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 shadow shadow-primary/30">
           <Globe className="w-4 h-4 text-white" />
         </div>
-        <div>
-          <span className="font-extrabold text-sm text-foreground">شبكة سوق للإعلانات</span>
-          <span className="text-xs text-primary/70 mr-2">ads-as.com</span>
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <span className="font-extrabold text-sm text-foreground">شبكة سوق للإعلانات</span>
+            <span className="text-xs text-muted-foreground">•</span>
+            <span className="text-xs text-muted-foreground font-medium">Souq Ads Network</span>
+          </div>
+          <p className="text-xs text-primary/70">ads-as.com</p>
         </div>
-        <Badge className="mr-auto bg-primary/15 text-primary border-primary/25 text-xs">🏆 رسمي</Badge>
+        <Badge className="bg-primary/15 text-primary border-primary/25 text-xs flex-shrink-0">🏆 Official</Badge>
       </div>
 
-      {/* Primary match */}
+      {/* Primary match — bilingual */}
       {primary && (
         <a
           href={primary.href}
@@ -126,17 +146,23 @@ function PlatformCard({ query }: { query: string }) {
         >
           <span className="text-2xl flex-shrink-0">{primary.icon}</span>
           <div className="flex-1 min-w-0">
+            {/* Arabic */}
             <p className="font-bold text-sm text-foreground">{primary.title}</p>
             <p className="text-xs text-muted-foreground">{primary.desc}</p>
-            <p className="text-xs text-primary/60 mt-0.5">{primary.path}</p>
+            {/* English */}
+            <div className="mt-1 pt-1 border-t border-border/50">
+              <p className="font-semibold text-xs text-foreground/80" dir="ltr">{primary.titleEn}</p>
+              <p className="text-xs text-muted-foreground/80" dir="ltr">{primary.descEn}</p>
+            </div>
+            <p className="text-xs text-primary/60 mt-1" dir="ltr">{primary.path}</p>
           </div>
           <ExternalLink className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
         </a>
       )}
 
-      {/* Quick links to other pages */}
+      {/* Quick links — bilingual labels */}
       <div className="flex flex-wrap gap-2 px-3 pb-3 pt-1">
-        {(primary ? others : PLATFORM_PAGES.slice(0, 6)).map(page => (
+        {(primary ? others : PLATFORM_PAGES.slice(0, 7)).map(page => (
           <a
             key={page.href}
             href={page.href}
@@ -146,6 +172,8 @@ function PlatformCard({ query }: { query: string }) {
           >
             <span>{page.icon}</span>
             <span>{page.title}</span>
+            <span className="text-muted-foreground mx-0.5">·</span>
+            <span className="text-muted-foreground" dir="ltr">{page.titleEn}</span>
           </a>
         ))}
       </div>
