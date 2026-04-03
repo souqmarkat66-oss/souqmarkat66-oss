@@ -940,7 +940,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const boostPriceRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_price_egp' LIMIT 1`);
       const boostPrice = parseFloat((boostPriceRow.rows[0] as any)?.value || "0");
 
-      const { payment_ref } = req.body;
+      const { payment_ref } = req.body || {};
       const isPaid = !!payment_ref; // client sends payment_ref when user has paid
 
       // Rate limit: check last boost time — max once per 30 days for FREE boosts
