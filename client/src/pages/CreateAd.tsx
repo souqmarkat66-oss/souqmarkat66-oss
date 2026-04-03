@@ -84,6 +84,7 @@ export default function CreateAd() {
   const [cinemaFullscreen, setCinemaFullscreen] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [paymentMode, setPaymentMode] = useState<"cash" | "installment">("cash");
+  const [adDuration, setAdDuration] = useState<number>(30); // days, 0 = no expiry
   // Targeting map states
   const [targetRegions, setTargetRegions] = useState<string[]>([]);
   const [targetInterests, setTargetInterests] = useState<string[]>([]);
@@ -164,12 +165,16 @@ export default function CreateAd() {
   const onSubmit = async (values: FormValues) => {
     try {
       const { productName, targetAudience, adTitle, ...adData } = values;
+      const expiresAt = adDuration > 0
+        ? new Date(Date.now() + adDuration * 24 * 60 * 60 * 1000)
+        : null;
       const newAd = await createAd({
         ...adData,
         userId: "temp",
         targetRegion: targetRegions.join(",") || adData.targetRegion || "",
         targetInterests: targetInterests.join(",") || "",
         targetAges: targetAges.join(",") || "",
+        expiresAt,
         ...(locationTarget ? {
           targetLat: locationTarget.lat,
           targetLng: locationTarget.lng,
@@ -1463,6 +1468,43 @@ export default function CreateAd() {
               }
             </div>
           )}
+
+          {/* Ad Duration Selector */}
+          <div className="border rounded-2xl p-4 bg-blue-50/40 dark:bg-blue-950/10 space-y-3">
+            <h3 className="font-bold text-sm flex items-center gap-2">⏳ مدة الإعلان</h3>
+            <p className="text-xs text-muted-foreground">اختر كم يوماً يظهر إعلانك على المنصة</p>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { days: 7,  label: "7 أيام",   sub: "أسبوع" },
+                { days: 14, label: "14 يوماً",  sub: "أسبوعان" },
+                { days: 30, label: "30 يوماً",  sub: "شهر ✨" },
+                { days: 60, label: "60 يوماً",  sub: "شهران" },
+                { days: 90, label: "90 يوماً",  sub: "3 أشهر" },
+                { days: 0,  label: "بلا حد",    sub: "دائم ♾️" },
+              ].map(opt => (
+                <button
+                  key={opt.days}
+                  type="button"
+                  onClick={() => setAdDuration(opt.days)}
+                  className={`flex flex-col items-center justify-center py-3 px-2 rounded-xl border-2 text-sm font-bold transition-all ${
+                    adDuration === opt.days
+                      ? "border-primary bg-primary text-white shadow-md shadow-primary/30"
+                      : "border-border bg-white dark:bg-background text-foreground hover:border-primary/50"
+                  }`}
+                  data-testid={`duration-${opt.days}`}
+                >
+                  <span>{opt.label}</span>
+                  <span className={`text-[10px] font-normal mt-0.5 ${adDuration === opt.days ? "text-white/80" : "text-muted-foreground"}`}>{opt.sub}</span>
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 bg-blue-100/60 dark:bg-blue-900/20 rounded-xl px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
+              <span>📅</span>
+              {adDuration > 0
+                ? `سينتهي إعلانك في: ${new Date(Date.now() + adDuration * 86400000).toLocaleDateString("ar-EG", { day: "numeric", month: "long", year: "numeric" })}`
+                : "إعلانك سيظل نشطاً إلى أجل غير مسمى"}
+            </div>
+          </div>
 
           <Button
             type="submit"
