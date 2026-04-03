@@ -1,10 +1,10 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Loader2, Upload, X, Image as ImageIcon, Video } from "lucide-react";
+import { Loader2, X, Sparkles, RefreshCw } from "lucide-react";
 import { useUpdateAd } from "@/hooks/use-ads";
 import { useToast } from "@/hooks/use-toast";
 import { UploadZone } from "@/components/UploadZone";
@@ -35,6 +35,35 @@ export function EditAdDialog({ ad, open, onClose }: EditAdDialogProps) {
   const [mediaType, setMediaType] = useState(ad.mediaType ?? "image");
   const [priceEGP, setPriceEGP] = useState(ad.priceEGP ? String(ad.priceEGP) : "");
   const [whatsapp, setWhatsapp] = useState(ad.whatsappNumber ?? "");
+  const [generatingImage, setGeneratingImage] = useState(false);
+
+  const handleGenerateImage = async () => {
+    const prompt = `Professional Arabic advertisement image for: ${title || description}. High quality, vibrant colors, suitable for Egyptian market.`;
+    setGeneratingImage(true);
+    try {
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, size: "1024x1024" }),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.message === "insufficient_credits") {
+          toast({ variant: "destructive", title: "رصيد غير كافٍ", description: "اشحن رصيدك من صفحة الإيرادات" });
+          return;
+        }
+        throw new Error(data.message);
+      }
+      setMediaUrl(data.url);
+      setMediaType("image");
+      toast({ title: "🎨 تم توليد الصورة!" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "فشل توليد الصورة", description: e.message });
+    } finally {
+      setGeneratingImage(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!title.trim() || title.trim().length < 2) {
@@ -106,7 +135,26 @@ export function EditAdDialog({ ad, open, onClose }: EditAdDialogProps) {
 
           {/* Media */}
           <div className="space-y-2">
-            <Label className="text-sm font-semibold">الصورة / الفيديو</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-semibold">الصورة / الفيديو</Label>
+              {/* AI Generate button */}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleGenerateImage}
+                disabled={generatingImage || (!title.trim() && !description.trim())}
+                className="gap-1.5 text-xs h-7 border-purple-300 text-purple-700 hover:bg-purple-50 dark:border-purple-700 dark:text-purple-300"
+                data-testid="edit-btn-generate-ai-image"
+              >
+                {generatingImage
+                  ? <><Loader2 className="w-3 h-3 animate-spin" /> جاري التوليد...</>
+                  : mediaUrl
+                    ? <><RefreshCw className="w-3 h-3" /> توليد صورة جديدة</>
+                    : <><Sparkles className="w-3 h-3" /> توليد صورة بالذكاء</>
+                }
+              </Button>
+            </div>
 
             {/* Preview */}
             {mediaUrl && (

@@ -2328,18 +2328,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         n: 1,
         size: (size || "1024x1024") as any,
       });
-      // gpt-image-1 returns b64_json, save to file
+      // Always save locally — b64_json or download from URL — so the image persists
       const b64 = response.data?.[0]?.b64_json;
       const imageUrl = response.data?.[0]?.url;
-      let finalUrl = imageUrl;
-      if (!finalUrl && b64) {
-        const buf = Buffer.from(b64, 'base64');
-        const filename = `ai-img-${Date.now()}.png`;
-        const savePath = path.join(process.cwd(), 'uploads', filename);
+      const filename = `ai-img-${Date.now()}.png`;
+      const savePath = path.join(process.cwd(), 'uploads', filename);
+      if (b64) {
+        fs.writeFileSync(savePath, Buffer.from(b64, 'base64'));
+      } else if (imageUrl) {
+        const imgRes = await fetch(imageUrl);
+        const buf = Buffer.from(await imgRes.arrayBuffer());
         fs.writeFileSync(savePath, buf);
-        finalUrl = `/uploads/${filename}`;
+      } else {
+        throw new Error("No image generated");
       }
-      if (!finalUrl) throw new Error("No image generated");
+      const finalUrl = `/uploads/${filename}`;
       await storage.recordAiUsage(userId, 'image');
       if (req.aiChargeEGP) {
         await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد صورة بالذكاء الاصطناعي', channelId: null, campaignId: null });
