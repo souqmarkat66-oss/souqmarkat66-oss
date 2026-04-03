@@ -2950,10 +2950,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const profileImageUrl = req.file ? `/uploads/${req.file.filename}` : null;
       await db.execute(sql`
         UPDATE users SET
-          first_name = COALESCE(${firstName}, first_name),
-          last_name = COALESCE(${lastName}, last_name),
-          bio = CASE WHEN ${bio} IS NOT NULL THEN ${bio} ELSE bio END,
-          profile_image_url = COALESCE(${profileImageUrl}, profile_image_url)
+          first_name = COALESCE(${firstName}::text, first_name),
+          last_name = COALESCE(${lastName}::text, last_name),
+          bio = CASE WHEN ${bio}::text IS NOT NULL THEN ${bio}::text ELSE bio END,
+          profile_image_url = COALESCE(${profileImageUrl}::text, profile_image_url)
         WHERE id = ${userId}
       `);
       const row = await db.execute(sql`SELECT id, first_name, last_name, profile_image_url, bio, governorate, referral_code FROM users WHERE id = ${userId} LIMIT 1`);
