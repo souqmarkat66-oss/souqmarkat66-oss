@@ -263,7 +263,8 @@ export function PayFromAppButton({ price, label, className = "", size = "default
                     <Download className="w-4 h-4 opacity-70" />
                   </a>
                   <a href={APP_STORE} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-3 w-full bg-black hover:bg-gray-900 text-white rounded-xl px-4 py-2.5 transition-colors">
+                    className="flex items-center gap-3 w-full text-white rounded-xl px-4 py-2.5 transition-all hover:opacity-90 hover:scale-[1.01]"
+                    style={{ background: "linear-gradient(135deg, #1c1c1e 0%, #3a3a3c 100%)" }}>
                     <Apple className="w-6 h-6 flex-shrink-0" />
                     <div className="text-right flex-1"><div className="text-[10px] opacity-70">متوفر على</div><div className="font-bold text-sm">App Store</div></div>
                     <Download className="w-4 h-4 opacity-70" />

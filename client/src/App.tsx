@@ -144,7 +144,8 @@ function AppFooter() {
                 href="https://apps.apple.com/eg/app/as-souqmarket/id6740153334"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 bg-black text-white rounded-xl px-4 py-2.5 hover:bg-gray-900 transition-colors"
+                className="flex items-center gap-3 text-white rounded-xl px-4 py-2.5 transition-all hover:opacity-90 hover:scale-[1.02]"
+                style={{ background: "linear-gradient(135deg, #1c1c1e 0%, #3a3a3c 100%)" }}
                 data-testid="btn-appstore"
               >
                 <svg viewBox="0 0 24 24" className="w-6 h-6 fill-white flex-shrink-0" xmlns="http://www.w3.org/2000/svg">
@@ -159,7 +160,8 @@ function AppFooter() {
                 href="https://play.google.com/store/apps/details?id=com.apmo.souqmarket"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 bg-black text-white rounded-xl px-4 py-2.5 hover:bg-gray-900 transition-colors"
+                className="flex items-center gap-3 text-white rounded-xl px-4 py-2.5 transition-all hover:opacity-90 hover:scale-[1.02]"
+                style={{ background: "linear-gradient(135deg, #01875f 0%, #00a86b 100%)" }}
                 data-testid="btn-playstore"
               >
                 <svg viewBox="0 0 24 24" className="w-6 h-6 flex-shrink-0" xmlns="http://www.w3.org/2000/svg">
@@ -171,14 +173,15 @@ function AppFooter() {
                 </div>
               </a>
               <a
-                href="https://play.google.com/store/apps/details?id=com.apmo.souqmarket"
+                href="https://app.as-souqmarkat.com/?from-splash=false"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 bg-black text-white rounded-xl px-4 py-2.5 hover:bg-gray-900 transition-colors"
+                className="flex items-center gap-3 text-white rounded-xl px-4 py-2.5 transition-all hover:opacity-90 hover:scale-[1.02]"
+                style={{ background: "linear-gradient(135deg, #cf0a2c 0%, #e8102f 100%)" }}
                 data-testid="btn-appgallery"
               >
-                <svg viewBox="0 0 24 24" className="w-6 h-6 flex-shrink-0" fill="#fff" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>
+                <svg viewBox="0 0 512 512" className="w-6 h-6 flex-shrink-0 fill-white" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M256 32C132.3 32 32 132.3 32 256s100.3 224 224 224 224-100.3 224-224S379.7 32 256 32zm-40 316.5v-185l130 92.5-130 92.5z"/>
                 </svg>
                 <div>
                   <div className="text-[10px] opacity-70">تحميل على</div>

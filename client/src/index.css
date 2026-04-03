@@ -18,54 +18,54 @@
   --font-sans: 'Cairo', sans-serif;
   --font-display: 'Cairo', sans-serif;
 
-  /* Vibrant Arabic-inspired Palette (Modern Teal & Gold) */
+  /* Professional Royal Blue & Gold Palette */
   --background: 0 0% 100%;
   --foreground: 222 47% 11%;
   
-  --primary: 174 100% 29%; /* Deep Teal */
+  --primary: 221 83% 48%; /* Royal Blue */
   --primary-foreground: 0 0% 100%;
   
-  --secondary: 38 92% 50%; /* Golden Orange */
+  --secondary: 38 95% 52%; /* Rich Gold */
   --secondary-foreground: 0 0% 100%;
   
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 46.9%;
+  --muted: 214 32% 96%;
+  --muted-foreground: 215 16% 47%;
   
-  --accent: 174 50% 96%;
-  --accent-foreground: 174 100% 29%;
+  --accent: 221 80% 96%;
+  --accent-foreground: 221 83% 40%;
   
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 210 40% 98%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
 
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 174 100% 29%;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 221 83% 48%;
   
   --radius: 0.75rem;
 }
 
 .dark {
-  --background: 222 47% 11%;
+  --background: 222 47% 9%;
   --foreground: 210 40% 98%;
   
-  --primary: 174 80% 40%;
+  --primary: 221 83% 60%;
   --primary-foreground: 0 0% 100%;
   
-  --secondary: 38 92% 50%;
+  --secondary: 38 95% 52%;
   --secondary-foreground: 0 0% 100%;
   
-  --muted: 217.2 32.6% 17.5%;
-  --muted-foreground: 215 20.2% 65.1%;
+  --muted: 217 33% 16%;
+  --muted-foreground: 215 20% 65%;
   
-  --accent: 217.2 32.6% 17.5%;
+  --accent: 221 40% 18%;
   --accent-foreground: 210 40% 98%;
   
-  --destructive: 0 62.8% 30.6%;
+  --destructive: 0 63% 31%;
   --destructive-foreground: 210 40% 98%;
   
-  --border: 217.2 32.6% 17.5%;
-  --input: 217.2 32.6% 17.5%;
-  --ring: 174 80% 40%;
+  --border: 221 30% 18%;
+  --input: 221 30% 18%;
+  --ring: 221 83% 60%;
 }
 
 @layer base {
@@ -78,25 +78,12 @@
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
-    @apply font-bold tracking-tight;
+    font-weight: 700;
   }
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  @apply bg-muted-foreground/20 rounded-full;
-}
-::-webkit-scrollbar-thumb:hover {
-  @apply bg-muted-foreground/40;
-}
-
-/* RTL Support Utilities */
-[dir="rtl"] .rtl-flip {
-  transform: scaleX(-1);
+@layer utilities {
+  .animate-shake {
+    animation: shake 0.5s ease-in-out;
+  }
 }
