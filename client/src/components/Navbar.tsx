@@ -10,7 +10,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 const ADMIN_USER_ID = "54219806";
@@ -30,6 +30,41 @@ const navLinks = (user: any) => [
     ...(user.id === ADMIN_USER_ID ? [{ href: "/admin", label: "الإدارة", icon: ShieldCheck }] : []),
   ] : []),
 ];
+
+function LiveClock() {
+  const [time, setTime] = useState(new Date());
+
+  useEffect(() => {
+    const id = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const cairoTime = time.toLocaleTimeString("ar-EG", {
+    timeZone: "Africa/Cairo",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+
+  const cairoDate = time.toLocaleDateString("ar-EG", {
+    timeZone: "Africa/Cairo",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+
+  return (
+    <div
+      className="hidden md:flex flex-col items-center leading-none px-3 py-1 rounded-xl bg-muted/60 border border-border/60 select-none"
+      data-testid="live-clock"
+      title={`توقيت القاهرة — ${cairoDate}`}
+    >
+      <span className="text-sm font-bold tabular-nums text-foreground tracking-wide">{cairoTime}</span>
+      <span className="text-[10px] text-muted-foreground mt-0.5">{cairoDate}</span>
+    </div>
+  );
+}
 
 function MessagesBadge() {
   const { user } = useAuth();
@@ -89,6 +124,9 @@ export function Navbar() {
 
         {/* Actions */}
         <div className="flex items-center gap-1.5">
+          {/* Clock */}
+          <LiveClock />
+
           {/* Live Stream */}
           {user && (
             <Link href="/stream/start" className="hidden md:block">
