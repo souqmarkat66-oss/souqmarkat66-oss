@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   MessageSquare, Upload, X, FileText, Image, Clock, CheckCircle2,
-  XCircle, Plus, Send, Star, Package, Loader2, ChevronDown, ChevronUp,
+  XCircle, Plus, Send, Star, Package, Loader2, ChevronDown, ChevronUp, Sparkles,
 } from "lucide-react";
 import { PayFromAppButton } from "@/components/PayFromAppButton";
 import { format } from "date-fns";
@@ -91,6 +91,25 @@ export default function Consultations() {
   // Admin reply state
   const [adminReply, setAdminReply] = useState<Record<number, string>>({});
   const [adminNote, setAdminNote] = useState<Record<number, string>>({});
+  const [aiDraftLoading, setAiDraftLoading] = useState<number | null>(null);
+
+  const generateAiDraft = async (consultationId: number) => {
+    setAiDraftLoading(consultationId);
+    try {
+      const res = await fetch(`/api/consultations/${consultationId}/ai-draft`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setAdminReply(prev => ({ ...prev, [consultationId]: data.draft }));
+      toast({ title: "✨ تم توليد المسودة — راجعها قبل الإرسال" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "فشل توليد المسودة", description: e.message });
+    } finally {
+      setAiDraftLoading(null);
+    }
+  };
 
   const { data: consultations = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/consultations"],
@@ -309,13 +328,28 @@ export default function Consultations() {
                     {/* Admin Controls */}
                     {isAdmin && (
                       <div className="border-t pt-3 space-y-3">
-                        <p className="text-xs font-bold text-muted-foreground">لوحة الإدارة</p>
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-bold text-muted-foreground">لوحة الإدارة</p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 text-xs border-purple-300 text-purple-700 hover:bg-purple-50 dark:border-purple-700 dark:text-purple-400 dark:hover:bg-purple-950/30"
+                            onClick={() => generateAiDraft(c.id)}
+                            disabled={aiDraftLoading === c.id}
+                            data-testid={`btn-ai-draft-${c.id}`}
+                          >
+                            {aiDraftLoading === c.id
+                              ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> جاري التوليد...</>
+                              : <><Sparkles className="w-3.5 h-3.5" /> مسودة بالذكاء الاصطناعي</>
+                            }
+                          </Button>
+                        </div>
                         <Textarea
-                          placeholder="الرد على الاستشارة..."
+                          placeholder="الرد على الاستشارة... (يمكنك توليد مسودة بالذكاء الاصطناعي ثم تعديلها)"
                           value={adminReply[c.id] ?? c.reply ?? ""}
                           onChange={e => setAdminReply(prev => ({ ...prev, [c.id]: e.target.value }))}
                           className="text-sm resize-none"
-                          rows={3}
+                          rows={5}
                         />
                         <Input
                           placeholder="ملاحظة إدارية (اختياري)..."

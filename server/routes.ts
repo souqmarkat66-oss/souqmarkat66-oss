@@ -3868,6 +3868,38 @@ ${allPages.map(p => `  <url>
     } catch (e: any) { res.status(400).json({ message: e.message }); }
   });
 
+  // POST /api/consultations/:id/ai-draft — generate AI draft reply (admin only)
+  app.post("/api/consultations/:id/ai-draft", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      const row = await db.execute(sql`SELECT title, description, package_label FROM consultations WHERE id = ${Number(req.params.id)} LIMIT 1`);
+      const c = row.rows[0] as any;
+      if (!c) return res.status(404).json({ message: "الاستشارة غير موجودة" });
+
+      const prompt = `أنت مستشار تسويقي محترف متخصص في الإعلانات الرقمية والتجارة الإلكترونية في السوق المصري.
+قم بكتابة رد استشاري احترافي ومفيد على الطلب التالي:
+
+العنوان: ${c.title}
+التفاصيل: ${c.description || "لا توجد تفاصيل إضافية"}
+الباقة: ${c.package_label || ""}
+
+اكتب رداً عملياً ومنظماً يشمل:
+1. تحليل الوضع
+2. التوصيات المحددة
+3. خطوات تنفيذية واضحة
+
+الرد يجب أن يكون باللغة العربية، احترافياً ومفيداً وقابلاً للتطبيق مباشرة.`;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 800,
+      });
+
+      const draft = response.choices[0].message.content || "";
+      res.json({ draft });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   // ================================================================
   // COUPONS — AI-generated promo codes (paid service)
   // ================================================================
