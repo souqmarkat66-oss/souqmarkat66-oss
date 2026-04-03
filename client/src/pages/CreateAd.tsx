@@ -156,6 +156,13 @@ export default function CreateAd() {
     enabled: aiMode,
   });
 
+  const { data: platformSettings } = useQuery<Record<string, string>>({
+    queryKey: ["/api/settings"],
+    queryFn: () => fetch("/api/settings").then(r => r.json()),
+    staleTime: 60 * 1000,
+  });
+  const aiEnabled = platformSettings?.["feature_ai"] !== "0";
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -1609,7 +1616,7 @@ export default function CreateAd() {
                       <Copy className="w-3.5 h-3.5 text-green-600" />
                     </button>
                   </div>
-                ) : (
+                ) : aiEnabled ? (
                   <Button
                     type="button"
                     variant="outline"
@@ -1657,7 +1664,7 @@ export default function CreateAd() {
                   >
                     {couponGenerating ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري الإنشاء...</> : <><Sparkles className="w-4 h-4" /> إنشاء كوبون بالذكاء (15 ج.م)</>}
                   </Button>
-                )}
+                ) : null}
               </div>
             )}
           </div>

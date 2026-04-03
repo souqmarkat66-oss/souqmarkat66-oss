@@ -138,6 +138,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_vodafone_cash', '01098553911') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_instapay', '01285558567') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_whatsapp', '') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_ads', '1') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_reels', '1') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_channels', '1') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_livestream', '1') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_messages', '1') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_campaigns', '1') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_ai', '1') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_registration', '1') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_boost', '1') ON CONFLICT (key) DO NOTHING`);
   } catch { /* table may already exist */ }
 
   // Serve uploads directory

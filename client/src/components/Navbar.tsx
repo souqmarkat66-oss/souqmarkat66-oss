@@ -96,7 +96,22 @@ export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const isActive = (path: string) => location === path;
 
-  const links = navLinks(user);
+  const { data: settings } = useQuery<Record<string, string>>({
+    queryKey: ["/api/settings"],
+    queryFn: () => fetch("/api/settings").then(r => r.json()),
+    staleTime: 60 * 1000,
+  });
+
+  const feat = (key: string) => settings?.[key] !== "0";
+
+  const allLinks = navLinks(user);
+  const links = allLinks.filter(l => {
+    if (l.href === "/ads")      return feat("feature_ads");
+    if (l.href === "/channels") return feat("feature_channels");
+    if (l.href === "/reels")    return feat("feature_reels");
+    if (l.href === "/campaigns")return feat("feature_campaigns");
+    return true;
+  });
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b bg-background/90 backdrop-blur-md">
@@ -128,7 +143,7 @@ export function Navbar() {
           <LiveClock />
 
           {/* Live Stream */}
-          {user && (
+          {user && feat("feature_livestream") && (
             <Link href="/stream/start" className="hidden md:block">
               <Button size="sm" className="gap-2 bg-red-500 hover:bg-red-600 text-white">
                 <Radio className="w-3 h-3 animate-pulse" /> بث مباشر
@@ -137,7 +152,7 @@ export function Navbar() {
           )}
 
           {/* Messages */}
-          {user && <MessagesBadge />}
+          {user && feat("feature_messages") && <MessagesBadge />}
 
           {/* Notifications */}
           {user && <NotificationBell />}
@@ -184,21 +199,25 @@ export function Navbar() {
                     </Link>
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem asChild>
-                  <Link href="/messages" className="gap-2 cursor-pointer flex items-center">
-                    <MessageSquare className="w-4 h-4 text-green-500" /> الرسائل
-                  </Link>
-                </DropdownMenuItem>
+                {feat("feature_messages") && (
+                  <DropdownMenuItem asChild>
+                    <Link href="/messages" className="gap-2 cursor-pointer flex items-center">
+                      <MessageSquare className="w-4 h-4 text-green-500" /> الرسائل
+                    </Link>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem asChild>
                   <Link href="/create" className="gap-2 cursor-pointer flex items-center">
                     <PlusCircle className="w-4 h-4 text-green-500" /> إعلان جديد
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/reels" className="gap-2 cursor-pointer flex items-center">
-                    <Radio className="w-4 h-4 text-red-500" /> الريلز
-                  </Link>
-                </DropdownMenuItem>
+                {feat("feature_reels") && (
+                  <DropdownMenuItem asChild>
+                    <Link href="/reels" className="gap-2 cursor-pointer flex items-center">
+                      <Radio className="w-4 h-4 text-red-500" /> الريلز
+                    </Link>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem asChild>
                   <Link href="/social" className="gap-2 cursor-pointer flex items-center">
                     <Users className="w-4 h-4 text-pink-500" /> الميزات الاجتماعية
@@ -268,21 +287,25 @@ export function Navbar() {
                     </Button>
                   </Link>
                 )}
-                <Link href="/messages" onClick={() => setMobileOpen(false)}>
-                  <Button variant="ghost" className="w-full justify-start gap-2">
-                    <MessageSquare className="w-4 h-4" /> الرسائل
-                  </Button>
-                </Link>
+                {feat("feature_messages") && (
+                  <Link href="/messages" onClick={() => setMobileOpen(false)}>
+                    <Button variant="ghost" className="w-full justify-start gap-2">
+                      <MessageSquare className="w-4 h-4" /> الرسائل
+                    </Button>
+                  </Link>
+                )}
                 <Link href="/social" onClick={() => setMobileOpen(false)}>
                   <Button variant="ghost" className="w-full justify-start gap-2">
                     <Users className="w-4 h-4 text-pink-500" /> الميزات الاجتماعية
                   </Button>
                 </Link>
-                <Link href="/stream/start" onClick={() => setMobileOpen(false)}>
-                  <Button className="w-full gap-2 bg-red-500 hover:bg-red-600 text-white mt-2">
-                    <Radio className="w-4 h-4" /> بدء البث المباشر
-                  </Button>
-                </Link>
+                {feat("feature_livestream") && (
+                  <Link href="/stream/start" onClick={() => setMobileOpen(false)}>
+                    <Button className="w-full gap-2 bg-red-500 hover:bg-red-600 text-white mt-2">
+                      <Radio className="w-4 h-4" /> بدء البث المباشر
+                    </Button>
+                  </Link>
+                )}
                 <Link href="/help" onClick={() => setMobileOpen(false)}>
                   <Button variant="ghost" className="w-full justify-start gap-2">
                     <HelpCircle className="w-4 h-4 text-amber-500" /> المساعدة والشرح
