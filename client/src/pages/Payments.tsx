@@ -8,8 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon, Tag, CheckSquare, Square, Calculator } from "lucide-react";
-import { PayFromAppButton } from "@/components/PayFromAppButton";
+import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon, Tag, CheckSquare, Square, Calculator, Download, Apple } from "lucide-react";
+import { SiGoogleplay, SiHuawei } from "react-icons/si";
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {
   ad_boost:   "⚡ تعزيز إعلان",
@@ -563,7 +563,7 @@ export default function Payments() {
               </div>
             </div>
 
-            {/* Phone */}
+            {/* Phone — للطرق غير سوق ماركات */}
             {formData.method !== "souq" && (
               <div className="space-y-1">
                 <label className="text-xs font-bold flex items-center gap-1">
@@ -584,6 +584,54 @@ export default function Payments() {
                     حوّل المبلغ على: <span className="font-mono font-bold">{selectedMethod.number}</span>
                   </p>
                 )}
+              </div>
+            )}
+
+            {/* سوق ماركات — خطوات الدفع */}
+            {formData.method === "souq" && (
+              <div className="rounded-2xl border-2 border-primary/30 bg-primary/5 p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🛒</span>
+                  <div>
+                    <p className="text-sm font-extrabold text-primary">ادفع من تطبيق سوق ماركات</p>
+                    <p className="text-[10px] text-muted-foreground">حمّل التطبيق — ادفع — ارفع صورة الفاتورة أدناه</p>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <a href="https://play.google.com/store/apps/details?id=com.apmo.souqmarket"
+                    target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-2.5 w-full bg-[#01875f] hover:bg-[#017a57] text-white rounded-xl px-3 py-2.5 transition-colors">
+                    <SiGoogleplay className="w-5 h-5 flex-shrink-0" />
+                    <div className="text-right flex-1 leading-tight">
+                      <div className="text-[9px] opacity-70">متوفر على</div>
+                      <div className="font-bold text-xs">Google Play</div>
+                    </div>
+                    <Download className="w-3.5 h-3.5 opacity-70" />
+                  </a>
+                  <a href="https://apps.apple.com/app/id6743621961"
+                    target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-2.5 w-full bg-black hover:bg-gray-900 text-white rounded-xl px-3 py-2.5 transition-colors">
+                    <Apple className="w-5 h-5 flex-shrink-0" />
+                    <div className="text-right flex-1 leading-tight">
+                      <div className="text-[9px] opacity-70">متوفر على</div>
+                      <div className="font-bold text-xs">App Store</div>
+                    </div>
+                    <Download className="w-3.5 h-3.5 opacity-70" />
+                  </a>
+                  <a href="https://appgallery.huawei.com/app/C112484935"
+                    target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-2.5 w-full bg-[#cf0a2c] hover:bg-[#b0091f] text-white rounded-xl px-3 py-2.5 transition-colors">
+                    <SiHuawei className="w-5 h-5 flex-shrink-0" />
+                    <div className="text-right flex-1 leading-tight">
+                      <div className="text-[9px] opacity-70">متوفر على</div>
+                      <div className="font-bold text-xs">AppGallery</div>
+                    </div>
+                    <Download className="w-3.5 h-3.5 opacity-70" />
+                  </a>
+                </div>
+                <div className="bg-primary/10 rounded-xl px-3 py-2 text-xs text-primary font-medium">
+                  💡 بعد الدفع من التطبيق، التقط صورة الفاتورة وارفعها في حقل الإيصال أدناه
+                </div>
               </div>
             )}
 
@@ -639,13 +687,6 @@ export default function Payments() {
               )}
             </div>
 
-            {/* Pay from App */}
-            {effectiveAmount && Number(effectiveAmount) > 0 && (
-              <div className="text-center space-y-1">
-                <p className="text-xs text-muted-foreground">— أو ادفع مباشرة من التطبيق —</p>
-                <PayFromAppButton price={Number(effectiveAmount)} className="w-full" />
-              </div>
-            )}
 
             {/* Submit */}
             <Button
