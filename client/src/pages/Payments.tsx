@@ -618,7 +618,7 @@ export default function Payments() {
                     </div>
                     <Download className="w-3.5 h-3.5 opacity-70" />
                   </a>
-                  <a href="https://appgallery.huawei.com/app/C112484935"
+                  <a href="https://app.as-souqmarkat.com/?from-splash=false"
                     target="_blank" rel="noopener noreferrer"
                     className="flex items-center gap-2.5 w-full bg-[#cf0a2c] hover:bg-[#b0091f] text-white rounded-xl px-3 py-2.5 transition-colors">
                     <SiHuawei className="w-5 h-5 flex-shrink-0" />

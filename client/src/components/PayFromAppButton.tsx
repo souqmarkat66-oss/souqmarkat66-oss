@@ -11,7 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 
 const PLAY_STORE  = "https://play.google.com/store/apps/details?id=com.apmo.souqmarket";
 const APP_STORE   = "https://apps.apple.com/app/id6743621961";
-const HUAWEI_STORE = "https://appgallery.huawei.com/app/C112484935";
+const HUAWEI_STORE = "https://app.as-souqmarkat.com/?from-splash=false";
 
 interface Props {
   price?:     number;
