@@ -19,7 +19,7 @@ import {
   AlertTriangle, Activity, Menu, ChevronLeft, VideoOff, PieChart,
   Star, MessageSquare, Clock, BanIcon, UserCheck, FolderOpen, FileImage,
   FileVideo, File, Lock, Phone, Mail, Shield, RefreshCw, ToggleLeft, ToggleRight, Zap,
-  Sparkles, Image, Video, Wand2, FileText, Gift, Check, Globe
+  Sparkles, Image, Video, Wand2, FileText, Gift, Check, Globe, Plus
 } from "lucide-react";
 
 const ADMIN_ID = "54219806";
@@ -452,6 +452,33 @@ function AdsSection({ logAction }: { logAction: any }) {
   const [searchQ, setSearchQ] = useState("");
   const [editId, setEditId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>({});
+  const [showPromoForm, setShowPromoForm] = useState(false);
+  const [promoForm, setPromoForm] = useState({ title: "", description: "", mediaUrl: "", mediaType: "image", priceEGP: "", whatsappNumber: "" });
+
+  const { data: promoAds = [], refetch: refetchPromo } = useQuery<any[]>({
+    queryKey: ["/api/admin/promo-ads"],
+    queryFn: () => fetch("/api/admin/promo-ads", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const createPromo = useMutation({
+    mutationFn: (data: any) => fetch("/api/admin/promo-ads", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: (res) => {
+      if (res.success) {
+        toast({ title: "✅ تم نشر الإعلان الترويجي" });
+        setPromoForm({ title: "", description: "", mediaUrl: "", mediaType: "image", priceEGP: "", whatsappNumber: "" });
+        setShowPromoForm(false);
+        refetchPromo();
+        logAction("create_promo_ad", `ad#${res.id}`);
+      } else {
+        toast({ title: "❌ " + res.message, variant: "destructive" });
+      }
+    },
+  });
+
+  const deletePromo = useMutation({
+    mutationFn: (id: number) => fetch(`/api/admin/promo-ads/${id}`, { method: "DELETE", credentials: "include" }).then(r => r.json()),
+    onSuccess: (_, id) => { refetchPromo(); toast({ title: "🗑️ تم حذف الإعلان الترويجي" }); logAction("delete_promo_ad", `ad#${id}`); },
+  });
 
   const { data: ads = [], isLoading, refetch } = useQuery<any[]>({
     queryKey: ["/api/admin/ads", searchQ],
@@ -472,6 +499,69 @@ function AdsSection({ logAction }: { logAction: any }) {
 
   return (
     <div className="space-y-4">
+      {/* Promo Ads Section */}
+      <Card className="border-emerald-500/40 bg-emerald-50/30 dark:bg-emerald-950/20">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <span className="text-emerald-500">📢</span>
+              إعلانات المنصة الترويجية
+              {promoAds.length > 0 && <Badge className="bg-emerald-500 text-white text-xs">{promoAds.length}</Badge>}
+            </CardTitle>
+            <Button size="sm" variant="outline" className="text-xs border-emerald-400 text-emerald-700 hover:bg-emerald-50" onClick={() => setShowPromoForm(v => !v)}>
+              {showPromoForm ? <><X className="w-3 h-3 me-1" />إغلاق</> : <><Plus className="w-3 h-3 me-1" />إعلان جديد</>}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">إعلانات تنشرها المنصة بين إعلانات المستخدمين — تظهر بشارة خضراء "إعلان ترويجي"</p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {showPromoForm && (
+            <div className="space-y-3 p-3 rounded-xl bg-background border border-emerald-200">
+              <Input value={promoForm.title} onChange={e => setPromoForm(f => ({ ...f, title: e.target.value }))} placeholder="عنوان الإعلان *" data-testid="promo-ad-title" />
+              <textarea value={promoForm.description} onChange={e => setPromoForm(f => ({ ...f, description: e.target.value }))} rows={2} placeholder="وصف الإعلان *" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary" data-testid="promo-ad-description" />
+              <Input dir="ltr" value={promoForm.mediaUrl} onChange={e => setPromoForm(f => ({ ...f, mediaUrl: e.target.value }))} placeholder="رابط الصورة أو الفيديو (URL) *" data-testid="promo-ad-media-url" />
+              <div className="grid grid-cols-2 gap-2">
+                <Select value={promoForm.mediaType} onValueChange={v => setPromoForm(f => ({ ...f, mediaType: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="image">🖼️ صورة</SelectItem>
+                    <SelectItem value="video">🎥 فيديو</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input type="number" value={promoForm.priceEGP} onChange={e => setPromoForm(f => ({ ...f, priceEGP: e.target.value }))} placeholder="السعر (ج.م) — اختياري" />
+              </div>
+              <Input dir="ltr" value={promoForm.whatsappNumber} onChange={e => setPromoForm(f => ({ ...f, whatsappNumber: e.target.value }))} placeholder="رقم واتساب — اختياري" />
+              <Button size="sm" className="w-full bg-emerald-500 hover:bg-emerald-600 text-white" disabled={createPromo.isPending || !promoForm.title || !promoForm.description || !promoForm.mediaUrl} onClick={() => createPromo.mutate(promoForm)} data-testid="btn-create-promo-ad">
+                {createPromo.isPending ? <Loader2 className="w-3 h-3 animate-spin me-1" /> : <Megaphone className="w-3 h-3 me-1" />}
+                نشر الإعلان الترويجي
+              </Button>
+            </div>
+          )}
+          {promoAds.length > 0 && (
+            <div className="space-y-2">
+              {promoAds.map((ad: any) => (
+                <div key={ad.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-background border border-emerald-100">
+                  {ad.media_url && ad.media_type === "image" && (
+                    <img src={ad.media_url} alt="" className="w-12 h-12 rounded-lg object-cover flex-shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate">{ad.title}</p>
+                    <p className="text-xs text-muted-foreground truncate">{ad.description}</p>
+                    {ad.price_egp && <p className="text-xs text-emerald-600 font-bold">{ad.price_egp} ج.م</p>}
+                  </div>
+                  <Button size="sm" variant="destructive" className="text-xs flex-shrink-0" onClick={() => { if (confirm("حذف الإعلان الترويجي؟")) deletePromo.mutate(ad.id); }} data-testid={`btn-delete-promo-ad-${ad.id}`}>
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+          {promoAds.length === 0 && !showPromoForm && (
+            <p className="text-center text-xs text-muted-foreground py-2">لا توجد إعلانات ترويجية — اضغط "إعلان جديد" لإضافة أول إعلان</p>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="flex gap-2">
         <Input placeholder="🔍 ابحث عن إعلان..." value={search} onChange={e => setSearch(e.target.value)}
           onKeyDown={e => e.key === "Enter" && setSearchQ(search)} className="flex-1" />

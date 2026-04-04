@@ -91,6 +91,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── DB Migrations (safe — ADD COLUMN IF NOT EXISTS) ──
   try {
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS is_admin_promo boolean DEFAULT false`);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS coupon_code text`);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS coupon_discount_type text`);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS coupon_discount_value real`);
@@ -1805,6 +1806,45 @@ Sitemap: ${BASE}/sitemap-pages.xml
       if (title !== undefined) {
         await db.execute(sql`UPDATE ads SET title = ${title} WHERE id = ${id}`);
       }
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Admin: create promo ad
+  app.post("/api/admin/promo-ads", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      const { title, description, mediaUrl, mediaType, priceEGP, whatsappNumber } = req.body;
+      if (!title || !description || !mediaUrl || !mediaType) return res.status(400).json({ message: "بيانات ناقصة" });
+      const adminId = req.user.id;
+      const result = await db.execute(sql`
+        INSERT INTO ads (title, description, media_url, media_type, user_id, price_egp, whatsapp_number, is_admin_promo, status, language)
+        VALUES (${title}, ${description}, ${mediaUrl}, ${mediaType}, ${adminId}, ${priceEGP || null}, ${whatsappNumber || null}, true, 'active', 'ar')
+        RETURNING id
+      `);
+      res.json({ success: true, id: (result.rows[0] as any).id });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Admin: list promo ads
+  app.get("/api/admin/promo-ads", isAuthenticated, requireAdmin, async (_req, res) => {
+    try {
+      const result = await db.execute(sql`SELECT * FROM ads WHERE is_admin_promo = true ORDER BY created_at DESC`);
+      res.json(result.rows);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Admin: delete promo ad
+  app.delete("/api/admin/promo-ads/:id", isAuthenticated, requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
+      await db.execute(sql`DELETE FROM ads WHERE id = ${id} AND is_admin_promo = true`);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
