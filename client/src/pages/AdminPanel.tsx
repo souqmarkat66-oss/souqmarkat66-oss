@@ -1431,6 +1431,46 @@ function SettingsSection({ logAction }: { logAction: any }) {
         </CardContent>
       </Card>
 
+      {/* Promo Banner */}
+      <Card className="border-amber-500/40 bg-amber-50/30 dark:bg-amber-950/20">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <span className="text-amber-500">📢</span>
+            شريط الإعلان المتحرك (سوق ماركات)
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">شريط يظهر في أعلى الصفحة الرئيسية — يمكن تفعيله وتغيير نصه حسب العروض</p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium">إظهار الشريط</label>
+            <button
+              type="button"
+              onClick={() => set("promo_banner_enabled", get("promo_banner_enabled", "1") === "1" ? "0" : "1")}
+              data-testid="toggle-promo-banner"
+              className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${get("promo_banner_enabled", "1") === "1" ? "bg-green-500 text-white" : "bg-red-500 text-white"}`}
+            >
+              {get("promo_banner_enabled", "1") === "1" ? "✓ ظاهر" : "✗ مخفي"}
+            </button>
+          </div>
+          <div>
+            <label className="text-xs font-medium block mb-1">نص الشريط (افصل بين الجمل بـ |)</label>
+            <textarea
+              value={get("promo_banner_text", "")}
+              onChange={e => set("promo_banner_text", e.target.value)}
+              rows={3}
+              data-testid="setting-promo-banner-text"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary"
+              placeholder="🎉 عرض خاص | قسّط على 18 شهر | حمّل التطبيق الآن"
+            />
+          </div>
+          {get("promo_banner_enabled", "1") === "1" && get("promo_banner_text", "") && (
+            <div className="overflow-hidden rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 py-2 px-4">
+              <p className="text-white text-xs font-bold text-center truncate">{get("promo_banner_text", "")}</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Button
         className="w-full gap-2" disabled={Object.keys(form).length === 0 || save.isPending}
         onClick={() => save.mutate(form)} data-testid="btn-save-settings"

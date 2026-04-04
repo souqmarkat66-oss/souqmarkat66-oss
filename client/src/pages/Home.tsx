@@ -54,6 +54,10 @@ export default function Home() {
     enabled: debouncedSearch.trim().length >= 2,
   });
 
+  const { data: siteSettings } = useQuery<Record<string, string>>({ queryKey: ["/api/settings"] });
+  const bannerEnabled = siteSettings?.promo_banner_enabled !== "0";
+  const bannerText = siteSettings?.promo_banner_text || "";
+
   const { data: adsResp, isLoading: adsLoading } = useQuery({ queryKey: ["/api/ads"], queryFn: () => fetch(`/api/ads?language=${language}&limit=8`).then(r => r.json()) });
   const ads: any[] = adsResp?.ads ?? adsResp ?? [];
   const { data: streams, isLoading: streamsLoading } = useQuery({ queryKey: ["/api/streams"], queryFn: () => fetch("/api/streams").then(r => r.json()) });
@@ -65,6 +69,28 @@ export default function Home() {
 
   return (
     <div className="min-h-screen">
+      {/* Promo Banner */}
+      {bannerEnabled && bannerText && (
+        <div className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 overflow-hidden py-2 relative" data-testid="promo-banner">
+          <div className="flex items-center">
+            <div
+              className="flex gap-16 whitespace-nowrap text-white text-sm font-bold animate-[marquee_25s_linear_infinite]"
+              style={{ direction: "rtl" }}
+            >
+              {[...Array(3)].map((_, i) => (
+                <span key={i} className="flex items-center gap-8">
+                  {bannerText.split("|").map((part, j) => (
+                    <span key={j} className="flex items-center gap-2">
+                      {part.trim()}
+                      {j < bannerText.split("|").length - 1 && <span className="text-white/60 mx-2">◆</span>}
+                    </span>
+                  ))}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {/* Hero */}
       <section className="relative overflow-hidden py-20 md:py-32">
         <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(circle at 50% 0%, hsl(174 100% 29% / 0.12) 0%, transparent 60%), radial-gradient(circle at 100% 0%, hsl(38 92% 50% / 0.08) 0%, transparent 50%)" }} />
