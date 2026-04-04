@@ -341,11 +341,133 @@ function DashboardSection() {
 // ═══════════════════════════════════════════════════════════════
 // USERS
 // ═══════════════════════════════════════════════════════════════
+function getUserType(u: any): { label: string; color: string; icon: string } {
+  if (Number(u.ads_count) > 0 && (Number(u.channels_count) > 0 || Number(u.reels_count) > 0))
+    return { label: "معلن + صاحب محتوى", color: "bg-violet-500/15 text-violet-600 border-violet-500/30", icon: "🎯" };
+  if (Number(u.ads_count) > 0)
+    return { label: "معلن", color: "bg-blue-500/15 text-blue-600 border-blue-500/30", icon: "📢" };
+  if (Number(u.channels_count) > 0 || Number(u.reels_count) > 0)
+    return { label: "صاحب محتوى", color: "bg-green-500/15 text-green-600 border-green-500/30", icon: "🎬" };
+  return { label: "مستخدم", color: "bg-muted text-muted-foreground border-border", icon: "👤" };
+}
+
+function UserDetailDialog({ user, onClose, onUpdate, onResetPassword }: { user: any; onClose: () => void; onUpdate: any; onResetPassword: any }) {
+  const [editMode, setEditMode] = useState(false);
+  const [role, setRole] = useState(user.role || "user");
+  const type = getUserType(user);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-background rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="p-5 border-b flex items-center justify-between">
+          <h2 className="font-bold text-lg">بروفايل المستخدم</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-muted flex items-center justify-center hover:bg-muted/70"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-5 space-y-5">
+          {/* Avatar + Name */}
+          <div className="flex items-center gap-4">
+            {user.profile_image_url
+              ? <img src={user.profile_image_url} className="w-16 h-16 rounded-full object-cover border-2 border-border" alt="" />
+              : <div className="w-16 h-16 rounded-full bg-primary/15 flex items-center justify-center text-2xl font-bold text-primary border-2 border-primary/20">{(user.first_name || user.email || "?")[0]}</div>
+            }
+            <div>
+              <div className="font-bold text-lg">{user.first_name} {user.last_name}</div>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                <span className={`text-xs border rounded-full px-2 py-0.5 ${type.color}`}>{type.icon} {type.label}</span>
+                {user.is_banned && <span className="text-xs bg-red-500/15 text-red-600 border border-red-500/30 rounded-full px-2 py-0.5">🚫 محظور</span>}
+                {user.id === ADMIN_ID && <span className="text-xs bg-primary/15 text-primary border border-primary/30 rounded-full px-2 py-0.5">👑 أدمن</span>}
+              </div>
+            </div>
+          </div>
+
+          {/* Contact Info */}
+          <div className="rounded-xl bg-muted/40 p-4 space-y-2">
+            <div className="text-xs font-bold text-muted-foreground mb-2">معلومات التواصل</div>
+            {user.email && <div className="flex items-center gap-2 text-sm"><Mail className="w-4 h-4 text-muted-foreground" /><span>{user.email}</span></div>}
+            {user.phone && <div className="flex items-center gap-2 text-sm"><Phone className="w-4 h-4 text-muted-foreground" /><span dir="ltr">{user.phone}</span></div>}
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Clock className="w-4 h-4" />
+              <span>انضم: {user.created_at ? format(new Date(user.created_at), "dd MMM yyyy", { locale: ar }) : "—"}</span>
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-blue-500/10 border border-blue-500/20 p-3 text-center">
+              <div className="text-2xl font-bold text-blue-600">{user.ads_count}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">📢 إعلانات</div>
+            </div>
+            <div className="rounded-xl bg-green-500/10 border border-green-500/20 p-3 text-center">
+              <div className="text-2xl font-bold text-green-600">{user.channels_count}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">📺 قنوات</div>
+            </div>
+            <div className="rounded-xl bg-violet-500/10 border border-violet-500/20 p-3 text-center">
+              <div className="text-2xl font-bold text-violet-600">{user.reels_count}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">🎬 ريلز</div>
+            </div>
+            <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-3 text-center">
+              <div className="text-2xl font-bold text-amber-600">{Number(user.total_earnings || 0).toFixed(0)}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">💰 ج.م أرباح</div>
+            </div>
+          </div>
+
+          {/* Role Edit */}
+          {user.id !== ADMIN_ID && (
+            <div className="rounded-xl border p-4 space-y-3">
+              <div className="text-xs font-bold text-muted-foreground">الدور / الصلاحية</div>
+              <Select value={role} onValueChange={setRole}>
+                <SelectTrigger data-testid="select-user-role"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">مستخدم عادي</SelectItem>
+                  <SelectItem value="advertiser">معلن</SelectItem>
+                  <SelectItem value="creator">صاحب محتوى</SelectItem>
+                  <SelectItem value="moderator">مشرف</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm" className="w-full gap-2"
+                onClick={() => { onUpdate({ id: user.id, data: { role } }); setEditMode(false); }}
+                data-testid="btn-save-user-role"
+              >
+                <Save className="w-3.5 h-3.5" /> حفظ الدور
+              </Button>
+            </div>
+          )}
+
+          {/* Actions */}
+          {user.id !== ADMIN_ID && (
+            <div className="flex gap-2 flex-wrap">
+              <Button
+                size="sm" variant="outline" className="gap-1.5 flex-1"
+                onClick={() => { if (confirm(`إعادة تعيين كلمة مرور ${user.first_name}؟`)) onResetPassword(user.id); }}
+                data-testid={`btn-reset-pwd-dialog-${user.id}`}
+              >
+                <Lock className="w-3.5 h-3.5" /> إعادة تعيين كلمة المرور
+              </Button>
+              <Button
+                size="sm"
+                variant={user.is_banned ? "outline" : "destructive"}
+                className="gap-1.5 flex-1"
+                onClick={() => onUpdate({ id: user.id, data: { isBanned: !user.is_banned } })}
+                data-testid={`btn-ban-dialog-${user.id}`}
+              >
+                {user.is_banned ? <><UserCheck className="w-3.5 h-3.5" /> رفع الحظر</> : <><BanIcon className="w-3.5 h-3.5" /> حظر المستخدم</>}
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UsersSection({ logAction }: { logAction: any }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [searchQ, setSearchQ] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | "advertiser" | "creator" | "user">("all");
+  const [selectedUser, setSelectedUser] = useState<any>(null);
 
   const { data: users = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/admin/users", searchQ],
@@ -359,6 +481,7 @@ function UsersSection({ logAction }: { logAction: any }) {
       qc.invalidateQueries({ queryKey: ["/api/admin/users"] });
       toast({ title: "✅ تم تحديث المستخدم" });
       logAction("update_user", vars.id, JSON.stringify(vars.data));
+      if (selectedUser?.id === vars.id) setSelectedUser((prev: any) => ({ ...prev, ...vars.data }));
     },
   });
 
@@ -372,71 +495,110 @@ function UsersSection({ logAction }: { logAction: any }) {
     },
   });
 
+  const filteredUsers = users.filter((u: any) => {
+    if (typeFilter === "all") return true;
+    const hasAds = Number(u.ads_count) > 0;
+    const hasContent = Number(u.channels_count) > 0 || Number(u.reels_count) > 0;
+    if (typeFilter === "advertiser") return hasAds;
+    if (typeFilter === "creator") return hasContent && !hasAds;
+    if (typeFilter === "user") return !hasAds && !hasContent;
+    return true;
+  });
+
+  const counts = {
+    all: users.length,
+    advertiser: users.filter((u: any) => Number(u.ads_count) > 0).length,
+    creator: users.filter((u: any) => (Number(u.channels_count) > 0 || Number(u.reels_count) > 0) && Number(u.ads_count) === 0).length,
+    user: users.filter((u: any) => Number(u.ads_count) === 0 && Number(u.channels_count) === 0 && Number(u.reels_count) === 0).length,
+  };
+
   return (
     <div className="space-y-4">
+      {/* Search */}
       <div className="flex gap-2">
-        <Input placeholder="🔍 ابحث بالاسم أو الإيميل..." value={search} onChange={e => setSearch(e.target.value)}
+        <Input placeholder="🔍 ابحث بالاسم أو الإيميل أو الهاتف..." value={search} onChange={e => setSearch(e.target.value)}
           onKeyDown={e => e.key === "Enter" && setSearchQ(search)} className="flex-1" data-testid="input-users-search" />
         <Button onClick={() => setSearchQ(search)} data-testid="btn-users-search"><Search className="w-4 h-4 me-1" />بحث</Button>
         {searchQ && <Button variant="outline" onClick={() => { setSearchQ(""); setSearch(""); }}><X className="w-4 h-4" /></Button>}
       </div>
 
+      {/* Type Filter Tabs */}
+      <div className="flex gap-2 flex-wrap">
+        {([
+          { key: "all",        label: "الكل",            icon: "👥", color: "bg-muted text-foreground" },
+          { key: "advertiser", label: "معلنون",           icon: "📢", color: "bg-blue-500/15 text-blue-600 border-blue-500/30" },
+          { key: "creator",    label: "أصحاب محتوى",     icon: "🎬", color: "bg-green-500/15 text-green-600 border-green-500/30" },
+          { key: "user",       label: "مستخدمون عاديون", icon: "👤", color: "bg-muted text-muted-foreground" },
+        ] as const).map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setTypeFilter(tab.key)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-all ${
+              typeFilter === tab.key ? tab.color + " border-current shadow-sm" : "border-border text-muted-foreground hover:border-muted-foreground"
+            }`}
+            data-testid={`filter-users-${tab.key}`}
+          >
+            {tab.icon} {tab.label}
+            <span className="bg-background/60 rounded-full px-1.5 py-0.5 text-xs">{counts[tab.key]}</span>
+          </button>
+        ))}
+      </div>
+
       {isLoading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : (
         <div className="space-y-2">
-          {users.map((u: any) => (
-            <Card key={u.id} className="rounded-xl" data-testid={`user-card-${u.id}`}>
-              <CardContent className="p-4 flex items-center gap-4">
-                {u.profile_image_url
-                  ? <img src={u.profile_image_url} className="w-10 h-10 rounded-full object-cover flex-shrink-0" alt="" />
-                  : <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center flex-shrink-0 text-lg font-bold">{(u.first_name || u.email || "?")[0]}</div>
-                }
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-sm">{u.first_name} {u.last_name}</span>
-                    {u.is_banned && <span className="text-xs bg-red-500/15 text-red-600 border border-red-500/30 rounded-full px-2 py-0.5">🚫 محظور</span>}
-                    {u.id === ADMIN_ID && <span className="text-xs bg-primary/15 text-primary border border-primary/30 rounded-full px-2 py-0.5">👑 أدمن</span>}
-                    {!u.has_password && u.id !== ADMIN_ID && <span className="text-xs bg-yellow-500/15 text-yellow-600 border border-yellow-500/30 rounded-full px-2 py-0.5">⚠️ بدون كلمة مرور</span>}
+          {filteredUsers.map((u: any) => {
+            const type = getUserType(u);
+            return (
+              <Card key={u.id} className="rounded-xl hover:shadow-md transition-shadow" data-testid={`user-card-${u.id}`}>
+                <CardContent className="p-4 flex items-center gap-3">
+                  {u.profile_image_url
+                    ? <img src={u.profile_image_url} className="w-10 h-10 rounded-full object-cover flex-shrink-0" alt="" />
+                    : <div className="w-10 h-10 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0 text-lg font-bold text-primary">{(u.first_name || u.email || "?")[0]}</div>
+                  }
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm">{u.first_name} {u.last_name}</span>
+                      <span className={`text-xs border rounded-full px-2 py-0.5 ${type.color}`}>{type.icon} {type.label}</span>
+                      {u.is_banned && <span className="text-xs bg-red-500/15 text-red-600 border border-red-500/30 rounded-full px-2 py-0.5">🚫 محظور</span>}
+                      {u.id === ADMIN_ID && <span className="text-xs bg-primary/15 text-primary border border-primary/30 rounded-full px-2 py-0.5">👑 أدمن</span>}
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5 flex-wrap">
+                      {u.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{u.email}</span>}
+                      {u.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{u.phone}</span>}
+                    </div>
+                    <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
+                      <span>📢 {u.ads_count}</span>
+                      <span>📺 {u.channels_count}</span>
+                      <span>🎬 {u.reels_count}</span>
+                      <span>💰 {Number(u.total_earnings || 0).toFixed(0)} ج.م</span>
+                      <span className="mr-auto">{u.created_at ? format(new Date(u.created_at), "dd/MM/yy", { locale: ar }) : ""}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5 flex-wrap">
-                    {u.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{u.email}</span>}
-                    {u.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{u.phone}</span>}
-                  </div>
-                  <div className="flex gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
-                    <span>📢 {u.ads_count} إعلان</span>
-                    <span>📺 {u.channels_count} قناة</span>
-                    <span>🎬 {u.reels_count} ريل</span>
-                    <span>💰 {Number(u.total_earnings || 0).toFixed(2)} ج.م</span>
-                    <span>{u.created_at ? format(new Date(u.created_at), "dd/MM/yyyy", { locale: ar }) : ""}</span>
-                  </div>
-                </div>
-                {u.id !== ADMIN_ID && (
-                  <div className="flex gap-1.5 flex-shrink-0 flex-col sm:flex-row">
-                    <Button
-                      size="sm" variant="outline" className="gap-1 text-xs"
-                      disabled={resetPassword.isPending}
-                      onClick={() => { if (confirm(`إعادة تعيين كلمة مرور ${u.first_name}؟`)) resetPassword.mutate(u.id); }}
-                      data-testid={`btn-reset-pwd-${u.id}`}
-                      title="إعادة تعيين كلمة المرور"
-                    >
-                      <Lock className="w-3 h-3" />
-                    </Button>
-                    <Button
-                      size="sm" variant={u.is_banned ? "outline" : "destructive"} className="gap-1 text-xs"
-                      disabled={updateUser.isPending}
-                      onClick={() => updateUser.mutate({ id: u.id, data: { isBanned: !u.is_banned } })}
-                      data-testid={`btn-ban-${u.id}`}
-                    >
-                      {u.is_banned ? <><UserCheck className="w-3 h-3" /> رفع الحظر</> : <><BanIcon className="w-3 h-3" /> حظر</>}
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-          {users.length === 0 && !isLoading && (
+                  <Button
+                    size="sm" variant="outline" className="gap-1.5 text-xs flex-shrink-0"
+                    onClick={() => setSelectedUser(u)}
+                    data-testid={`btn-view-user-${u.id}`}
+                  >
+                    <Eye className="w-3.5 h-3.5" /> عرض
+                  </Button>
+                </CardContent>
+              </Card>
+            );
+          })}
+          {filteredUsers.length === 0 && !isLoading && (
             <div className="text-center py-16 text-muted-foreground"><Users className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد نتائج</p></div>
           )}
         </div>
+      )}
+
+      {/* User Detail Dialog */}
+      {selectedUser && (
+        <UserDetailDialog
+          user={selectedUser}
+          onClose={() => setSelectedUser(null)}
+          onUpdate={(vars: any) => updateUser.mutate(vars)}
+          onResetPassword={(id: string) => resetPassword.mutate(id)}
+        />
       )}
     </div>
   );
