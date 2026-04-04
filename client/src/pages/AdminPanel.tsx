@@ -1463,6 +1463,18 @@ function SettingsSection({ logAction }: { logAction: any }) {
               placeholder="🎉 عرض خاص | قسّط على 18 شهر | حمّل التطبيق الآن"
             />
           </div>
+          <div>
+            <label className="text-xs font-medium block mb-1">رابط الضغط على الشريط (رابط تحميل التطبيق)</label>
+            <input
+              type="url"
+              dir="ltr"
+              value={get("promo_banner_url", "https://play.google.com/store/apps/details?id=com.apmo.souqmarket")}
+              onChange={e => set("promo_banner_url", e.target.value)}
+              data-testid="setting-promo-banner-url"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              placeholder="https://play.google.com/store/apps/details?id=..."
+            />
+          </div>
           {get("promo_banner_enabled", "1") === "1" && get("promo_banner_text", "") && (
             <div className="overflow-hidden rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 py-2 px-4">
               <p className="text-white text-xs font-bold text-center truncate">{get("promo_banner_text", "")}</p>

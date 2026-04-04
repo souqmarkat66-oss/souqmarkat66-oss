@@ -57,6 +57,7 @@ export default function Home() {
   const { data: siteSettings } = useQuery<Record<string, string>>({ queryKey: ["/api/settings"] });
   const bannerEnabled = siteSettings?.promo_banner_enabled !== "0";
   const bannerText = siteSettings?.promo_banner_text || "";
+  const bannerUrl = siteSettings?.promo_banner_url || "https://play.google.com/store/apps/details?id=com.apmo.souqmarket";
 
   const { data: adsResp, isLoading: adsLoading } = useQuery({ queryKey: ["/api/ads"], queryFn: () => fetch(`/api/ads?language=${language}&limit=8`).then(r => r.json()) });
   const ads: any[] = adsResp?.ads ?? adsResp ?? [];
@@ -71,7 +72,13 @@ export default function Home() {
     <div className="min-h-screen">
       {/* Promo Banner */}
       {bannerEnabled && bannerText && (
-        <div className="w-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 overflow-hidden py-2 relative" data-testid="promo-banner">
+        <a
+          href={bannerUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block w-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 overflow-hidden py-2 relative cursor-pointer hover:brightness-110 transition-all"
+          data-testid="promo-banner"
+        >
           <div className="flex items-center">
             <div
               className="flex gap-16 whitespace-nowrap text-white text-sm font-bold animate-[marquee_25s_linear_infinite]"
@@ -89,7 +96,7 @@ export default function Home() {
               ))}
             </div>
           </div>
-        </div>
+        </a>
       )}
       {/* Hero */}
       <section className="relative overflow-hidden py-20 md:py-32">
