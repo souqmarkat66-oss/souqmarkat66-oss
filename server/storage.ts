@@ -110,7 +110,10 @@ export class DatabaseStorage implements IStorage {
   // ─── ADS ──────────────────────────────────────────────────────
   async getAds(language?: string, userId?: string): Promise<Ad[]> {
     if (userId) {
-      return db.select().from(ads).where(eq(ads.userId, userId)).orderBy(desc(ads.createdAt));
+      const rows = await db.execute(
+        sql`SELECT * FROM ads WHERE user_id = ${userId} AND (is_admin_promo IS NULL OR is_admin_promo = false) ORDER BY created_at DESC`
+      );
+      return rows.rows as unknown as Ad[];
     }
     if (language) {
       return db.select().from(ads).where(eq(ads.language, language as any)).orderBy(desc(ads.createdAt));

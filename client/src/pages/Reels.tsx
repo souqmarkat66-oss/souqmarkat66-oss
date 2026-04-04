@@ -34,7 +34,23 @@ type Reel = {
 function isImageUrl(url: string): boolean {
   if (!url) return false;
   const clean = url.split('?')[0].toLowerCase();
-  return /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif)$/.test(clean);
+  return /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif)(\?.*)?$/.test(url.toLowerCase()) ||
+    /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif)$/.test(clean);
+}
+
+// Detect YouTube URL and return embed URL, or null
+function getYouTubeEmbedUrl(url: string): string | null {
+  if (!url) return null;
+  const ytRegex = /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+  const match = url.match(ytRegex);
+  if (match) return `https://www.youtube.com/embed/${match[1]}?autoplay=1&playsinline=1`;
+  return null;
+}
+
+// Check if URL is an external video (non-uploaded)
+function isExternalVideoUrl(url: string): boolean {
+  if (!url) return false;
+  return (url.startsWith('http://') || url.startsWith('https://')) && !url.includes('/uploads/');
 }
 
 // Parse videoUrl — may be a JSON array of image URLs or a single URL
@@ -126,6 +142,20 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
   const isImageMode = urls.length > 0 && urls.every(u => isImageUrl(u));
   const isMultiImage = isImageMode && urls.length > 1;
   const hasAudio = isImageMode && !!reel.audioUrl;
+  const youtubeEmbedUrl = !isImageMode ? getYouTubeEmbedUrl(reel.videoUrl) : null;
+  const isYouTube = !!youtubeEmbedUrl;
+
+  // Load initial like state
+  const { data: likeData } = useQuery<{ liked: boolean }>({
+    queryKey: ['/api/likes/reel', reel.id],
+    queryFn: () => fetch(`/api/likes/reel/${reel.id}`, { credentials: 'include' }).then(r => r.json()),
+    enabled: !!user,
+  });
+  useEffect(() => {
+    if (likeData) {
+      setLiked(likeData.liked);
+    }
+  }, [likeData]);
 
   const { data: comments = [] } = useQuery<any[]>({
     queryKey: ['/api/comments/reel', reel.id],
@@ -445,18 +475,28 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
       ) : (
         /* ── VIDEO REEL ── */
         <>
-          <video
-            ref={videoRef}
-            src={reel.videoUrl}
-            className="w-full h-full object-contain"
-            autoPlay={isActive}
-            muted={muted}
-            playsInline
-            onEnded={() => onEnded?.()}
-            onClick={() => videoRef.current?.paused ? videoRef.current.play() : videoRef.current?.pause()}
-          />
-          {/* TAP TO UNMUTE */}
-          {muted && showUnmuteHint && (
+          {isYouTube ? (
+            <iframe
+              src={isActive ? youtubeEmbedUrl! : youtubeEmbedUrl!.replace('autoplay=1', 'autoplay=0')}
+              className="w-full h-full"
+              allow="autoplay; fullscreen; picture-in-picture"
+              allowFullScreen
+              style={{ border: 'none' }}
+            />
+          ) : (
+            <video
+              ref={videoRef}
+              src={reel.videoUrl}
+              className="w-full h-full object-contain"
+              autoPlay={isActive}
+              muted={muted}
+              playsInline
+              onEnded={() => onEnded?.()}
+              onClick={() => videoRef.current?.paused ? videoRef.current.play() : videoRef.current?.pause()}
+            />
+          )}
+          {/* TAP TO UNMUTE — only for local videos */}
+          {!isYouTube && muted && showUnmuteHint && (
             <button
               onClick={handleUnmute}
               className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-2 animate-pulse"
@@ -470,7 +510,7 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
               </span>
             </button>
           )}
-          {muted && !showUnmuteHint && (
+          {!isYouTube && muted && !showUnmuteHint && (
             <button
               onClick={handleToggleMute}
               className="absolute top-4 left-4 z-20 flex items-center gap-1.5 bg-black/60 backdrop-blur text-white text-xs px-3 py-1.5 rounded-full border border-white/20"
@@ -526,19 +566,21 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
           <span className="text-white text-xs font-bold">شارك</span>
         </button>
 
-        {/* Volume toggle — always visible */}
-        <button
-          onClick={handleToggleMute}
-          className={`flex flex-col items-center gap-1`}
-          data-testid="btn-volume-reel"
-        >
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${
-            muted ? 'bg-red-500/30 border-red-400 text-red-300' : 'bg-white/20 border-white/30 text-white'
-          }`}>
-            {muted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-          </div>
-          <span className="text-white text-xs font-bold">{muted ? 'صوت' : 'كتم'}</span>
-        </button>
+        {/* Volume toggle — hidden for YouTube (YouTube has its own controls) */}
+        {!isYouTube && (
+          <button
+            onClick={handleToggleMute}
+            className={`flex flex-col items-center gap-1`}
+            data-testid="btn-volume-reel"
+          >
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${
+              muted ? 'bg-red-500/30 border-red-400 text-red-300' : 'bg-white/20 border-white/30 text-white'
+            }`}>
+              {muted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+            </div>
+            <span className="text-white text-xs font-bold">{muted ? 'صوت' : 'كتم'}</span>
+          </button>
+        )}
 
         {/* Owner-only: Edit & Delete */}
         {isOwner && (
