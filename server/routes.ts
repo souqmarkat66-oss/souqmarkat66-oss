@@ -153,6 +153,36 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('promo_banner_url', 'https://play.google.com/store/apps/details?id=com.apmo.souqmarket') ON CONFLICT (key) DO NOTHING`);
   } catch { /* table may already exist */ }
 
+  // ── Seed promo ads (run once if none exist and admin user exists) ──
+  try {
+    const existingPromo = await db.execute(sql`SELECT COUNT(*) as cnt FROM ads WHERE is_admin_promo = true`);
+    const promoCount = Number((existingPromo.rows[0] as any).cnt);
+    const adminUser = await db.execute(sql`SELECT id FROM users WHERE id = '54219806' LIMIT 1`);
+    if (promoCount === 0 && adminUser.rows.length > 0) {
+      const adminId = '54219806';
+      const promoAdsData = [
+        { title: 'iPhone 15 Pro Max — 256GB أزرق تيتانيوم', description: 'آيفون 15 برو ماكس جديد متبرشم بضمان الوكيل سنة كاملة — الكاميرا الأفضل في السوق', mediaUrl: 'https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=600', price: 42000 },
+        { title: 'لابتوب Dell XPS 15 — Core i7 الجيل 13', description: 'لابتوب Dell XPS 15 بمعالج i7 وشاشة 4K OLED — مثالي للمصممين والمبرمجين، بحالة ممتازة', mediaUrl: 'https://images.unsplash.com/photo-1593642632559-0c6d3fc62b89?w=600', price: 28500 },
+        { title: 'شقة للإيجار — مدينة نصر — 3 غرف', description: 'شقة مفروشة بالكامل في مدينة نصر بالقرب من المترو — 3 غرف وصالة وحمامين', mediaUrl: 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=600', price: 7500 },
+        { title: 'سيارة هيونداي إيلنترا 2022 — فل أوبشن', description: 'هيونداي إيلنترا موديل 2022 فل أوبشن — مشيت 45 ألف كيلو — نظيفة جداً بدون حوادث', mediaUrl: 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=600', price: 385000 },
+        { title: 'تليفزيون Samsung QLED 55 بوصة — 4K', description: 'شاشة Samsung QLED 55 بوصة 4K Smart TV — جديدة متبرشمة بضمان سامسونج مصر سنتين', mediaUrl: 'https://images.unsplash.com/photo-1593784991095-a205069470b6?w=600', price: 18900 },
+        { title: 'مكيف كاريير 1.5 حصان بارد وساخن', description: 'مكيف كاريير إنفرتر 1.5 حصان بارد وساخن — موفر للكهرباء — يشمل التركيب والضمان', mediaUrl: 'https://images.unsplash.com/photo-1585771724684-38269d6639fd?w=600', price: 11500 },
+        { title: 'موتوسيكل هوندا CB300R 2023 — جديد', description: 'موتوسيكل هوندا CB300R موديل 2023 — لون أسود مطفي — جديد لم يُستخدم من الوكيل', mediaUrl: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=600', price: 95000 },
+        { title: 'كاميرا Sony Alpha A7 IV — Full Frame', description: 'كاميرا Sony Alpha A7 IV Full Frame مع عدسة 28-70mm — مثالية للمصورين المحترفين', mediaUrl: 'https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=600', price: 54000 },
+        { title: 'شقة للبيع — الإسكندرية — سيدي بشر', description: 'شقة 120م في سيدي بشر — الطابق الثالث — إطلالة بحرية جزئية — تشطيب سوبر لوكس', mediaUrl: 'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=600', price: 1850000 },
+        { title: 'iPhone 14 — 128GB — مستعمل بحالة ممتازة', description: 'آيفون 14 أسود 128 جيجا — مستعمل 6 شهور فقط بحالة ممتازة مع جميع ملحقاته الأصلية', mediaUrl: 'https://images.unsplash.com/photo-1663499482523-1c0c1bae4ce1?w=600', price: 22000 },
+        { title: 'أرض للبيع — 6 أكتوبر — 500 متر', description: 'أرض سكنية 500 متر في حي الوصلة بـ 6 أكتوبر — مرافق كاملة — موقع مميز', mediaUrl: 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=600', price: 2400000 },
+        { title: 'جهاز PlayStation 5 + دراعين + 3 ألعاب', description: 'بلايستيشن 5 الإصدار الجديد مع دراعين أصليين وثلاث ألعاب — كل شيء جديد متبرشم', mediaUrl: 'https://images.unsplash.com/photo-1607853202273-797f1c22a38e?w=600', price: 19500 },
+      ];
+      for (const ad of promoAdsData) {
+        await db.execute(sql`
+          INSERT INTO ads (title, description, media_url, media_type, user_id, price_egp, is_admin_promo, status, language)
+          VALUES (${ad.title}, ${ad.description}, ${ad.mediaUrl}, 'image', ${adminId}, ${ad.price}, true, 'active', 'ar')
+        `);
+      }
+    }
+  } catch { /* promo seed failed silently */ }
+
   // Serve uploads directory
   const uploadsDir = path.join(process.cwd(), "uploads");
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
