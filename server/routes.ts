@@ -435,6 +435,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 </sitemapindex>`);
   });
 
+  // ── robots.txt (SEO) ──
+  app.get("/robots.txt", (_req, res) => {
+    const BASE = "https://ads-as.com";
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(`User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api/
+Disallow: /login
+Sitemap: ${BASE}/sitemap.xml
+Sitemap: ${BASE}/sitemap-pages.xml
+`);
+  });
+
   // ── Static Pages Sitemap ──
   app.get("/sitemap-pages.xml", async (_req, res) => {
     const BASE = "https://ads-as.com";
