@@ -77,8 +77,34 @@ const HIGH_QUALITY_AUDIO = {
   noiseSuppression: true,
   autoGainControl: true,
   sampleRate: 48000,
-  channelCount: 2,
+  channelCount: 1,
+  latency: 0,
 };
+
+// Prefer Opus codec and set bitrate for best voice quality without echo
+function preferOpus(sdp: string): string {
+  const lines = sdp.split("\r\n");
+  const mLineIdx = lines.findIndex(l => l.startsWith("m=audio"));
+  if (mLineIdx === -1) return sdp;
+  // Find Opus payload type
+  let opusPt = "";
+  for (const l of lines) {
+    const m = l.match(/^a=rtpmap:(\d+) opus\//i);
+    if (m) { opusPt = m[1]; break; }
+  }
+  if (!opusPt) return sdp;
+  // Reorder m= line so Opus is first
+  const mLine = lines[mLineIdx].split(" ");
+  const header = mLine.slice(0, 3);
+  const payloads = mLine.slice(3).filter(p => p !== opusPt);
+  lines[mLineIdx] = [...header, opusPt, ...payloads].join(" ");
+  // Ensure fmtp for Opus sets good voice params
+  const fmtpIdx = lines.findIndex(l => l.startsWith(`a=fmtp:${opusPt}`));
+  const fmtp = `a=fmtp:${opusPt} minptime=10;useinbandfec=1;stereo=0;maxaveragebitrate=32000`;
+  if (fmtpIdx !== -1) lines[fmtpIdx] = fmtp;
+  else lines.splice(mLineIdx + 1, 0, fmtp);
+  return lines.join("\r\n");
+}
 
 const ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },
@@ -364,10 +390,13 @@ export default function LiveStream() {
         }
       });
       pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false })
-        .then(offer => pc.setLocalDescription(offer).then(() => {
+        .then(async offer => {
+          const modSdp = preferOpus(offer.sdp || "");
+          const modOffer = new RTCSessionDescription({ type: offer.type, sdp: modSdp });
+          await pc.setLocalDescription(modOffer);
           socket.emit("offer", watcherId, pc.localDescription);
           startStats(pc);
-        })).catch(() => {});
+        }).catch(() => {});
     });
 
     socket.on("answer", async (watcherId: string, desc: RTCSessionDescriptionInit) => {
@@ -452,7 +481,8 @@ export default function LiveStream() {
           }
         });
         const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
-        await pc.setLocalDescription(offer);
+        const offerMod = new RTCSessionDescription({ type: offer.type, sdp: preferOpus(offer.sdp || "") });
+        await pc.setLocalDescription(offerMod);
         socket.emit("offer", watcherId, pc.localDescription);
         startStats(pc);
       }
@@ -539,7 +569,8 @@ export default function LiveStream() {
 
       await pc.setRemoteDescription(new RTCSessionDescription(desc));
       const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
+      const answerMod = new RTCSessionDescription({ type: answer.type, sdp: preferOpus(answer.sdp || "") });
+      await pc.setLocalDescription(answerMod);
       // FIXED: send answer to real broadcaster socket ID, not the string "broadcaster"
       socket.emit("answer", senderId, pc.localDescription);
     });
@@ -613,7 +644,7 @@ export default function LiveStream() {
       isCoHostRef.current = true;
       setIsCoHost(true);
       setRequestingJoin(false);
-      toast({ title: "✅ تم قبول طلبك! جارٍ فتح الكاميرا..." });
+      toast({ title: "✅ تم قبول طلبك! جارٍ فتح الكاميرا...", description: "💡 استخدم سماعات لأفضل جودة صوت بدون صدى" });
       try {
         const mediaStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user" },
@@ -688,7 +719,8 @@ export default function LiveStream() {
       };
       try {
         const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
+        const offerMod = new RTCSessionDescription({ type: offer.type, sdp: preferOpus(offer.sdp || "") });
+        await pc.setLocalDescription(offerMod);
         socket.emit("cohost-offer", watcherId, pc.localDescription);
       } catch {}
     });
@@ -719,7 +751,8 @@ export default function LiveStream() {
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(desc));
         const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
+        const answerMod = new RTCSessionDescription({ type: answer.type, sdp: preferOpus(answer.sdp || "") });
+        await pc.setLocalDescription(answerMod);
         socket.emit("cohost-answer", senderId, pc.localDescription);
       } catch (err) { console.warn("cohost-offer handling failed", err); }
     });
