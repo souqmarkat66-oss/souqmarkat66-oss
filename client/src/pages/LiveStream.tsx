@@ -9,7 +9,9 @@ import {
   WifiOff, Volume2, VolumeX, FlipHorizontal,
   Copy, Check, Radio, Monitor, UserPlus, Users,
   Loader2, X, CheckCircle, XCircle,
+  Share2, Gift,
 } from "lucide-react";
+import { SiWhatsapp, SiFacebook, SiX, SiTelegram } from "react-icons/si";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -56,8 +58,15 @@ export default function LiveStream() {
   type CoHostStatus = "idle"|"requesting"|"accepted"|"rejected";
   const [coHostStatus,    setCoHostStatus]    = useState<CoHostStatus>("idle");
   const [coHostRequests,  setCoHostRequests]  = useState<{socketId:string; userName:string}[]>([]);
-  const [activeCoHostId,  setActiveCoHostId]  = useState<string>("");
+  const [activeCoHosts,   setActiveCoHosts]   = useState<{socketId:string; name:string}[]>([]);
   const [autoAccept,      setAutoAccept]      = useState(false);
+
+  // Share & Gift state
+  const [showShare,       setShowShare]       = useState(false);
+  const [showGiftPanel,   setShowGiftPanel]   = useState(false);
+  interface FlyingGift { id: number; emoji: string; x: number; }
+  const [flyingGifts,     setFlyingGifts]     = useState<FlyingGift[]>([]);
+  const [myCoins,         setMyCoins]         = useState(500); // starter coins
 
   // RTMP mode state
   const [broadcastMode,   setBroadcastMode]   = useState<"webrtc"|"rtmp">("webrtc");
@@ -69,16 +78,22 @@ export default function LiveStream() {
   const [rtmpSetup,       setRtmpSetup]       = useState(false); // broadcaster done picking mode
 
   /* ── refs ── */
-  const videoRef      = useRef<HTMLVideoElement>(null);
-  const hlsVideoRef   = useRef<HTMLVideoElement>(null);
-  const coHostVideoRef= useRef<HTMLVideoElement>(null);  // co-host camera feed
-  const socketRef     = useRef<Socket | null>(null);
-  const localStream   = useRef<MediaStream | null>(null);
-  const coHostStream  = useRef<MediaStream | null>(null); // co-host's own camera
-  const coHostPeer    = useRef<RTCPeerConnection | null>(null);
-  const peers         = useRef<Map<string, RTCPeerConnection>>(new Map());
-  const streamStarted = useRef(false);
-  const hlsInstance   = useRef<any>(null);
+  const videoRef         = useRef<HTMLVideoElement>(null);
+  const hlsVideoRef      = useRef<HTMLVideoElement>(null);
+  const socketRef        = useRef<Socket | null>(null);
+  const localStream      = useRef<MediaStream | null>(null);
+  // Multi-cohost refs (broadcaster side: receives guest streams)
+  const coHostPeers      = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const coHostStreams     = useRef<Map<string, MediaStream>>(new Map()); // guest→stream received by broadcaster
+  const coHostVideoRefs  = useRef<Map<string, HTMLVideoElement>>(new Map());
+  const coHostNamesMap   = useRef<Map<string, string>>(new Map()); // for broadcaster to remember names
+  // Guest/viewer-side single co-host connection
+  const coHostStream     = useRef<MediaStream | null>(null); // my own camera as guest
+  const coHostPeer       = useRef<RTCPeerConnection | null>(null);
+  const coHostSelfVideo  = useRef<HTMLVideoElement>(null);   // my own PiP video
+  const peers            = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const streamStarted    = useRef(false);
+  const hlsInstance      = useRef<any>(null);
 
   /* ── stream data ── */
   const { data: stream } = useQuery<any>({
@@ -237,26 +252,32 @@ export default function LiveStream() {
 
       // ── Co-host events (broadcaster side) ──
       socket.on("cohost-request", (data: { socketId: string; userName: string }) => {
+        coHostNamesMap.current.set(data.socketId, data.userName);
         setCoHostRequests(prev => [...prev.filter(r => r.socketId !== data.socketId), data]);
         toast({ title: "🎙️ طلب مشاركة", description: `${data.userName} يريد الانضمام للبث` });
       });
 
       socket.on("cohost-auto-joined", (data: { socketId: string; userName: string }) => {
-        setActiveCoHostId(data.socketId);
+        coHostNamesMap.current.set(data.socketId, data.userName);
+        setActiveCoHosts(prev => [...prev.filter(c => c.socketId !== data.socketId), { socketId: data.socketId, name: data.userName }]);
         toast({ title: `✅ ${data.userName} انضم تلقائياً`, description: "الضيف دخل البث" });
       });
 
       socket.on("cohost-offer", async (fromId: string, offer: RTCSessionDescriptionInit) => {
+        // Close old peer for this socket if any
+        coHostPeers.current.get(fromId)?.close();
+
         const pc = new RTCPeerConnection({ iceServers: ICE });
-        coHostPeer.current = pc;
+        coHostPeers.current.set(fromId, pc);
+
         pc.onicecandidate = e => {
           if (e.candidate) socket.emit("cohost-candidate", fromId, e.candidate);
         };
         pc.ontrack = e => {
-          if (coHostVideoRef.current && e.streams[0]) {
-            coHostVideoRef.current.srcObject = e.streams[0];
-            coHostVideoRef.current.play().catch(() => {});
-          }
+          if (!e.streams[0]) return;
+          coHostStreams.current.set(fromId, e.streams[0]);
+          const videoEl = coHostVideoRefs.current.get(fromId);
+          if (videoEl) { videoEl.srcObject = e.streams[0]; videoEl.play().catch(() => {}); }
         };
         if (localStream.current) {
           localStream.current.getTracks().forEach(t => pc.addTrack(t, localStream.current!));
@@ -266,21 +287,25 @@ export default function LiveStream() {
         if (!answer) return;
         await pc.setLocalDescription(answer).catch(() => {});
         socket.emit("cohost-answer", fromId, pc.localDescription);
-        setActiveCoHostId(fromId);
+
+        const name = coHostNamesMap.current.get(fromId) || "ضيف";
+        setActiveCoHosts(prev => [...prev.filter(c => c.socketId !== fromId), { socketId: fromId, name }]);
       });
 
-      socket.on("cohost-candidate", async (_fromId: string, candidate: RTCIceCandidateInit) => {
-        if (coHostPeer.current) await coHostPeer.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      socket.on("cohost-candidate", async (fromId: string, candidate: RTCIceCandidateInit) => {
+        const pc = coHostPeers.current.get(fromId) || coHostPeer.current;
+        if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
       });
 
       socket.on("cohost-left", (socketId: string) => {
-        if (activeCoHostId === socketId || true) {
-          setActiveCoHostId("");
-          setCoHostRequests(prev => prev.filter(r => r.socketId !== socketId));
-          if (coHostPeer.current) { coHostPeer.current.close(); coHostPeer.current = null; }
-          if (coHostVideoRef.current) coHostVideoRef.current.srcObject = null;
-          toast({ title: "انتهت المشاركة", description: "غادر الضيف البث" });
-        }
+        setCoHostRequests(prev => prev.filter(r => r.socketId !== socketId));
+        setActiveCoHosts(prev => prev.filter(c => c.socketId !== socketId));
+        const pc = coHostPeers.current.get(socketId);
+        if (pc) { pc.close(); coHostPeers.current.delete(socketId); }
+        coHostStreams.current.delete(socketId);
+        coHostVideoRefs.current.delete(socketId);
+        coHostNamesMap.current.delete(socketId);
+        toast({ title: "انتهت المشاركة", description: "غادر أحد الضيوف البث" });
       });
     }
 
@@ -344,10 +369,10 @@ export default function LiveStream() {
         }
 
         // Make sure PiP is showing our own camera
-        if (coHostVideoRef.current && !coHostVideoRef.current.srcObject) {
-          coHostVideoRef.current.srcObject = ms;
-          coHostVideoRef.current.muted = true;
-          coHostVideoRef.current.play().catch(() => {});
+        if (coHostSelfVideo.current && !coHostSelfVideo.current.srcObject) {
+          coHostSelfVideo.current.srcObject = ms;
+          coHostSelfVideo.current.muted = true;
+          coHostSelfVideo.current.play().catch(() => {});
         }
 
         // Build WebRTC connection with broadcaster
@@ -388,6 +413,17 @@ export default function LiveStream() {
       });
     }
 
+    // ── Gift events (both broadcaster and viewer) ──
+    socket.on("stream-gift", (data: { id: number; giftEmoji: string; giftName: string; giftCoins: number; userName: string }) => {
+      const x = 10 + Math.random() * 60;
+      const flyId = Date.now() + Math.random();
+      setFlyingGifts(prev => [...prev, { id: flyId, emoji: data.giftEmoji, x }]);
+      setTimeout(() => setFlyingGifts(prev => prev.filter(g => g.id !== flyId)), 3000);
+      if (isBroadcast) {
+        toast({ title: `🎁 هدية من ${data.userName}!`, description: `${data.giftEmoji} ${data.giftName} — ${data.giftCoins} عملة` });
+      }
+    });
+
     return () => {
       socket.emit("leave-stream", id);
       if (!isBroadcast && coHostStatus === "accepted") socket.emit("cohost-leave", id);
@@ -395,6 +431,9 @@ export default function LiveStream() {
       localStream.current?.getTracks().forEach(t => t.stop());
       coHostStream.current?.getTracks().forEach(t => t.stop());
       if (coHostPeer.current) { coHostPeer.current.close(); coHostPeer.current = null; }
+      coHostPeers.current.forEach(pc => pc.close());
+      coHostPeers.current.clear();
+      coHostStreams.current.clear();
       peers.current.forEach(pc => pc.close());
       peers.current.clear();
       if (hlsInstance.current) { hlsInstance.current.destroy(); hlsInstance.current = null; }
@@ -483,10 +522,10 @@ export default function LiveStream() {
     coHostStream.current = ms;
 
     // Show self-preview immediately
-    if (coHostVideoRef.current) {
-      coHostVideoRef.current.srcObject = ms;
-      coHostVideoRef.current.muted = true;
-      coHostVideoRef.current.play().catch(() => {});
+    if (coHostSelfVideo.current) {
+      coHostSelfVideo.current.srcObject = ms;
+      coHostSelfVideo.current.muted = true;
+      coHostSelfVideo.current.play().catch(() => {});
     }
 
     const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مستخدم";
@@ -500,7 +539,7 @@ export default function LiveStream() {
     coHostStream.current?.getTracks().forEach(t => t.stop());
     coHostStream.current = null;
     if (coHostPeer.current) { coHostPeer.current.close(); coHostPeer.current = null; }
-    if (coHostVideoRef.current) coHostVideoRef.current.srcObject = null;
+    if (coHostSelfVideo.current) coHostSelfVideo.current.srcObject = null;
   };
 
   const acceptCoHost = (socketId: string, userName: string) => {
@@ -513,11 +552,14 @@ export default function LiveStream() {
     setCoHostRequests(prev => prev.filter(r => r.socketId !== socketId));
   };
 
-  const endCoHostFromBroadcaster = () => {
-    if (coHostPeer.current) { coHostPeer.current.close(); coHostPeer.current = null; }
-    if (coHostVideoRef.current) coHostVideoRef.current.srcObject = null;
-    socketRef.current?.emit("cohost-leave", id);
-    setActiveCoHostId("");
+  const endCoHostFromBroadcaster = (socketId: string) => {
+    const pc = coHostPeers.current.get(socketId);
+    if (pc) { pc.close(); coHostPeers.current.delete(socketId); }
+    coHostStreams.current.delete(socketId);
+    coHostVideoRefs.current.delete(socketId);
+    setActiveCoHosts(prev => prev.filter(c => c.socketId !== socketId));
+    // Notify guest they've been removed
+    socketRef.current?.emit("reject-cohost", { guestSocketId: socketId });
   };
 
   const toggleAutoAccept = () => {
@@ -526,6 +568,42 @@ export default function LiveStream() {
     socketRef.current?.emit("set-auto-accept", { streamId: id, enabled: newVal });
     toast({ title: newVal ? "✅ القبول التلقائي مفعّل" : "القبول التلقائي معطّل", description: newVal ? "كل من يطلب سيدخل مباشرة" : "ستراجع طلبات المشاركة يدوياً" });
   };
+
+  /* ─── Gift helpers ────────────────────────────────────── */
+  const GIFTS = [
+    { type: "rose",    emoji: "🌹", name: "وردة",      coins: 5   },
+    { type: "heart",   emoji: "❤️", name: "قلب",       coins: 10  },
+    { type: "star",    emoji: "⭐", name: "نجمة",      coins: 20  },
+    { type: "crown",   emoji: "👑", name: "تاج",       coins: 50  },
+    { type: "fire",    emoji: "🔥", name: "نار",       coins: 30  },
+    { type: "diamond", emoji: "💎", name: "ألماسة",    coins: 100 },
+    { type: "clap",    emoji: "👏", name: "تصفيق",     coins: 5   },
+    { type: "rocket",  emoji: "🚀", name: "صاروخ",     coins: 75  },
+  ];
+
+  const sendGift = (gift: typeof GIFTS[0]) => {
+    if (!user) return;
+    if (myCoins < gift.coins) {
+      toast({ title: "عملاتك غير كافية", description: `تحتاج ${gift.coins} عملة — رصيدك ${myCoins}`, variant: "destructive" });
+      return;
+    }
+    const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مستخدم";
+    socketRef.current?.emit("send-gift", {
+      streamId: id, giftType: gift.type, giftEmoji: gift.emoji,
+      giftName: gift.name, giftCoins: gift.coins, userName, userId: (user as any).id,
+    });
+    setMyCoins(prev => prev - gift.coins);
+  };
+
+  /* ─── Share helpers ───────────────────────────────────── */
+  const streamUrl = typeof window !== "undefined" ? `${window.location.origin}/streams/${id}` : "";
+  const shareText = encodeURIComponent(`شاهد البث المباشر على شبكة سوق! ${streamUrl}`);
+  const shareLinks = [
+    { icon: SiWhatsapp,  label: "واتساب",   color: "#25D366", href: `https://wa.me/?text=${shareText}` },
+    { icon: SiFacebook,  label: "فيسبوك",   color: "#1877F2", href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(streamUrl)}` },
+    { icon: SiX,         label: "تويتر X",  color: "#000000", href: `https://twitter.com/intent/tweet?text=${shareText}` },
+    { icon: SiTelegram,  label: "تيليغرام", color: "#26A5E4", href: `https://t.me/share/url?url=${encodeURIComponent(streamUrl)}&text=${encodeURIComponent("شاهد البث المباشر على شبكة سوق!")}` },
+  ];
 
   const unlockAudio = () => {
     const v = videoRef.current || hlsVideoRef.current;
@@ -919,6 +997,25 @@ export default function LiveStream() {
               </div>
             </button>
 
+            {/* SHARE BUTTON */}
+            <button onClick={() => { setShowShare(true); setShowGiftPanel(false); }} className="flex flex-col items-center gap-0.5" data-testid="btn-share-stream">
+              <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-blue-600/80 backdrop-blur">
+                <Share2 className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-white text-[10px] font-bold drop-shadow">مشاركة</span>
+            </button>
+
+            {/* GIFT BUTTON */}
+            {user && (
+              <button onClick={() => { setShowGiftPanel(p => !p); setShowShare(false); }} className="flex flex-col items-center gap-0.5" data-testid="btn-gift-panel">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-yellow-500/80 backdrop-blur relative">
+                  <Gift className="w-6 h-6 text-white" />
+                  <span className="absolute -top-1 -end-1 bg-black/70 text-white text-[9px] font-bold rounded-full px-1">{myCoins}</span>
+                </div>
+                <span className="text-white text-[10px] font-bold drop-shadow">هدية</span>
+              </button>
+            )}
+
             {/* CO-HOST REQUEST BUTTON */}
             {user && coHostStatus === "idle" && (
               <button onClick={requestCoHost} className="flex flex-col items-center gap-0.5" data-testid="btn-request-cohost">
@@ -955,11 +1052,11 @@ export default function LiveStream() {
           </div>
         )}
 
-        {/* CO-HOST PiP — viewer's own camera preview (shown once camera is open) */}
+        {/* CO-HOST PiP — viewer's own camera (shown once camera opens) */}
         {!isBroadcast && (coHostStatus === "requesting" || coHostStatus === "accepted") && (
           <div className="absolute bottom-20 start-3 z-20">
             <video
-              ref={coHostVideoRef}
+              ref={coHostSelfVideo}
               autoPlay playsInline muted
               className="w-28 h-40 rounded-2xl object-cover border-2 border-purple-500 shadow-xl"
               data-testid="video-cohost-self"
@@ -1008,27 +1105,48 @@ export default function LiveStream() {
           </div>
         )}
 
-        {/* CO-HOST PiP — broadcaster sees guest's camera */}
-        {isBroadcast && activeCoHostId && (
-          <div className="absolute bottom-36 start-3 z-20">
-            <video
-              ref={coHostVideoRef}
-              autoPlay playsInline
-              className="w-28 h-40 rounded-2xl object-cover border-2 border-purple-500 shadow-xl"
-              data-testid="video-cohost-broadcaster"
-            />
-            <div className="absolute top-1 inset-x-0 flex items-center justify-center">
-              <span className="text-[10px] text-white bg-purple-600 rounded-full px-1.5 py-0.5 font-bold">ضيف</span>
-            </div>
-            <button
-              onClick={endCoHostFromBroadcaster}
-              className="absolute -top-2 -end-2 w-6 h-6 rounded-full bg-red-500 flex items-center justify-center shadow-lg"
-              data-testid="btn-end-cohost"
-            >
-              <X className="w-3 h-3 text-white" />
-            </button>
+        {/* CO-HOST PiP Grid — broadcaster sees all guests */}
+        {isBroadcast && activeCoHosts.length > 0 && (
+          <div className="absolute bottom-36 start-3 z-20 flex flex-col gap-2">
+            {activeCoHosts.map((ch, idx) => (
+              <div key={ch.socketId} className="relative">
+                <video
+                  autoPlay playsInline
+                  ref={el => {
+                    if (el) {
+                      coHostVideoRefs.current.set(ch.socketId, el);
+                      const ms = coHostStreams.current.get(ch.socketId);
+                      if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(() => {}); }
+                    }
+                  }}
+                  className="w-24 h-36 rounded-xl object-cover border-2 border-purple-500 shadow-xl"
+                  data-testid={`video-cohost-${idx}`}
+                />
+                <div className="absolute top-1 inset-x-0 flex items-center justify-center">
+                  <span className="text-[9px] text-white bg-purple-600 rounded-full px-1 py-0.5 font-bold truncate max-w-[80px]">{ch.name}</span>
+                </div>
+                <button
+                  onClick={() => endCoHostFromBroadcaster(ch.socketId)}
+                  className="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center shadow-lg"
+                  data-testid={`btn-end-cohost-${idx}`}
+                >
+                  <X className="w-2.5 h-2.5 text-white" />
+                </button>
+              </div>
+            ))}
           </div>
         )}
+
+        {/* FLYING GIFT ANIMATIONS */}
+        {flyingGifts.map(g => (
+          <div
+            key={g.id}
+            className="absolute bottom-40 z-30 pointer-events-none"
+            style={{ left: `${g.x}%`, animation: "giftFly 3s ease-out forwards" }}
+          >
+            <span className="text-5xl drop-shadow-2xl">{g.emoji}</span>
+          </div>
+        ))}
 
         {/* AUTO-ACCEPT TOGGLE (broadcaster only) */}
         {isBroadcast && streaming && (
@@ -1083,6 +1201,76 @@ export default function LiveStream() {
           </div>
         )}
       </div>
+
+      {/* SHARE MODAL */}
+      {showShare && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowShare(false)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-6 pb-safe" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-white font-bold text-lg">شارك البث</h3>
+              <button onClick={() => setShowShare(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+            <div className="grid grid-cols-4 gap-4 mb-5">
+              {shareLinks.map(s => (
+                <a key={s.label} href={s.href} target="_blank" rel="noopener noreferrer"
+                  className="flex flex-col items-center gap-1.5"
+                  data-testid={`btn-share-${s.label}`}
+                >
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg" style={{ backgroundColor: s.color }}>
+                    <s.icon className="text-white text-2xl" />
+                  </div>
+                  <span className="text-white text-xs">{s.label}</span>
+                </a>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
+              <span className="text-white/70 text-xs flex-1 truncate">{streamUrl}</span>
+              <button
+                onClick={() => { navigator.clipboard.writeText(streamUrl); toast({ title: "✅ تم نسخ الرابط" }); }}
+                className="bg-white/20 text-white text-xs px-3 py-1.5 rounded-lg font-bold flex-shrink-0"
+                data-testid="btn-copy-stream-link"
+              >
+                نسخ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GIFT PANEL */}
+      {showGiftPanel && !isBroadcast && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowGiftPanel(false)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-safe" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-white font-bold text-lg">أرسل هدية 🎁</h3>
+                <p className="text-white/50 text-xs">رصيدك: <span className="text-yellow-400 font-bold">{myCoins} عملة</span></p>
+              </div>
+              <button onClick={() => setShowGiftPanel(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+            <div className="grid grid-cols-4 gap-3">
+              {GIFTS.map(gift => (
+                <button
+                  key={gift.type}
+                  onClick={() => { sendGift(gift); }}
+                  className={`flex flex-col items-center gap-1 bg-white/10 hover:bg-white/20 active:scale-95 transition-all rounded-2xl p-3 border ${myCoins >= gift.coins ? "border-white/10" : "border-red-500/30 opacity-50"}`}
+                  data-testid={`btn-gift-${gift.type}`}
+                >
+                  <span className="text-3xl">{gift.emoji}</span>
+                  <span className="text-white text-[10px] font-bold">{gift.name}</span>
+                  <span className="text-yellow-400 text-[10px] font-bold">{gift.coins} 🪙</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* CHAT INPUT BAR */}
       <div className="flex-shrink-0 bg-zinc-900/95 border-t border-white/10 pb-safe">
