@@ -203,8 +203,10 @@ export default function LiveStream() {
   const filterCanvasRef    = useRef<HTMLCanvasElement>(null);
   const filterRafRef       = useRef<number>(0);
   const currentFilterRef   = useRef<string>("none");
+  const showTimeOverlayRef = useRef<boolean>(false);
   const [selectedFilter, setSelectedFilter] = useState<FilterId>("none");
   const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [showTimeOverlay, setShowTimeOverlay] = useState(false);
 
   // ── Post-stream summary ─────────────────────────────────────
   const [showSummary, setShowSummary] = useState(false);
@@ -355,6 +357,11 @@ export default function LiveStream() {
     currentFilterRef.current = f ? f.css : "none";
   }, [selectedFilter]);
 
+  // Sync time overlay state → ref
+  useEffect(() => {
+    showTimeOverlayRef.current = showTimeOverlay;
+  }, [showTimeOverlay]);
+
   // Build a canvas-filtered stream from the raw camera stream
   const buildFilteredStream = useCallback((rawStream: MediaStream): MediaStream => {
     const rawVideo = rawVideoRef.current;
@@ -376,6 +383,37 @@ export default function LiveStream() {
         const filterCss = currentFilterRef.current;
         ctx.filter = filterCss === "none" ? "none" : filterCss;
         ctx.drawImage(rawVideo, 0, 0, canvas.width, canvas.height);
+
+        // ── Time overlay ──────────────────────────────────────────
+        if (showTimeOverlayRef.current) {
+          ctx.filter = "none"; // draw text without camera filter
+          const now = new Date();
+          const timeStr = now.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true });
+          const dateStr = now.toLocaleDateString("ar-EG", { weekday: "short", year: "numeric", month: "short", day: "numeric" });
+          const fontSize = Math.max(16, Math.round(canvas.width * 0.032));
+          ctx.font = `bold ${fontSize}px 'Arial', sans-serif`;
+          ctx.textAlign = "right";
+          ctx.textBaseline = "top";
+          const padX = Math.round(canvas.width * 0.025);
+          const padY = Math.round(canvas.height * 0.025);
+          const boxW = Math.round(canvas.width * 0.36);
+          const boxH = fontSize * 2.8;
+          const boxX = canvas.width - boxW - padX;
+          const boxY = padY;
+          // Semi-transparent pill background
+          ctx.fillStyle = "rgba(0,0,0,0.55)";
+          ctx.beginPath();
+          ctx.roundRect(boxX, boxY, boxW, boxH, 10);
+          ctx.fill();
+          // Time text (large)
+          ctx.fillStyle = "#ffffff";
+          ctx.font = `bold ${fontSize}px Arial`;
+          ctx.fillText(timeStr, canvas.width - padX - 8, boxY + 6);
+          // Date text (smaller)
+          ctx.fillStyle = "rgba(255,255,255,0.75)";
+          ctx.font = `${Math.round(fontSize * 0.65)}px Arial`;
+          ctx.fillText(dateStr, canvas.width - padX - 8, boxY + fontSize + 10);
+        }
       }
       filterRafRef.current = requestAnimationFrame(drawFrame);
     };
@@ -1536,6 +1574,11 @@ export default function LiveStream() {
                   </Badge>
                 ) : null;
               })()}
+              {isBroadcast && showTimeOverlay && (
+                <Badge className="bg-amber-500/80 text-black text-xs backdrop-blur font-bold">
+                  🕐 وقت
+                </Badge>
+              )}
             </div>
 
             {/* Fullscreen button (viewer) */}
@@ -1695,8 +1738,25 @@ export default function LiveStream() {
                       </button>
                     ))}
                   </div>
+                  {/* Time overlay toggle */}
+                  <div className="mt-3 pt-3 border-t border-white/10">
+                    <button
+                      onClick={() => setShowTimeOverlay(v => !v)}
+                      data-testid="btn-toggle-time-overlay"
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border-2 transition-all ${
+                        showTimeOverlay
+                          ? "border-amber-400 bg-amber-500/20 text-amber-300"
+                          : "border-white/10 bg-white/5 text-white/70 hover:bg-white/10"
+                      }`}
+                    >
+                      <span className="text-xs font-medium">🕐 طابع الوقت والتاريخ على الفيديو</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${showTimeOverlay ? "bg-amber-400 text-black" : "bg-white/10 text-white/40"}`}>
+                        {showTimeOverlay ? "مفعّل" : "معطّل"}
+                      </span>
+                    </button>
+                  </div>
                   <p className="text-white/40 text-[10px] text-center mt-2">
-                    الفلتر يظهر للمشاهدين أيضاً ✨
+                    الفلتر والوقت يظهران للمشاهدين أيضاً ✨
                   </p>
                 </div>
               </div>
