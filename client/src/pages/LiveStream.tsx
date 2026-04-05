@@ -12,7 +12,7 @@ import {
   Mic, Video, Share2, Eye, MessageCircle, Monitor, Camera,
   Settings, Wifi, WifiOff, Maximize, RotateCcw, Volume2, X,
   UserPlus, UserCheck, UserX, Trophy, Clock, TrendingUp,
-  ChevronUp, ChevronDown, UserCircle2, Bell, BellOff
+  ChevronUp, ChevronDown, UserCircle2, Bell, BellOff, Wand2
 } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import type { LiveStream as LiveStreamType } from "@shared/schema";
@@ -71,6 +71,23 @@ const QUALITY_PRESETS = {
   "480p":  { width: { ideal: 854,  max: 854  }, height: { ideal: 480,  max: 480  }, frameRate: { ideal: 30, max: 30 } },
   "360p":  { width: { ideal: 640,  max: 640  }, height: { ideal: 360,  max: 360  }, frameRate: { ideal: 24, max: 24 } },
 };
+
+const LIVE_FILTERS = [
+  { id: "none",     name: "بدون",        emoji: "🚫", css: "none" },
+  { id: "beauty",   name: "جمال",        emoji: "✨", css: "brightness(1.12) contrast(0.9) saturate(1.15)" },
+  { id: "warm",     name: "دافئ",        emoji: "🌅", css: "sepia(0.35) saturate(1.6) brightness(1.05)" },
+  { id: "cool",     name: "بارد",        emoji: "🧊", css: "hue-rotate(195deg) saturate(1.4) brightness(1.05)" },
+  { id: "vintage",  name: "كلاسيك",      emoji: "📷", css: "sepia(0.55) contrast(1.1) brightness(0.9) saturate(0.8)" },
+  { id: "dramatic", name: "درامي",       emoji: "🎭", css: "contrast(1.5) saturate(1.3) brightness(0.85)" },
+  { id: "bw",       name: "أبيض وأسود", emoji: "🖤", css: "grayscale(1) contrast(1.2)" },
+  { id: "vivid",    name: "زاهي",        emoji: "🌈", css: "saturate(2.2) contrast(1.1) brightness(1.05)" },
+  { id: "rose",     name: "وردي",        emoji: "🌸", css: "sepia(0.3) hue-rotate(300deg) saturate(1.8) brightness(1.05)" },
+  { id: "night",    name: "ليلي",        emoji: "🌙", css: "brightness(0.65) contrast(1.4) saturate(0.7)" },
+  { id: "golden",   name: "ذهبي",        emoji: "🥇", css: "sepia(0.4) saturate(2) hue-rotate(10deg) brightness(1.1)" },
+  { id: "soft",     name: "ناعم",        emoji: "🌫️", css: "brightness(1.2) saturate(0.75) contrast(0.85)" },
+] as const;
+
+type FilterId = typeof LIVE_FILTERS[number]["id"];
 
 const HIGH_QUALITY_AUDIO = {
   echoCancellation: true,
@@ -180,6 +197,14 @@ export default function LiveStream() {
   const streamRecorderRef  = useRef<MediaRecorder | null>(null);
   const streamChunksRef    = useRef<BlobPart[]>([]);
   const [isUploadingRec, setIsUploadingRec] = useState(false);
+
+  // ── Camera Filter (broadcaster only) ─────────────────────────
+  const rawVideoRef        = useRef<HTMLVideoElement>(null);
+  const filterCanvasRef    = useRef<HTMLCanvasElement>(null);
+  const filterRafRef       = useRef<number>(0);
+  const currentFilterRef   = useRef<string>("none");
+  const [selectedFilter, setSelectedFilter] = useState<FilterId>("none");
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
 
   // ── Post-stream summary ─────────────────────────────────────
   const [showSummary, setShowSummary] = useState(false);
@@ -324,6 +349,55 @@ export default function LiveStream() {
     return pc;
   }, []);
 
+  // Sync filter selection → ref (so the RAF loop always reads the latest value)
+  useEffect(() => {
+    const f = LIVE_FILTERS.find(f => f.id === selectedFilter);
+    currentFilterRef.current = f ? f.css : "none";
+  }, [selectedFilter]);
+
+  // Build a canvas-filtered stream from the raw camera stream
+  const buildFilteredStream = useCallback((rawStream: MediaStream): MediaStream => {
+    const rawVideo = rawVideoRef.current;
+    const canvas = filterCanvasRef.current;
+    if (!rawVideo || !canvas) return rawStream;
+
+    rawVideo.srcObject = rawStream;
+    rawVideo.muted = true;
+    rawVideo.playsInline = true;
+    rawVideo.play().catch(() => {});
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return rawStream;
+
+    const drawFrame = () => {
+      if (rawVideo.videoWidth && rawVideo.videoHeight) {
+        if (canvas.width !== rawVideo.videoWidth)  canvas.width  = rawVideo.videoWidth;
+        if (canvas.height !== rawVideo.videoHeight) canvas.height = rawVideo.videoHeight;
+        const filterCss = currentFilterRef.current;
+        ctx.filter = filterCss === "none" ? "none" : filterCss;
+        ctx.drawImage(rawVideo, 0, 0, canvas.width, canvas.height);
+      }
+      filterRafRef.current = requestAnimationFrame(drawFrame);
+    };
+
+    // Wait for video metadata before starting the loop
+    const startLoop = () => {
+      canvas.width  = rawVideo.videoWidth  || 640;
+      canvas.height = rawVideo.videoHeight || 480;
+      filterRafRef.current = requestAnimationFrame(drawFrame);
+    };
+    if (rawVideo.readyState >= 1) {
+      startLoop();
+    } else {
+      rawVideo.onloadedmetadata = startLoop;
+    }
+
+    const canvasStream = canvas.captureStream(30);
+    // Add audio tracks from the raw camera stream
+    rawStream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
+    return canvasStream;
+  }, []);
+
   // Collect real-time stats for broadcaster
   const startStats = useCallback((pc: RTCPeerConnection) => {
     statsIntervalRef.current = setInterval(async () => {
@@ -415,9 +489,15 @@ export default function LiveStream() {
         }
       }
 
-      localStreamRef.current = mediaStream;
+      // Apply canvas filter for camera mode; screen share uses raw stream
+      const transmitStream = sourceMode === "camera"
+        ? buildFilteredStream(mediaStream)
+        : mediaStream;
+
+      localStreamRef.current = transmitStream;
       if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
+        // Broadcaster preview: show canvas-filtered output (same as what viewers see)
+        videoRef.current.srcObject = transmitStream;
         videoRef.current.muted = true;
         videoRef.current.play().catch(() => {});
       }
@@ -839,6 +919,7 @@ export default function LiveStream() {
     return () => {
       if (statsIntervalRef.current) clearInterval(statsIntervalRef.current);
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      if (filterRafRef.current) cancelAnimationFrame(filterRafRef.current);
       if (isCoHostRef.current) socket.emit("cohost-leave", id);
       socket.emit("leave-stream", id);
       socket.io.off("reconnect");
@@ -1166,6 +1247,10 @@ export default function LiveStream() {
         .gift-pop { animation: giftPop 0.4s cubic-bezier(0.175,0.885,0.32,1.275); }
       `}</style>
 
+      {/* ── Hidden elements for canvas filter processing (broadcaster only) ── */}
+      <video ref={rawVideoRef} style={{ display: "none" }} playsInline muted />
+      <canvas ref={filterCanvasRef} style={{ display: "none" }} />
+
       {/* ── Post-Stream Summary Modal ── */}
       {showSummary && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur z-50 flex items-center justify-center p-4">
@@ -1443,6 +1528,14 @@ export default function LiveStream() {
                   <Wifi className="w-3 h-3" /> {stats.resolution} · {stats.fps}fps
                 </Badge>
               )}
+              {isBroadcast && selectedFilter !== "none" && (() => {
+                const f = LIVE_FILTERS.find(x => x.id === selectedFilter);
+                return f ? (
+                  <Badge className="bg-purple-600/80 text-white text-xs backdrop-blur gap-1">
+                    <Wand2 className="w-3 h-3" /> {f.emoji} {f.name}
+                  </Badge>
+                ) : null;
+              })()}
             </div>
 
             {/* Fullscreen button (viewer) */}
@@ -1570,6 +1663,45 @@ export default function LiveStream() {
               ))}
             </div>
 
+            {/* ── Filter Panel (slides up when showFilterPanel = true) ── */}
+            {isBroadcast && streaming && showFilterPanel && (
+              <div className="absolute bottom-36 start-0 end-0 z-40 px-3 pb-2">
+                <div className="bg-black/85 backdrop-blur-md rounded-2xl p-3 border border-white/10">
+                  <div className="flex items-center justify-between mb-2.5 px-1">
+                    <p className="text-white text-xs font-bold flex items-center gap-1.5">
+                      <Wand2 className="w-3.5 h-3.5 text-purple-400" /> فلاتر الكاميرا
+                    </p>
+                    <button onClick={() => setShowFilterPanel(false)} className="text-white/50 hover:text-white transition-colors">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide" style={{ scrollbarWidth: "none" }}>
+                    {LIVE_FILTERS.map(f => (
+                      <button
+                        key={f.id}
+                        onClick={() => setSelectedFilter(f.id)}
+                        data-testid={`btn-filter-${f.id}`}
+                        className={`flex-none flex flex-col items-center gap-1 px-2.5 py-2 rounded-xl border-2 transition-all min-w-[60px] ${
+                          selectedFilter === f.id
+                            ? "border-purple-400 bg-purple-500/30 scale-105"
+                            : "border-white/10 bg-white/5 hover:bg-white/10"
+                        }`}
+                      >
+                        <span className="text-xl leading-none">{f.emoji}</span>
+                        <span className="text-white text-[10px] font-medium whitespace-nowrap">{f.name}</span>
+                        {selectedFilter === f.id && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-white/40 text-[10px] text-center mt-2">
+                    الفلتر يظهر للمشاهدين أيضاً ✨
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Broadcaster controls */}
             {isBroadcast && streaming && (
               <div className="absolute bottom-16 start-0 end-0 bg-gradient-to-t from-black/60 to-transparent px-5 pb-3 pt-6 z-30">
@@ -1600,6 +1732,18 @@ export default function LiveStream() {
                   >
                     {sourceMode === "screen" ? <Camera className="w-5 h-5" /> : <Monitor className="w-5 h-5" />}
                   </button>
+
+                  {/* Filter Toggle — camera only */}
+                  {sourceMode === "camera" && (
+                    <button
+                      onClick={() => setShowFilterPanel(v => !v)}
+                      className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg ${showFilterPanel ? "bg-purple-500 text-white scale-110 ring-2 ring-purple-300" : "bg-white/20 backdrop-blur text-white hover:bg-white/30"}`}
+                      title="فلاتر الكاميرا"
+                      data-testid="btn-toggle-filter-panel"
+                    >
+                      <Wand2 className="w-5 h-5" />
+                    </button>
+                  )}
 
                   {/* Poll Creator Toggle */}
                   <button
