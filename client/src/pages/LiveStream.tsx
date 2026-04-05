@@ -362,78 +362,77 @@ export default function LiveStream() {
     showTimeOverlayRef.current = showTimeOverlay;
   }, [showTimeOverlay]);
 
-  // Build a canvas-filtered stream from the raw camera stream
+  // Build a canvas-filtered stream for WebRTC transmission only
+  // The broadcaster preview always uses the raw stream directly (more reliable)
   const buildFilteredStream = useCallback((rawStream: MediaStream): MediaStream => {
     const rawVideo = rawVideoRef.current;
-    const canvas = filterCanvasRef.current;
-    if (!rawVideo || !canvas) return rawStream;
-
-    rawVideo.srcObject = rawStream;
-    rawVideo.muted = true;
-    rawVideo.playsInline = true;
-    rawVideo.play().catch(() => {});
+    const canvas   = filterCanvasRef.current;
+    // If elements not ready or captureStream not supported → send raw stream
+    if (!rawVideo || !canvas || typeof canvas.captureStream !== "function") return rawStream;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return rawStream;
 
+    // Set initial dimensions so the stream has content from the start
+    const vTracks = rawStream.getVideoTracks();
+    const settings = vTracks[0]?.getSettings() || {};
+    canvas.width  = settings.width  || 1280;
+    canvas.height = settings.height || 720;
+
+    // Start drawing immediately — don't wait for play() promise
     const drawFrame = () => {
-      if (rawVideo.videoWidth && rawVideo.videoHeight) {
-        if (canvas.width !== rawVideo.videoWidth)  canvas.width  = rawVideo.videoWidth;
-        if (canvas.height !== rawVideo.videoHeight) canvas.height = rawVideo.videoHeight;
-        const filterCss = currentFilterRef.current;
-        ctx.filter = filterCss === "none" ? "none" : filterCss;
-        ctx.drawImage(rawVideo, 0, 0, canvas.width, canvas.height);
-
-        // ── Time overlay ──────────────────────────────────────────
-        if (showTimeOverlayRef.current) {
-          ctx.filter = "none"; // draw text without camera filter
-          const now = new Date();
-          const timeStr = now.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true });
-          const dateStr = now.toLocaleDateString("ar-EG", { weekday: "short", year: "numeric", month: "short", day: "numeric" });
-          const fontSize = Math.max(16, Math.round(canvas.width * 0.032));
-          ctx.font = `bold ${fontSize}px 'Arial', sans-serif`;
-          ctx.textAlign = "right";
-          ctx.textBaseline = "top";
-          const padX = Math.round(canvas.width * 0.025);
-          const padY = Math.round(canvas.height * 0.025);
-          const boxW = Math.round(canvas.width * 0.36);
-          const boxH = fontSize * 2.8;
-          const boxX = canvas.width - boxW - padX;
-          const boxY = padY;
-          // Semi-transparent pill background
-          ctx.fillStyle = "rgba(0,0,0,0.55)";
-          ctx.beginPath();
-          ctx.roundRect(boxX, boxY, boxW, boxH, 10);
-          ctx.fill();
-          // Time text (large)
-          ctx.fillStyle = "#ffffff";
-          ctx.font = `bold ${fontSize}px Arial`;
-          ctx.fillText(timeStr, canvas.width - padX - 8, boxY + 6);
-          // Date text (smaller)
-          ctx.fillStyle = "rgba(255,255,255,0.75)";
-          ctx.font = `${Math.round(fontSize * 0.65)}px Arial`;
-          ctx.fillText(dateStr, canvas.width - padX - 8, boxY + fontSize + 10);
+      try {
+        if (rawVideo.readyState >= 2 && rawVideo.videoWidth > 0) {
+          if (canvas.width  !== rawVideo.videoWidth)  canvas.width  = rawVideo.videoWidth;
+          if (canvas.height !== rawVideo.videoHeight) canvas.height = rawVideo.videoHeight;
+          const filterCss = currentFilterRef.current;
+          ctx.filter = filterCss === "none" ? "none" : filterCss;
+          ctx.drawImage(rawVideo, 0, 0, canvas.width, canvas.height);
+          // ── Time overlay ──────────────────────────────────────────
+          if (showTimeOverlayRef.current) {
+            ctx.filter = "none";
+            const now      = new Date();
+            const timeStr  = now.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true });
+            const dateStr  = now.toLocaleDateString("ar-EG", { weekday: "short", year: "numeric", month: "short", day: "numeric" });
+            const fontSize = Math.max(16, Math.round(canvas.width * 0.032));
+            const padX     = Math.round(canvas.width  * 0.025);
+            const padY     = Math.round(canvas.height * 0.025);
+            const boxW     = Math.round(canvas.width  * 0.38);
+            const boxH     = fontSize * 2.8;
+            const boxX     = canvas.width - boxW - padX;
+            ctx.fillStyle  = "rgba(0,0,0,0.55)";
+            ctx.beginPath();
+            ctx.roundRect(boxX, padY, boxW, boxH, 10);
+            ctx.fill();
+            ctx.textAlign    = "right";
+            ctx.textBaseline = "top";
+            ctx.fillStyle    = "#ffffff";
+            ctx.font         = `bold ${fontSize}px Arial`;
+            ctx.fillText(timeStr, canvas.width - padX - 8, padY + 6);
+            ctx.fillStyle    = "rgba(255,255,255,0.75)";
+            ctx.font         = `${Math.round(fontSize * 0.65)}px Arial`;
+            ctx.fillText(dateStr, canvas.width - padX - 8, padY + fontSize + 10);
+          }
         }
-      }
+      } catch { /* ignore any draw errors */ }
       filterRafRef.current = requestAnimationFrame(drawFrame);
     };
 
-    // Wait for video metadata before starting the loop
-    const startLoop = () => {
-      canvas.width  = rawVideo.videoWidth  || 640;
-      canvas.height = rawVideo.videoHeight || 480;
-      filterRafRef.current = requestAnimationFrame(drawFrame);
-    };
-    if (rawVideo.readyState >= 1) {
-      startLoop();
-    } else {
-      rawVideo.onloadedmetadata = startLoop;
+    // Attach raw stream to the hidden video and start loop after play
+    rawVideo.srcObject  = rawStream;
+    rawVideo.muted      = true;
+    rawVideo.playsInline = true;
+    rawVideo.play()
+      .then(() => { filterRafRef.current = requestAnimationFrame(drawFrame); })
+      .catch(() => { filterRafRef.current = requestAnimationFrame(drawFrame); }); // start anyway
+
+    try {
+      const canvasStream = canvas.captureStream(30);
+      rawStream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
+      return canvasStream;
+    } catch {
+      return rawStream; // captureStream not supported → fall back
     }
-
-    const canvasStream = canvas.captureStream(30);
-    // Add audio tracks from the raw camera stream
-    rawStream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
-    return canvasStream;
   }, []);
 
   // Collect real-time stats for broadcaster
@@ -527,15 +526,17 @@ export default function LiveStream() {
         }
       }
 
-      // Apply canvas filter for camera mode; screen share uses raw stream
+      // Build filtered stream for WebRTC transmission (canvas-based)
+      // Preview always shows the raw camera directly for reliability
       const transmitStream = sourceMode === "camera"
         ? buildFilteredStream(mediaStream)
         : mediaStream;
 
-      localStreamRef.current = transmitStream;
+      localStreamRef.current = transmitStream; // WebRTC uses filtered/canvas stream
+
       if (videoRef.current) {
-        // Broadcaster preview: show canvas-filtered output (same as what viewers see)
-        videoRef.current.srcObject = transmitStream;
+        // Broadcaster preview: always use raw camera — CSS filter applied via style in JSX
+        videoRef.current.srcObject = mediaStream;
         videoRef.current.muted = true;
         videoRef.current.play().catch(() => {});
       }
@@ -1489,7 +1490,14 @@ export default function LiveStream() {
               playsInline
               controls={!isBroadcast}
               className="w-full h-full object-cover"
-              style={{ backgroundColor: "#000" }}
+              style={{
+                backgroundColor: "#000",
+                // Apply CSS filter on broadcaster's preview only (viewers see canvas-filtered stream)
+                filter: (isBroadcast && sourceMode === "camera" && selectedFilter !== "none")
+                  ? (LIVE_FILTERS.find(f => f.id === selectedFilter)?.css || "none")
+                  : undefined,
+                transition: "filter 0.3s ease",
+              }}
             />
 
             {/* Ended + Replay overlay (viewer only) */}
