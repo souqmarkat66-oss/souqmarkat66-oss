@@ -167,6 +167,9 @@ export default function LiveStream() {
   const [requestingJoin, setRequestingJoin]     = useState(false);
   const [coHostMuted, setCoHostMuted]           = useState(false);
   const [coHostVideoOff, setCoHostVideoOff]     = useState(false);
+  const [autoAccept, setAutoAccept]             = useState(false); // broadcaster: auto-accept mode
+  const [roomAutoAccept, setRoomAutoAccept]     = useState(false); // viewer: room has auto-accept on
+  const [showJoinDialog, setShowJoinDialog]     = useState(false); // viewer: entry join popup
   const streamStartRef = useRef<number>(Date.now());
   const peakViewersRef = useRef<number>(0);
 
@@ -623,6 +626,20 @@ export default function LiveStream() {
       toast({ variant: "destructive", title: msg });
     });
 
+    // Room auto-accept mode changed (broadcaster toggled it)
+    socket.on("auto-accept-changed", (enabled: boolean) => {
+      setRoomAutoAccept(enabled);
+      if (!isBroadcast && enabled) {
+        // Notify viewer that they can now join instantly
+        toast({ title: "📹 البث مفتوح للمشاركة بصوت وصورة", description: "اضغط 'انضم الآن' للاتصال الفوري" });
+      }
+    });
+
+    // Broadcaster: someone joined automatically via auto-accept
+    socket.on("cohost-auto-joined", (data: { socketId: string; userName: string }) => {
+      toast({ title: `✅ ${data.userName} انضم للبث تلقائياً بصوت وصورة` });
+    });
+
     // SERVER → everyone in room: a co-host just went live with their socketId and name
     socket.on("cohost-active", (cohostSocketId: string, cohostName?: string) => {
       // Don't connect to our own stream
@@ -811,6 +828,13 @@ export default function LiveStream() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Show join dialog for viewer when auto-accept becomes active
+  useEffect(() => {
+    if (!isBroadcast && roomAutoAccept && !isCoHost && user && streaming) {
+      setShowJoinDialog(true);
+    }
+  }, [roomAutoAccept, isBroadcast, isCoHost, user, streaming]);
 
   const sendChat = () => {
     if (!chatInput.trim() || !user) return;
@@ -1121,6 +1145,46 @@ export default function LiveStream() {
         {/* ══ TikTok-style Full-Screen Video Area ══ */}
         <div className="relative flex-1 overflow-hidden bg-black flex items-center justify-center lg:max-w-[480px] lg:mx-auto"
           style={{ minHeight: "100dvh" }}>
+          {/* ── Viewer: Join with Audio/Video Dialog (auto-accept mode) ── */}
+          {showJoinDialog && !isBroadcast && !isCoHost && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" dir="rtl">
+              <div className="bg-gray-900 border border-green-500/50 rounded-3xl p-6 mx-4 max-w-sm w-full text-center shadow-2xl">
+                <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mx-auto mb-4">
+                  <Video className="w-8 h-8 text-green-400" />
+                </div>
+                <h3 className="text-white text-lg font-bold mb-2">انضم للبث بصوت وصورة!</h3>
+                <p className="text-gray-400 text-sm mb-5">
+                  المضيف فتح البث للمشاركة الفورية — اضغط "انضم الآن" وستظهر كاميرتك وصوتك مباشرةً
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowJoinDialog(false);
+                      setRequestingJoin(true);
+                      socketRef.current?.emit("request-cohost", {
+                        streamId: id,
+                        userId: (user as any)?.id,
+                        userName: `${(user as any)?.firstName || ""} ${(user as any)?.lastName || ""}`.trim() || "مشاهد",
+                      });
+                    }}
+                    className="flex-1 py-3 rounded-2xl bg-green-500 hover:bg-green-400 text-white font-bold text-sm transition flex items-center justify-center gap-2"
+                    data-testid="btn-join-now-dialog"
+                  >
+                    <Video className="w-4 h-4" />
+                    انضم الآن
+                  </button>
+                  <button
+                    onClick={() => setShowJoinDialog(false)}
+                    className="flex-1 py-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-sm transition"
+                    data-testid="btn-watch-only-dialog"
+                  >
+                    مشاهدة فقط
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Co-host request popups (one per pending request, stacked) */}
           {isBroadcast && cohostRequests.map((req, i) => (
             <div key={req.socketId} className="absolute inset-x-3 z-30 p-3 rounded-2xl bg-black/80 backdrop-blur border border-blue-500/50 flex items-center gap-3" style={{ top: `${64 + i * 72}px` }} dir="rtl">
@@ -1431,6 +1495,21 @@ export default function LiveStream() {
                     <TrendingUp className="w-5 h-5" />
                   </button>
 
+                  {/* Auto-accept toggle */}
+                  <button
+                    onClick={() => {
+                      const next = !autoAccept;
+                      setAutoAccept(next);
+                      socketRef.current?.emit("set-auto-accept", { streamId: id, enabled: next });
+                      toast({ title: next ? "✅ قبول تلقائي مفعّل — أي شخص يضغط 'انضم' يدخل فوراً" : "⏸️ القبول التلقائي أُوقف" });
+                    }}
+                    className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg ${autoAccept ? "bg-green-500 text-white scale-110 ring-2 ring-green-300" : "bg-white/20 backdrop-blur text-white hover:bg-white/30"}`}
+                    title={autoAccept ? "إيقاف القبول التلقائي" : "قبول تلقائي للضيوف"}
+                    data-testid="btn-toggle-auto-accept"
+                  >
+                    <UserCheck className="w-5 h-5" />
+                  </button>
+
                   {/* End stream */}
                   <button
                     onClick={() => endStreamMutation.mutate()}
@@ -1632,16 +1711,18 @@ export default function LiveStream() {
                     userId: (user as any).id,
                     userName: `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مشاهد",
                   });
-                  toast({ title: "⏳ تم إرسال طلب المشاركة" });
+                  if (!roomAutoAccept) toast({ title: "⏳ تم إرسال طلب المشاركة" });
                 }}
                 disabled={requestingJoin}
                 className="flex flex-col items-center gap-0.5"
                 data-testid="btn-request-cohost"
               >
-                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center shadow-lg">
-                  <UserPlus className="w-5 h-5 text-white" />
+                <div className={`w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all ${roomAutoAccept ? "bg-green-500 ring-2 ring-green-300 scale-110 animate-pulse" : "bg-gradient-to-br from-purple-600 to-blue-600"}`}>
+                  {roomAutoAccept ? <Video className="w-5 h-5 text-white" /> : <UserPlus className="w-5 h-5 text-white" />}
                 </div>
-                <span className="text-white text-[10px] font-bold drop-shadow">{requestingJoin ? "انتظار..." : "مشاركة"}</span>
+                <span className="text-white text-[10px] font-bold drop-shadow">
+                  {requestingJoin ? "جارٍ الاتصال..." : roomAutoAccept ? "انضم الآن" : "مشاركة"}
+                </span>
               </button>
             )}
             {/* Gift button (viewer) */}

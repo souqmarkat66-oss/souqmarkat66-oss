@@ -208,6 +208,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     giftGoal: number | null;
     totalGiftCoins: number;
     socketToUser: Map<string, { userId: string; userName: string }>;
+    autoAccept: boolean;          // auto-accept all co-host join requests
   }> = new Map();
 
   // Arabic & English bad words basic filter
@@ -227,7 +228,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         broadcasterId: null, cohostIds: [], cohostNames: new Map(), viewers: new Set(),
         peakViewers: 0, startedAt: Date.now(), totalLikes: 0, totalComments: 0,
         bannedSockets: new Set(), giftGoal: null, totalGiftCoins: 0,
-        socketToUser: new Map(),
+        socketToUser: new Map(), autoAccept: false,
       });
     }
     return streamRooms.get(streamId)!;
@@ -245,6 +246,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Inform new viewer of ALL active co-hosts
       for (const cohostId of room.cohostIds) {
         socket.emit("cohost-active", cohostId, room.cohostNames.get(cohostId) || "ضيف");
+      }
+      // Inform new viewer of current auto-accept state
+      if (room.autoAccept) {
+        socket.emit("auto-accept-changed", true);
       }
     });
 
@@ -302,11 +307,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const room = streamRooms.get(data.streamId);
       if (!room?.broadcasterId) return;
       if (room.cohostIds.length >= 3) {
-        // Max 3 co-hosts
         socket.emit("cohost-rejected", { reason: "max_cohosts" });
         return;
       }
-      socket.to(room.broadcasterId).emit("cohost-request", { socketId: socket.id, userId: data.userId, userName: data.userName });
+      if (room.autoAccept) {
+        // Auto-accept: skip the broadcaster prompt and accept immediately
+        if (!room.cohostIds.includes(socket.id)) {
+          room.cohostIds.push(socket.id);
+          if (data.userName) room.cohostNames.set(socket.id, data.userName);
+        }
+        socket.emit("cohost-accepted", { broadcasterId: room.broadcasterId });
+        // Also notify broadcaster that someone joined automatically
+        socket.to(room.broadcasterId).emit("cohost-auto-joined", { socketId: socket.id, userName: data.userName });
+      } else {
+        socket.to(room.broadcasterId).emit("cohost-request", { socketId: socket.id, userId: data.userId, userName: data.userName });
+      }
+    });
+
+    // Broadcaster toggles auto-accept mode
+    socket.on("set-auto-accept", (data: { streamId: string; enabled: boolean }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room || room.broadcasterId !== socket.id) return;
+      room.autoAccept = data.enabled;
+      // Notify all viewers about the new mode
+      io.to(`stream:${data.streamId}`).emit("auto-accept-changed", data.enabled);
     });
 
     socket.on("accept-cohost", (data: { streamId: string; guestSocketId: string; guestName?: string }) => {
