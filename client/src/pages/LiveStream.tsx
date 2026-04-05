@@ -7,7 +7,8 @@ import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Eye, Send, ArrowRight, Heart, RotateCcw,
   WifiOff, Volume2, VolumeX, FlipHorizontal,
-  Copy, Check, Radio, Monitor,
+  Copy, Check, Radio, Monitor, UserPlus, Users,
+  Loader2, X, CheckCircle, XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +52,13 @@ export default function LiveStream() {
   const [cameraError,     setCameraError]     = useState("");
   const [facingSupported, setFacingSupported] = useState(false);
 
+  // Co-host state
+  type CoHostStatus = "idle"|"requesting"|"accepted"|"rejected";
+  const [coHostStatus,    setCoHostStatus]    = useState<CoHostStatus>("idle");
+  const [coHostRequests,  setCoHostRequests]  = useState<{socketId:string; userName:string}[]>([]);
+  const [activeCoHostId,  setActiveCoHostId]  = useState<string>("");
+  const [autoAccept,      setAutoAccept]      = useState(false);
+
   // RTMP mode state
   const [broadcastMode,   setBroadcastMode]   = useState<"webrtc"|"rtmp">("webrtc");
   const [rtmpKey,         setRtmpKey]         = useState<string>("");
@@ -63,8 +71,11 @@ export default function LiveStream() {
   /* ── refs ── */
   const videoRef      = useRef<HTMLVideoElement>(null);
   const hlsVideoRef   = useRef<HTMLVideoElement>(null);
+  const coHostVideoRef= useRef<HTMLVideoElement>(null);  // co-host camera feed
   const socketRef     = useRef<Socket | null>(null);
   const localStream   = useRef<MediaStream | null>(null);
+  const coHostStream  = useRef<MediaStream | null>(null); // co-host's own camera
+  const coHostPeer    = useRef<RTCPeerConnection | null>(null);
   const peers         = useRef<Map<string, RTCPeerConnection>>(new Map());
   const streamStarted = useRef(false);
   const hlsInstance   = useRef<any>(null);
@@ -223,6 +234,54 @@ export default function LiveStream() {
         const pc = peers.current.get(fromId);
         if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
       });
+
+      // ── Co-host events (broadcaster side) ──
+      socket.on("cohost-request", (data: { socketId: string; userName: string }) => {
+        setCoHostRequests(prev => [...prev.filter(r => r.socketId !== data.socketId), data]);
+        toast({ title: "🎙️ طلب مشاركة", description: `${data.userName} يريد الانضمام للبث` });
+      });
+
+      socket.on("cohost-auto-joined", (data: { socketId: string; userName: string }) => {
+        setActiveCoHostId(data.socketId);
+        toast({ title: `✅ ${data.userName} انضم تلقائياً`, description: "الضيف دخل البث" });
+      });
+
+      socket.on("cohost-offer", async (fromId: string, offer: RTCSessionDescriptionInit) => {
+        const pc = new RTCPeerConnection({ iceServers: ICE });
+        coHostPeer.current = pc;
+        pc.onicecandidate = e => {
+          if (e.candidate) socket.emit("cohost-candidate", fromId, e.candidate);
+        };
+        pc.ontrack = e => {
+          if (coHostVideoRef.current && e.streams[0]) {
+            coHostVideoRef.current.srcObject = e.streams[0];
+            coHostVideoRef.current.play().catch(() => {});
+          }
+        };
+        if (localStream.current) {
+          localStream.current.getTracks().forEach(t => pc.addTrack(t, localStream.current!));
+        }
+        await pc.setRemoteDescription(offer).catch(() => {});
+        const answer = await pc.createAnswer().catch(() => null);
+        if (!answer) return;
+        await pc.setLocalDescription(answer).catch(() => {});
+        socket.emit("cohost-answer", fromId, pc.localDescription);
+        setActiveCoHostId(fromId);
+      });
+
+      socket.on("cohost-candidate", async (_fromId: string, candidate: RTCIceCandidateInit) => {
+        if (coHostPeer.current) await coHostPeer.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      });
+
+      socket.on("cohost-left", (socketId: string) => {
+        if (activeCoHostId === socketId || true) {
+          setActiveCoHostId("");
+          setCoHostRequests(prev => prev.filter(r => r.socketId !== socketId));
+          if (coHostPeer.current) { coHostPeer.current.close(); coHostPeer.current = null; }
+          if (coHostVideoRef.current) coHostVideoRef.current.srcObject = null;
+          toast({ title: "انتهت المشاركة", description: "غادر الضيف البث" });
+        }
+      });
     }
 
     if (!isBroadcast) {
@@ -270,12 +329,75 @@ export default function LiveStream() {
         setEnded(true);
         if (hlsInstance.current) { hlsInstance.current.destroy(); hlsInstance.current = null; }
       });
+
+      // ── Co-host events (viewer/guest side) ──
+      socket.on("cohost-accepted", async (data: { broadcasterId: string }) => {
+        setCoHostStatus("accepted");
+        const ms = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: { echoCancellation: true, noiseSuppression: true },
+        }).catch(() => null);
+
+        if (!ms) {
+          setCoHostStatus("idle");
+          toast({ title: "تعذّر فتح الكاميرا", description: "اسمح للمتصفح بالوصول للكاميرا", variant: "destructive" });
+          return;
+        }
+
+        coHostStream.current = ms;
+        // Show our own camera in PiP
+        if (coHostVideoRef.current) {
+          coHostVideoRef.current.srcObject = ms;
+          coHostVideoRef.current.muted = true;
+          coHostVideoRef.current.play().catch(() => {});
+        }
+
+        // Build WebRTC connection with broadcaster
+        const pc = new RTCPeerConnection({ iceServers: ICE });
+        coHostPeer.current = pc;
+
+        pc.onicecandidate = e => {
+          if (e.candidate) socket.emit("cohost-candidate", data.broadcasterId, e.candidate);
+        };
+
+        ms.getTracks().forEach(t => pc.addTrack(t, ms));
+
+        const offer = await pc.createOffer().catch(() => null);
+        if (!offer) return;
+        await pc.setLocalDescription(offer).catch(() => {});
+        socket.emit("cohost-offer", data.broadcasterId, pc.localDescription);
+        // Tell everyone we're co-hosting
+        socket.emit("cohost-broadcaster", { streamId: id, name: `${(user as any)?.firstName || ""} ${(user as any)?.lastName || ""}`.trim() || "ضيف" });
+
+        toast({ title: "🎙️ أنت على الهواء كضيف!", description: "المُذيع يسمعك ويشوفك الآن" });
+      });
+
+      socket.on("cohost-answer", async (_fromId: string, answer: RTCSessionDescriptionInit) => {
+        if (coHostPeer.current) await coHostPeer.current.setRemoteDescription(answer).catch(() => {});
+      });
+
+      socket.on("cohost-candidate", async (_fromId: string, candidate: RTCIceCandidateInit) => {
+        if (coHostPeer.current) await coHostPeer.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      });
+
+      socket.on("cohost-rejected", () => {
+        setCoHostStatus("rejected");
+        toast({ title: "تم رفض طلبك", description: "المُذيع لم يقبل مشاركتك", variant: "destructive" });
+        setTimeout(() => setCoHostStatus("idle"), 3000);
+      });
+
+      socket.on("auto-accept-changed", (enabled: boolean) => {
+        setAutoAccept(enabled);
+      });
     }
 
     return () => {
       socket.emit("leave-stream", id);
+      if (!isBroadcast && coHostStatus === "accepted") socket.emit("cohost-leave", id);
       socket.disconnect();
       localStream.current?.getTracks().forEach(t => t.stop());
+      coHostStream.current?.getTracks().forEach(t => t.stop());
+      if (coHostPeer.current) { coHostPeer.current.close(); coHostPeer.current = null; }
       peers.current.forEach(pc => pc.close());
       peers.current.clear();
       if (hlsInstance.current) { hlsInstance.current.destroy(); hlsInstance.current = null; }
@@ -336,6 +458,48 @@ export default function LiveStream() {
     if (liked) return;
     setLiked(true);
     socketRef.current?.emit("stream-like", id);
+  };
+
+  /* ─── Co-host helpers ────────────────────────────────── */
+  const requestCoHost = () => {
+    if (!user) return;
+    const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مستخدم";
+    socketRef.current?.emit("request-cohost", { streamId: id, userId: (user as any).id, userName });
+    setCoHostStatus("requesting");
+    toast({ title: "⏳ تم إرسال الطلب", description: "في انتظار موافقة المُذيع" });
+  };
+
+  const leaveCoHost = () => {
+    socketRef.current?.emit("cohost-leave", id);
+    setCoHostStatus("idle");
+    coHostStream.current?.getTracks().forEach(t => t.stop());
+    coHostStream.current = null;
+    if (coHostPeer.current) { coHostPeer.current.close(); coHostPeer.current = null; }
+    if (coHostVideoRef.current) coHostVideoRef.current.srcObject = null;
+  };
+
+  const acceptCoHost = (socketId: string, userName: string) => {
+    socketRef.current?.emit("accept-cohost", { streamId: id, guestSocketId: socketId, guestName: userName });
+    setCoHostRequests(prev => prev.filter(r => r.socketId !== socketId));
+  };
+
+  const rejectCoHost = (socketId: string) => {
+    socketRef.current?.emit("reject-cohost", { guestSocketId: socketId });
+    setCoHostRequests(prev => prev.filter(r => r.socketId !== socketId));
+  };
+
+  const endCoHostFromBroadcaster = () => {
+    if (coHostPeer.current) { coHostPeer.current.close(); coHostPeer.current = null; }
+    if (coHostVideoRef.current) coHostVideoRef.current.srcObject = null;
+    socketRef.current?.emit("cohost-leave", id);
+    setActiveCoHostId("");
+  };
+
+  const toggleAutoAccept = () => {
+    const newVal = !autoAccept;
+    setAutoAccept(newVal);
+    socketRef.current?.emit("set-auto-accept", { streamId: id, enabled: newVal });
+    toast({ title: newVal ? "✅ القبول التلقائي مفعّل" : "القبول التلقائي معطّل", description: newVal ? "كل من يطلب سيدخل مباشرة" : "ستراجع طلبات المشاركة يدوياً" });
   };
 
   const unlockAudio = () => {
@@ -729,7 +893,120 @@ export default function LiveStream() {
                 <Volume2 className="w-6 h-6 text-white" />
               </div>
             </button>
+
+            {/* CO-HOST REQUEST BUTTON */}
+            {user && coHostStatus === "idle" && (
+              <button onClick={requestCoHost} className="flex flex-col items-center gap-0.5" data-testid="btn-request-cohost">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-purple-600/80 backdrop-blur">
+                  <UserPlus className="w-6 h-6 text-white" />
+                </div>
+                <span className="text-white text-[10px] font-bold drop-shadow">مشاركة</span>
+              </button>
+            )}
+            {user && coHostStatus === "requesting" && (
+              <button className="flex flex-col items-center gap-0.5" disabled data-testid="btn-cohost-pending">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-yellow-500/80 backdrop-blur">
+                  <Loader2 className="w-6 h-6 text-white animate-spin" />
+                </div>
+                <span className="text-white text-[10px] font-bold drop-shadow">انتظار...</span>
+              </button>
+            )}
+            {user && coHostStatus === "accepted" && (
+              <button onClick={leaveCoHost} className="flex flex-col items-center gap-0.5" data-testid="btn-leave-cohost">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-red-600 animate-pulse">
+                  <Users className="w-6 h-6 text-white" />
+                </div>
+                <span className="text-white text-[10px] font-bold drop-shadow">إنهاء</span>
+              </button>
+            )}
+            {user && coHostStatus === "rejected" && (
+              <button className="flex flex-col items-center gap-0.5" disabled data-testid="btn-cohost-rejected">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-zinc-700">
+                  <XCircle className="w-6 h-6 text-red-400" />
+                </div>
+                <span className="text-white text-[10px] font-bold drop-shadow">مرفوض</span>
+              </button>
+            )}
           </div>
+        )}
+
+        {/* CO-HOST PiP — viewer's own camera preview when accepted */}
+        {!isBroadcast && coHostStatus === "accepted" && (
+          <video
+            ref={coHostVideoRef}
+            autoPlay playsInline muted
+            className="absolute bottom-20 start-3 w-28 h-40 rounded-2xl object-cover border-2 border-purple-500 shadow-xl z-20"
+            data-testid="video-cohost-self"
+          />
+        )}
+
+        {/* CO-HOST REQUESTS PANEL (broadcaster) */}
+        {isBroadcast && coHostRequests.length > 0 && (
+          <div className="absolute top-16 inset-x-4 z-20 flex flex-col gap-2">
+            {coHostRequests.map(req => (
+              <div key={req.socketId} className="flex items-center gap-2 bg-black/80 backdrop-blur rounded-2xl px-3 py-2.5 border border-purple-500/40">
+                <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center flex-shrink-0">
+                  <UserPlus className="w-4 h-4 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-xs font-bold truncate">{req.userName}</p>
+                  <p className="text-white/50 text-[10px]">يطلب المشاركة بالصوت والصورة</p>
+                </div>
+                <button
+                  onClick={() => acceptCoHost(req.socketId, req.userName)}
+                  className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0"
+                  data-testid={`btn-accept-cohost-${req.socketId}`}
+                >
+                  <CheckCircle className="w-4 h-4 text-white" />
+                </button>
+                <button
+                  onClick={() => rejectCoHost(req.socketId)}
+                  className="w-8 h-8 rounded-full bg-red-500/80 flex items-center justify-center flex-shrink-0"
+                  data-testid={`btn-reject-cohost-${req.socketId}`}
+                >
+                  <X className="w-4 h-4 text-white" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* CO-HOST PiP — broadcaster sees guest's camera */}
+        {isBroadcast && activeCoHostId && (
+          <div className="absolute bottom-36 start-3 z-20">
+            <video
+              ref={coHostVideoRef}
+              autoPlay playsInline
+              className="w-28 h-40 rounded-2xl object-cover border-2 border-purple-500 shadow-xl"
+              data-testid="video-cohost-broadcaster"
+            />
+            <div className="absolute top-1 inset-x-0 flex items-center justify-center">
+              <span className="text-[10px] text-white bg-purple-600 rounded-full px-1.5 py-0.5 font-bold">ضيف</span>
+            </div>
+            <button
+              onClick={endCoHostFromBroadcaster}
+              className="absolute -top-2 -end-2 w-6 h-6 rounded-full bg-red-500 flex items-center justify-center shadow-lg"
+              data-testid="btn-end-cohost"
+            >
+              <X className="w-3 h-3 text-white" />
+            </button>
+          </div>
+        )}
+
+        {/* AUTO-ACCEPT TOGGLE (broadcaster only) */}
+        {isBroadcast && streaming && (
+          <button
+            onClick={toggleAutoAccept}
+            className={`absolute top-3 end-3 z-20 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-bold border transition-all ${
+              autoAccept
+                ? "bg-purple-600 border-purple-400 text-white"
+                : "bg-black/60 border-white/20 text-white/70"
+            }`}
+            data-testid="btn-toggle-auto-accept"
+          >
+            <Users className="w-3.5 h-3.5" />
+            {autoAccept ? "قبول تلقائي" : "قبول يدوي"}
+          </button>
         )}
 
         {/* BROADCASTER CONTROLS (WebRTC) */}
