@@ -243,6 +243,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (count > room.peakViewers) room.peakViewers = count;
       io.to(`stream:${streamId}`).emit("viewer-count", count);
       storage.updateLiveStream(Number(streamId), { viewerCount: count } as any).catch(() => {});
+      // If broadcaster is already live, tell this viewer so they know to send "watcher"
+      if (room.broadcasterId) {
+        socket.emit("broadcaster");
+      }
       // Inform new viewer of ALL active co-hosts
       for (const cohostId of room.cohostIds) {
         socket.emit("cohost-active", cohostId, room.cohostNames.get(cohostId) || "ضيف");
