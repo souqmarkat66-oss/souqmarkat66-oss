@@ -333,20 +333,18 @@ export default function LiveStream() {
       // ── Co-host events (viewer/guest side) ──
       socket.on("cohost-accepted", async (data: { broadcasterId: string }) => {
         setCoHostStatus("accepted");
-        const ms = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-          audio: { echoCancellation: true, noiseSuppression: true },
-        }).catch(() => null);
 
+        // Use the stream we already opened in requestCoHost (user-gesture context)
+        // If for some reason it's missing, abort gracefully
+        const ms = coHostStream.current;
         if (!ms) {
           setCoHostStatus("idle");
-          toast({ title: "تعذّر فتح الكاميرا", description: "اسمح للمتصفح بالوصول للكاميرا", variant: "destructive" });
+          toast({ title: "تعذّر فتح الكاميرا", description: "حاول مرة أخرى", variant: "destructive" });
           return;
         }
 
-        coHostStream.current = ms;
-        // Show our own camera in PiP
-        if (coHostVideoRef.current) {
+        // Make sure PiP is showing our own camera
+        if (coHostVideoRef.current && !coHostVideoRef.current.srcObject) {
           coHostVideoRef.current.srcObject = ms;
           coHostVideoRef.current.muted = true;
           coHostVideoRef.current.play().catch(() => {});
@@ -366,7 +364,6 @@ export default function LiveStream() {
         if (!offer) return;
         await pc.setLocalDescription(offer).catch(() => {});
         socket.emit("cohost-offer", data.broadcasterId, pc.localDescription);
-        // Tell everyone we're co-hosting
         socket.emit("cohost-broadcaster", { streamId: id, name: `${(user as any)?.firstName || ""} ${(user as any)?.lastName || ""}`.trim() || "ضيف" });
 
         toast({ title: "🎙️ أنت على الهواء كضيف!", description: "المُذيع يسمعك ويشوفك الآن" });
@@ -461,11 +458,39 @@ export default function LiveStream() {
   };
 
   /* ─── Co-host helpers ────────────────────────────────── */
-  const requestCoHost = () => {
+  const requestCoHost = async () => {
     if (!user) return;
+
+    // Must open camera HERE — inside a user-gesture handler — so mobile browsers allow it
+    setCoHostStatus("requesting");
+    toast({ title: "📷 جاري فتح الكاميرا...", description: "اسمح للمتصفح بالوصول للكاميرا والميكروفون" });
+
+    const ms = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: { echoCancellation: true, noiseSuppression: true },
+    }).catch((err) => {
+      console.error("getUserMedia error:", err);
+      return null;
+    });
+
+    if (!ms) {
+      setCoHostStatus("idle");
+      toast({ title: "تعذّر فتح الكاميرا", description: "اسمح للمتصفح بالوصول للكاميرا والميكروفون ثم حاول مجدداً", variant: "destructive" });
+      return;
+    }
+
+    // Store stream now — so cohost-accepted handler can use it without another getUserMedia call
+    coHostStream.current = ms;
+
+    // Show self-preview immediately
+    if (coHostVideoRef.current) {
+      coHostVideoRef.current.srcObject = ms;
+      coHostVideoRef.current.muted = true;
+      coHostVideoRef.current.play().catch(() => {});
+    }
+
     const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مستخدم";
     socketRef.current?.emit("request-cohost", { streamId: id, userId: (user as any).id, userName });
-    setCoHostStatus("requesting");
     toast({ title: "⏳ تم إرسال الطلب", description: "في انتظار موافقة المُذيع" });
   };
 
@@ -930,14 +955,26 @@ export default function LiveStream() {
           </div>
         )}
 
-        {/* CO-HOST PiP — viewer's own camera preview when accepted */}
-        {!isBroadcast && coHostStatus === "accepted" && (
-          <video
-            ref={coHostVideoRef}
-            autoPlay playsInline muted
-            className="absolute bottom-20 start-3 w-28 h-40 rounded-2xl object-cover border-2 border-purple-500 shadow-xl z-20"
-            data-testid="video-cohost-self"
-          />
+        {/* CO-HOST PiP — viewer's own camera preview (shown once camera is open) */}
+        {!isBroadcast && (coHostStatus === "requesting" || coHostStatus === "accepted") && (
+          <div className="absolute bottom-20 start-3 z-20">
+            <video
+              ref={coHostVideoRef}
+              autoPlay playsInline muted
+              className="w-28 h-40 rounded-2xl object-cover border-2 border-purple-500 shadow-xl"
+              data-testid="video-cohost-self"
+            />
+            {coHostStatus === "requesting" && (
+              <div className="absolute inset-0 flex items-end justify-center pb-1">
+                <span className="text-[10px] text-white bg-yellow-500 rounded-full px-1.5 py-0.5 font-bold">انتظار...</span>
+              </div>
+            )}
+            {coHostStatus === "accepted" && (
+              <div className="absolute inset-0 flex items-end justify-center pb-1">
+                <span className="text-[10px] text-white bg-red-600 rounded-full px-1.5 py-0.5 font-bold animate-pulse">LIVE</span>
+              </div>
+            )}
+          </div>
         )}
 
         {/* CO-HOST REQUESTS PANEL (broadcaster) */}
