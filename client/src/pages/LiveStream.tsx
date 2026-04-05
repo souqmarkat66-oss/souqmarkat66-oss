@@ -61,6 +61,11 @@ export default function LiveStream() {
   const [activeCoHosts,   setActiveCoHosts]   = useState<{socketId:string; name:string}[]>([]);
   const [autoAccept,      setAutoAccept]      = useState(false);
 
+  // In-stream ads state
+  const [streamAds,       setStreamAds]       = useState<any[]>([]);
+  const [currentAdIdx,    setCurrentAdIdx]    = useState(0);
+  const [adVisible,       setAdVisible]       = useState(false);
+
   // Share & Gift state
   const [showShare,       setShowShare]       = useState(false);
   const [showGiftPanel,   setShowGiftPanel]   = useState(false);
@@ -440,6 +445,43 @@ export default function LiveStream() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isBroadcast]);
+
+  /* ─── In-stream ads ─────────────────────────────────── */
+  useEffect(() => {
+    if (!streaming) return;
+    // Fetch a pool of active ads
+    fetch("/api/ads?limit=20&status=active", { credentials: "include" })
+      .then(r => r.json())
+      .then(data => {
+        const ads = Array.isArray(data) ? data : (data.ads || []);
+        const imageAds = ads.filter((a: any) => a.media_type === "image" || !a.media_type);
+        if (imageAds.length > 0) setStreamAds(imageAds);
+      })
+      .catch(() => {});
+  }, [streaming]);
+
+  useEffect(() => {
+    if (streamAds.length === 0 || !streaming) return;
+    // Show first ad after 15 seconds
+    const showTimer = setTimeout(() => setAdVisible(true), 15000);
+    return () => clearTimeout(showTimer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamAds, streaming]);
+
+  useEffect(() => {
+    if (!adVisible || streamAds.length === 0) return;
+    // Hide ad after 8 seconds, then show next ad after 30 more seconds
+    const hideTimer = setTimeout(() => {
+      setAdVisible(false);
+      const nextTimer = setTimeout(() => {
+        setCurrentAdIdx(prev => (prev + 1) % streamAds.length);
+        setAdVisible(true);
+      }, 30000);
+      return () => clearTimeout(nextTimer);
+    }, 8000);
+    return () => clearTimeout(hideTimer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adVisible, streamAds]);
 
   /* ─── auto-start WebRTC camera ──────────────────────── */
   useEffect(() => {
@@ -1147,6 +1189,63 @@ export default function LiveStream() {
             <span className="text-5xl drop-shadow-2xl">{g.emoji}</span>
           </div>
         ))}
+
+        {/* IN-STREAM AD BANNER */}
+        {streaming && adVisible && streamAds.length > 0 && stream?.showAds !== false && (() => {
+          const ad = streamAds[currentAdIdx];
+          return (
+            <div className="absolute inset-x-3 z-20 flex items-center gap-3 bg-black/85 backdrop-blur-md rounded-2xl p-2.5 border border-white/10 shadow-2xl"
+              style={{ bottom: "92px", animation: "slideInLeft 0.4s ease-out" }}
+            >
+              {/* Ad thumbnail */}
+              <img
+                src={ad.media_url}
+                alt={ad.title}
+                className="w-14 h-14 rounded-xl object-cover flex-shrink-0 border border-white/10"
+              />
+              {/* Ad info */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1 mb-0.5">
+                  <span className="text-[9px] text-yellow-400 font-bold bg-yellow-400/15 rounded px-1 py-0.5">إعلان</span>
+                </div>
+                <p className="text-white text-xs font-bold truncate leading-tight">{ad.title}</p>
+                {ad.price_egp && (
+                  <p className="text-green-400 text-[11px] font-bold">{Number(ad.price_egp).toLocaleString("ar-EG")} ج.م</p>
+                )}
+              </div>
+              {/* CTA button */}
+              <div className="flex flex-col gap-1.5 flex-shrink-0">
+                {ad.whatsapp_number ? (
+                  <a
+                    href={`https://wa.me/${ad.whatsapp_number.replace(/\D/g, "")}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 bg-green-500 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-xl"
+                    data-testid="btn-ad-whatsapp"
+                  >
+                    <SiWhatsapp className="w-3 h-3" />
+                    واتساب
+                  </a>
+                ) : (
+                  <a
+                    href={`/ads/${ad.id}`}
+                    className="bg-white/20 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-xl"
+                    data-testid="btn-ad-view"
+                  >
+                    عرض
+                  </a>
+                )}
+                <button
+                  onClick={() => setAdVisible(false)}
+                  className="text-white/40 text-[9px] text-center"
+                  data-testid="btn-ad-dismiss"
+                >
+                  إغلاق
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* AUTO-ACCEPT TOGGLE (broadcaster only) */}
         {isBroadcast && streaming && (
