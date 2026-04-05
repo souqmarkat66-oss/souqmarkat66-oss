@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useParams, useSearch } from "wouter";
+import { useParams, useSearch, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,8 @@ import {
   Radio, Users, Heart, Send, MicOff, VideoOff, PhoneOff,
   Mic, Video, Share2, Eye, MessageCircle, Monitor, Camera,
   Settings, Wifi, WifiOff, Maximize, RotateCcw, Volume2, X,
-  UserPlus, UserCheck, UserX, Trophy, Clock, TrendingUp
+  UserPlus, UserCheck, UserX, Trophy, Clock, TrendingUp,
+  ChevronUp, ChevronDown, UserCircle2, Bell, BellOff
 } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import type { LiveStream as LiveStreamType } from "@shared/schema";
@@ -206,6 +207,23 @@ export default function LiveStream() {
   const [pollOptions, setPollOptions]       = useState(["", ""]);
   const [recentGiftBanner, setRecentGiftBanner] = useState<LiveGift | null>(null);
   const [followerBanners, setFollowerBanners] = useState<{ id: number; userName: string }[]>([]);
+
+  // ── TikTok Navigation & Interaction ─────────────────────────
+  const [, setLocation] = useLocation();
+  const [showUI, setShowUI]                     = useState(true);
+  const [swipeDir, setSwipeDir]                 = useState<"up" | "down" | null>(null);
+  const [doubleTapHearts, setDoubleTapHearts]   = useState<{ id: number; x: number; y: number }[]>([]);
+  const touchStartYRef  = useRef<number>(0);
+  const touchStartXRef  = useRef<number>(0);
+  const lastTapTimeRef  = useRef<number>(0);
+  const singleTapTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const { data: allStreams } = useQuery<LiveStreamType[]>({
+    queryKey: ["/api/streams"],
+    queryFn: () => fetch("/api/streams").then(r => r.json()),
+    enabled: !isBroadcast,
+    refetchInterval: 30000,
+  });
 
   const { data: stream, isLoading } = useQuery<LiveStreamType>({
     queryKey: ["/api/streams", Number(id)],
@@ -965,6 +983,60 @@ export default function LiveStream() {
     }
   };
 
+  // ── TikTok Touch Interaction Handlers ────────────────────────
+  const handleVideoTouchStart = (e: React.TouchEvent) => {
+    touchStartYRef.current = e.touches[0].clientY;
+    touchStartXRef.current = e.touches[0].clientX;
+  };
+
+  const handleVideoTouchEnd = (e: React.TouchEvent) => {
+    const dy = touchStartYRef.current - e.changedTouches[0].clientY;
+    const dx = Math.abs(touchStartXRef.current - e.changedTouches[0].clientX);
+    const now = Date.now();
+
+    // Swipe up/down to change streams (must be mostly vertical, > 60px)
+    if (Math.abs(dy) > 60 && dx < 60 && !isBroadcast) {
+      const streams = Array.isArray(allStreams) ? allStreams : [];
+      const idx = streams.findIndex(s => String(s.id) === String(id));
+      if (dy > 0 && idx < streams.length - 1) {
+        // Swipe up → next stream
+        setSwipeDir("up");
+        setTimeout(() => { setSwipeDir(null); setLocation(`/streams/${streams[idx + 1].id}`); }, 300);
+      } else if (dy < 0 && idx > 0) {
+        // Swipe down → previous stream
+        setSwipeDir("down");
+        setTimeout(() => { setSwipeDir(null); setLocation(`/streams/${streams[idx - 1].id}`); }, 300);
+      }
+      return;
+    }
+
+    // Double-tap to like (within 300ms of last tap, and not much movement)
+    if (Math.abs(dy) < 20 && dx < 20) {
+      const timeSinceLast = now - lastTapTimeRef.current;
+      if (timeSinceLast < 300 && timeSinceLast > 0) {
+        // Double-tap detected
+        if (singleTapTimer.current) { clearTimeout(singleTapTimer.current); singleTapTimer.current = null; }
+        lastTapTimeRef.current = 0;
+        if (!liked) handleLike();
+        const rect = (e.target as HTMLElement).closest(".stream-tap-area")?.getBoundingClientRect();
+        const x = rect ? ((e.changedTouches[0].clientX - rect.left) / rect.width) * 100 : 50;
+        const y = rect ? ((e.changedTouches[0].clientY - rect.top) / rect.height) * 100 : 50;
+        const hid = Date.now() + Math.random();
+        setDoubleTapHearts(prev => [...prev, { id: hid, x, y }]);
+        setTimeout(() => setDoubleTapHearts(prev => prev.filter(h => h.id !== hid)), 1200);
+      } else {
+        // Potential single tap — wait to see if double-tap comes
+        lastTapTimeRef.current = now;
+        if (singleTapTimer.current) clearTimeout(singleTapTimer.current);
+        singleTapTimer.current = setTimeout(() => {
+          singleTapTimer.current = null;
+          // Single tap = toggle UI
+          setShowUI(v => !v);
+        }, 310);
+      }
+    }
+  };
+
   // ── TikTok Actions ────────────────────────────────────────────
   const sendGift = (gift: typeof GIFTS[0]) => {
     if (!user) { window.location.href = "/login"; return; }
@@ -1143,8 +1215,40 @@ export default function LiveStream() {
       <div className="flex flex-col lg:flex-row h-[100dvh]">
 
         {/* ══ TikTok-style Full-Screen Video Area ══ */}
-        <div className="relative flex-1 overflow-hidden bg-black flex items-center justify-center lg:max-w-[480px] lg:mx-auto"
-          style={{ minHeight: "100dvh" }}>
+        <div
+          className={`stream-tap-area relative flex-1 overflow-hidden bg-black flex items-center justify-center lg:max-w-[480px] lg:mx-auto transition-transform duration-300 ${swipeDir === "up" ? "-translate-y-8 opacity-60" : swipeDir === "down" ? "translate-y-8 opacity-60" : ""}`}
+          style={{ minHeight: "100dvh" }}
+          onTouchStart={handleVideoTouchStart}
+          onTouchEnd={handleVideoTouchEnd}
+        >
+          {/* ── Double-tap hearts ── */}
+          {doubleTapHearts.map(h => (
+            <div key={h.id} className="absolute z-40 pointer-events-none select-none"
+              style={{ left: `${h.x}%`, top: `${h.y}%`, transform: "translate(-50%,-50%)", animation: "doubleTapHeart 1.1s ease-out forwards" }}>
+              ❤️
+            </div>
+          ))}
+
+          {/* ── Swipe navigation hints (viewer only) ── */}
+          {!isBroadcast && (() => {
+            const streams = Array.isArray(allStreams) ? allStreams : [];
+            const idx = streams.findIndex(s => String(s.id) === String(id));
+            return (<>
+              {idx > 0 && (
+                <div className={`absolute top-16 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1 transition-opacity duration-300 pointer-events-none ${showUI ? "opacity-60" : "opacity-0"}`}>
+                  <ChevronUp className="w-6 h-6 text-white drop-shadow animate-bounce" />
+                  <span className="text-white/70 text-[10px] font-medium">سوايب للأسفل</span>
+                </div>
+              )}
+              {idx < streams.length - 1 && (
+                <div className={`absolute bottom-28 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1 transition-opacity duration-300 pointer-events-none ${showUI ? "opacity-60" : "opacity-0"}`}>
+                  <span className="text-white/70 text-[10px] font-medium">سوايب للأعلى</span>
+                  <ChevronDown className="w-6 h-6 text-white drop-shadow animate-bounce" />
+                </div>
+              )}
+            </>);
+          })()}
+
           {/* ── Viewer: Join with Audio/Video Dialog (auto-accept mode) ── */}
           {showJoinDialog && !isBroadcast && !isCoHost && (
             <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" dir="rtl">
@@ -1655,7 +1759,7 @@ export default function LiveStream() {
           </div>{/* end grid wrapper */}
 
           {/* ── TikTok Top Bar Overlay ── */}
-          <div className="absolute top-0 inset-x-0 z-20 bg-gradient-to-b from-black/70 to-transparent px-4 pt-4 pb-10 pointer-events-none">
+          <div className={`absolute top-0 inset-x-0 z-20 bg-gradient-to-b from-black/70 to-transparent px-4 pt-4 pb-10 pointer-events-none transition-opacity duration-300 ${showUI ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
             <div className="flex items-center gap-2">
               <Badge className="bg-red-500 text-white gap-1 px-2.5 py-0.5 text-xs font-bold animate-pulse pointer-events-auto">
                 🔴 مباشر
@@ -1673,7 +1777,7 @@ export default function LiveStream() {
           </div>
 
           {/* ── TikTok Right Action Buttons ── */}
-          <div className="absolute end-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-3 items-center">
+          <div className={`absolute end-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-3 items-center transition-opacity duration-300 ${showUI ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
             {/* Like */}
             <button
               onClick={handleLike}
@@ -1739,6 +1843,19 @@ export default function LiveStream() {
               </button>
             )}
           </div>
+
+          {/* ── TikTok Broadcaster Profile Card ── */}
+          {stream && !isBroadcast && (
+            <div className={`absolute bottom-[260px] start-3 z-20 flex items-center gap-2 transition-opacity duration-300 ${showUI ? "opacity-100" : "opacity-0 pointer-events-none"}`} dir="rtl">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center flex-shrink-0 ring-2 ring-white/30">
+                <UserCircle2 className="w-6 h-6 text-white" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-white text-xs font-bold drop-shadow truncate max-w-[120px]">{stream.title}</p>
+                <p className="text-white/60 text-[10px] truncate">{(stream as any).channelName || "بث مباشر"}</p>
+              </div>
+            </div>
+          )}
 
           {/* ── TikTok Floating Chat Messages ── */}
           <div className="absolute bottom-[72px] start-0 w-[58%] px-3 z-20 max-h-52 overflow-hidden flex flex-col-reverse gap-1 pointer-events-none">
