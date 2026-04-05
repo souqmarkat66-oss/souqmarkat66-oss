@@ -15,6 +15,7 @@ import CreateAd from "@/pages/CreateAd";
 import Channels from "@/pages/Channels";
 import ChannelPage from "@/pages/ChannelPage";
 import LiveStream from "@/pages/LiveStream";
+import LiveStreamList from "@/pages/LiveStreamList";
 import StartStream from "@/pages/StartStream";
 import Campaigns from "@/pages/Campaigns";
 import AdminPanel from "@/pages/AdminPanel";
@@ -77,6 +78,7 @@ function Router() {
               </Route>
               <Route path="/channels" component={Channels} />
               <Route path="/channels/:id" component={ChannelPage} />
+              <Route path="/livestream" component={LiveStreamList} />
               <Route path="/streams/:id" component={LiveStream} />
               <Route path="/stream/start">
                 <ProtectedRoute component={StartStream} />
@@ -248,6 +250,7 @@ function AppFooter() {
               <li><a href="/ads" className="hover:text-foreground transition-colors">الإعلانات</a></li>
               <li><a href="/channels" className="hover:text-foreground transition-colors">القنوات</a></li>
               <li><a href="/reels" className="hover:text-foreground transition-colors">الريلز</a></li>
+              <li><a href="/livestream" className="hover:text-foreground transition-colors font-bold text-red-600 dark:text-red-400">📡 البث المباشر</a></li>
               <li><a href="/campaigns" className="hover:text-foreground transition-colors">الحملات الإعلانية</a></li>
               <li><a href="/media-library" className="hover:text-foreground transition-colors">مكتبة الوسائط</a></li>
               <li><a href="/revenue" className="hover:text-foreground transition-colors">الإيرادات</a></li>

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { NotificationBell } from "./NotificationBell";
 import {
   LogIn, LogOut, PlusCircle, Globe, LayoutGrid, Megaphone,
-  Radio, BarChart2, ShieldCheck, DollarSign, Menu, X, Tv, UserCircle2, MessageSquare, Receipt, FolderOpen, PieChart, Users, HelpCircle
+  Radio, BarChart2, ShieldCheck, DollarSign, Menu, X, Tv, UserCircle2, MessageSquare, Receipt, FolderOpen, PieChart, Users, HelpCircle, Cast
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -19,6 +19,7 @@ const navLinks = (user: any) => [
   { href: "/ads", label: "الإعلانات", icon: LayoutGrid },
   { href: "/channels", label: "القنوات", icon: Tv },
   { href: "/reels", label: "ريلز", icon: Radio },
+  { href: "/livestream", label: "مباشر", icon: Cast },
   { href: "/help", label: "المساعدة", icon: HelpCircle },
   ...(user ? [
     { href: "/my-content", label: "محتواي", icon: UserCircle2 },
@@ -106,10 +107,11 @@ export function Navbar() {
 
   const allLinks = navLinks(user);
   const links = allLinks.filter(l => {
-    if (l.href === "/ads")      return feat("feature_ads");
-    if (l.href === "/channels") return feat("feature_channels");
-    if (l.href === "/reels")    return feat("feature_reels");
-    if (l.href === "/campaigns")return feat("feature_campaigns");
+    if (l.href === "/ads")         return feat("feature_ads");
+    if (l.href === "/channels")    return feat("feature_channels");
+    if (l.href === "/reels")       return feat("feature_reels");
+    if (l.href === "/livestream")  return feat("feature_livestream");
+    if (l.href === "/campaigns")   return feat("feature_campaigns");
     return true;
   });
 
