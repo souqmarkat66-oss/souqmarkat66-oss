@@ -613,20 +613,28 @@ export default function LiveStream() {
       isCoHostRef.current = true;
       setIsCoHost(true);
       setRequestingJoin(false);
-      toast({ title: "✅ تم قبول طلبك! ستبدأ الكاميرا الآن" });
+      toast({ title: "✅ تم قبول طلبك! جارٍ فتح الكاميرا..." });
       try {
         const mediaStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user" },
           audio: HIGH_QUALITY_AUDIO,
         });
         myCoHostStreamRef.current = mediaStream;
-        // Show my own preview via my own socketId
         const myId = socket.id || "me";
-        const myVideoEl = coHostVideoEls.current.get(myId);
-        if (myVideoEl) { myVideoEl.srcObject = mediaStream; myVideoEl.muted = true; myVideoEl.play().catch(() => {}); }
-        // Add myself to coHosts so a slot appears
         const myName = "أنت";
+        // First: add the slot so React renders the <video> element
         setCoHosts(prev => prev.some(c => c.socketId === myId) ? prev : [...prev, { socketId: myId, name: myName }]);
+        // After DOM renders, assign stream to the video element
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const myVideoEl = coHostVideoEls.current.get(myId);
+            if (myVideoEl) {
+              myVideoEl.srcObject = mediaStream;
+              myVideoEl.muted = true;
+              myVideoEl.play().catch(() => {});
+            }
+          });
+        });
         // Tell server I'm now a co-broadcaster with my display name
         socket.emit("cohost-broadcaster", { streamId: id, name: myName });
       } catch (err: any) {
@@ -1693,8 +1701,17 @@ export default function LiveStream() {
             <div key={ch.socketId} className="relative overflow-hidden bg-black ring-2 ring-purple-500/60 h-full">
               <video
                 ref={(el) => {
-                  if (el) coHostVideoEls.current.set(ch.socketId, el);
-                  else coHostVideoEls.current.delete(ch.socketId);
+                  if (el) {
+                    coHostVideoEls.current.set(ch.socketId, el);
+                    // If this is our own slot and stream is already ready, attach it now
+                    if (ch.name === "أنت" && myCoHostStreamRef.current && !el.srcObject) {
+                      el.srcObject = myCoHostStreamRef.current;
+                      el.muted = true;
+                      el.play().catch(() => {});
+                    }
+                  } else {
+                    coHostVideoEls.current.delete(ch.socketId);
+                  }
                 }}
                 autoPlay
                 playsInline
@@ -1715,43 +1732,57 @@ export default function LiveStream() {
               </div>
               {/* Co-host mic/video/leave controls — only shown on the co-host's own slot */}
               {isCoHost && ch.name === "أنت" && (
-                <div className="absolute bottom-4 inset-x-0 flex items-center justify-center gap-3">
-                  <button
-                    onClick={() => {
-                      if (myCoHostStreamRef.current) {
-                        const aTrack = myCoHostStreamRef.current.getAudioTracks()[0];
-                        if (aTrack) { aTrack.enabled = !aTrack.enabled; setCoHostMuted(!aTrack.enabled); }
-                      }
-                    }}
-                    className={`w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all ${coHostMuted ? "bg-red-500 text-white" : "bg-white/20 backdrop-blur text-white hover:bg-white/30"}`}
-                  >
-                    {coHostMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (myCoHostStreamRef.current) {
-                        const vTrack = myCoHostStreamRef.current.getVideoTracks()[0];
-                        if (vTrack) { vTrack.enabled = !vTrack.enabled; setCoHostVideoOff(!vTrack.enabled); }
-                      }
-                    }}
-                    className={`w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all ${coHostVideoOff ? "bg-red-500 text-white" : "bg-white/20 backdrop-blur text-white hover:bg-white/30"}`}
-                  >
-                    {coHostVideoOff ? <VideoOff className="w-4 h-4" /> : <Video className="w-4 h-4" />}
-                  </button>
-                  <button
-                    onClick={() => {
-                      socketRef.current?.emit("cohost-leave", id);
-                      setIsCoHost(false);
-                      isCoHostRef.current = false;
-                      myCoHostStreamRef.current?.getTracks().forEach(t => t.stop());
-                      myCoHostStreamRef.current = null;
-                      setCoHosts(prev => prev.filter(c => c.name !== "أنت"));
-                    }}
-                    className="px-4 h-11 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5 text-xs font-bold shadow-lg transition"
-                    data-testid="btn-leave-cohost"
-                  >
-                    <PhoneOff className="w-3.5 h-3.5" /> مغادرة
-                  </button>
+                <div className="absolute bottom-3 inset-x-0 flex items-end justify-center gap-4 px-2">
+                  {/* Mic toggle */}
+                  <div className="flex flex-col items-center gap-1">
+                    <button
+                      onClick={() => {
+                        if (myCoHostStreamRef.current) {
+                          const aTrack = myCoHostStreamRef.current.getAudioTracks()[0];
+                          if (aTrack) { aTrack.enabled = !aTrack.enabled; setCoHostMuted(!aTrack.enabled); }
+                        }
+                      }}
+                      className={`w-12 h-12 rounded-full flex items-center justify-center shadow-xl transition-all border-2 ${coHostMuted ? "bg-red-500 border-red-400 text-white" : "bg-black/60 backdrop-blur border-white/30 text-white hover:bg-black/80"}`}
+                      data-testid="btn-cohost-toggle-mic"
+                    >
+                      {coHostMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                    </button>
+                    <span className="text-white text-[10px] font-bold drop-shadow">{coHostMuted ? "صوت مكتوم" : "الصوت"}</span>
+                  </div>
+                  {/* Camera toggle */}
+                  <div className="flex flex-col items-center gap-1">
+                    <button
+                      onClick={() => {
+                        if (myCoHostStreamRef.current) {
+                          const vTrack = myCoHostStreamRef.current.getVideoTracks()[0];
+                          if (vTrack) { vTrack.enabled = !vTrack.enabled; setCoHostVideoOff(!vTrack.enabled); }
+                        }
+                      }}
+                      className={`w-12 h-12 rounded-full flex items-center justify-center shadow-xl transition-all border-2 ${coHostVideoOff ? "bg-red-500 border-red-400 text-white" : "bg-black/60 backdrop-blur border-white/30 text-white hover:bg-black/80"}`}
+                      data-testid="btn-cohost-toggle-camera"
+                    >
+                      {coHostVideoOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+                    </button>
+                    <span className="text-white text-[10px] font-bold drop-shadow">{coHostVideoOff ? "كاميرا مغلقة" : "الكاميرا"}</span>
+                  </div>
+                  {/* Leave button */}
+                  <div className="flex flex-col items-center gap-1">
+                    <button
+                      onClick={() => {
+                        socketRef.current?.emit("cohost-leave", id);
+                        setIsCoHost(false);
+                        isCoHostRef.current = false;
+                        myCoHostStreamRef.current?.getTracks().forEach(t => t.stop());
+                        myCoHostStreamRef.current = null;
+                        setCoHosts(prev => prev.filter(c => c.name !== "أنت"));
+                      }}
+                      className="w-12 h-12 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-xl transition border-2 border-red-400"
+                      data-testid="btn-leave-cohost"
+                    >
+                      <PhoneOff className="w-5 h-5" />
+                    </button>
+                    <span className="text-white text-[10px] font-bold drop-shadow">مغادرة</span>
+                  </div>
                 </div>
               )}
             </div>
