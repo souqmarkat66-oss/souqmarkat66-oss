@@ -4,6 +4,8 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
+import path from "path";
+import fs from "fs";
 
 const app = express();
 const httpServer = createServer(app);
@@ -162,6 +164,8 @@ async function runMigrations() {
     await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS screenshot_url TEXT`);
     await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS service_type TEXT`);
     await db.execute(sql`ALTER TABLE live_streams ADD COLUMN IF NOT EXISTS recording_url TEXT`);
+    await db.execute(sql`ALTER TABLE live_streams ADD COLUMN IF NOT EXISTS stream_key TEXT UNIQUE`);
+    await db.execute(sql`ALTER TABLE live_streams ADD COLUMN IF NOT EXISTS stream_mode TEXT DEFAULT 'webrtc'`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthday DATE`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title VARCHAR(100)`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS company VARCHAR(100)`);
@@ -242,6 +246,25 @@ async function runMigrations() {
 
 (async () => {
   await runMigrations();
+
+  // Serve HLS segments from RTMP transcoding
+  const HLS_DIR = "/tmp/hls";
+  if (!fs.existsSync(HLS_DIR)) fs.mkdirSync(HLS_DIR, { recursive: true });
+  app.use("/hls", express.static(HLS_DIR, {
+    setHeaders: (res) => {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "no-cache");
+    }
+  }));
+
+  // Start RTMP server (RTMP on 1935, used when deployed on ads-as.com)
+  try {
+    const { startRtmpServer } = await import("./rtmp");
+    startRtmpServer();
+  } catch (e: any) {
+    console.warn("[RTMP] Could not start RTMP server:", e.message);
+  }
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {

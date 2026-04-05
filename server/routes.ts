@@ -1405,6 +1405,47 @@ Sitemap: ${BASE}/sitemap-pages.xml
     res.json(stream);
   });
 
+  // ── Generate / Get RTMP stream key ──────────────────────────────
+  app.post("/api/streams/:id/key", isAuthenticated, async (req: any, res) => {
+    try {
+      const streamId = Number(req.params.id);
+      const stream = await storage.getLiveStream(streamId);
+      if (!stream || stream.userId !== req.user.claims.sub) return res.status(403).json({ message: "Forbidden" });
+      const { randomBytes } = await import("crypto");
+      const key = `${streamId}-${randomBytes(12).toString("hex")}`;
+      await db.execute(sql`UPDATE live_streams SET stream_key = ${key}, stream_mode = 'rtmp' WHERE id = ${streamId}`);
+      res.json({ streamKey: key, rtmpUrl: "rtmp://ads-as.com/live", hlsUrl: `/hls/live/${key}/index.m3u8` });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/streams/:id/key", isAuthenticated, async (req: any, res) => {
+    try {
+      const streamId = Number(req.params.id);
+      const row = await db.execute(sql`SELECT stream_key, stream_mode FROM live_streams WHERE id = ${streamId} AND user_id = ${req.user.claims.sub}`);
+      if (!row.rows.length) return res.status(403).json({ message: "Forbidden" });
+      const r = row.rows[0] as any;
+      if (!r.stream_key) return res.json({ streamKey: null });
+      res.json({ streamKey: r.stream_key, rtmpUrl: "rtmp://ads-as.com/live", hlsUrl: `/hls/live/${r.stream_key}/index.m3u8`, streamMode: r.stream_mode });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/streams/:id/hls-status", async (req, res) => {
+    try {
+      const row = await db.execute(sql`SELECT stream_key FROM live_streams WHERE id = ${Number(req.params.id)}`);
+      if (!row.rows.length) return res.json({ live: false });
+      const key = (row.rows[0] as any).stream_key;
+      if (!key) return res.json({ live: false });
+      const { isStreamLive } = await import("./rtmp");
+      res.json({ live: isStreamLive(key), hlsUrl: `/hls/live/${key}/index.m3u8` });
+    } catch {
+      res.json({ live: false });
+    }
+  });
+
   // ================================================================
   // SOCIAL FEATURES - LIKES & COMMENTS
   // ================================================================
