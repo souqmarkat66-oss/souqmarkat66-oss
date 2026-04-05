@@ -47,6 +47,13 @@
 
 .gift-pop { animation: gift-pop 0.35s ease-out; }
 .tiktok-chat-msg { animation: slideInLeft 0.25s ease-out; }
+.animate-doubletap-heart { animation: doubleTapHeart 0.9s ease-out forwards; }
+
+@keyframes marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-100%); }
+}
+.animate-marquee { animation: marquee 6s linear infinite; }
 
 :root {
   --font-sans: 'Cairo', sans-serif;

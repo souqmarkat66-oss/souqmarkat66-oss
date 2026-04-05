@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown, Image as ImageIcon, Film, Music, ChevronLeft, ChevronRight, Pause, Pencil, Trash2, ArrowRight, Mic, MicOff, Send, Square } from "lucide-react";
+import { Heart, MessageCircle, Share2, Plus, Play, Upload, Loader2, Volume2, VolumeX, ChevronUp, ChevronDown, Image as ImageIcon, Film, Music, ChevronLeft, ChevronRight, Pause, Pencil, Trash2, ArrowRight, Mic, MicOff, Send, Square, Bookmark, BookmarkCheck, UserPlus, Check, Music2 } from "lucide-react";
 import { useLocation } from "wouter";
 import { EditReelDialog } from "@/components/EditReelDialog";
 import { AdWidget } from "@/components/AdWidget";
@@ -20,13 +20,16 @@ type Reel = {
   id: number;
   title: string;
   description?: string;
-  videoUrl: string;    // single URL, or JSON array of image URLs e.g. ["url1","url2"]
-  audioUrl?: string;   // optional background music for image reels
+  videoUrl: string;
+  audioUrl?: string;
   thumbnailUrl?: string;
   viewsCount: number;
   likesCount: number;
   commentsCount: number;
   userId: string;
+  channelId?: number | null;
+  channelName?: string | null;
+  channelAvatar?: string | null;
   createdAt: string;
 };
 
@@ -60,6 +63,19 @@ function parseMediaUrls(videoUrl: string): string[] {
     try { return JSON.parse(videoUrl) as string[]; } catch {}
   }
   return [videoUrl];
+}
+
+function renderWithHashtags(text: string, onHashtag?: (tag: string) => void) {
+  const parts = text.split(/(#[\u0600-\u06FFa-zA-Z0-9_]+)/g);
+  return parts.map((part, i) =>
+    part.startsWith('#') ? (
+      <span
+        key={i}
+        className="text-[#fe2c55] font-bold cursor-pointer hover:underline"
+        onClick={(e) => { e.stopPropagation(); onHashtag?.(part.slice(1)); }}
+      >{part}</span>
+    ) : <span key={i}>{part}</span>
+  );
 }
 
 function speakEgyptian(text: string) {
@@ -125,6 +141,57 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { user } = useAuth();
+
+  // TikTok double-tap to like
+  const [doubleTapHearts, setDoubleTapHearts] = useState<{id: number; x: number; y: number}[]>([]);
+  const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null);
+  const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // TikTok bookmark/save
+  const [bookmarked, setBookmarked] = useState(false);
+
+  // TikTok follow channel
+  const [channelFollowing, setChannelFollowing] = useState(false);
+  const followMutation = useMutation({
+    mutationFn: () => apiRequest('POST', `/api/channels/${reel.channelId}/follow`, {}),
+    onSuccess: (data: any) => {
+      setChannelFollowing(data.following);
+      toast({ title: data.following ? '✅ تمت المتابعة!' : 'تم إلغاء المتابعة' });
+    },
+  });
+
+  const { data: channelFollowData } = useQuery<{ following: boolean }>({
+    queryKey: ['/api/channels', reel.channelId, 'follow'],
+    queryFn: () => fetch(`/api/channels/${reel.channelId}/follow`, { credentials: 'include' }).then(r => r.json()),
+    enabled: !!user && !!reel.channelId && !isOwner,
+  });
+  useEffect(() => {
+    if (channelFollowData) setChannelFollowing(channelFollowData.following);
+  }, [channelFollowData]);
+
+  // Double-tap to like handler
+  const handleScreenTap = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (showComments || showShare) return;
+    const now = Date.now();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (lastTapRef.current && now - lastTapRef.current.time < 300) {
+      if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+      lastTapRef.current = null;
+      // Double tap — like!
+      if (!liked) likeMutation.mutate();
+      const heartId = Date.now();
+      setDoubleTapHearts(prev => [...prev, { id: heartId, x, y }]);
+      setTimeout(() => setDoubleTapHearts(prev => prev.filter(h => h.id !== heartId)), 1000);
+    } else {
+      lastTapRef.current = { time: now, x, y };
+      tapTimerRef.current = setTimeout(() => {
+        lastTapRef.current = null;
+      }, 320);
+    }
+  };
 
   // Voice recording state
   const [isRecording, setIsRecording]     = useState(false);
@@ -327,7 +394,14 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
   const currentImgUrl = isImageMode ? urls[imgIndex] : "";
 
   return (
-    <div className="relative h-screen w-full snap-start bg-black flex items-center justify-center overflow-hidden">
+    <div className="relative h-screen w-full snap-start bg-black flex items-center justify-center overflow-hidden" onClick={handleScreenTap}>
+
+      {/* Double-tap heart animations */}
+      {doubleTapHearts.map(h => (
+        <div key={h.id} className="absolute z-50 pointer-events-none" style={{ left: h.x - 40, top: h.y - 40 }}>
+          <div className="animate-doubletap-heart text-7xl select-none">❤️</div>
+        </div>
+      ))}
 
       {isImageMode ? (
         /* ── IMAGE / SLIDESHOW REEL ── */
@@ -522,63 +596,124 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
         </>
       )}
 
-      {/* Overlay info */}
-      <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
-        <h3 className="text-white font-bold text-lg">{reel.title}</h3>
-        {reel.description && <p className="text-white/70 text-sm mt-1">{reel.description}</p>}
-        <div className="flex items-center gap-4 mt-2 text-white/60 text-xs">
-          <span>👁 {reel.viewsCount}</span>
+      {/* TikTok Bottom Overlay */}
+      <div className="absolute bottom-0 left-0 right-16 p-4 pb-6 bg-gradient-to-t from-black/90 via-black/50 to-transparent" dir="rtl">
+        {/* Creator Row */}
+        <div className="flex items-center gap-2.5 mb-2">
+          {/* Avatar + Follow button */}
+          <div className="relative flex-shrink-0">
+            <div className="w-11 h-11 rounded-full border-2 border-white/60 overflow-hidden bg-zinc-800 flex items-center justify-center">
+              {reel.channelAvatar ? (
+                <img src={reel.channelAvatar} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-white font-bold text-base">{reel.channelName?.[0] || '؟'}</span>
+              )}
+            </div>
+            {/* Follow (+) pill on avatar */}
+            {!isOwner && reel.channelId && (
+              <button
+                onClick={(e) => { e.stopPropagation(); if (!user) { window.location.href="/login"; return; } followMutation.mutate(); }}
+                className={`absolute -bottom-1 left-1/2 -translate-x-1/2 flex items-center justify-center w-5 h-5 rounded-full text-white text-xs font-black border-2 border-black transition-all ${channelFollowing ? 'bg-green-500' : 'bg-[#fe2c55]'}`}
+                data-testid={`btn-follow-channel-${reel.channelId}`}
+              >
+                {channelFollowing ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+              </button>
+            )}
+          </div>
+          {/* Channel name */}
+          <span className="text-white font-bold text-sm drop-shadow-md">{reel.channelName || 'بدون قناة'}</span>
+          {reel.channelId && !isOwner && (
+            <button
+              onClick={(e) => { e.stopPropagation(); if (!user) { window.location.href="/login"; return; } followMutation.mutate(); }}
+              className={`text-xs font-bold px-3 py-0.5 rounded-full border transition-all ${channelFollowing ? 'border-white/40 text-white/60' : 'border-[#fe2c55] text-[#fe2c55]'}`}
+            >
+              {channelFollowing ? 'متابَع' : 'متابعة'}
+            </button>
+          )}
+        </div>
+        {/* Title */}
+        <h3 className="text-white font-bold text-base leading-snug mb-1 drop-shadow">{reel.title}</h3>
+        {/* Description with hashtags */}
+        {reel.description && (
+          <p className="text-white/80 text-sm leading-relaxed mb-2 line-clamp-2">
+            {renderWithHashtags(reel.description)}
+          </p>
+        )}
+        {/* Sound disc */}
+        <div className="flex items-center gap-2 mt-1">
+          <div className={`w-5 h-5 rounded-full bg-zinc-700 border border-white/30 flex items-center justify-center flex-shrink-0 ${isActive && !muted ? 'animate-spin' : ''}`} style={{ animationDuration: '3s' }}>
+            <Music2 className="w-2.5 h-2.5 text-white" />
+          </div>
+          <div className="text-white/70 text-xs overflow-hidden whitespace-nowrap max-w-[180px]">
+            <span className={isActive ? 'inline-block animate-marquee' : ''}>
+              {reel.channelName ? `صوت أصلي - ${reel.channelName}` : 'صوت أصلي'}
+            </span>
+          </div>
+          <span className="text-white/40 text-xs ms-auto">👁 {reel.viewsCount}</span>
         </div>
       </div>
 
-      {/* Side Actions */}
-      <div className="absolute right-4 bottom-24 flex flex-col gap-5 items-center">
+      {/* TikTok Side Actions */}
+      <div className="absolute right-2 bottom-16 flex flex-col gap-4 items-center z-30">
+        {/* Like */}
         <button
-          onClick={() => likeMutation.mutate()}
-          className="flex flex-col items-center gap-1"
+          onClick={(e) => { e.stopPropagation(); likeMutation.mutate(); }}
+          className="flex flex-col items-center gap-0.5"
           data-testid={`btn-like-reel-${reel.id}`}
         >
-          <div className={`w-10 h-10 rounded-full bg-white/20 flex items-center justify-center ${liked ? 'text-red-500' : 'text-white'}`}>
-            <Heart className={`w-5 h-5 ${liked ? 'fill-current' : ''}`} />
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${liked ? 'text-[#fe2c55] scale-110' : 'text-white'}`}>
+            <Heart className={`w-7 h-7 drop-shadow-lg ${liked ? 'fill-current' : ''}`} />
           </div>
-          <span className="text-white text-xs font-bold">{localLikes}</span>
+          <span className="text-white text-xs font-bold drop-shadow">{localLikes}</span>
         </button>
 
+        {/* Comment */}
         <button
-          onClick={() => setShowComments(!showComments)}
-          className="flex flex-col items-center gap-1"
+          onClick={(e) => { e.stopPropagation(); setShowComments(!showComments); }}
+          className="flex flex-col items-center gap-0.5"
           data-testid={`btn-comment-reel-${reel.id}`}
         >
-          <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-white">
-            <MessageCircle className="w-5 h-5" />
+          <div className="w-12 h-12 rounded-full flex items-center justify-center text-white">
+            <MessageCircle className="w-7 h-7 drop-shadow-lg" />
           </div>
-          <span className="text-white text-xs font-bold">{reel.commentsCount}</span>
+          <span className="text-white text-xs font-bold drop-shadow">{reel.commentsCount}</span>
         </button>
 
+        {/* Bookmark/Save */}
         <button
-          onClick={handleShare}
-          className="flex flex-col items-center gap-1"
+          onClick={(e) => { e.stopPropagation(); setBookmarked(b => !b); toast({ title: !bookmarked ? '🔖 تم الحفظ!' : 'تم الإلغاء' }); }}
+          className="flex flex-col items-center gap-0.5"
+          data-testid={`btn-bookmark-reel-${reel.id}`}
+        >
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${bookmarked ? 'text-yellow-400 scale-110' : 'text-white'}`}>
+            {bookmarked ? <BookmarkCheck className="w-7 h-7 fill-current drop-shadow-lg" /> : <Bookmark className="w-7 h-7 drop-shadow-lg" />}
+          </div>
+          <span className="text-white text-xs font-bold drop-shadow">{bookmarked ? 'محفوظ' : 'احفظ'}</span>
+        </button>
+
+        {/* Share */}
+        <button
+          onClick={(e) => { e.stopPropagation(); handleShare(); }}
+          className="flex flex-col items-center gap-0.5"
           data-testid={`btn-share-reel-${reel.id}`}
         >
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${showShare ? "bg-white text-gray-900 scale-110" : "bg-white/20 text-white"}`}>
-            <Share2 className="w-5 h-5" />
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${showShare ? "text-primary scale-110" : "text-white"}`}>
+            <Share2 className="w-7 h-7 drop-shadow-lg" />
           </div>
-          <span className="text-white text-xs font-bold">شارك</span>
+          <span className="text-white text-xs font-bold drop-shadow">شارك</span>
         </button>
 
-        {/* Volume toggle — hidden for YouTube (YouTube has its own controls) */}
+        {/* Volume toggle */}
         {!isYouTube && (
           <button
-            onClick={handleToggleMute}
-            className={`flex flex-col items-center gap-1`}
+            onClick={(e) => { e.stopPropagation(); handleToggleMute(); }}
+            className="flex flex-col items-center gap-0.5"
             data-testid="btn-volume-reel"
           >
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${
-              muted ? 'bg-red-500/30 border-red-400 text-red-300' : 'bg-white/20 border-white/30 text-white'
-            }`}>
-              {muted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${muted ? 'text-red-400' : 'text-white'}`}>
+              {muted ? <VolumeX className="w-6 h-6 drop-shadow-lg" /> : <Volume2 className="w-6 h-6 drop-shadow-lg" />}
             </div>
-            <span className="text-white text-xs font-bold">{muted ? 'صوت' : 'كتم'}</span>
+            <span className="text-white text-xs font-bold drop-shadow">{muted ? 'صوت' : 'كتم'}</span>
           </button>
         )}
 
@@ -586,7 +721,7 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
         {isOwner && (
           <>
             <button
-              onClick={onEdit}
+              onClick={(e) => { e.stopPropagation(); onEdit?.(); }}
               className="flex flex-col items-center gap-1"
               data-testid={`btn-edit-reel-feed-${reel.id}`}
             >
@@ -597,7 +732,7 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
             </button>
 
             <button
-              onClick={() => { if (confirm("هل تريد حذف هذا الريل؟")) onDelete?.(); }}
+              onClick={(e) => { e.stopPropagation(); if (confirm("هل تريد حذف هذا الريل؟")) onDelete?.(); }}
               className="flex flex-col items-center gap-1"
               data-testid={`btn-delete-reel-feed-${reel.id}`}
             >
@@ -1219,6 +1354,7 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
 export default function Reels() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [editingReel, setEditingReel] = useState<Reel | null>(null);
+  const [activeTab, setActiveTab] = useState<'foryou' | 'following'>('foryou');
   // Global muted state — remembered across reels and across sessions
   const [globalMuted, setGlobalMuted] = useState(() => {
     return localStorage.getItem("reels_unmuted") !== "1";
@@ -1228,10 +1364,19 @@ export default function Reels() {
   const { toast } = useToast();
   const { user } = useAuth();
   const [, setLocation] = useLocation();
-  const { data: reels = [], isLoading } = useQuery<Reel[]>({
+
+  const { data: reelsForyou = [], isLoading: loadingForyou } = useQuery<Reel[]>({
     queryKey: ['/api/reels'],
     queryFn: () => fetch('/api/reels', { credentials: 'include' }).then(r => r.json()),
   });
+  const { data: reelsFollowing = [], isLoading: loadingFollowing } = useQuery<Reel[]>({
+    queryKey: ['/api/reels', 'following'],
+    queryFn: () => fetch('/api/reels?feed=following', { credentials: 'include' }).then(r => r.json()),
+    enabled: activeTab === 'following' && !!user,
+  });
+
+  const reels = activeTab === 'following' ? reelsFollowing : reelsForyou;
+  const isLoading = activeTab === 'following' ? loadingFollowing : loadingForyou;
 
   const deleteReelMut = useMutation({
     mutationFn: (id: number) => fetch(`/api/reels/${id}`, { method: 'DELETE', credentials: 'include' }),
@@ -1279,15 +1424,39 @@ export default function Reels() {
 
   return (
     <div className="h-screen bg-black overflow-hidden relative">
-      {/* زرار الرجوع */}
-      <button
-        onClick={() => setLocation('/ads')}
-        className="absolute top-4 right-4 z-50 flex items-center gap-1.5 bg-black/60 backdrop-blur border border-white/20 text-white text-sm font-bold px-3 py-2 rounded-full hover:bg-black/80 transition-all"
-        data-testid="btn-back-to-ads"
-      >
-        <ArrowRight className="w-4 h-4" />
-        رجوع
-      </button>
+
+      {/* TikTok Top Bar — Tabs + Back */}
+      <div className="absolute top-0 left-0 right-0 z-50 flex items-center justify-center pt-3 pb-2 px-4" style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%)' }}>
+        {/* Back button */}
+        <button
+          onClick={() => setLocation('/ads')}
+          className="absolute right-4 top-3 text-white/70 hover:text-white transition"
+          data-testid="btn-back-to-ads"
+        >
+          <ArrowRight className="w-6 h-6" />
+        </button>
+
+        {/* TikTok-style tabs */}
+        <div className="flex items-center gap-6">
+          <button
+            onClick={() => { setActiveTab('following'); setActiveIndex(0); containerRef.current?.scrollTo({ top: 0 }); }}
+            className={`text-base font-bold transition-all ${activeTab === 'following' ? 'text-white' : 'text-white/50'}`}
+            data-testid="tab-following"
+          >
+            متابَعون
+            {activeTab === 'following' && <div className="mt-0.5 h-0.5 w-full bg-white rounded-full" />}
+          </button>
+          <button
+            onClick={() => { setActiveTab('foryou'); setActiveIndex(0); containerRef.current?.scrollTo({ top: 0 }); }}
+            className={`text-base font-bold transition-all ${activeTab === 'foryou' ? 'text-white' : 'text-white/50'}`}
+            data-testid="tab-foryou"
+          >
+            لك
+            {activeTab === 'foryou' && <div className="mt-0.5 h-0.5 w-full bg-white rounded-full" />}
+          </button>
+        </div>
+
+      </div>
 
       <div
         ref={containerRef}
@@ -1311,17 +1480,26 @@ export default function Reels() {
             }}
           />
         ))}
+
+        {/* Following tab empty state */}
+        {activeTab === 'following' && reels.length === 0 && !isLoading && (
+          <div className="h-screen flex flex-col items-center justify-center text-white gap-4">
+            <div className="text-6xl">👥</div>
+            <h2 className="text-xl font-bold">لا توجد ريلز من المتابَعين</h2>
+            <p className="text-white/60 text-center px-8 text-sm">تابع قنوات لترى ريلزهم هنا</p>
+          </div>
+        )}
       </div>
 
       {/* Navigation hints */}
       {activeIndex > 0 && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 text-white/40 animate-bounce">
-          <ChevronUp className="w-6 h-6" />
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 text-white/40 animate-bounce">
+          <ChevronUp className="w-5 h-5" />
         </div>
       )}
       {activeIndex < reels.length - 1 && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/40 animate-bounce">
-          <ChevronDown className="w-6 h-6" />
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 text-white/40 animate-bounce">
+          <ChevronDown className="w-5 h-5" />
         </div>
       )}
 

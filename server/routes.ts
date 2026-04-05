@@ -1512,17 +1512,52 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.get("/api/reels", async (req: any, res) => {
     const myReels = req.query.mine === 'true';
     const filterUserId = req.query.userId as string | undefined;
+    const feed = req.query.feed as string | undefined;
     const authUserId = req.user?.claims?.sub;
+
+    const enrichReels = async (rows: any[]) => {
+      if (!rows.length) return rows;
+      const getChannelId = (r: any) => r.channelId ?? r.channel_id ?? null;
+      const channelIds = [...new Set(rows.map(getChannelId).filter(Boolean))];
+      let channelMap: Record<number, { name: string; avatarUrl: string | null }> = {};
+      if (channelIds.length) {
+        const chRows = await db.execute(sql`SELECT id, name, avatar_url FROM channels WHERE id = ANY(${channelIds})`);
+        for (const ch of chRows.rows as any[]) {
+          channelMap[ch.id] = { name: ch.name, avatarUrl: ch.avatar_url };
+        }
+      }
+      return rows.map(r => {
+        const cid = getChannelId(r);
+        return {
+          id: r.id, userId: r.userId ?? r.user_id, channelId: cid,
+          title: r.title, description: r.description, videoUrl: r.videoUrl ?? r.video_url,
+          audioUrl: r.audioUrl ?? r.audio_url, thumbnailUrl: r.thumbnailUrl ?? r.thumbnail_url,
+          duration: r.duration, viewsCount: r.viewsCount ?? r.views_count ?? 0,
+          likesCount: r.likesCount ?? r.likes_count ?? 0, commentsCount: r.commentsCount ?? r.comments_count ?? 0,
+          status: r.status, createdAt: r.createdAt ?? r.created_at,
+          channelName: cid && channelMap[cid] ? channelMap[cid].name : null,
+          channelAvatar: cid && channelMap[cid] ? channelMap[cid].avatarUrl : null,
+        };
+      });
+    };
+
+    if (feed === 'following' && authUserId) {
+      const followedChannelRows = await db.execute(sql`SELECT channel_id FROM follows WHERE follower_id = ${authUserId}`);
+      const channelIds = (followedChannelRows.rows as any[]).map(r => r.channel_id);
+      if (!channelIds.length) return res.json([]);
+      const rows = await db.execute(sql`SELECT * FROM reels WHERE status = 'active' AND channel_id = ANY(${channelIds}) ORDER BY created_at DESC LIMIT 50`);
+      return res.json(await enrichReels(rows.rows));
+    }
     if (myReels && authUserId) {
       const reels = await storage.getReels(authUserId);
-      return res.json(reels);
+      return res.json(await enrichReels(reels));
     }
     if (filterUserId) {
       const reels = await storage.getReels(filterUserId);
-      return res.json(reels);
+      return res.json(await enrichReels(reels));
     }
     const reels = await storage.getReels();
-    res.json(reels);
+    res.json(await enrichReels(reels));
   });
 
   app.get("/api/reels/mine", isAuthenticated, async (req: any, res) => {
