@@ -1376,7 +1376,7 @@ export default function LiveStream() {
                 </div>
               )}
               {idx < streams.length - 1 && (
-                <div className={`absolute bottom-28 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1 transition-opacity duration-300 pointer-events-none ${showUI ? "opacity-60" : "opacity-0"}`}>
+                <div className={`absolute bottom-[90px] left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1 transition-opacity duration-300 pointer-events-none ${showUI ? "opacity-60" : "opacity-0"}`}>
                   <span className="text-white/70 text-[10px] font-medium">سوايب للأعلى</span>
                   <ChevronDown className="w-6 h-6 text-white drop-shadow animate-bounce" />
                 </div>
@@ -1644,7 +1644,7 @@ export default function LiveStream() {
                     });
                   }
                 }}
-                className="absolute bottom-20 start-4 w-10 h-10 rounded-full bg-black/60 backdrop-blur flex items-center justify-center text-white hover:bg-black/80 transition shadow-lg"
+                className="absolute bottom-[84px] start-4 w-10 h-10 rounded-full bg-black/60 backdrop-blur flex items-center justify-center text-white hover:bg-black/80 transition shadow-lg"
                 data-testid="btn-toggle-viewer-audio"
                 title="كتم / تشغيل الصوت"
               >
@@ -1680,23 +1680,23 @@ export default function LiveStream() {
 
             {/* ── TikTok Floating Hearts ── */}
             {floatingHearts.map(h => (
-              <div key={h.id} className="absolute bottom-20 pointer-events-none select-none text-2xl"
-                style={{ left: `${h.x}%`, animation: "floatUp 3s ease-out forwards" }}>
+              <div key={h.id} className="absolute pointer-events-none select-none text-2xl"
+                style={{ left: `${h.x}%`, bottom: isBroadcast && streaming ? "220px" : "90px", animation: "floatUp 3s ease-out forwards" }}>
                 ❤️
               </div>
             ))}
 
             {/* ── TikTok Floating Gifts ── */}
             {floatingGifts.map(g => (
-              <div key={g.id} className="absolute bottom-24 pointer-events-none select-none text-3xl"
-                style={{ left: `${g.x}%`, animation: "floatUp 3.5s ease-out forwards", filter: "drop-shadow(0 0 8px gold)" }}>
+              <div key={g.id} className="absolute pointer-events-none select-none text-3xl"
+                style={{ left: `${g.x}%`, bottom: isBroadcast && streaming ? "240px" : "110px", animation: "floatUp 3.5s ease-out forwards", filter: "drop-shadow(0 0 8px gold)" }}>
                 {g.emoji}
               </div>
             ))}
 
             {/* ── Recent Gift Banner (bottom-left) ── */}
             {recentGiftBanner && (
-              <div className="absolute bottom-16 start-4 flex items-center gap-2 bg-black/70 backdrop-blur rounded-full px-4 py-2 border border-yellow-500/40 text-white text-sm font-bold"
+              <div className={`absolute ${isBroadcast && streaming ? "bottom-[248px]" : "bottom-[88px]"} start-4 flex items-center gap-2 bg-black/70 backdrop-blur rounded-full px-4 py-2 border border-yellow-500/40 text-white text-sm font-bold`}
                 style={{ animation: "slideInLeft 0.4s ease-out" }}>
                 <span className="text-2xl">{recentGiftBanner.giftEmoji}</span>
                 <span>{recentGiftBanner.userName}</span>
@@ -1716,7 +1716,7 @@ export default function LiveStream() {
 
             {/* ── Filter Panel (slides up when showFilterPanel = true) ── */}
             {isBroadcast && streaming && showFilterPanel && (
-              <div className="absolute bottom-36 start-0 end-0 z-40 px-3 pb-2">
+              <div className="absolute bottom-[168px] start-0 end-0 z-40 px-3 pb-2">
                 <div className="bg-black/85 backdrop-blur-md rounded-2xl p-3 border border-white/10">
                   <div className="flex items-center justify-between mb-2.5 px-1">
                     <p className="text-white text-xs font-bold flex items-center gap-1.5">
@@ -1772,7 +1772,7 @@ export default function LiveStream() {
 
             {/* Broadcaster controls */}
             {isBroadcast && streaming && (
-              <div className="absolute bottom-16 start-0 end-0 bg-gradient-to-t from-black/60 to-transparent px-5 pb-3 pt-6 z-30">
+              <div className="absolute bottom-[80px] start-0 end-0 bg-gradient-to-t from-black/60 to-transparent px-5 pb-3 pt-6 z-30">
                 <div className="flex items-center justify-center gap-3 flex-wrap">
                   {/* Mute */}
                   <button
@@ -2092,7 +2092,7 @@ export default function LiveStream() {
 
           {/* ── TikTok Broadcaster Profile Card ── */}
           {stream && !isBroadcast && (
-            <div className={`absolute bottom-[260px] start-3 z-20 flex items-center gap-2 transition-opacity duration-300 ${showUI ? "opacity-100" : "opacity-0 pointer-events-none"}`} dir="rtl">
+            <div className={`absolute bottom-[180px] start-3 z-20 flex items-center gap-2 transition-opacity duration-300 ${showUI ? "opacity-100" : "opacity-0 pointer-events-none"}`} dir="rtl">
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center flex-shrink-0 ring-2 ring-white/30">
                 <UserCircle2 className="w-6 h-6 text-white" />
               </div>
@@ -2104,7 +2104,7 @@ export default function LiveStream() {
           )}
 
           {/* ── TikTok Floating Chat Messages ── */}
-          <div className="absolute bottom-[72px] start-0 w-[58%] px-3 z-20 max-h-52 overflow-hidden flex flex-col-reverse gap-1 pointer-events-none">
+          <div className={`absolute start-0 w-[58%] px-3 z-20 max-h-52 overflow-hidden flex flex-col-reverse gap-1 pointer-events-none ${isBroadcast && streaming ? "bottom-[168px]" : "bottom-[72px]"}`}>
             {/* Pinned comment */}
             {pinnedComment && (
               <div className="flex items-start gap-1.5 bg-yellow-500/20 backdrop-blur rounded-xl px-2.5 py-1.5 mb-1 pointer-events-auto">
