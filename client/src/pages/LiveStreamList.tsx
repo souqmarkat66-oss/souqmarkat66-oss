@@ -163,10 +163,10 @@ export default function LiveStreamList() {
       {/* Hero header */}
       <div className="bg-gradient-to-br from-red-600 via-red-500 to-orange-500 text-white px-4 py-8">
         <div className="container max-w-5xl mx-auto">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
               <div className="flex items-center gap-2 mb-1">
-                <Radio className="w-5 h-5 animate-pulse" />
+                <Radio className="w-5 h-5 animate-pulse flex-shrink-0" />
                 <h1 className="text-xl font-bold">البث المباشر</h1>
               </div>
               <p className="text-red-100 text-sm">شاهد البثوث المباشرة وتفاعل مع المذيعين</p>
@@ -174,7 +174,7 @@ export default function LiveStreamList() {
             {user && (
               <Button
                 onClick={() => setLocation("/stream/start")}
-                className="bg-white text-red-600 hover:bg-red-50 font-bold gap-2 shadow-lg"
+                className="bg-white text-red-600 hover:bg-red-50 font-bold gap-2 shadow-lg flex-shrink-0"
                 data-testid="btn-start-stream"
               >
                 <Plus className="w-4 h-4" />

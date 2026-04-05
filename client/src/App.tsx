@@ -37,6 +37,7 @@ import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import { GlobalAssistant } from "@/components/GlobalAssistant";
 import { PushSetup } from "@/components/PushSetup";
 import { InterestOnboarding } from "@/components/InterestOnboarding";
+import BottomNav from "@/components/BottomNav";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -68,7 +69,7 @@ function Router() {
           <GlobalAssistant />
           <PushSetup />
           <InterestOnboarding />
-          <main className="flex-1 bg-background">
+          <main className="flex-1 bg-background pb-16 lg:pb-0">
             <Switch>
               <Route path="/" component={Home} />
               <Route path="/ads" component={Ads} />
@@ -125,6 +126,7 @@ function Router() {
             </Switch>
           </main>
           <AppFooter />
+          <BottomNav />
         </div>
       </Route>
     </Switch>
@@ -150,7 +152,7 @@ function AppFooter() {
   const platformName  = g("platform_name",  "شبكة سوق للإعلانات");
 
   return (
-    <footer className="border-t py-10 bg-muted/20">
+    <footer className="border-t py-10 bg-muted/20 pb-10 lg:pb-10">
       <div className="container px-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
           {/* App Download */}

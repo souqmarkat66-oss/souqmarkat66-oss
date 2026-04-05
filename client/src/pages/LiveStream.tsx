@@ -771,7 +771,7 @@ export default function LiveStream() {
       </div>
 
       {/* CHAT INPUT BAR */}
-      <div className="flex-shrink-0 bg-zinc-900/95 border-t border-white/10 safe-bottom">
+      <div className="flex-shrink-0 bg-zinc-900/95 border-t border-white/10 pb-safe">
         {user ? (
           <div className="flex items-center gap-2 px-3 py-2">
             <Input
