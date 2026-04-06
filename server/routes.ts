@@ -1767,6 +1767,110 @@ Sitemap: ${BASE}/sitemap-pages.xml
     res.json({ ...campaign, ctr, cpmEGP, cpcEGP });
   });
 
+  // ─── MY PERSONAL ANALYTICS ───────────────────────────────────
+  app.get("/api/my/analytics", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const [campaignStats, dailyCampaign, channelStats, dailyChannel] = await Promise.all([
+        pool.query(`
+          SELECT
+            COUNT(*) as total_campaigns,
+            COALESCE(SUM(impressions), 0) as total_impressions,
+            COALESCE(SUM(clicks), 0) as total_clicks,
+            COALESCE(SUM(spent_egp), 0) as total_spent,
+            COALESCE(SUM(budget_egp), 0) as total_budget,
+            COALESCE(SUM(CASE WHEN created_at >= NOW() - INTERVAL '7 days' THEN impressions ELSE 0 END), 0) as imp_7d,
+            COALESCE(SUM(CASE WHEN created_at >= NOW() - INTERVAL '14 days' AND created_at < NOW() - INTERVAL '7 days' THEN impressions ELSE 0 END), 0) as imp_prev_7d,
+            COALESCE(SUM(CASE WHEN created_at >= NOW() - INTERVAL '7 days' THEN clicks ELSE 0 END), 0) as clicks_7d,
+            COALESCE(SUM(CASE WHEN created_at >= NOW() - INTERVAL '14 days' AND created_at < NOW() - INTERVAL '7 days' THEN clicks ELSE 0 END), 0) as clicks_prev_7d,
+            COALESCE(SUM(CASE WHEN created_at >= NOW() - INTERVAL '7 days' THEN spent_egp ELSE 0 END), 0) as spent_7d,
+            COALESCE(SUM(CASE WHEN created_at >= NOW() - INTERVAL '14 days' AND created_at < NOW() - INTERVAL '7 days' THEN spent_egp ELSE 0 END), 0) as spent_prev_7d
+          FROM ad_campaigns WHERE advertiser_id = $1
+        `, [userId]),
+        pool.query(`
+          SELECT TO_CHAR(ai.created_at, 'YYYY-MM-DD') as day,
+            COUNT(*) FILTER (WHERE ai.event_type = 'impression' AND ai.is_fraud = false) as impressions,
+            COUNT(*) FILTER (WHERE ai.event_type = 'click' AND ai.is_fraud = false) as clicks,
+            COALESCE(SUM(rt.amount_egp), 0) as spent
+          FROM ad_campaigns ac
+          LEFT JOIN ad_impressions ai ON ai.campaign_id = ac.id AND ai.created_at >= NOW() - INTERVAL '14 days'
+          LEFT JOIN revenue_transactions rt ON rt.campaign_id = ac.id AND rt.type = 'spending' AND rt.created_at >= NOW() - INTERVAL '14 days'
+          WHERE ac.advertiser_id = $1 AND ai.id IS NOT NULL
+          GROUP BY day ORDER BY day
+        `, [userId]),
+        pool.query(`
+          SELECT c.id, c.name,
+            COALESCE(c.earnings_egp, 0) as total_earnings,
+            c.subscriber_count,
+            COALESCE(SUM(rt.amount_egp) FILTER (WHERE rt.created_at >= NOW() - INTERVAL '7 days'), 0) as earnings_7d,
+            COALESCE(SUM(rt.amount_egp) FILTER (WHERE rt.created_at >= NOW() - INTERVAL '14 days' AND rt.created_at < NOW() - INTERVAL '7 days'), 0) as earnings_prev_7d,
+            COUNT(ai.id) FILTER (WHERE ai.event_type = 'impression' AND ai.is_fraud = false AND ai.created_at >= NOW() - INTERVAL '7 days') as imp_7d,
+            COUNT(ai.id) FILTER (WHERE ai.event_type = 'click' AND ai.is_fraud = false AND ai.created_at >= NOW() - INTERVAL '7 days') as clicks_7d
+          FROM channels c
+          LEFT JOIN revenue_transactions rt ON rt.channel_id = c.id AND rt.type = 'earning'
+          LEFT JOIN ad_impressions ai ON ai.channel_id = c.id
+          WHERE c.user_id = $1
+          GROUP BY c.id, c.name, c.earnings_egp, c.subscriber_count
+        `, [userId]),
+        pool.query(`
+          SELECT TO_CHAR(rt.created_at, 'YYYY-MM-DD') as day,
+            COALESCE(SUM(rt.amount_egp), 0) as earnings,
+            COUNT(ai.id) FILTER (WHERE ai.event_type = 'impression' AND ai.is_fraud = false) as impressions,
+            COUNT(ai.id) FILTER (WHERE ai.event_type = 'click' AND ai.is_fraud = false) as clicks
+          FROM channels c
+          LEFT JOIN revenue_transactions rt ON rt.channel_id = c.id AND rt.type = 'earning' AND rt.created_at >= NOW() - INTERVAL '14 days'
+          LEFT JOIN ad_impressions ai ON ai.channel_id = c.id AND ai.created_at >= NOW() - INTERVAL '14 days'
+          WHERE c.user_id = $1 AND rt.id IS NOT NULL
+          GROUP BY day ORDER BY day
+        `, [userId]),
+      ]);
+
+      const cs = campaignStats.rows[0] || {};
+      const channels = channelStats.rows || [];
+      const totalEarnings7d = channels.reduce((s: number, c: any) => s + parseFloat(c.earnings_7d || 0), 0);
+      const totalEarningsPrev7d = channels.reduce((s: number, c: any) => s + parseFloat(c.earnings_prev_7d || 0), 0);
+      const totalImp7d = channels.reduce((s: number, c: any) => s + parseInt(c.imp_7d || 0), 0);
+      const totalClicks7d = channels.reduce((s: number, c: any) => s + parseInt(c.clicks_7d || 0), 0);
+
+      res.json({
+        advertiser: {
+          totalCampaigns: parseInt(cs.total_campaigns) || 0,
+          totalImpressions: parseInt(cs.total_impressions) || 0,
+          totalClicks: parseInt(cs.total_clicks) || 0,
+          totalSpent: parseFloat(cs.total_spent) || 0,
+          totalBudget: parseFloat(cs.total_budget) || 0,
+          imp7d: parseInt(cs.imp_7d) || 0,
+          impPrev7d: parseInt(cs.imp_prev_7d) || 0,
+          clicks7d: parseInt(cs.clicks_7d) || 0,
+          clicksPrev7d: parseInt(cs.clicks_prev_7d) || 0,
+          spent7d: parseFloat(cs.spent_7d) || 0,
+          spentPrev7d: parseFloat(cs.spent_prev_7d) || 0,
+          dailyChart: dailyCampaign.rows.map((r: any) => ({
+            day: r.day, dayLabel: (r.day || '').slice(5),
+            impressions: parseInt(r.impressions) || 0,
+            clicks: parseInt(r.clicks) || 0,
+            spent: parseFloat(r.spent) || 0,
+          })),
+        },
+        publisher: {
+          channels,
+          totalEarnings7d,
+          totalEarningsPrev7d,
+          totalImp7d,
+          totalClicks7d,
+          dailyChart: dailyChannel.rows.map((r: any) => ({
+            day: r.day, dayLabel: (r.day || '').slice(5),
+            earnings: parseFloat(r.earnings) || 0,
+            impressions: parseInt(r.impressions) || 0,
+            clicks: parseInt(r.clicks) || 0,
+          })),
+        },
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   // ─── AI FRAUD DETECTION ──────────────────────────────────────
   const BOT_AGENTS = ['bot','spider','crawl','scraper','headless','phantom','selenium','puppeteer','curl','wget','python-requests'];
 
