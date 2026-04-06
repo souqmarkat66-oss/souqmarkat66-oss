@@ -4223,15 +4223,16 @@ ${reelTags}
       const userId = req.user.claims.sub;
       const { packageId, packageLabel, amountEGP, title, description, fileUrls, paymentRef, paymentMethod, paymentScreenshotUrl } = req.body;
       if (!packageId || !title) return res.status(400).json({ message: "بيانات ناقصة" });
-      const user = await storage.getUser(userId);
-      const userName = `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || "مستخدم";
+      const userRow = await pool.query(`SELECT first_name, last_name FROM users WHERE id = $1`, [userId]);
+      const u = userRow.rows[0];
+      const userName = u ? `${u.first_name || ""} ${u.last_name || ""}`.trim() || "مستخدم" : "مستخدم";
       const result = await db.execute(sql`
         INSERT INTO consultations (user_id, user_name, package_id, package_label, amount_egp, title, description, file_urls, payment_ref, payment_method, payment_screenshot_url)
         VALUES (${userId}, ${userName}, ${packageId}, ${packageLabel || packageId}, ${amountEGP || 0}, ${title}, ${description || null}, ${fileUrls ? JSON.stringify(fileUrls) : null}, ${paymentRef || null}, ${paymentMethod || null}, ${paymentScreenshotUrl || null})
         RETURNING *
       `);
       // Notify admin
-      await createNotification(userId, "payment", `📋 استشارة جديدة من ${userName}: ${title}`, undefined, `/consultations`);
+      await createNotification(userId, "payment", `📋 استشارة جديدة من ${userName}: ${title}`, `طلب استشارة: ${title}`, `/consultations`);
       res.status(201).json(result.rows[0]);
     } catch (e: any) { res.status(400).json({ message: e.message }); }
   });
@@ -4247,7 +4248,8 @@ ${reelTags}
       if (result.rows[0]) {
         await createNotification((result.rows[0] as any).user_id, "payment",
           status === "approved" ? "✅ تمت الموافقة على استشارتك" : status === "rejected" ? "❌ تم رفض استشارتك" : "🔄 تم تحديث استشارتك",
-          undefined, `/consultations`
+          status === "approved" ? "يمكنك الاطلاع على رد الاستشارة" : status === "rejected" ? "للمزيد راسل الدعم" : "تم تحديث حالة الاستشارة",
+          `/consultations`
         );
       }
       res.json(result.rows[0]);

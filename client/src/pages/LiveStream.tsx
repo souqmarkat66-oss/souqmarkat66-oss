@@ -66,6 +66,10 @@ export default function LiveStream() {
   const [currentAdIdx,    setCurrentAdIdx]    = useState(0);
   const [adVisible,       setAdVisible]       = useState(false);
 
+  // Video swap state (tap PiP to swap with main screen)
+  const [swappedCohostId, setSwappedCohostId] = useState<string>(""); // broadcaster: which cohost is full-screen
+  const [selfCamSwapped,  setSelfCamSwapped]  = useState(false);       // viewer: own cam is full-screen
+
   // Share & Gift state
   const [showShare,       setShowShare]       = useState(false);
   const [showGiftPanel,   setShowGiftPanel]   = useState(false);
@@ -449,13 +453,19 @@ export default function LiveStream() {
   /* ─── In-stream ads ─────────────────────────────────── */
   useEffect(() => {
     if (!streaming) return;
-    // Fetch a pool of active ads
-    fetch("/api/ads?limit=20&status=active", { credentials: "include" })
+    // Fetch a pool of active ads — boosted/promo first
+    fetch("/api/ads?limit=40&status=active", { credentials: "include" })
       .then(r => r.json())
       .then(data => {
         const ads = Array.isArray(data) ? data : (data.ads || []);
         const imageAds = ads.filter((a: any) => a.media_type === "image" || !a.media_type);
-        if (imageAds.length > 0) setStreamAds(imageAds);
+        // Sort: boosted & promo ads appear first, then regular
+        const sorted = [...imageAds].sort((a: any, b: any) => {
+          const aScore = (a.is_boosted ? 2 : 0) + (a.is_admin_promo ? 1 : 0);
+          const bScore = (b.is_boosted ? 2 : 0) + (b.is_admin_promo ? 1 : 0);
+          return bScore - aScore;
+        });
+        if (sorted.length > 0) setStreamAds(sorted);
       })
       .catch(() => {});
   }, [streaming]);
@@ -1096,24 +1106,45 @@ export default function LiveStream() {
 
         {/* CO-HOST PiP — viewer's own camera (shown once camera opens) */}
         {!isBroadcast && (coHostStatus === "requesting" || coHostStatus === "accepted") && (
-          <div className="absolute bottom-20 start-3 z-20">
+          <>
+            {/* Own cam — full screen when swapped, PiP when not */}
             <video
               ref={coHostSelfVideo}
               autoPlay playsInline muted
-              className="w-28 h-40 rounded-2xl object-cover border-2 border-purple-500 shadow-xl"
+              onClick={() => setSelfCamSwapped(s => !s)}
               data-testid="video-cohost-self"
+              className={
+                selfCamSwapped
+                  ? "absolute inset-0 w-full h-full object-cover z-10 cursor-pointer"
+                  : "absolute bottom-20 start-3 z-20 w-28 h-40 rounded-2xl object-cover border-2 border-purple-500 shadow-xl cursor-pointer"
+              }
+              style={selfCamSwapped ? { transform: "scaleX(-1)" } : { transform: "scaleX(-1)" }}
             />
-            {coHostStatus === "requesting" && (
-              <div className="absolute inset-0 flex items-end justify-center pb-1">
-                <span className="text-[10px] text-white bg-yellow-500 rounded-full px-1.5 py-0.5 font-bold">انتظار...</span>
+            {/* Swap hint badge */}
+            {!selfCamSwapped && coHostStatus === "accepted" && (
+              <div className="absolute bottom-20 start-3 z-30 pointer-events-none"
+                   style={{ bottom: "calc(5rem + 160px)", left: "0.75rem" }}>
               </div>
             )}
-            {coHostStatus === "accepted" && (
-              <div className="absolute inset-0 flex items-end justify-center pb-1">
-                <span className="text-[10px] text-white bg-red-600 rounded-full px-1.5 py-0.5 font-bold animate-pulse">LIVE</span>
+            {/* Status badge on PiP */}
+            {!selfCamSwapped && (
+              <div className="absolute bottom-20 start-3 z-30 pointer-events-none flex items-end justify-center pb-1"
+                   style={{ width: 112, height: 160 }}>
+                {coHostStatus === "requesting" && (
+                  <span className="text-[10px] text-white bg-yellow-500 rounded-full px-1.5 py-0.5 font-bold mb-1">انتظار...</span>
+                )}
+                {coHostStatus === "accepted" && (
+                  <span className="text-[10px] text-white bg-red-600 rounded-full px-1.5 py-0.5 font-bold animate-pulse mb-1">LIVE</span>
+                )}
               </div>
             )}
-          </div>
+            {/* When swapped: show swap back hint */}
+            {selfCamSwapped && (
+              <div className="absolute top-4 start-4 z-30 pointer-events-none">
+                <span className="text-[10px] text-white bg-black/60 rounded-full px-2 py-1">اضغط للمبادلة</span>
+              </div>
+            )}
+          </>
         )}
 
         {/* CO-HOST REQUESTS PANEL (broadcaster) */}
@@ -1147,36 +1178,87 @@ export default function LiveStream() {
           </div>
         )}
 
-        {/* CO-HOST PiP Grid — broadcaster sees all guests */}
+        {/* CO-HOST PiP Grid — broadcaster sees all guests; tap to swap with main screen */}
         {isBroadcast && activeCoHosts.length > 0 && (
-          <div className="absolute bottom-36 start-3 z-20 flex flex-col gap-2">
-            {activeCoHosts.map((ch, idx) => (
-              <div key={ch.socketId} className="relative">
+          <>
+            {/* Own cam small PiP shown only when a co-host is swapped to full screen */}
+            {swappedCohostId && (
+              <div
+                className="absolute bottom-36 end-3 z-30 w-24 h-36 rounded-xl overflow-hidden border-2 border-white/60 shadow-xl cursor-pointer"
+                onClick={() => setSwappedCohostId("")}
+                data-testid="video-broadcaster-self-pip"
+              >
                 <video
-                  autoPlay playsInline
+                  autoPlay playsInline muted
                   ref={el => {
-                    if (el) {
-                      coHostVideoRefs.current.set(ch.socketId, el);
-                      const ms = coHostStreams.current.get(ch.socketId);
-                      if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(() => {}); }
+                    if (el && localStream.current && !el.srcObject) {
+                      el.srcObject = localStream.current;
+                      el.play().catch(() => {});
                     }
                   }}
-                  className="w-24 h-36 rounded-xl object-cover border-2 border-purple-500 shadow-xl"
-                  data-testid={`video-cohost-${idx}`}
+                  className="w-full h-full object-cover"
+                  style={{ transform: camFacing === "user" ? "scaleX(-1)" : "none" }}
                 />
-                <div className="absolute top-1 inset-x-0 flex items-center justify-center">
-                  <span className="text-[9px] text-white bg-purple-600 rounded-full px-1 py-0.5 font-bold truncate max-w-[80px]">{ch.name}</span>
+                <div className="absolute bottom-1 inset-x-0 flex justify-center">
+                  <span className="text-[9px] text-white bg-black/60 rounded-full px-1.5 py-0.5 font-bold">أنت</span>
                 </div>
-                <button
-                  onClick={() => endCoHostFromBroadcaster(ch.socketId)}
-                  className="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center shadow-lg"
-                  data-testid={`btn-end-cohost-${idx}`}
-                >
-                  <X className="w-2.5 h-2.5 text-white" />
-                </button>
               </div>
-            ))}
-          </div>
+            )}
+
+            {activeCoHosts.map((ch, idx) => {
+              const isSwapped = swappedCohostId === ch.socketId;
+              return (
+                <div
+                  key={ch.socketId}
+                  className={isSwapped
+                    ? "absolute inset-0 z-10"
+                    : "absolute z-20"
+                  }
+                  style={isSwapped ? {} : {
+                    bottom: `${9 + idx * 10}rem`,
+                    [document.documentElement.dir === "rtl" ? "left" : "right"]: "0.75rem",
+                  }}
+                >
+                  <video
+                    autoPlay playsInline
+                    ref={el => {
+                      if (el) {
+                        coHostVideoRefs.current.set(ch.socketId, el);
+                        const ms = coHostStreams.current.get(ch.socketId);
+                        if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(() => {}); }
+                      }
+                    }}
+                    onClick={() => setSwappedCohostId(isSwapped ? "" : ch.socketId)}
+                    className={isSwapped
+                      ? "w-full h-full object-cover cursor-pointer"
+                      : "w-24 h-36 rounded-xl object-cover border-2 border-purple-500 shadow-xl cursor-pointer"
+                    }
+                    data-testid={`video-cohost-${idx}`}
+                  />
+                  {/* Name badge */}
+                  <div className={`absolute ${isSwapped ? "top-4 start-4" : "top-1 inset-x-0"} flex items-center justify-center`}>
+                    <span className="text-[9px] text-white bg-purple-600 rounded-full px-1.5 py-0.5 font-bold truncate max-w-[100px]">{ch.name}</span>
+                  </div>
+                  {/* Swap hint when full screen */}
+                  {isSwapped && (
+                    <div className="absolute top-4 end-4">
+                      <span className="text-[10px] text-white bg-black/60 rounded-full px-2 py-1">اضغط للمبادلة</span>
+                    </div>
+                  )}
+                  {/* Remove button */}
+                  {!isSwapped && (
+                    <button
+                      onClick={e => { e.stopPropagation(); endCoHostFromBroadcaster(ch.socketId); }}
+                      className="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center shadow-lg"
+                      data-testid={`btn-end-cohost-${idx}`}
+                    >
+                      <X className="w-2.5 h-2.5 text-white" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </>
         )}
 
         {/* FLYING GIFT ANIMATIONS */}
