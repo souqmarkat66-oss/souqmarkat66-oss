@@ -699,7 +699,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
             COALESCE(c.subscriber_count, 0) * 3.0
             + COALESCE(c.views_count, 0) * 0.5
             + CASE WHEN EXISTS(
-                SELECT 1 FROM streams s WHERE s.channel_id = c.id AND s.status = 'live'
+                SELECT 1 FROM live_streams s WHERE s.channel_id = c.id AND s.status = 'live'
               ) THEN 200 ELSE 0 END
             + CASE WHEN c.is_verified THEN 20 ELSE 0 END
             + CASE WHEN c.is_monetized THEN 15 ELSE 0 END

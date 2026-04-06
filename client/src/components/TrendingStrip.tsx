@@ -192,7 +192,8 @@ export function TrendingChannelsStrip({ className = "" }: { className?: string }
     staleTime: 30_000,
   });
 
-  const liveIds = new Set<number>((streams || []).map((s: any) => s.channelId));
+  const safeStreams = Array.isArray(streams) ? streams : [];
+  const liveIds = new Set<number>(safeStreams.map((s: any) => s.channelId));
 
   if (isLoading) {
     return (
@@ -208,7 +209,8 @@ export function TrendingChannelsStrip({ className = "" }: { className?: string }
     );
   }
 
-  if (!channels || channels.length === 0) return null;
+  const safeChannels = Array.isArray(channels) ? channels : [];
+  if (safeChannels.length === 0) return null;
 
   return (
     <div className={`${className}`}>
@@ -229,7 +231,7 @@ export function TrendingChannelsStrip({ className = "" }: { className?: string }
         className="flex gap-3 overflow-x-auto pb-2"
         style={{ scrollbarWidth: "none" }}
       >
-        {channels.map((ch, i) => (
+        {safeChannels.map((ch, i) => (
           <ChannelTrendCard key={ch.id} ch={ch} rank={i + 1} index={i} liveIds={liveIds} />
         ))}
       </div>
