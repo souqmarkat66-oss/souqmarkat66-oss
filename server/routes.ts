@@ -655,6 +655,65 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // ================================================================
+  // TRENDING
+  // ================================================================
+
+  // GET /api/trending/ads — top trending ads (Hacker News-style score)
+  app.get("/api/trending/ads", async (req, res) => {
+    try {
+      const limit = Math.min(Number(req.query.limit) || 12, 30);
+      const rows = await pool.query(`
+        SELECT
+          id, title, description, media_url, media_type, price_egp,
+          views_count, likes_count, whatsapp_clicks, is_boosted, is_admin_promo,
+          created_at, status, user_id,
+          (
+            COALESCE(views_count, 0) * 1.0
+            + COALESCE(likes_count, 0) * 5.0
+            + COALESCE(whatsapp_clicks, 0) * 3.0
+            + CASE WHEN is_boosted THEN 50 ELSE 0 END
+            + CASE WHEN is_admin_promo THEN 30 ELSE 0 END
+          ) / POWER(
+            GREATEST(EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600.0, 0.5) + 2,
+            1.5
+          ) AS trending_score
+        FROM ads
+        WHERE status = 'active'
+        ORDER BY trending_score DESC
+        LIMIT $1
+      `, [limit]);
+      res.json(rows.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // GET /api/trending/channels — top trending channels
+  app.get("/api/trending/channels", async (req, res) => {
+    try {
+      const limit = Math.min(Number(req.query.limit) || 8, 20);
+      const rows = await pool.query(`
+        SELECT
+          c.id, c.name, c.description, c.avatar_url, c.banner_url,
+          c.subscriber_count, c.views_count, c.is_verified, c.is_monetized,
+          c.category, c.created_at,
+          (
+            COALESCE(c.subscriber_count, 0) * 3.0
+            + COALESCE(c.views_count, 0) * 0.5
+            + CASE WHEN EXISTS(
+                SELECT 1 FROM streams s WHERE s.channel_id = c.id AND s.status = 'live'
+              ) THEN 200 ELSE 0 END
+            + CASE WHEN c.is_verified THEN 20 ELSE 0 END
+            + CASE WHEN c.is_monetized THEN 15 ELSE 0 END
+          ) AS trending_score
+        FROM channels c
+        WHERE c.status = 'active'
+        ORDER BY trending_score DESC
+        LIMIT $1
+      `, [limit]);
+      res.json(rows.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ================================================================
   // SEARCH
   // ================================================================
   app.get("/api/ads/search", async (req, res) => {

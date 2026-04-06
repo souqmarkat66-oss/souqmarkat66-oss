@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "wouter";
 import { ArrowRight, Sparkles, Radio, Users, Megaphone, TrendingUp, BarChart2, Search } from "lucide-react";
+import { TrendingAdsStrip, TrendingChannelsStrip } from "@/components/TrendingStrip";
 import { Input } from "@/components/ui/input";
 import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
@@ -205,6 +206,14 @@ export default function Home() {
               </Link>
             </div>
           </motion.div>
+        </div>
+      </section>
+
+      {/* Trending Section */}
+      <section className="py-8 border-t border-border/30" dir="rtl">
+        <div className="container px-4 space-y-6">
+          <TrendingAdsStrip />
+          <TrendingChannelsStrip />
         </div>
       </section>
 

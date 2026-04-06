@@ -11,6 +11,7 @@ import {
   SlidersHorizontal, X, TrendingUp, Eye,
   Star, Wifi, ShieldCheck, DollarSign, ArrowUpDown,
 } from "lucide-react";
+import { TrendingChannelsStrip } from "@/components/TrendingStrip";
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Channel } from "@shared/schema";
@@ -118,6 +119,13 @@ export default function Channels() {
           </Link>
         </div>
       </motion.div>
+
+      {/* ── Trending Channels Strip (shown when no search/filter active) ── */}
+      {!search && !activeFilterCount && (
+        <div className="mb-6 p-4 bg-muted/30 rounded-2xl border border-border/30">
+          <TrendingChannelsStrip />
+        </div>
+      )}
 
       {/* ── Search + Filter Toggle Row ── */}
       <motion.div

@@ -6,6 +6,7 @@ import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
 import { PlusCircle, LayoutGrid, Video, Search, Megaphone, ExternalLink, Star, Globe, SlidersHorizontal, ChevronDown, ArrowUpDown, X } from "lucide-react";
+import { TrendingAdsStrip } from "@/components/TrendingStrip";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
@@ -410,6 +411,13 @@ export default function Ads() {
           ))}
         </div>
       </div>
+
+      {/* Trending Ads Strip */}
+      {!isSearching && (
+        <div className="mb-8 p-4 bg-muted/30 rounded-2xl border border-border/30">
+          <TrendingAdsStrip />
+        </div>
+      )}
 
       {/* Sponsored Ad */}
       {sponsoredAd && !isSearching && (
