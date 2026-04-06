@@ -1625,7 +1625,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const channelIds = [...new Set(rows.map(getChannelId).filter(Boolean))];
       let channelMap: Record<number, { name: string; avatarUrl: string | null }> = {};
       if (channelIds.length) {
-        const chRows = await db.execute(sql`SELECT id, name, avatar_url FROM channels WHERE id = ANY(${channelIds})`);
+        const chRows = await db.execute(sql`SELECT id, name, avatar_url FROM channels WHERE id = ANY(ARRAY[${sql.raw(channelIds.join(','))}])`);
         for (const ch of chRows.rows as any[]) {
           channelMap[ch.id] = { name: ch.name, avatarUrl: ch.avatar_url };
         }
@@ -1649,7 +1649,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const followedChannelRows = await db.execute(sql`SELECT channel_id FROM follows WHERE follower_id = ${authUserId}`);
       const channelIds = (followedChannelRows.rows as any[]).map(r => r.channel_id);
       if (!channelIds.length) return res.json([]);
-      const rows = await db.execute(sql`SELECT * FROM reels WHERE status = 'active' AND channel_id = ANY(${channelIds}) ORDER BY created_at DESC LIMIT 50`);
+      const rows = await db.execute(sql`SELECT * FROM reels WHERE status = 'active' AND channel_id = ANY(ARRAY[${sql.raw(channelIds.join(','))}]) ORDER BY created_at DESC LIMIT 50`);
       return res.json(await enrichReels(rows.rows));
     }
     if (myReels && authUserId) {
@@ -3450,7 +3450,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
     if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
     try {
       const keys = ['ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post','ai_free_credits','ai_price_per_credit_egp','ai_referral_bonus_egp'];
-      const rows = await db.execute(sql`SELECT key, value FROM platform_settings WHERE key = ANY(${keys})`);
+      const rows = await db.execute(sql`SELECT key, value FROM platform_settings WHERE key IN (${sql.join(keys.map(k => sql`${k}`), sql`, `)})`);
       const settings: Record<string,string> = {};
       for (const r of rows.rows) settings[r.key as string] = r.value as string;
       res.json(settings);
@@ -3510,7 +3510,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
         'ai_free_credits','ai_price_per_credit_egp','ai_referral_bonus_egp',
       ];
-      const rows = await db.execute(sql`SELECT key, value FROM platform_settings WHERE key = ANY(${keys})`);
+      const rows = await db.execute(sql`SELECT key, value FROM platform_settings WHERE key IN (${sql.join(keys.map(k => sql`${k}`), sql`, `)})`);
       const settings: Record<string, string> = {};
       for (const r of rows.rows as any[]) settings[r.key] = r.value;
       res.json(settings);

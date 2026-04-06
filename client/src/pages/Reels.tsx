@@ -1367,15 +1367,17 @@ export default function Reels() {
 
   const { data: reelsForyou = [], isLoading: loadingForyou } = useQuery<Reel[]>({
     queryKey: ['/api/reels'],
-    queryFn: () => fetch('/api/reels', { credentials: 'include' }).then(r => r.json()),
+    queryFn: () => fetch('/api/reels', { credentials: 'include' }).then(r => r.json()).then(d => Array.isArray(d) ? d : []),
   });
   const { data: reelsFollowing = [], isLoading: loadingFollowing } = useQuery<Reel[]>({
     queryKey: ['/api/reels', 'following'],
-    queryFn: () => fetch('/api/reels?feed=following', { credentials: 'include' }).then(r => r.json()),
+    queryFn: () => fetch('/api/reels?feed=following', { credentials: 'include' }).then(r => r.json()).then(d => Array.isArray(d) ? d : []),
     enabled: activeTab === 'following' && !!user,
   });
 
-  const reels = activeTab === 'following' ? reelsFollowing : reelsForyou;
+  const reels = Array.isArray(activeTab === 'following' ? reelsFollowing : reelsForyou)
+    ? (activeTab === 'following' ? reelsFollowing : reelsForyou)
+    : [];
   const isLoading = activeTab === 'following' ? loadingFollowing : loadingForyou;
 
   const deleteReelMut = useMutation({

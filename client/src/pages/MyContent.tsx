@@ -215,7 +215,7 @@ function AuthenticatedContent({ user }: { user: any }) {
 
   const { data: reels = [], isLoading: reelsLoading } = useQuery<any[]>({
     queryKey: ["/api/reels"],
-    queryFn: () => fetch("/api/reels").then(r => r.json()),
+    queryFn: () => fetch("/api/reels").then(r => r.json()).then(d => Array.isArray(d) ? d : []),
   });
 
   const { data: streams = [], isLoading: streamsLoading } = useQuery<any[]>({
