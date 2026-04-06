@@ -2546,6 +2546,95 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
+  app.get("/api/admin/analytics", isAuthenticated, requireAdmin, async (_req: any, res) => {
+    try {
+      const [revSummary, impSummary, dailyRev, dailyImp, topChannels, topCampaigns] = await Promise.all([
+        pool.query(`
+          SELECT
+            COALESCE(SUM(CASE WHEN created_at >= NOW() - INTERVAL '7 days' THEN amount_egp ELSE 0 END), 0) as rev_7d,
+            COALESCE(SUM(CASE WHEN created_at >= NOW() - INTERVAL '14 days' AND created_at < NOW() - INTERVAL '7 days' THEN amount_egp ELSE 0 END), 0) as rev_prev_7d
+          FROM revenue_transactions WHERE type = 'spending'
+        `),
+        pool.query(`
+          SELECT
+            COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'impression' AND is_fraud = false) as imp_7d,
+            COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '14 days' AND created_at < NOW() - INTERVAL '7 days' AND event_type = 'impression' AND is_fraud = false) as imp_prev_7d,
+            COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'click' AND is_fraud = false) as clicks_7d,
+            COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '14 days' AND created_at < NOW() - INTERVAL '7 days' AND event_type = 'click' AND is_fraud = false) as clicks_prev_7d
+          FROM ad_impressions
+        `),
+        pool.query(`
+          SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as day,
+            COALESCE(SUM(amount_egp), 0) as revenue
+          FROM revenue_transactions
+          WHERE created_at >= NOW() - INTERVAL '14 days' AND type = 'spending'
+          GROUP BY day ORDER BY day
+        `),
+        pool.query(`
+          SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as day,
+            COUNT(*) FILTER (WHERE event_type = 'impression' AND is_fraud = false) as impressions,
+            COUNT(*) FILTER (WHERE event_type = 'click' AND is_fraud = false) as clicks
+          FROM ad_impressions
+          WHERE created_at >= NOW() - INTERVAL '14 days'
+          GROUP BY day ORDER BY day
+        `),
+        pool.query(`
+          SELECT c.id, c.name, c.avatar_url,
+            COUNT(ai.id) FILTER (WHERE ai.event_type = 'impression' AND ai.is_fraud = false) as impressions,
+            COUNT(ai.id) FILTER (WHERE ai.event_type = 'click' AND ai.is_fraud = false) as clicks,
+            COALESCE(SUM(rt.amount_egp), 0) as earnings_egp
+          FROM channels c
+          LEFT JOIN ad_impressions ai ON ai.channel_id = c.id AND ai.created_at >= NOW() - INTERVAL '7 days'
+          LEFT JOIN revenue_transactions rt ON rt.channel_id = c.id AND rt.type = 'earning' AND rt.created_at >= NOW() - INTERVAL '7 days'
+          GROUP BY c.id, c.name, c.avatar_url
+          ORDER BY impressions DESC LIMIT 10
+        `),
+        pool.query(`
+          SELECT ac.id, ac.name, ac.status,
+            COALESCE(ac.impressions, 0) as impressions,
+            COALESCE(ac.clicks, 0) as clicks,
+            COALESCE(ac.spent_egp, 0) as spent_egp,
+            COALESCE(ac.budget_egp, 0) as budget_egp,
+            CASE WHEN COALESCE(ac.impressions,0) > 0 THEN ROUND((COALESCE(ac.clicks,0)::numeric / COALESCE(ac.impressions,1) * 100), 2) ELSE 0 END as ctr
+          FROM ad_campaigns ac
+          ORDER BY ac.impressions DESC NULLS LAST LIMIT 10
+        `)
+      ]);
+
+      const r = revSummary.rows[0];
+      const s = impSummary.rows[0];
+      const rev7d = parseFloat(r.rev_7d) || 0;
+      const revPrev7d = parseFloat(r.rev_prev_7d) || 0;
+      const imp7d = parseInt(s.imp_7d) || 0;
+      const impPrev7d = parseInt(s.imp_prev_7d) || 0;
+      const clicks7d = parseInt(s.clicks_7d) || 0;
+      const clicksPrev7d = parseInt(s.clicks_prev_7d) || 0;
+
+      const ctr7d = imp7d > 0 ? (clicks7d / imp7d) * 100 : 0;
+      const ctrPrev7d = impPrev7d > 0 ? (clicksPrev7d / impPrev7d) * 100 : 0;
+      const rpm7d = imp7d > 0 ? (rev7d / imp7d) * 1000 : 0;
+      const rpmPrev7d = impPrev7d > 0 ? (revPrev7d / impPrev7d) * 1000 : 0;
+
+      const chartMap: Record<string, any> = {};
+      dailyRev.rows.forEach((row: any) => {
+        chartMap[row.day] = { ...chartMap[row.day], day: row.day, revenue: parseFloat(row.revenue) || 0 };
+      });
+      dailyImp.rows.forEach((row: any) => {
+        chartMap[row.day] = { ...chartMap[row.day], day: row.day, impressions: parseInt(row.impressions) || 0, clicks: parseInt(row.clicks) || 0 };
+      });
+      const chartData = Object.values(chartMap).sort((a: any, b: any) => a.day.localeCompare(b.day));
+
+      res.json({
+        summary: { rev7d, revPrev7d, imp7d, impPrev7d, clicks7d, clicksPrev7d, ctr7d, ctrPrev7d, rpm7d, rpmPrev7d },
+        chartData,
+        topChannels: topChannels.rows,
+        topCampaigns: topCampaigns.rows,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   app.get("/api/admin/reels", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { reels } = await import("@shared/schema");
     const { desc } = await import("drizzle-orm");

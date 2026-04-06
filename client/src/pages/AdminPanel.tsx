@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+} from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -40,6 +43,7 @@ const NAV = [
   { key: "renewalorders",  label: "طلبات التجديد",           icon: RefreshCw,       color: "text-blue-400" },
   { key: "reports",        label: "البلاغات",             icon: Flag,            color: "text-yellow-400" },
   { key: "fraud",          label: "كشف الاحتيال",         icon: ShieldX,         color: "text-red-500" },
+  { key: "analytics",      label: "تقرير الأداء",          icon: PieChart,        color: "text-sky-400" },
   { key: "revenue",        label: "الإيرادات",            icon: DollarSign,      color: "text-emerald-400" },
   { key: "broadcast",      label: "إشعارات جماعية",       icon: Bell,            color: "text-cyan-400" },
   { key: "media",          label: "مكتبة الملفات",         icon: FolderOpen,      color: "text-lime-400" },
@@ -200,6 +204,7 @@ export default function AdminPanel() {
           {section === "renewalorders" && <RenewalOrdersSection />}
           {section === "reports"       && <ReportsSection logAction={logAction} />}
           {section === "fraud"      && <FraudSection />}
+          {section === "analytics"  && <AnalyticsSection />}
           {section === "revenue"    && <RevenueSection />}
           {section === "broadcast"  && <BroadcastSection logAction={logAction} />}
           {section === "media"      && <MediaSection logAction={logAction} />}
@@ -2628,6 +2633,244 @@ function AiPricingSection() {
 }
 
 // ── RENEWAL ORDERS SECTION ───────────────────────────────────────────────────
+function pct(curr: number, prev: number) {
+  if (prev === 0) return curr > 0 ? 100 : 0;
+  return ((curr - prev) / prev) * 100;
+}
+
+function MetricCard({ label, value, prev, format: fmt, color, icon: Icon }: { label: string; value: number; prev: number; format?: (v: number) => string; color: string; icon: any }) {
+  const change = pct(value, prev);
+  const up = change >= 0;
+  const formatted = fmt ? fmt(value) : value.toLocaleString("ar-EG");
+  const prevFormatted = fmt ? fmt(prev) : prev.toLocaleString("ar-EG");
+  return (
+    <Card className="rounded-2xl border border-border/50">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between mb-3">
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center bg-current/10`} style={{ backgroundColor: color + "18" }}>
+            <Icon className="w-4 h-4" style={{ color }} />
+          </div>
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex items-center gap-0.5 ${up ? "bg-green-500/10 text-green-600" : "bg-red-500/10 text-red-500"}`}>
+            {up ? "▲" : "▼"} {Math.abs(change).toFixed(1)}%
+          </span>
+        </div>
+        <div className="text-xl font-bold" dir="ltr">{formatted}</div>
+        <div className="text-xs text-muted-foreground mt-0.5">{label}</div>
+        <div className="text-xs text-muted-foreground/60 mt-1">مقارنة بـ {prevFormatted}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
+const CHART_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#3b82f6", "#ec4899", "#8b5cf6", "#14b8a6"];
+
+function AnalyticsSection() {
+  const { data, isLoading } = useQuery<any>({
+    queryKey: ["/api/admin/analytics"],
+    queryFn: () => fetch("/api/admin/analytics", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 60000,
+  });
+
+  if (isLoading || !data) return (
+    <div className="flex flex-col items-center justify-center py-20 gap-3">
+      <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      <span className="text-sm text-muted-foreground">جارٍ تحميل تقرير الأداء...</span>
+    </div>
+  );
+
+  const { summary: s, chartData, topChannels, topCampaigns } = data;
+
+  const formatEGP = (v: number) => `${v.toFixed(2)} ج.م`;
+  const formatPct = (v: number) => `${v.toFixed(2)}%`;
+  const formatRPM = (v: number) => `${v.toFixed(2)} ج.م`;
+
+  const chartDays = (chartData || []).map((d: any) => ({
+    ...d,
+    dayLabel: d.day?.slice(5),
+    revenue: parseFloat(d.revenue) || 0,
+    impressions: parseInt(d.impressions) || 0,
+    clicks: parseInt(d.clicks) || 0,
+  }));
+
+  const topChannelsChart = (topChannels || []).slice(0, 8).map((c: any) => ({
+    name: c.name,
+    مشاهدات: parseInt(c.impressions) || 0,
+    نقرات: parseInt(c.clicks) || 0,
+  }));
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-sky-500/10 flex items-center justify-center">
+          <PieChart className="w-5 h-5 text-sky-500" />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold">تقرير الأداء</h2>
+          <p className="text-xs text-muted-foreground">آخر 7 أيام مقارنةً بالأيام السبعة السابقة</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <MetricCard label="الأرباح الإجمالية" value={s.rev7d} prev={s.revPrev7d} format={formatEGP} color="#10b981" icon={DollarSign} />
+        <MetricCard label="المشاهدات" value={s.imp7d} prev={s.impPrev7d} color="#6366f1" icon={Eye} />
+        <MetricCard label="النقرات" value={s.clicks7d} prev={s.clicksPrev7d} color="#3b82f6" icon={BarChart2} />
+        <MetricCard label="نسبة النقر CTR" value={s.ctr7d} prev={s.ctrPrev7d} format={formatPct} color="#f59e0b" icon={TrendingUp} />
+        <MetricCard label="العائد لكل 1000 مشاهدة RPM" value={s.rpm7d} prev={s.rpmPrev7d} format={formatRPM} color="#ec4899" icon={Sparkles} />
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-6">
+        <Card className="rounded-2xl">
+          <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><DollarSign className="w-4 h-4 text-emerald-500" /> الأرباح اليومية (آخر 14 يوم)</CardTitle></CardHeader>
+          <CardContent>
+            {chartDays.length === 0 ? (
+              <p className="text-center py-10 text-muted-foreground text-sm">لا توجد بيانات بعد</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={200}>
+                <AreaChart data={chartDays}>
+                  <defs>
+                    <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#88888822" />
+                  <XAxis dataKey="dayLabel" tick={{ fontSize: 10, fill: "#888" }} />
+                  <YAxis tick={{ fontSize: 10, fill: "#888" }} />
+                  <Tooltip formatter={(v: any) => [`${Number(v).toFixed(2)} ج.م`, "الأرباح"]} labelFormatter={(l) => `يوم ${l}`} />
+                  <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#revGrad)" dot={{ r: 3 }} />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl">
+          <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Eye className="w-4 h-4 text-indigo-500" /> المشاهدات والنقرات اليومية</CardTitle></CardHeader>
+          <CardContent>
+            {chartDays.length === 0 ? (
+              <p className="text-center py-10 text-muted-foreground text-sm">لا توجد بيانات بعد</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={200}>
+                <AreaChart data={chartDays}>
+                  <defs>
+                    <linearGradient id="impGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="clkGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#88888822" />
+                  <XAxis dataKey="dayLabel" tick={{ fontSize: 10, fill: "#888" }} />
+                  <YAxis tick={{ fontSize: 10, fill: "#888" }} />
+                  <Tooltip />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Area type="monotone" dataKey="impressions" name="مشاهدات" stroke="#6366f1" strokeWidth={2} fill="url(#impGrad)" dot={{ r: 2 }} />
+                  <Area type="monotone" dataKey="clicks" name="نقرات" stroke="#3b82f6" strokeWidth={2} fill="url(#clkGrad)" dot={{ r: 2 }} />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="rounded-2xl">
+        <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Tv className="w-4 h-4 text-purple-500" /> مشاهدات القنوات (آخر 7 أيام)</CardTitle></CardHeader>
+        <CardContent>
+          {topChannelsChart.length === 0 ? (
+            <p className="text-center py-10 text-muted-foreground text-sm">لا توجد بيانات بعد</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={topChannelsChart} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke="#88888822" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 10, fill: "#888" }} />
+                <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: "#888" }} width={90} />
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="مشاهدات" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                <Bar dataKey="نقرات" fill="#10b981" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl">
+        <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Megaphone className="w-4 h-4 text-orange-500" /> أداء الحملات الإعلانية</CardTitle></CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border/50">
+                  <th className="text-right py-2 px-3 text-xs text-muted-foreground font-medium">الحملة</th>
+                  <th className="text-center py-2 px-3 text-xs text-muted-foreground font-medium">الحالة</th>
+                  <th className="text-center py-2 px-3 text-xs text-muted-foreground font-medium">مشاهدات</th>
+                  <th className="text-center py-2 px-3 text-xs text-muted-foreground font-medium">نقرات</th>
+                  <th className="text-center py-2 px-3 text-xs text-muted-foreground font-medium">CTR</th>
+                  <th className="text-center py-2 px-3 text-xs text-muted-foreground font-medium">الإنفاق</th>
+                  <th className="text-center py-2 px-3 text-xs text-muted-foreground font-medium">الميزانية</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(topCampaigns || []).length === 0 && (
+                  <tr><td colSpan={7} className="text-center py-8 text-muted-foreground">لا توجد حملات بعد</td></tr>
+                )}
+                {(topCampaigns || []).map((c: any) => (
+                  <tr key={c.id} className="border-b border-border/30 hover:bg-muted/30 transition-colors">
+                    <td className="py-2.5 px-3 font-medium truncate max-w-[160px]">{c.name}</td>
+                    <td className="py-2.5 px-3 text-center"><StatusBadge status={c.status} /></td>
+                    <td className="py-2.5 px-3 text-center text-indigo-500 font-medium">{parseInt(c.impressions).toLocaleString("ar-EG")}</td>
+                    <td className="py-2.5 px-3 text-center text-blue-500 font-medium">{parseInt(c.clicks).toLocaleString("ar-EG")}</td>
+                    <td className="py-2.5 px-3 text-center text-amber-500 font-medium">{parseFloat(c.ctr).toFixed(2)}%</td>
+                    <td className="py-2.5 px-3 text-center text-red-500 font-medium">{parseFloat(c.spent_egp).toFixed(2)} ج.م</td>
+                    <td className="py-2.5 px-3 text-center text-emerald-500 font-medium">{parseFloat(c.budget_egp).toFixed(2)} ج.م</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        {(topChannels || []).slice(0, 6).map((ch: any, i: number) => {
+          const imps = parseInt(ch.impressions) || 0;
+          const clks = parseInt(ch.clicks) || 0;
+          const ctr = imps > 0 ? ((clks / imps) * 100).toFixed(2) : "0";
+          return (
+            <Card key={ch.id} className="rounded-2xl border border-border/50 hover:shadow-md transition-all">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }}>
+                    {i + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm truncate">{ch.name}</div>
+                    <div className="text-xs text-muted-foreground">CTR: {ctr}%</div>
+                  </div>
+                  <div className="text-emerald-500 font-bold text-sm">{parseFloat(ch.earnings_egp || 0).toFixed(2)} ج.م</div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-indigo-500/5 rounded-lg p-2 text-center">
+                    <div className="text-sm font-bold text-indigo-500">{imps.toLocaleString("ar-EG")}</div>
+                    <div className="text-xs text-muted-foreground">مشاهدات</div>
+                  </div>
+                  <div className="bg-blue-500/5 rounded-lg p-2 text-center">
+                    <div className="text-sm font-bold text-blue-500">{clks.toLocaleString("ar-EG")}</div>
+                    <div className="text-xs text-muted-foreground">نقرات</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function RenewalOrdersSection() {
   const { toast } = useToast();
   const qc = useQueryClient();
