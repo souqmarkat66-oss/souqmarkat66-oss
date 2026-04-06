@@ -224,9 +224,9 @@ function AuthenticatedContent({ user }: { user: any }) {
   });
 
   // Filter by current user — handle both camelCase (Drizzle) and snake_case (raw SQL) field names
-  const myAds = allAds.filter(ad => (ad.userId ?? ad.user_id) === user.id);
-  const myReels = reels.filter((r: any) => (r.userId ?? r.user_id) === user.id);
-  const myStreams = streams.filter((s: any) => (s.userId ?? s.user_id) === user.id);
+  const myAds = (Array.isArray(allAds) ? allAds : []).filter(ad => (ad.userId ?? ad.user_id) === user.id);
+  const myReels = (Array.isArray(reels) ? reels : []).filter((r: any) => (r.userId ?? r.user_id) === user.id);
+  const myStreams = (Array.isArray(streams) ? streams : []).filter((s: any) => (s.userId ?? s.user_id) === user.id);
 
   const deleteAdMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/ads/${id}`),
