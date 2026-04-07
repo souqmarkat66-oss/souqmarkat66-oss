@@ -1886,28 +1886,33 @@ export default function LiveStream() {
                     </>
                   )}
                   {payMethod === "souq" && (
-                    <div className="text-center">
-                      <div className="text-4xl mb-2">🛍️</div>
-                      <p className="text-white font-bold text-sm mb-1">ادفع من تطبيق سوق ماركات</p>
-                      <p className="text-white/60 text-xs mb-3">حمّل التطبيق، أتمّ الدفع، وأرسل صورة إيصال الدفع</p>
-                      <div className="flex gap-2 justify-center">
-                        <a href="https://play.google.com/store" target="_blank" rel="noreferrer"
-                          className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl px-3 py-2 transition-all"
+                    <div>
+                      <div className="text-center mb-3">
+                        <div className="text-3xl mb-1">🛍️</div>
+                        <p className="text-white font-bold text-sm">حمّل تطبيق سوق ماركات وادفع منه</p>
+                        <p className="text-white/50 text-[11px]">ثم أرسل رقم إيصال الدفع أدناه</p>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <a href="https://play.google.com/store/apps/details?id=com.apmo.souqmarket" target="_blank" rel="noreferrer"
+                          className="flex flex-col items-center gap-1 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl px-2 py-2.5 transition-all"
                           data-testid="btn-download-android">
-                          <span className="text-lg">▶</span>
-                          <div className="text-right">
-                            <p className="text-white/60 text-[9px]">احصل عليه من</p>
-                            <p className="text-white text-xs font-bold">Google Play</p>
-                          </div>
+                          <span className="text-xl">▶</span>
+                          <p className="text-white/60 text-[9px]">احصل عليه من</p>
+                          <p className="text-white text-[10px] font-bold">Google Play</p>
                         </a>
-                        <a href="https://apps.apple.com" target="_blank" rel="noreferrer"
-                          className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl px-3 py-2 transition-all"
+                        <a href="https://apps.apple.com/eg/app/as-souqmarket/id6740153334" target="_blank" rel="noreferrer"
+                          className="flex flex-col items-center gap-1 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl px-2 py-2.5 transition-all"
                           data-testid="btn-download-ios">
-                          <span className="text-lg"></span>
-                          <div className="text-right">
-                            <p className="text-white/60 text-[9px]">متاح على</p>
-                            <p className="text-white text-xs font-bold">App Store</p>
-                          </div>
+                          <span className="text-xl"></span>
+                          <p className="text-white/60 text-[9px]">متاح على</p>
+                          <p className="text-white text-[10px] font-bold">App Store</p>
+                        </a>
+                        <a href="https://appgallery.huawei.com/" target="_blank" rel="noreferrer"
+                          className="flex flex-col items-center gap-1 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl px-2 py-2.5 transition-all"
+                          data-testid="btn-download-huawei">
+                          <span className="text-xl">📱</span>
+                          <p className="text-white/60 text-[9px]">متاح على</p>
+                          <p className="text-white text-[10px] font-bold">App Gallery</p>
                         </a>
                       </div>
                     </div>
@@ -1944,16 +1949,18 @@ export default function LiveStream() {
                   )}
                 </div>
 
-                {/* Payment reference input — hidden for souq app method */}
-                {payMethod !== "souq" && (
+                {/* Payment reference input */}
                 <div className="mb-4">
                   <label className="text-white/60 text-xs font-bold mb-1.5 block">
-                    {payMethod === "installment" ? "أدخل رقم إيصال التقسيط / رقم العملية" : "أدخل رقم مرجع التحويل / رقم العملية"}
+                    {payMethod === "souq" ? "أدخل رقم إيصال الدفع من التطبيق"
+                    : payMethod === "installment" ? "أدخل رقم إيصال التقسيط / رقم العملية"
+                    : "أدخل رقم مرجع التحويل / رقم العملية"}
                   </label>
                   <input type="text" value={payRef} onChange={e => setPayRef(e.target.value)}
                     placeholder={
                       payMethod === "vodafone" || payMethod === "vodafone2" ? "مثال: 123456789"
                       : payMethod === "instapay" ? "مثال: INST-2024-XXXX"
+                      : payMethod === "souq" ? "رقم الإيصال من تطبيق سوق ماركات"
                       : payMethod === "installment" ? "رقم إيصال التقسيط"
                       : "رقم المرجع من البنك"
                     }
@@ -1961,26 +1968,15 @@ export default function LiveStream() {
                     data-testid="input-pay-ref" dir="ltr"
                   />
                 </div>
-                )}
 
                 {/* Buttons */}
                 <div className="flex gap-2">
                   <button onClick={() => setPurchaseStep("packages")} className="flex-1 py-3 rounded-2xl bg-white/10 text-white font-bold text-sm">رجوع</button>
-                  {payMethod === "souq" ? (
-                    <a href="https://play.google.com/store" target="_blank" rel="noreferrer"
-                      className="flex-1 py-3 rounded-2xl bg-purple-500 text-white font-bold text-sm text-center"
-                      data-testid="btn-download-souq">
-                      تحميل التطبيق 🛍️
-                    </a>
-                  ) : (
                   <button onClick={submitPurchaseOrder} disabled={payLoading || !payRef.trim()} className="flex-1 py-3 rounded-2xl bg-yellow-500 text-black font-bold text-sm disabled:opacity-50" data-testid="btn-submit-purchase">
-                    {payLoading ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "تأكيد الطلب"}
+                    {payLoading ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "تأكيد الطلب ✓"}
                   </button>
-                  )}
                 </div>
-                {payMethod !== "souq" && (
                 <p className="text-white/20 text-[10px] text-center mt-3">سيتم مراجعة الطلب وإضافة العملات خلال دقائق</p>
-                )}
               </>
             )}
 
