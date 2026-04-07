@@ -761,7 +761,7 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
               <button onClick={() => setShowShare(false)} className="text-white/50 hover:text-white text-xl leading-none">×</button>
             </div>
             {/* Platform buttons */}
-            <div className="grid grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-4 gap-2 mb-2">
               {[
                 { name: "واتساب", icon: "💬", color: "bg-[#25D366]", href: `https://wa.me/?text=${encodeURIComponent(reel.title + "\n" + reelShareUrl)}` },
                 { name: "فيسبوك", icon: "👥", color: "bg-[#1877F2]", href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(reelShareUrl)}` },
@@ -779,6 +779,40 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
                   <span className="text-2xl leading-none">{p.icon}</span>
                   <span className="text-[10px] font-semibold">{p.name}</span>
                 </a>
+              ))}
+            </div>
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {[
+                { name: "انستجرام", icon: "📷", color: "bg-gradient-to-br from-[#f09433] via-[#e6683c] to-[#bc1888]", copy: true },
+                { name: "تيك توك", icon: "🎵", color: "bg-black border border-white/20", copy: true },
+                { name: "سناب شات", icon: "👻", color: "bg-[#FFFC00]", href: `https://www.snapchat.com/scan?attachmentUrl=${encodeURIComponent(reelShareUrl)}`, textColor: "text-black" },
+              ].map(p => (
+                p.copy ? (
+                  <button
+                    key={p.name}
+                    onClick={() => {
+                      navigator.clipboard.writeText(reelShareUrl);
+                      toast({ title: `✅ تم نسخ الرابط — افتح ${p.name} والصقه!` });
+                      setShowShare(false);
+                    }}
+                    className={`${p.color} flex flex-col items-center gap-1.5 rounded-2xl py-3 text-white text-center hover:opacity-90 transition`}
+                  >
+                    <span className="text-2xl leading-none">{p.icon}</span>
+                    <span className="text-[10px] font-semibold">{p.name}</span>
+                  </button>
+                ) : (
+                  <a
+                    key={p.name}
+                    href={(p as any).href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setShowShare(false)}
+                    className={`${p.color} flex flex-col items-center gap-1.5 rounded-2xl py-3 text-center hover:opacity-90 transition ${(p as any).textColor || "text-white"}`}
+                  >
+                    <span className="text-2xl leading-none">{p.icon}</span>
+                    <span className="text-[10px] font-semibold">{p.name}</span>
+                  </a>
+                )
               ))}
             </div>
             {/* Copy link */}

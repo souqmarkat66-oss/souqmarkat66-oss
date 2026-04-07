@@ -108,6 +108,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS relationship_status text`);
   } catch { /* columns may already exist */ }
 
+  // ── Auto-cleanup stale live streams (older than 12 hours) ──
+  const cleanupStaleStreams = async () => {
+    try {
+      const result = await db.execute(sql`
+        UPDATE live_streams
+        SET status = 'ended', ended_at = NOW()
+        WHERE status = 'live'
+          AND started_at < NOW() - INTERVAL '12 hours'
+      `);
+      if ((result.rowCount ?? 0) > 0) {
+        console.log(`[cleanup] Closed ${result.rowCount} stale live streams`);
+      }
+    } catch (e) {
+      console.error("[cleanup] stale streams error:", e);
+    }
+  };
+  cleanupStaleStreams();
+  setInterval(cleanupStaleStreams, 60 * 60 * 1000);
+
   // ── Coupons table migration ──
   try {
     await db.execute(sql`

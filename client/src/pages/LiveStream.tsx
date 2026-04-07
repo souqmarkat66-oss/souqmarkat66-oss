@@ -11,7 +11,7 @@ import {
   Loader2, X, CheckCircle, XCircle,
   Share2, Gift,
 } from "lucide-react";
-import { SiWhatsapp, SiFacebook, SiX, SiTelegram } from "react-icons/si";
+import { SiWhatsapp, SiFacebook, SiX, SiTelegram, SiInstagram, SiTiktok, SiSnapchat } from "react-icons/si";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -651,10 +651,13 @@ export default function LiveStream() {
   const streamUrl = typeof window !== "undefined" ? `${window.location.origin}/streams/${id}` : "";
   const shareText = encodeURIComponent(`شاهد البث المباشر على شبكة سوق! ${streamUrl}`);
   const shareLinks = [
-    { icon: SiWhatsapp,  label: "واتساب",   color: "#25D366", href: `https://wa.me/?text=${shareText}` },
-    { icon: SiFacebook,  label: "فيسبوك",   color: "#1877F2", href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(streamUrl)}` },
-    { icon: SiX,         label: "تويتر X",  color: "#000000", href: `https://twitter.com/intent/tweet?text=${shareText}` },
-    { icon: SiTelegram,  label: "تيليغرام", color: "#26A5E4", href: `https://t.me/share/url?url=${encodeURIComponent(streamUrl)}&text=${encodeURIComponent("شاهد البث المباشر على شبكة سوق!")}` },
+    { icon: SiWhatsapp,   label: "واتساب",    color: "#25D366", href: `https://wa.me/?text=${shareText}` },
+    { icon: SiFacebook,   label: "فيسبوك",    color: "#1877F2", href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(streamUrl)}` },
+    { icon: SiX,          label: "تويتر X",   color: "#000000", href: `https://twitter.com/intent/tweet?text=${shareText}` },
+    { icon: SiTelegram,   label: "تيليغرام",  color: "#26A5E4", href: `https://t.me/share/url?url=${encodeURIComponent(streamUrl)}&text=${encodeURIComponent("شاهد البث المباشر على شبكة سوق!")}` },
+    { icon: SiInstagram,  label: "انستجرام",  color: "#E1306C", href: null, copy: true },
+    { icon: SiTiktok,     label: "تيك توك",   color: "#010101", href: null, copy: true },
+    { icon: SiSnapchat,   label: "سناب شات",  color: "#FFFC00", href: `https://www.snapchat.com/scan?attachmentUrl=${encodeURIComponent(streamUrl)}`, textDark: true },
   ];
 
   const unlockAudio = () => {
@@ -1394,17 +1397,35 @@ export default function LiveStream() {
                 <X className="w-4 h-4 text-white" />
               </button>
             </div>
-            <div className="grid grid-cols-4 gap-4 mb-5">
+            <div className="grid grid-cols-4 gap-3 mb-5">
               {shareLinks.map(s => (
-                <a key={s.label} href={s.href} target="_blank" rel="noopener noreferrer"
-                  className="flex flex-col items-center gap-1.5"
-                  data-testid={`btn-share-${s.label}`}
-                >
-                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg" style={{ backgroundColor: s.color }}>
-                    <s.icon className="text-white text-2xl" />
-                  </div>
-                  <span className="text-white text-xs">{s.label}</span>
-                </a>
+                s.copy ? (
+                  <button
+                    key={s.label}
+                    onClick={() => {
+                      navigator.clipboard.writeText(streamUrl);
+                      toast({ title: `✅ تم نسخ الرابط — افتح ${s.label} والصقه!` });
+                      setShowShare(false);
+                    }}
+                    className="flex flex-col items-center gap-1.5"
+                    data-testid={`btn-share-${s.label}`}
+                  >
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg" style={{ backgroundColor: s.color }}>
+                      <s.icon className={s.textDark ? "text-black text-2xl" : "text-white text-2xl"} />
+                    </div>
+                    <span className="text-white text-xs">{s.label}</span>
+                  </button>
+                ) : (
+                  <a key={s.label} href={s.href!} target="_blank" rel="noopener noreferrer"
+                    className="flex flex-col items-center gap-1.5"
+                    data-testid={`btn-share-${s.label}`}
+                  >
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg" style={{ backgroundColor: s.color }}>
+                      <s.icon className={s.textDark ? "text-black text-2xl" : "text-white text-2xl"} />
+                    </div>
+                    <span className="text-white text-xs">{s.label}</span>
+                  </a>
+                )
               ))}
             </div>
             <div className="flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
