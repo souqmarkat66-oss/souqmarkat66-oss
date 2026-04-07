@@ -79,6 +79,12 @@ export default function LiveStream() {
   const [showRechargeModal, setShowRechargeModal] = useState(false);
   const [rechargeCode,    setRechargeCode]    = useState("");
   const [rechargeLoading, setRechargeLoading] = useState(false);
+  // Purchase flow states
+  const [purchaseStep,    setPurchaseStep]    = useState<"packages"|"pay"|"done">("packages");
+  const [selectedPkg,     setSelectedPkg]     = useState<any>(null);
+  const [payMethod,       setPayMethod]       = useState<"vodafone"|"instapay"|"bank">("vodafone");
+  const [payRef,          setPayRef]          = useState("");
+  const [payLoading,      setPayLoading]      = useState(false);
   interface FlyingGift { id: number; emoji: string; x: number; }
   const [flyingGifts,     setFlyingGifts]     = useState<FlyingGift[]>([]);
   const [myCoins,         setMyCoins]         = useState(0); // loaded from DB
@@ -751,6 +757,36 @@ export default function LiveStream() {
       toast({ title: "خطأ في الاتصال", variant: "destructive" });
     }
     setRechargeLoading(false);
+  };
+
+  /* ─── Submit coin purchase order ──────────────────────── */
+  const submitPurchaseOrder = async () => {
+    if (!selectedPkg) return;
+    if (!payRef.trim()) {
+      toast({ title: "أدخل رقم مرجع الدفع", variant: "destructive" });
+      return;
+    }
+    setPayLoading(true);
+    try {
+      const userName = user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "";
+      const res = await apiRequest("POST", "/api/coins/purchase-order", {
+        packageId: selectedPkg.id,
+        coins: selectedPkg.coins + (selectedPkg.bonus_coins || 0),
+        amountEGP: selectedPkg.price_egp,
+        paymentMethod: payMethod === "vodafone" ? "فودافون كاش" : payMethod === "instapay" ? "إنستاباي" : "تحويل بنكي",
+        paymentRef: payRef.trim(),
+        userName,
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPurchaseStep("done");
+      } else {
+        toast({ title: "خطأ", description: data.message, variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "خطأ في الاتصال", variant: "destructive" });
+    }
+    setPayLoading(false);
   };
 
   /* ─── Gift helpers ────────────────────────────────────── */
@@ -1720,72 +1756,164 @@ export default function LiveStream() {
 
       {/* COIN RECHARGE MODAL */}
       {showRechargeModal && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowRechargeModal(false)}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => { if (purchaseStep !== "pay") { setShowRechargeModal(false); setPurchaseStep("packages"); setSelectedPkg(null); setPayRef(""); } }}>
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-6 pb-safe" onClick={e => e.stopPropagation()} dir="rtl">
+          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-safe max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()} dir="rtl">
+
+            {/* Header */}
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-white font-bold text-lg">شحن العملات 🪙</h3>
-                <p className="text-yellow-400 text-sm font-bold mt-0.5">رصيدك: {myCoins} عملة</p>
+                <h3 className="text-white font-bold text-lg">
+                  {purchaseStep === "packages" && "شحن العملات 🪙"}
+                  {purchaseStep === "pay" && "إتمام الدفع 💳"}
+                  {purchaseStep === "done" && "تم استلام الطلب ✅"}
+                </h3>
+                <p className="text-yellow-400 text-xs font-bold">رصيدك: {myCoins} عملة</p>
               </div>
-              <button onClick={() => setShowRechargeModal(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+              <button onClick={() => { setShowRechargeModal(false); setPurchaseStep("packages"); setSelectedPkg(null); setPayRef(""); }} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
                 <X className="w-4 h-4 text-white" />
               </button>
             </div>
 
-            {/* Recharge code input */}
-            <div className="bg-white/5 rounded-2xl p-4 mb-4 border border-white/10">
-              <p className="text-white/70 text-xs mb-2 font-bold">لديك كود شحن؟</p>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={rechargeCode}
-                  onChange={e => setRechargeCode(e.target.value.toUpperCase())}
-                  placeholder="SOUQ-XXXXX-XXXXX"
-                  className="flex-1 bg-white/10 border border-white/20 text-white placeholder:text-white/30 rounded-xl px-3 py-2.5 text-sm font-mono tracking-wider"
-                  data-testid="input-recharge-code"
-                  dir="ltr"
-                />
-                <button
-                  onClick={redeemCoinCode}
-                  disabled={rechargeLoading || !rechargeCode.trim()}
-                  className="px-4 py-2.5 rounded-xl bg-yellow-500 text-black font-bold text-sm disabled:opacity-50"
-                  data-testid="btn-redeem-code"
-                >
-                  {rechargeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "تفعيل"}
+            {/* ── Step 1: Packages ── */}
+            {purchaseStep === "packages" && (
+              <>
+                {/* Recharge code */}
+                <div className="bg-white/5 rounded-2xl p-3.5 mb-4 border border-white/10">
+                  <p className="text-white/60 text-xs mb-2 font-bold">لديك كود شحن؟</p>
+                  <div className="flex gap-2">
+                    <input type="text" value={rechargeCode} onChange={e => setRechargeCode(e.target.value.toUpperCase())} placeholder="SOUQ-XXXXX-XXXXX"
+                      className="flex-1 bg-white/10 border border-white/20 text-white placeholder:text-white/30 rounded-xl px-3 py-2 text-sm font-mono" data-testid="input-recharge-code" dir="ltr" />
+                    <button onClick={redeemCoinCode} disabled={rechargeLoading || !rechargeCode.trim()} className="px-4 py-2 rounded-xl bg-yellow-500 text-black font-bold text-sm disabled:opacity-50" data-testid="btn-redeem-code">
+                      {rechargeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "تفعيل"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Packages grid */}
+                <p className="text-white/50 text-xs font-bold mb-2">أو اشتري باقة بالدفع المباشر</p>
+                <div className="grid grid-cols-2 gap-2 mb-4">
+                  {(coinPackages || [
+                    { id:1, name:"باقة صغيرة",  coins:100,  price_egp:10,  bonus_coins:0   },
+                    { id:2, name:"باقة متوسطة", coins:250,  price_egp:22,  bonus_coins:20  },
+                    { id:3, name:"باقة كبيرة",  coins:500,  price_egp:40,  bonus_coins:75  },
+                    { id:4, name:"باقة مميزة",  coins:1000, price_egp:70,  bonus_coins:200 },
+                    { id:5, name:"باقة الكنز",  coins:3000, price_egp:180, bonus_coins:800 },
+                  ]).map((pkg: any) => (
+                    <button key={pkg.id}
+                      className="bg-gradient-to-b from-yellow-500/20 to-yellow-600/10 border border-yellow-500/30 rounded-2xl p-3 text-right hover:from-yellow-500/30 active:scale-95 transition-all"
+                      data-testid={`btn-buy-package-${pkg.id}`}
+                      onClick={() => { setSelectedPkg(pkg); setPurchaseStep("pay"); setPayRef(""); }}
+                    >
+                      <div className="text-2xl mb-0.5">🪙</div>
+                      <p className="text-yellow-400 font-bold text-sm">{(pkg.coins + (pkg.bonus_coins || 0)).toLocaleString()} عملة</p>
+                      {pkg.bonus_coins > 0 && <p className="text-green-400 text-[10px]">+{pkg.bonus_coins} مجاناً</p>}
+                      <p className="text-white font-bold text-base mt-1">{pkg.price_egp} ج.م</p>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-white/20 text-[10px] text-center">المدفوع لا يُسترد • للمساعدة تواصل معنا</p>
+              </>
+            )}
+
+            {/* ── Step 2: Payment ── */}
+            {purchaseStep === "pay" && selectedPkg && (
+              <>
+                {/* Selected package summary */}
+                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-3.5 mb-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-yellow-400 font-bold text-base">{(selectedPkg.coins + (selectedPkg.bonus_coins || 0)).toLocaleString()} عملة</p>
+                    {selectedPkg.bonus_coins > 0 && <p className="text-green-400 text-xs">شاملة {selectedPkg.bonus_coins} عملة مجانًا</p>}
+                  </div>
+                  <div className="text-left">
+                    <p className="text-white font-bold text-xl">{selectedPkg.price_egp} ج.م</p>
+                    <p className="text-white/40 text-xs">{selectedPkg.name}</p>
+                  </div>
+                </div>
+
+                {/* Payment method selector */}
+                <p className="text-white/60 text-xs font-bold mb-2">اختر طريقة الدفع</p>
+                <div className="grid grid-cols-3 gap-2 mb-4">
+                  {[
+                    { key: "vodafone", label: "فودافون كاش", emoji: "📱", color: "border-red-500/50 bg-red-500/10" },
+                    { key: "instapay", label: "إنستاباي", emoji: "💳", color: "border-blue-500/50 bg-blue-500/10" },
+                    { key: "bank",     label: "تحويل بنكي", emoji: "🏦", color: "border-green-500/50 bg-green-500/10" },
+                  ].map(m => (
+                    <button key={m.key}
+                      onClick={() => setPayMethod(m.key as any)}
+                      className={`rounded-2xl p-3 border-2 transition-all text-center ${payMethod === m.key ? m.color + " border-opacity-100" : "border-white/10 bg-white/5"}`}
+                      data-testid={`btn-paymethod-${m.key}`}
+                    >
+                      <div className="text-2xl mb-1">{m.emoji}</div>
+                      <p className="text-white text-[11px] font-bold">{m.label}</p>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Payment details */}
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-4 mb-4">
+                  {payMethod === "vodafone" && (
+                    <>
+                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ لرقم فودافون كاش التالي:</p>
+                      <p className="text-white font-bold text-xl tracking-widest" dir="ltr">01098553911</p>
+                      <p className="text-white/40 text-xs mt-1">سوق ماركات للإعلانات</p>
+                    </>
+                  )}
+                  {payMethod === "instapay" && (
+                    <>
+                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ عبر إنستاباي لـ:</p>
+                      <p className="text-white font-bold text-xl tracking-widest" dir="ltr">01285558567</p>
+                      <p className="text-white/40 text-xs mt-1">سوق ماركات للإعلانات</p>
+                    </>
+                  )}
+                  {payMethod === "bank" && (
+                    <>
+                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ لحساب البنك التالي:</p>
+                      <p className="text-white font-bold text-sm">البنك الأهلي المصري</p>
+                      <p className="text-white text-sm" dir="ltr">1234567890123456</p>
+                      <p className="text-white/40 text-xs mt-1">باسم: سوق ماركات للإعلانات</p>
+                    </>
+                  )}
+                  <div className="mt-3 pt-3 border-t border-white/10">
+                    <p className="text-yellow-400 font-bold text-base">المبلغ: {selectedPkg.price_egp} ج.م</p>
+                    <p className="text-white/40 text-[10px]">اكتب في ملاحظة التحويل: "شحن عملات"</p>
+                  </div>
+                </div>
+
+                {/* Payment reference input */}
+                <div className="mb-4">
+                  <label className="text-white/60 text-xs font-bold mb-1.5 block">أدخل رقم مرجع التحويل / رقم العملية</label>
+                  <input type="text" value={payRef} onChange={e => setPayRef(e.target.value)}
+                    placeholder={payMethod === "vodafone" ? "مثال: 123456789" : payMethod === "instapay" ? "مثال: INST-2024-XXXX" : "رقم المرجع من البنك"}
+                    className="w-full bg-white/10 border border-white/20 text-white placeholder:text-white/30 rounded-xl px-4 py-3 text-sm"
+                    data-testid="input-pay-ref" dir="ltr"
+                  />
+                </div>
+
+                {/* Buttons */}
+                <div className="flex gap-2">
+                  <button onClick={() => setPurchaseStep("packages")} className="flex-1 py-3 rounded-2xl bg-white/10 text-white font-bold text-sm">رجوع</button>
+                  <button onClick={submitPurchaseOrder} disabled={payLoading || !payRef.trim()} className="flex-1 py-3 rounded-2xl bg-yellow-500 text-black font-bold text-sm disabled:opacity-50" data-testid="btn-submit-purchase">
+                    {payLoading ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "تأكيد الطلب"}
+                  </button>
+                </div>
+                <p className="text-white/20 text-[10px] text-center mt-3">سيتم مراجعة الطلب وإضافة العملات خلال دقائق</p>
+              </>
+            )}
+
+            {/* ── Step 3: Done ── */}
+            {purchaseStep === "done" && (
+              <div className="text-center py-6">
+                <div className="text-6xl mb-4">✅</div>
+                <h4 className="text-white font-bold text-xl mb-2">تم استلام طلبك!</h4>
+                <p className="text-white/60 text-sm mb-1">سيتم مراجعة الدفع وإضافة العملات لمحفظتك</p>
+                <p className="text-yellow-400 text-sm font-bold mb-6">خلال بضع دقائق ⚡</p>
+                <button onClick={() => { setShowRechargeModal(false); setPurchaseStep("packages"); setSelectedPkg(null); setPayRef(""); }}
+                  className="px-8 py-3 rounded-2xl bg-yellow-500 text-black font-bold">
+                  حسناً
                 </button>
               </div>
-              <p className="text-white/30 text-[10px] mt-2">اشتري كود من أي وكيل أو عبر التطبيق</p>
-            </div>
-
-            {/* Packages */}
-            <p className="text-white/60 text-xs font-bold mb-3">باقات الشحن</p>
-            <div className="grid grid-cols-2 gap-2.5 max-h-64 overflow-y-auto">
-              {(coinPackages || [
-                { id:1, name:"باقة صغيرة",  coins:100,  price_egp:10,  bonus_coins:0   },
-                { id:2, name:"باقة متوسطة", coins:250,  price_egp:22,  bonus_coins:20  },
-                { id:3, name:"باقة كبيرة",  coins:500,  price_egp:40,  bonus_coins:75  },
-                { id:4, name:"باقة مميزة",  coins:1000, price_egp:70,  bonus_coins:200 },
-                { id:5, name:"باقة الكنز",  coins:3000, price_egp:180, bonus_coins:800 },
-              ]).map((pkg: any) => (
-                <button
-                  key={pkg.id}
-                  className="bg-gradient-to-b from-yellow-500/20 to-yellow-600/10 border border-yellow-500/30 rounded-2xl p-3 text-right hover:from-yellow-500/30 transition-colors"
-                  data-testid={`btn-buy-package-${pkg.id}`}
-                  onClick={() => {
-                    toast({ title: "قريباً 🔜", description: "الدفع الإلكتروني سيتوفر قريباً — استخدم أكواد الشحن حالياً" });
-                  }}
-                >
-                  <div className="text-2xl mb-1">🪙</div>
-                  <p className="text-yellow-400 font-bold text-sm">{(pkg.coins + (pkg.bonus_coins || 0)).toLocaleString()} عملة</p>
-                  {pkg.bonus_coins > 0 && <p className="text-green-400 text-[10px]">+{pkg.bonus_coins} مجاناً</p>}
-                  <p className="text-white font-bold text-sm mt-1">{pkg.price_egp} ج.م</p>
-                  <p className="text-white/40 text-[10px]">{pkg.name}</p>
-                </button>
-              ))}
-            </div>
-
-            <p className="text-white/20 text-[10px] text-center mt-4">1 عملة = 0.10 جنيه مصري • المدفوع لا يُسترد</p>
+            )}
           </div>
         </div>
       )}

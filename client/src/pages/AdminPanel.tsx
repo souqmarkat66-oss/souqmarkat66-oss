@@ -2992,11 +2992,15 @@ function RenewalOrdersSection() {
 // ── CoinsSection ────────────────────────────────────────────────
 function CoinsSection({ logAction }: { logAction: any }) {
   const { toast } = useToast();
+  const [coinTab, setCoinTab] = useState<"orders"|"codes"|"packages">("orders");
   const [genCount, setGenCount] = useState("10");
   const [genCoins, setGenCoins] = useState("100");
   const [generating, setGenerating] = useState(false);
   const [generatedCodes, setGeneratedCodes] = useState<string[]>([]);
   const [codesPage, setCodesPage] = useState(1);
+  const [ordersFilter, setOrdersFilter] = useState("pending");
+  const [orderNote, setOrderNote] = useState<Record<number, string>>({});
+  const [orderLoading, setOrderLoading] = useState<Record<number, boolean>>({});
 
   const { data: codesData, isLoading: codesLoading, refetch: refetchCodes } = useQuery<any>({
     queryKey: ["/api/admin/coins/codes", codesPage],
@@ -3007,6 +3011,31 @@ function CoinsSection({ logAction }: { logAction: any }) {
     queryKey: ["/api/coins/packages"],
     queryFn: () => fetch("/api/coins/packages").then(r => r.json()),
   });
+
+  const { data: purchaseOrders, isLoading: ordersLoading, refetch: refetchOrders } = useQuery<any[]>({
+    queryKey: ["/api/admin/coins/purchase-orders", ordersFilter],
+    queryFn: () => fetch(`/api/admin/coins/purchase-orders?status=${ordersFilter}`).then(r => r.json()),
+  });
+
+  const reviewOrder = async (orderId: number, action: "approve" | "reject") => {
+    setOrderLoading(prev => ({ ...prev, [orderId]: true }));
+    try {
+      const res = await fetch(`/api/admin/coins/purchase-orders/${orderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, adminNote: orderNote[orderId] || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      toast({ title: action === "approve" ? "✅ تم القبول" : "❌ تم الرفض", description: data.message });
+      await refetchOrders();
+      logAction(`coin purchase order ${orderId} ${action}d`);
+    } catch (e: any) {
+      toast({ title: "خطأ", description: e.message, variant: "destructive" });
+    } finally {
+      setOrderLoading(prev => ({ ...prev, [orderId]: false }));
+    }
+  };
 
   const handleGenerate = async () => {
     const count = parseInt(genCount);
@@ -3052,11 +3081,110 @@ function CoinsSection({ logAction }: { logAction: any }) {
     <div className="space-y-6" dir="rtl">
       <div>
         <h2 className="text-2xl font-bold text-white mb-1">نظام العملات 🪙</h2>
-        <p className="text-white/50 text-sm">توليد وإدارة أكواد شحن العملات للمستخدمين</p>
+        <p className="text-white/50 text-sm">إدارة طلبات الشحن بالدفع وأكواد الشحن والباقات</p>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-2">
+        {[
+          { key: "orders",   label: "طلبات الشحن بالدفع", badge: (purchaseOrders || []).filter((o: any) => o.status === "pending").length },
+          { key: "codes",    label: "أكواد الشحن",         badge: 0 },
+          { key: "packages", label: "الباقات",              badge: 0 },
+        ].map(tab => (
+          <button key={tab.key} onClick={() => setCoinTab(tab.key as any)}
+            className={`relative px-4 py-2 rounded-xl text-sm font-bold transition-colors ${coinTab === tab.key ? "bg-yellow-500 text-black" : "bg-zinc-800 text-white/60 hover:text-white"}`}
+            data-testid={`tab-coins-${tab.key}`}
+          >
+            {tab.label}
+            {tab.badge > 0 && <span className="absolute -top-1.5 -end-1.5 bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">{tab.badge}</span>}
+          </button>
+        ))}
+      </div>
+
+      {/* ── TAB: Purchase Orders ── */}
+      {coinTab === "orders" && (
+        <div className="space-y-4">
+          {/* Filter */}
+          <div className="flex gap-2">
+            {["pending","approved","rejected"].map(s => (
+              <button key={s} onClick={() => setOrdersFilter(s)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${ordersFilter === s ? "bg-yellow-500 text-black" : "bg-zinc-800 text-white/50 hover:text-white"}`}
+              >
+                {s === "pending" ? "⏳ معلقة" : s === "approved" ? "✅ مقبولة" : "❌ مرفوضة"}
+              </button>
+            ))}
+            <button onClick={() => refetchOrders()} className="px-3 py-1.5 rounded-lg bg-zinc-800 text-white/50 hover:text-white ml-auto text-xs" data-testid="btn-refresh-orders"><RefreshCw className="w-3 h-3" /></button>
+          </div>
+
+          {ordersLoading ? (
+            <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-yellow-400" /></div>
+          ) : !purchaseOrders || purchaseOrders.length === 0 ? (
+            <div className="text-center py-16 text-white/30">لا توجد طلبات</div>
+          ) : (
+            <div className="space-y-3">
+              {purchaseOrders.map((order: any) => (
+                <Card key={order.id} className="bg-zinc-900 border-zinc-700" data-testid={`order-${order.id}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-white font-bold text-sm">{order.user_name || order.user_id}</span>
+                          <Badge className={order.status === "pending" ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" : order.status === "approved" ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"}>
+                            {order.status === "pending" ? "⏳ معلق" : order.status === "approved" ? "✅ مقبول" : "❌ مرفوض"}
+                          </Badge>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-white/50 mb-2">
+                          <span>💰 المبلغ: <span className="text-yellow-400 font-bold">{order.amount_egp} ج.م</span></span>
+                          <span>🪙 العملات: <span className="text-yellow-400 font-bold">{order.coins}</span></span>
+                          <span>💳 الدفع: {order.payment_method}</span>
+                          <span>🕐 {new Date(order.created_at).toLocaleDateString("ar-EG")}</span>
+                          {order.payment_ref && <span className="col-span-2">🔑 مرجع: <span className="font-mono text-white">{order.payment_ref}</span></span>}
+                          {order.admin_note && <span className="col-span-2 text-orange-400">📝 {order.admin_note}</span>}
+                        </div>
+
+                        {/* Admin actions (only for pending) */}
+                        {order.status === "pending" && (
+                          <div className="flex gap-2 mt-2">
+                            <input type="text" placeholder="ملاحظة (اختياري)" value={orderNote[order.id] || ""}
+                              onChange={e => setOrderNote(prev => ({ ...prev, [order.id]: e.target.value }))}
+                              className="flex-1 bg-zinc-800 border border-zinc-600 text-white text-xs rounded-lg px-2 py-1.5 placeholder:text-white/30"
+                              data-testid={`input-note-${order.id}`}
+                            />
+                            <Button size="sm"
+                              onClick={() => reviewOrder(order.id, "approve")}
+                              disabled={orderLoading[order.id]}
+                              className="bg-green-600 hover:bg-green-700 text-white text-xs gap-1 h-8"
+                              data-testid={`btn-approve-${order.id}`}
+                            >
+                              {orderLoading[order.id] ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                              قبول
+                            </Button>
+                            <Button size="sm" variant="outline"
+                              onClick={() => reviewOrder(order.id, "reject")}
+                              disabled={orderLoading[order.id]}
+                              className="border-red-500/50 text-red-400 hover:bg-red-500/10 text-xs gap-1 h-8"
+                              data-testid={`btn-reject-${order.id}`}
+                            >
+                              <X className="w-3 h-3" /> رفض
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB: Codes ── */}
+      {coinTab === "codes" && (
+      <div className="space-y-4">
+
       {/* Stats row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <Card className="bg-zinc-900 border-zinc-700">
           <CardContent className="p-4">
             <p className="text-white/50 text-xs mb-1">إجمالي الأكواد</p>
@@ -3077,12 +3205,6 @@ function CoinsSection({ logAction }: { logAction: any }) {
             <p className="text-2xl font-bold text-blue-400">
               {codes.filter((c: any) => !c.used_at).length || 0}
             </p>
-          </CardContent>
-        </Card>
-        <Card className="bg-zinc-900 border-zinc-700">
-          <CardContent className="p-4">
-            <p className="text-white/50 text-xs mb-1">الباقات المتاحة</p>
-            <p className="text-2xl font-bold text-violet-400">{packagesData?.length || 0}</p>
           </CardContent>
         </Card>
       </div>
@@ -3216,29 +3338,37 @@ function CoinsSection({ logAction }: { logAction: any }) {
         </CardContent>
       </Card>
 
-      {/* Packages overview */}
-      <Card className="bg-zinc-900 border-zinc-700">
-        <CardHeader>
-          <CardTitle className="text-white text-base">باقات الشحن الحالية</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {!packagesData || packagesData.length === 0 ? (
-            <p className="text-white/40 text-center py-4">لا توجد باقات</p>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-              {packagesData.map((pkg: any) => (
-                <div key={pkg.id} className="bg-gradient-to-b from-yellow-500/10 to-zinc-800 border border-yellow-500/20 rounded-2xl p-3 text-center" data-testid={`pkg-${pkg.id}`}>
-                  <p className="text-yellow-400 font-bold text-lg">{pkg.coins + (pkg.bonus_coins || 0)}</p>
-                  <p className="text-white/40 text-xs">عملة</p>
-                  {pkg.bonus_coins > 0 && <p className="text-green-400 text-xs">+{pkg.bonus_coins} مجانًا</p>}
-                  <p className="text-white font-bold mt-2">{pkg.price_egp} ج.م</p>
-                  <p className="text-white/30 text-[10px] mt-1">{pkg.name}</p>
+      </div>
+      )}
+
+      {/* ── TAB: Packages ── */}
+      {coinTab === "packages" && (
+        <div className="space-y-4">
+          <Card className="bg-zinc-900 border-zinc-700">
+            <CardHeader>
+              <CardTitle className="text-white text-base">باقات الشحن الحالية</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {!packagesData || packagesData.length === 0 ? (
+                <p className="text-white/40 text-center py-4">لا توجد باقات</p>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                  {packagesData.map((pkg: any) => (
+                    <div key={pkg.id} className="bg-gradient-to-b from-yellow-500/10 to-zinc-800 border border-yellow-500/20 rounded-2xl p-3 text-center" data-testid={`pkg-${pkg.id}`}>
+                      <p className="text-yellow-400 font-bold text-lg">{pkg.coins + (pkg.bonus_coins || 0)}</p>
+                      <p className="text-white/40 text-xs">عملة</p>
+                      {pkg.bonus_coins > 0 && <p className="text-green-400 text-xs">+{pkg.bonus_coins} مجانًا</p>}
+                      <p className="text-white font-bold mt-2">{pkg.price_egp} ج.م</p>
+                      <p className="text-white/30 text-[10px] mt-1">{pkg.name}</p>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
     </div>
   );
 }

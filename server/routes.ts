@@ -622,6 +622,111 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ success: true, coins: row.coins, message: `تم إضافة ${row.coins} عملة لمحفظتك` });
   });
 
+  // Submit coin purchase order (user pays via Vodafone Cash / InstaPay / Bank)
+  app.post("/api/coins/purchase-order", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const { packageId, coins, amountEGP, paymentMethod, paymentRef, screenshotUrl, userName } = req.body || {};
+    if (!coins || !amountEGP || !paymentMethod) return res.status(400).json({ message: "بيانات ناقصة" });
+
+    const r = await pool.query(
+      `INSERT INTO coin_purchase_orders (user_id, user_name, package_id, coins, amount_egp, payment_method, payment_ref, screenshot_url, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending') RETURNING *`,
+      [userId, userName || null, packageId || null, coins, amountEGP, paymentMethod, paymentRef || null, screenshotUrl || null]
+    );
+    // Notify admin
+    try {
+      const adminId = "54219806";
+      await pool.query(
+        `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coin_purchase', $2, $3)`,
+        [adminId, `طلب شحن عملات: ${userName || userId} دفع ${amountEGP} ج.م مقابل ${coins} عملة`, JSON.stringify({ orderId: r.rows[0].id, paymentMethod })]
+      );
+    } catch (_) {}
+    res.json({ success: true, order: r.rows[0], message: "تم استلام طلبك — سيتم تأكيد الشحن خلال دقائق" });
+  });
+
+  // Get my purchase orders
+  app.get("/api/coins/my-orders", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const r = await pool.query(
+      `SELECT * FROM coin_purchase_orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20`,
+      [userId]
+    );
+    res.json(r.rows);
+  });
+
+  // ADMIN: List purchase orders
+  app.get("/api/admin/coins/purchase-orders", isAuthenticated, async (req: any, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
+    const status = req.query.status as string || "pending";
+    const r = await pool.query(
+      `SELECT * FROM coin_purchase_orders WHERE status = $1 ORDER BY created_at DESC LIMIT 50`,
+      [status]
+    );
+    res.json(r.rows);
+  });
+
+  // ADMIN: Approve or reject purchase order
+  app.patch("/api/admin/coins/purchase-orders/:id", isAuthenticated, async (req: any, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
+    const adminId = req.user.claims.sub;
+    const { action, adminNote } = req.body || {};
+    const orderId = req.params.id;
+
+    const orderR = await pool.query(`SELECT * FROM coin_purchase_orders WHERE id = $1`, [orderId]);
+    if (orderR.rows.length === 0) return res.status(404).json({ message: "الطلب غير موجود" });
+    const order = orderR.rows[0];
+
+    if (order.status !== "pending") return res.status(400).json({ message: "الطلب تمت مراجعته بالفعل" });
+
+    if (action === "approve") {
+      // Add coins to user wallet
+      await pool.query(
+        `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
+         VALUES ($1, $2::int, 0, $2::int)
+         ON CONFLICT (user_id) DO UPDATE
+         SET balance = coin_wallets.balance + $2::int,
+             total_earned = coin_wallets.total_earned + $2::int,
+             updated_at = NOW()`,
+        [order.user_id, order.coins]
+      );
+      // Log coin transaction
+      await pool.query(
+        `INSERT INTO coin_transactions (user_id, type, coins, description)
+         VALUES ($1, 'purchase', $2, $3)`,
+        [order.user_id, order.coins, `شراء ${order.coins} عملة — ${order.payment_method} — ${order.amount_egp} ج.م`]
+      );
+      // Update order
+      await pool.query(
+        `UPDATE coin_purchase_orders SET status = 'approved', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
+        [adminNote || null, adminId, orderId]
+      );
+      // Notify user
+      try {
+        await pool.query(
+          `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coins_approved', $2, $3)`,
+          [order.user_id, `✅ تم قبول طلب شحن ${order.coins} عملة وإضافتها لمحفظتك`, JSON.stringify({ orderId, coins: order.coins })]
+        );
+      } catch (_) {}
+      return res.json({ success: true, message: `تم قبول الطلب وإضافة ${order.coins} عملة` });
+    }
+
+    if (action === "reject") {
+      await pool.query(
+        `UPDATE coin_purchase_orders SET status = 'rejected', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
+        [adminNote || null, adminId, orderId]
+      );
+      try {
+        await pool.query(
+          `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coins_rejected', $2, $3)`,
+          [order.user_id, `❌ تم رفض طلب شحن العملات${adminNote ? ": " + adminNote : ""}`, JSON.stringify({ orderId })]
+        );
+      } catch (_) {}
+      return res.json({ success: true, message: "تم رفض الطلب" });
+    }
+
+    return res.status(400).json({ message: "إجراء غير صالح" });
+  });
+
   // ADMIN: Generate recharge codes
   app.post("/api/admin/coins/generate-codes", isAuthenticated, async (req: any, res) => {
     if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
