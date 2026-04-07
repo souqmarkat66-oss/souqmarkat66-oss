@@ -1443,7 +1443,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.post("/api/streams/:id/end", isAuthenticated, async (req: any, res) => {
     const stream = await storage.getLiveStream(Number(req.params.id));
     if (!stream || stream.userId !== req.user.claims.sub) return res.status(403).json({ message: "Forbidden" });
-    const { recordingUrl } = req.body;
+    const { recordingUrl } = (req.body || {});
     const updateData: any = { status: 'ended', endedAt: new Date() };
     if (recordingUrl) updateData.recordingUrl = recordingUrl;
     const updated = await storage.updateLiveStream(Number(req.params.id), updateData);
