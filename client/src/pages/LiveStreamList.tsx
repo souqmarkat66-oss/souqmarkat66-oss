@@ -1,12 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
-import { useLocation, Link } from "wouter";
+import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import { useState, useMemo } from "react";
 import {
   Radio, Eye, Play, Plus, Users, Clock,
-  Share2, Heart, MessageCircle, Flame,
+  Share2, Heart, Flame, ChevronDown,
+  Gamepad2, ShoppingBag, BookOpen, Utensils,
+  Music, Activity, Sparkles, Newspaper, Globe, MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 
 function timeAgo(dateStr: string) {
@@ -17,14 +23,28 @@ function timeAgo(dateStr: string) {
   return `منذ ${Math.floor(diff / 86400)} يوم`;
 }
 
+const CATEGORIES = [
+  { key: "all",       label: "الكل",         icon: Globe },
+  { key: "general",   label: "عام",          icon: MessageSquare },
+  { key: "shopping",  label: "تسوق",         icon: ShoppingBag },
+  { key: "gaming",    label: "ألعاب",        icon: Gamepad2 },
+  { key: "education", label: "تعليم",        icon: BookOpen },
+  { key: "cooking",   label: "طبخ",          icon: Utensils },
+  { key: "music",     label: "موسيقى",       icon: Music },
+  { key: "sports",    label: "رياضة",        icon: Activity },
+  { key: "beauty",    label: "جمال",         icon: Sparkles },
+  { key: "news",      label: "أخبار",        icon: Newspaper },
+  { key: "lifestyle", label: "أسلوب حياة",  icon: Heart },
+];
+
+const SORT_OPTIONS = [
+  { key: "viewers", label: "الأكثر مشاهدين" },
+  { key: "newest",  label: "الأحدث"         },
+  { key: "oldest",  label: "الأقدم"         },
+];
+
 function categoryLabel(cat: string) {
-  const map: Record<string, string> = {
-    general: "عام", gaming: "ألعاب", lifestyle: "أسلوب حياة",
-    chat: "دردشة", music: "موسيقى", education: "تعليم",
-    cooking: "طبخ", sports: "رياضة", beauty: "جمال",
-    shopping: "تسوق", news: "أخبار", travel: "سفر",
-  };
-  return map[cat] || cat;
+  return CATEGORIES.find(c => c.key === cat)?.label || cat;
 }
 
 function StreamCard({ stream }: { stream: any }) {
@@ -43,7 +63,7 @@ function StreamCard({ stream }: { stream: any }) {
         await navigator.clipboard.writeText(url);
         toast({ title: "تم نسخ الرابط", description: url });
       }
-    } catch { /* ignore */ }
+    } catch { }
   };
 
   return (
@@ -52,27 +72,22 @@ function StreamCard({ stream }: { stream: any }) {
       onClick={() => setLocation(`/streams/${stream.id}`)}
       data-testid={`card-stream-${stream.id}`}
     >
-      {/* Thumbnail */}
       <div className="relative aspect-[9/16] bg-gradient-to-br from-zinc-800 to-zinc-900 overflow-hidden">
         {stream.thumbnailUrl ? (
           <img src={stream.thumbnailUrl} alt={stream.title} className="w-full h-full object-cover" />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
             <div className={`w-16 h-16 rounded-full flex items-center justify-center ${isLive ? "bg-red-500/20" : "bg-zinc-700/50"}`}>
-              {isLive ? (
-                <Radio className="w-8 h-8 text-red-400 animate-pulse" />
-              ) : (
-                <Play className="w-8 h-8 text-zinc-400" />
-              )}
+              {isLive
+                ? <Radio className="w-8 h-8 text-red-400 animate-pulse" />
+                : <Play className="w-8 h-8 text-zinc-400" />}
             </div>
             <span className="text-zinc-500 text-xs">{categoryLabel(stream.category || "general")}</span>
           </div>
         )}
 
-        {/* Gradient overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20" />
 
-        {/* LIVE badge */}
         {isLive && (
           <div className="absolute top-2 right-2 flex items-center gap-1 bg-red-600 text-white text-[11px] font-bold px-2 py-0.5 rounded-full shadow-lg">
             <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
@@ -80,7 +95,6 @@ function StreamCard({ stream }: { stream: any }) {
           </div>
         )}
 
-        {/* Viewer count */}
         {isLive && (
           <div className="absolute top-2 left-2 flex items-center gap-1 bg-black/60 backdrop-blur text-white text-[11px] px-2 py-0.5 rounded-full">
             <Eye className="w-3 h-3" />
@@ -88,17 +102,13 @@ function StreamCard({ stream }: { stream: any }) {
           </div>
         )}
 
-        {/* Bottom info */}
         <div className="absolute bottom-0 inset-x-0 p-2.5">
-          <p className="text-white font-bold text-sm leading-tight line-clamp-2 mb-1">
-            {stream.title}
-          </p>
+          <p className="text-white font-bold text-sm leading-tight line-clamp-2 mb-1">{stream.title}</p>
           {stream.channelName && (
             <p className="text-white/60 text-[11px] truncate">{stream.channelName}</p>
           )}
         </div>
 
-        {/* Play overlay */}
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
           <div className={`w-14 h-14 rounded-full flex items-center justify-center shadow-xl ${isLive ? "bg-red-500" : "bg-white/20 backdrop-blur"}`}>
             {isLive ? <Radio className="w-7 h-7 text-white" /> : <Play className="w-7 h-7 text-white" />}
@@ -106,7 +116,6 @@ function StreamCard({ stream }: { stream: any }) {
         </div>
       </div>
 
-      {/* Card footer */}
       <div className="p-2.5 flex items-center gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -146,6 +155,8 @@ function StreamCard({ stream }: { stream: any }) {
 export default function LiveStreamList() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
+  const [activeCategory, setActiveCategory] = useState("all");
+  const [sortBy, setSortBy] = useState("viewers");
 
   const { data: liveStreams = [], isLoading: loadingLive } = useQuery<any[]>({
     queryKey: ["/api/streams", "live"],
@@ -157,6 +168,30 @@ export default function LiveStreamList() {
     queryKey: ["/api/streams", "ended"],
     queryFn: () => fetch("/api/streams?status=ended", { credentials: "include" }).then(r => r.json()),
   });
+
+  const safeStreams = Array.isArray(liveStreams) ? liveStreams : [];
+  const safeEnded  = Array.isArray(endedStreams) ? endedStreams : [];
+
+  const sortStreams = (arr: any[]) => {
+    const copy = [...arr];
+    if (sortBy === "viewers") return copy.sort((a, b) => (b.viewerCount || 0) - (a.viewerCount || 0));
+    if (sortBy === "newest")  return copy.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    if (sortBy === "oldest")  return copy.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    return copy;
+  };
+
+  const filteredLive = useMemo(() => {
+    const filtered = activeCategory === "all" ? safeStreams : safeStreams.filter((s: any) => s.category === activeCategory);
+    return sortStreams(filtered);
+  }, [safeStreams, activeCategory, sortBy]);
+
+  const filteredEnded = useMemo(() => {
+    const filtered = activeCategory === "all" ? safeEnded : safeEnded.filter((s: any) => s.category === activeCategory);
+    return sortStreams(filtered);
+  }, [safeEnded, activeCategory, sortBy]);
+
+  const totalViewers = safeStreams.reduce((s: number, st: any) => s + (st.viewerCount || 0), 0);
+  const currentSortLabel = SORT_OPTIONS.find(o => o.key === sortBy)?.label || "الترتيب";
 
   return (
     <div className="min-h-screen bg-background" dir="rtl">
@@ -183,20 +218,69 @@ export default function LiveStreamList() {
             )}
           </div>
 
-          {/* Stats */}
-          <div className="flex items-center gap-4 mt-5">
+          <div className="flex items-center gap-4 mt-5 flex-wrap">
             <div className="flex items-center gap-1.5 bg-white/20 backdrop-blur rounded-full px-3 py-1.5">
               <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
-              <span className="text-sm font-bold">{liveStreams.length} بث مباشر الآن</span>
+              <span className="text-sm font-bold">{safeStreams.length} بث مباشر الآن</span>
             </div>
-            {liveStreams.reduce((s: number, st: any) => s + (st.viewerCount || 0), 0) > 0 && (
+            {totalViewers > 0 && (
               <div className="flex items-center gap-1.5 bg-white/20 backdrop-blur rounded-full px-3 py-1.5">
                 <Users className="w-3.5 h-3.5" />
-                <span className="text-sm font-bold">
-                  {liveStreams.reduce((s: number, st: any) => s + (st.viewerCount || 0), 0).toLocaleString()} مشاهد
-                </span>
+                <span className="text-sm font-bold">{totalViewers.toLocaleString()} مشاهد</span>
               </div>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Filter bar ────────────────────────────────────────── */}
+      <div className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border/40 shadow-sm">
+        <div className="container max-w-5xl mx-auto px-4">
+          <div className="flex items-center gap-2 py-2">
+            {/* Category pills — scrollable */}
+            <div className="flex items-center gap-1.5 overflow-x-auto flex-1 pb-1 scrollbar-hide" style={{ scrollbarWidth: "none" }}>
+              {CATEGORIES.map(cat => {
+                const Icon = cat.icon;
+                const isActive = activeCategory === cat.key;
+                return (
+                  <button
+                    key={cat.key}
+                    onClick={() => setActiveCategory(cat.key)}
+                    data-testid={`filter-cat-${cat.key}`}
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all flex-shrink-0 ${
+                      isActive
+                        ? "bg-red-500 text-white shadow"
+                        : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
+                  >
+                    <Icon className="w-3 h-3" />
+                    {cat.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Sort dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1 flex-shrink-0 h-8 text-xs" data-testid="btn-sort-streams">
+                  {currentSortLabel}
+                  <ChevronDown className="w-3 h-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[130px]">
+                {SORT_OPTIONS.map(opt => (
+                  <DropdownMenuItem
+                    key={opt.key}
+                    onClick={() => setSortBy(opt.key)}
+                    className={sortBy === opt.key ? "font-semibold text-primary" : ""}
+                    data-testid={`sort-${opt.key}`}
+                  >
+                    {opt.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </div>
@@ -204,14 +288,14 @@ export default function LiveStreamList() {
       <div className="container max-w-5xl mx-auto px-4 py-6">
 
         {/* LIVE NOW */}
-        {(loadingLive || liveStreams.length > 0) && (
+        {(loadingLive || filteredLive.length > 0) && (
           <section className="mb-8">
             <div className="flex items-center gap-2 mb-4">
               <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
               <h2 className="font-bold text-base">على الهواء الآن</h2>
               {!loadingLive && (
                 <Badge className="bg-red-500/10 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900 text-xs">
-                  {liveStreams.length}
+                  {filteredLive.length}
                 </Badge>
               )}
             </div>
@@ -222,51 +306,63 @@ export default function LiveStreamList() {
                   <div key={i} className="rounded-2xl bg-zinc-100 dark:bg-zinc-800 aspect-[9/16] animate-pulse" />
                 ))}
               </div>
-            ) : liveStreams.length === 0 ? null : (
+            ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {liveStreams.map((s: any) => <StreamCard key={s.id} stream={s} />)}
+                {filteredLive.map((s: any) => <StreamCard key={s.id} stream={s} />)}
               </div>
             )}
           </section>
         )}
 
         {/* No live streams */}
-        {!loadingLive && liveStreams.length === 0 && (
+        {!loadingLive && filteredLive.length === 0 && (
           <div className="text-center py-16 flex flex-col items-center gap-4">
             <div className="w-20 h-20 rounded-full bg-red-50 dark:bg-red-950/30 flex items-center justify-center">
               <Radio className="w-10 h-10 text-red-300 dark:text-red-700" />
             </div>
             <div>
-              <p className="font-bold text-lg text-foreground">لا يوجد بث مباشر الآن</p>
-              <p className="text-muted-foreground text-sm mt-1">كن أول من يبث مباشراً على المنصة</p>
+              {activeCategory !== "all" ? (
+                <>
+                  <p className="font-bold text-lg text-foreground">لا يوجد بث في هذه الفئة الآن</p>
+                  <p className="text-muted-foreground text-sm mt-1">جرب فئة أخرى أو شاهد الكل</p>
+                  <Button variant="outline" size="sm" className="mt-3" onClick={() => setActiveCategory("all")}>
+                    عرض كل البثوث
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <p className="font-bold text-lg text-foreground">لا يوجد بث مباشر الآن</p>
+                  <p className="text-muted-foreground text-sm mt-1">كن أول من يبث مباشراً على المنصة</p>
+                  {user ? (
+                    <Button
+                      onClick={() => setLocation("/stream/start")}
+                      className="bg-red-500 hover:bg-red-600 text-white gap-2 mt-3"
+                      data-testid="btn-be-first-stream"
+                    >
+                      <Flame className="w-4 h-4" />
+                      ابدأ البث الآن
+                    </Button>
+                  ) : (
+                    <Button onClick={() => setLocation("/login")} variant="outline" className="mt-3" data-testid="btn-login-to-stream">
+                      سجّل دخولك للبث
+                    </Button>
+                  )}
+                </>
+              )}
             </div>
-            {user ? (
-              <Button
-                onClick={() => setLocation("/stream/start")}
-                className="bg-red-500 hover:bg-red-600 text-white gap-2"
-                data-testid="btn-be-first-stream"
-              >
-                <Flame className="w-4 h-4" />
-                ابدأ البث الآن
-              </Button>
-            ) : (
-              <Button onClick={() => setLocation("/login")} variant="outline" data-testid="btn-login-to-stream">
-                سجّل دخولك للبث
-              </Button>
-            )}
           </div>
         )}
 
         {/* RECENT STREAMS */}
-        {endedStreams.length > 0 && (
+        {filteredEnded.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-4">
               <Clock className="w-4 h-4 text-muted-foreground" />
               <h2 className="font-bold text-base">بثوث سابقة</h2>
-              <Badge variant="secondary" className="text-xs">{endedStreams.length}</Badge>
+              <Badge variant="secondary" className="text-xs">{filteredEnded.length}</Badge>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-              {endedStreams.slice(0, 8).map((s: any) => <StreamCard key={s.id} stream={s} />)}
+              {filteredEnded.slice(0, 8).map((s: any) => <StreamCard key={s.id} stream={s} />)}
             </div>
           </section>
         )}

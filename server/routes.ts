@@ -690,27 +690,49 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.get("/api/trending/channels", async (req, res) => {
     try {
       const limit = Math.min(Number(req.query.limit) || 8, 20);
-      const rows = await pool.query(`
-        SELECT
-          c.id, c.name, c.description, c.avatar_url, c.banner_url,
-          c.subscriber_count, c.views_count, c.is_verified, c.is_monetized,
-          c.category, c.created_at,
-          (
-            COALESCE(c.subscriber_count, 0) * 3.0
-            + COALESCE(c.views_count, 0) * 0.5
-            + CASE WHEN EXISTS(
-                SELECT 1 FROM live_streams s WHERE s.channel_id = c.id AND s.status = 'live'
-              ) THEN 200 ELSE 0 END
-            + CASE WHEN c.is_verified THEN 20 ELSE 0 END
-            + CASE WHEN c.is_monetized THEN 15 ELSE 0 END
-          ) AS trending_score
-        FROM channels c
-        WHERE c.status = 'active'
-        ORDER BY trending_score DESC
-        LIMIT $1
-      `, [limit]);
+      // Try with live_streams join for active-stream bonus; fall back to simple query
+      let rows;
+      try {
+        rows = await pool.query(`
+          SELECT
+            c.id, c.name, c.description, c.avatar_url, c.banner_url,
+            c.subscriber_count, c.views_count, c.is_verified, c.is_monetized,
+            c.category, c.created_at,
+            (
+              COALESCE(c.subscriber_count, 0) * 3.0
+              + COALESCE(c.views_count, 0) * 0.5
+              + CASE WHEN EXISTS(
+                  SELECT 1 FROM live_streams s WHERE s.channel_id = c.id AND s.status = 'live'
+                ) THEN 200 ELSE 0 END
+              + CASE WHEN c.is_verified THEN 20 ELSE 0 END
+              + CASE WHEN c.is_monetized THEN 15 ELSE 0 END
+            ) AS trending_score
+          FROM channels c
+          WHERE c.status = 'active'
+          ORDER BY trending_score DESC
+          LIMIT $1
+        `, [limit]);
+      } catch {
+        // Fallback: basic ranking without live-stream bonus
+        rows = await pool.query(`
+          SELECT
+            c.id, c.name, c.description, c.avatar_url, c.banner_url,
+            c.subscriber_count, c.views_count, c.is_verified, c.is_monetized,
+            c.category, c.created_at,
+            (
+              COALESCE(c.subscriber_count, 0) * 3.0
+              + COALESCE(c.views_count, 0) * 0.5
+              + CASE WHEN c.is_verified THEN 20 ELSE 0 END
+              + CASE WHEN c.is_monetized THEN 15 ELSE 0 END
+            ) AS trending_score
+          FROM channels c
+          WHERE c.status = 'active'
+          ORDER BY trending_score DESC
+          LIMIT $1
+        `, [limit]);
+      }
       res.json(rows.rows);
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
+    } catch (e: any) { res.json([]); }
   });
 
   // ================================================================
