@@ -1833,19 +1833,21 @@ export default function LiveStream() {
 
                 {/* Payment method selector */}
                 <p className="text-white/60 text-xs font-bold mb-2">اختر طريقة الدفع</p>
-                <div className="grid grid-cols-3 gap-2 mb-4">
+                <div className="grid grid-cols-2 gap-2 mb-4">
                   {[
-                    { key: "vodafone", label: "فودافون كاش", emoji: "📱", color: "border-red-500/50 bg-red-500/10" },
-                    { key: "instapay", label: "إنستاباي", emoji: "💳", color: "border-blue-500/50 bg-blue-500/10" },
-                    { key: "bank",     label: "تحويل بنكي", emoji: "🏦", color: "border-green-500/50 bg-green-500/10" },
+                    { key: "vodafone",  label: "فودافون كاش",   sub: "01126665741",  emoji: "📱", color: "border-red-500/50 bg-red-500/10" },
+                    { key: "vodafone2", label: "فودافون كاش",   sub: "01098553911",  emoji: "📱", color: "border-red-400/50 bg-red-400/10" },
+                    { key: "instapay",  label: "إنستاباي",       sub: "01285558567",  emoji: "💳", color: "border-blue-500/50 bg-blue-500/10" },
+                    { key: "bank",      label: "تحويل بنكي",     sub: "البنك الأهلي", emoji: "🏦", color: "border-green-500/50 bg-green-500/10" },
                   ].map(m => (
                     <button key={m.key}
                       onClick={() => setPayMethod(m.key as any)}
-                      className={`rounded-2xl p-3 border-2 transition-all text-center ${payMethod === m.key ? m.color + " border-opacity-100" : "border-white/10 bg-white/5"}`}
+                      className={`rounded-2xl p-2.5 border-2 transition-all text-center ${payMethod === m.key ? m.color + " border-opacity-100" : "border-white/10 bg-white/5"}`}
                       data-testid={`btn-paymethod-${m.key}`}
                     >
-                      <div className="text-2xl mb-1">{m.emoji}</div>
+                      <div className="text-xl mb-0.5">{m.emoji}</div>
                       <p className="text-white text-[11px] font-bold">{m.label}</p>
+                      <p className="text-white/50 text-[10px]" dir="ltr">{m.sub}</p>
                     </button>
                   ))}
                 </div>
@@ -1854,15 +1856,22 @@ export default function LiveStream() {
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-4 mb-4">
                   {payMethod === "vodafone" && (
                     <>
-                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ لرقم فودافون كاش التالي:</p>
-                      <p className="text-white font-bold text-xl tracking-widest" dir="ltr">01126665741</p>
+                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ لفودافون كاش:</p>
+                      <p className="text-white font-bold text-2xl tracking-widest" dir="ltr">01126665741</p>
+                      <p className="text-white/40 text-xs mt-1">سوق ماركات للإعلانات</p>
+                    </>
+                  )}
+                  {payMethod === "vodafone2" && (
+                    <>
+                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ لفودافون كاش:</p>
+                      <p className="text-white font-bold text-2xl tracking-widest" dir="ltr">01098553911</p>
                       <p className="text-white/40 text-xs mt-1">سوق ماركات للإعلانات</p>
                     </>
                   )}
                   {payMethod === "instapay" && (
                     <>
                       <p className="text-white/60 text-xs mb-1">حوّل المبلغ عبر إنستاباي لـ:</p>
-                      <p className="text-white font-bold text-xl tracking-widest" dir="ltr">01285558567</p>
+                      <p className="text-white font-bold text-2xl tracking-widest" dir="ltr">01285558567</p>
                       <p className="text-white/40 text-xs mt-1">سوق ماركات للإعلانات</p>
                     </>
                   )}
