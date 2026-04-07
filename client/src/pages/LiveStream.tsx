@@ -1835,10 +1835,12 @@ export default function LiveStream() {
                 <p className="text-white/60 text-xs font-bold mb-2">اختر طريقة الدفع</p>
                 <div className="grid grid-cols-2 gap-2 mb-4">
                   {[
-                    { key: "vodafone",  label: "فودافون كاش",   sub: "01126665741",  emoji: "📱", color: "border-red-500/50 bg-red-500/10" },
-                    { key: "vodafone2", label: "فودافون كاش",   sub: "01098553911",  emoji: "📱", color: "border-red-400/50 bg-red-400/10" },
-                    { key: "instapay",  label: "إنستاباي",       sub: "01285558567",  emoji: "💳", color: "border-blue-500/50 bg-blue-500/10" },
-                    { key: "bank",      label: "تحويل بنكي",     sub: "البنك الأهلي", emoji: "🏦", color: "border-green-500/50 bg-green-500/10" },
+                    { key: "vodafone",     label: "فودافون كاش",   sub: "01126665741",      emoji: "📱", color: "border-red-500/50 bg-red-500/10" },
+                    { key: "vodafone2",    label: "فودافون كاش",   sub: "01098553911",      emoji: "📱", color: "border-red-400/50 bg-red-400/10" },
+                    { key: "instapay",     label: "إنستاباي",       sub: "01285558567",      emoji: "💳", color: "border-blue-500/50 bg-blue-500/10" },
+                    { key: "bank",         label: "تحويل بنكي",     sub: "البنك الأهلي",     emoji: "🏦", color: "border-green-500/50 bg-green-500/10" },
+                    { key: "souq",         label: "سوق ماركات",     sub: "تطبيق الدفع",      emoji: "🛍️", color: "border-purple-500/50 bg-purple-500/10" },
+                    { key: "installment",  label: "تقسيط فيزا",     sub: "55 يوم بدون فوائد", emoji: "💰", color: "border-yellow-500/50 bg-yellow-500/10" },
                   ].map(m => (
                     <button key={m.key}
                       onClick={() => setPayMethod(m.key as any)}
@@ -1883,30 +1885,102 @@ export default function LiveStream() {
                       <p className="text-white/40 text-xs mt-1">باسم: سوق ماركات للإعلانات</p>
                     </>
                   )}
+                  {payMethod === "souq" && (
+                    <div className="text-center">
+                      <div className="text-4xl mb-2">🛍️</div>
+                      <p className="text-white font-bold text-sm mb-1">ادفع من تطبيق سوق ماركات</p>
+                      <p className="text-white/60 text-xs mb-3">حمّل التطبيق، أتمّ الدفع، وأرسل صورة إيصال الدفع</p>
+                      <div className="flex gap-2 justify-center">
+                        <a href="https://play.google.com/store" target="_blank" rel="noreferrer"
+                          className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl px-3 py-2 transition-all"
+                          data-testid="btn-download-android">
+                          <span className="text-lg">▶</span>
+                          <div className="text-right">
+                            <p className="text-white/60 text-[9px]">احصل عليه من</p>
+                            <p className="text-white text-xs font-bold">Google Play</p>
+                          </div>
+                        </a>
+                        <a href="https://apps.apple.com" target="_blank" rel="noreferrer"
+                          className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl px-3 py-2 transition-all"
+                          data-testid="btn-download-ios">
+                          <span className="text-lg"></span>
+                          <div className="text-right">
+                            <p className="text-white/60 text-[9px]">متاح على</p>
+                            <p className="text-white text-xs font-bold">App Store</p>
+                          </div>
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                  {payMethod === "installment" && (
+                    <>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-2xl">💰</span>
+                        <div>
+                          <p className="text-white font-bold text-sm">تقسيط بدون فوائد أو رسوم</p>
+                          <p className="text-yellow-400 text-xs font-bold">55 يوم فترة سماح مجانية</p>
+                        </div>
+                      </div>
+                      <div className="space-y-1.5 mb-2">
+                        <div className="flex items-center gap-2 bg-white/5 rounded-lg px-2 py-1.5">
+                          <span className="text-sm">🏦</span>
+                          <p className="text-white/80 text-xs">فيزا البنك الأهلي المصري</p>
+                        </div>
+                        <div className="flex items-center gap-2 bg-white/5 rounded-lg px-2 py-1.5">
+                          <span className="text-sm">💳</span>
+                          <p className="text-white/80 text-xs">أي بطاقة فيزا أو ماستر كارد أخرى</p>
+                        </div>
+                      </div>
+                      <p className="text-white/40 text-[10px] border-t border-white/10 pt-2">
+                        بعد الدفع أرسل صورة إيصال التقسيط لإتمام الشحن
+                      </p>
+                    </>
+                  )}
+                  {payMethod !== "souq" && (
                   <div className="mt-3 pt-3 border-t border-white/10">
                     <p className="text-yellow-400 font-bold text-base">المبلغ: {selectedPkg.price_egp} ج.م</p>
                     <p className="text-white/40 text-[10px]">اكتب في ملاحظة التحويل: "شحن عملات"</p>
                   </div>
+                  )}
                 </div>
 
-                {/* Payment reference input */}
+                {/* Payment reference input — hidden for souq app method */}
+                {payMethod !== "souq" && (
                 <div className="mb-4">
-                  <label className="text-white/60 text-xs font-bold mb-1.5 block">أدخل رقم مرجع التحويل / رقم العملية</label>
+                  <label className="text-white/60 text-xs font-bold mb-1.5 block">
+                    {payMethod === "installment" ? "أدخل رقم إيصال التقسيط / رقم العملية" : "أدخل رقم مرجع التحويل / رقم العملية"}
+                  </label>
                   <input type="text" value={payRef} onChange={e => setPayRef(e.target.value)}
-                    placeholder={payMethod === "vodafone" ? "مثال: 123456789" : payMethod === "instapay" ? "مثال: INST-2024-XXXX" : "رقم المرجع من البنك"}
+                    placeholder={
+                      payMethod === "vodafone" || payMethod === "vodafone2" ? "مثال: 123456789"
+                      : payMethod === "instapay" ? "مثال: INST-2024-XXXX"
+                      : payMethod === "installment" ? "رقم إيصال التقسيط"
+                      : "رقم المرجع من البنك"
+                    }
                     className="w-full bg-white/10 border border-white/20 text-white placeholder:text-white/30 rounded-xl px-4 py-3 text-sm"
                     data-testid="input-pay-ref" dir="ltr"
                   />
                 </div>
+                )}
 
                 {/* Buttons */}
                 <div className="flex gap-2">
                   <button onClick={() => setPurchaseStep("packages")} className="flex-1 py-3 rounded-2xl bg-white/10 text-white font-bold text-sm">رجوع</button>
+                  {payMethod === "souq" ? (
+                    <a href="https://play.google.com/store" target="_blank" rel="noreferrer"
+                      className="flex-1 py-3 rounded-2xl bg-purple-500 text-white font-bold text-sm text-center"
+                      data-testid="btn-download-souq">
+                      تحميل التطبيق 🛍️
+                    </a>
+                  ) : (
                   <button onClick={submitPurchaseOrder} disabled={payLoading || !payRef.trim()} className="flex-1 py-3 rounded-2xl bg-yellow-500 text-black font-bold text-sm disabled:opacity-50" data-testid="btn-submit-purchase">
                     {payLoading ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "تأكيد الطلب"}
                   </button>
+                  )}
                 </div>
+                {payMethod !== "souq" && (
                 <p className="text-white/20 text-[10px] text-center mt-3">سيتم مراجعة الطلب وإضافة العملات خلال دقائق</p>
+                )}
               </>
             )}
 
