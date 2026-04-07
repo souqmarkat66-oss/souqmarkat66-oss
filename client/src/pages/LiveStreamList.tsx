@@ -38,9 +38,9 @@ const CATEGORIES = [
 ];
 
 const SORT_OPTIONS = [
-  { key: "viewers", label: "الأكثر مشاهدين" },
-  { key: "newest",  label: "الأحدث"         },
-  { key: "oldest",  label: "الأقدم"         },
+  { key: "viewers",       label: "الأكثر مشاهدين" },
+  { key: "newest",        label: "الأحدث"         },
+  { key: "least_viewers", label: "الأقل مشاهدين"  },
 ];
 
 function categoryLabel(cat: string) {
@@ -174,9 +174,9 @@ export default function LiveStreamList() {
 
   const sortStreams = (arr: any[]) => {
     const copy = [...arr];
-    if (sortBy === "viewers") return copy.sort((a, b) => (b.viewerCount || 0) - (a.viewerCount || 0));
-    if (sortBy === "newest")  return copy.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    if (sortBy === "oldest")  return copy.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    if (sortBy === "viewers")       return copy.sort((a, b) => (b.viewerCount || 0) - (a.viewerCount || 0));
+    if (sortBy === "newest")        return copy.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    if (sortBy === "least_viewers") return copy.sort((a, b) => (a.viewerCount || 0) - (b.viewerCount || 0));
     return copy;
   };
 

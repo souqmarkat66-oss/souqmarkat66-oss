@@ -712,7 +712,8 @@ Sitemap: ${BASE}/sitemap-pages.xml
           ORDER BY trending_score DESC
           LIMIT $1
         `, [limit]);
-      } catch {
+      } catch (fallbackErr: any) {
+        console.error("[trending/channels] primary query failed, using fallback:", fallbackErr?.message);
         // Fallback: basic ranking without live-stream bonus
         rows = await pool.query(`
           SELECT
@@ -732,7 +733,10 @@ Sitemap: ${BASE}/sitemap-pages.xml
         `, [limit]);
       }
       res.json(rows.rows);
-    } catch (e: any) { res.json([]); }
+    } catch (e: any) {
+      console.error("[trending/channels] all queries failed, returning empty:", e?.message);
+      res.json([]);
+    }
   });
 
   // ================================================================
