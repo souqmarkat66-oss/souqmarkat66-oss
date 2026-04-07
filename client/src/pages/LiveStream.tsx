@@ -55,11 +55,14 @@ export default function LiveStream() {
   const [facingSupported, setFacingSupported] = useState(false);
 
   // Co-host state
-  type CoHostStatus = "idle"|"requesting"|"accepted"|"rejected";
-  const [coHostStatus,    setCoHostStatus]    = useState<CoHostStatus>("idle");
-  const [coHostRequests,  setCoHostRequests]  = useState<{socketId:string; userName:string}[]>([]);
-  const [activeCoHosts,   setActiveCoHosts]   = useState<{socketId:string; name:string}[]>([]);
-  const [autoAccept,      setAutoAccept]      = useState(false);
+  type CoHostStatus = "idle"|"choosing"|"requesting"|"accepted"|"rejected";
+  const [coHostStatus,      setCoHostStatus]      = useState<CoHostStatus>("idle");
+  const [coHostRequests,    setCoHostRequests]     = useState<{socketId:string; userName:string; withCamera?:boolean}[]>([]);
+  const [activeCoHosts,     setActiveCoHosts]      = useState<{socketId:string; name:string; hasCamera?:boolean}[]>([]);
+  const [autoAccept,        setAutoAccept]         = useState(false);
+  const [mutedCohosts,      setMutedCohosts]       = useState<Set<string>>(new Set());
+  const [forceMuted,        setForceMuted]         = useState(false);
+  const [guestHasCamera,    setGuestHasCamera]     = useState(true);
 
   // In-stream ads state
   const [streamAds,       setStreamAds]       = useState<any[]>([]);
@@ -260,15 +263,16 @@ export default function LiveStream() {
       });
 
       // ── Co-host events (broadcaster side) ──
-      socket.on("cohost-request", (data: { socketId: string; userName: string }) => {
+      socket.on("cohost-request", (data: { socketId: string; userName: string; withCamera?: boolean }) => {
         coHostNamesMap.current.set(data.socketId, data.userName);
         setCoHostRequests(prev => [...prev.filter(r => r.socketId !== data.socketId), data]);
-        toast({ title: "🎙️ طلب مشاركة", description: `${data.userName} يريد الانضمام للبث` });
+        const mode = data.withCamera === false ? "🎙️ صوت فقط" : "📷 صوت وصورة";
+        toast({ title: "طلب مشاركة", description: `${data.userName} يريد الانضمام (${mode})` });
       });
 
-      socket.on("cohost-auto-joined", (data: { socketId: string; userName: string }) => {
+      socket.on("cohost-auto-joined", (data: { socketId: string; userName: string; withCamera?: boolean }) => {
         coHostNamesMap.current.set(data.socketId, data.userName);
-        setActiveCoHosts(prev => [...prev.filter(c => c.socketId !== data.socketId), { socketId: data.socketId, name: data.userName }]);
+        setActiveCoHosts(prev => [...prev.filter(c => c.socketId !== data.socketId), { socketId: data.socketId, name: data.userName, hasCamera: data.withCamera !== false }]);
         toast({ title: `✅ ${data.userName} انضم تلقائياً`, description: "الضيف دخل البث" });
       });
 
@@ -420,6 +424,23 @@ export default function LiveStream() {
       socket.on("auto-accept-changed", (enabled: boolean) => {
         setAutoAccept(enabled);
       });
+
+      // Broadcaster force-mutes/unmutes this guest
+      socket.on("force-muted", (muted: boolean) => {
+        setForceMuted(muted);
+        const audioTrack = coHostStream.current?.getAudioTracks()[0];
+        if (audioTrack) audioTrack.enabled = !muted;
+        toast({ title: muted ? "🔇 تم كتم ميكروفونك من المذيع" : "🎙️ فعّل المذيع ميكروفونك" });
+      });
+
+      // Broadcaster removed this guest
+      socket.on("cohost-removed", () => {
+        setCoHostStatus("idle");
+        coHostStream.current?.getTracks().forEach(t => t.stop());
+        coHostStream.current = null;
+        if (coHostPeer.current) { coHostPeer.current.close(); coHostPeer.current = null; }
+        toast({ title: "تمت إزالتك من البث", variant: "destructive" });
+      });
     }
 
     // ── Gift events (both broadcaster and viewer) ──
@@ -549,40 +570,55 @@ export default function LiveStream() {
   };
 
   /* ─── Co-host helpers ────────────────────────────────── */
-  const requestCoHost = async () => {
+  const requestCoHost = () => {
     if (!user) return;
+    setCoHostStatus("choosing");
+  };
 
-    // Must open camera HERE — inside a user-gesture handler — so mobile browsers allow it
+  const joinAsCoHost = async (withCamera: boolean) => {
+    if (!user) return;
+    setGuestHasCamera(withCamera);
     setCoHostStatus("requesting");
-    toast({ title: "📷 جاري فتح الكاميرا...", description: "اسمح للمتصفح بالوصول للكاميرا والميكروفون" });
 
-    const ms = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-      audio: { echoCancellation: true, noiseSuppression: true },
-    }).catch((err) => {
+    const constraints = withCamera
+      ? { video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: { echoCancellation: true, noiseSuppression: true } }
+      : { video: false, audio: { echoCancellation: true, noiseSuppression: true } };
+
+    toast({ title: withCamera ? "📷 جاري فتح الكاميرا..." : "🎙️ جاري فتح الميكروفون...", description: "اسمح للمتصفح بالوصول" });
+
+    const ms = await navigator.mediaDevices.getUserMedia(constraints).catch((err) => {
       console.error("getUserMedia error:", err);
       return null;
     });
 
     if (!ms) {
       setCoHostStatus("idle");
-      toast({ title: "تعذّر فتح الكاميرا", description: "اسمح للمتصفح بالوصول للكاميرا والميكروفون ثم حاول مجدداً", variant: "destructive" });
+      toast({ title: "تعذّر فتح الميكروفون", description: "اسمح للمتصفح بالوصول ثم حاول مجدداً", variant: "destructive" });
       return;
     }
 
-    // Store stream now — so cohost-accepted handler can use it without another getUserMedia call
     coHostStream.current = ms;
 
-    // Show self-preview immediately
-    if (coHostSelfVideo.current) {
+    if (withCamera && coHostSelfVideo.current) {
       coHostSelfVideo.current.srcObject = ms;
       coHostSelfVideo.current.muted = true;
       coHostSelfVideo.current.play().catch(() => {});
     }
 
     const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مستخدم";
-    socketRef.current?.emit("request-cohost", { streamId: id, userId: (user as any).id, userName });
+    socketRef.current?.emit("request-cohost", { streamId: id, userId: (user as any).id, userName, withCamera });
     toast({ title: "⏳ تم إرسال الطلب", description: "في انتظار موافقة المُذيع" });
+  };
+
+  const toggleMuteCohost = (socketId: string) => {
+    const currentlyMuted = mutedCohosts.has(socketId);
+    const nextMuted = !currentlyMuted;
+    socketRef.current?.emit("force-mute-cohost", { streamId: id, guestSocketId: socketId, muted: nextMuted });
+    setMutedCohosts(prev => {
+      const next = new Set(prev);
+      if (nextMuted) next.add(socketId); else next.delete(socketId);
+      return next;
+    });
   };
 
   const leaveCoHost = () => {
@@ -595,8 +631,10 @@ export default function LiveStream() {
   };
 
   const acceptCoHost = (socketId: string, userName: string) => {
+    const req = coHostRequests.find(r => r.socketId === socketId);
     socketRef.current?.emit("accept-cohost", { streamId: id, guestSocketId: socketId, guestName: userName });
     setCoHostRequests(prev => prev.filter(r => r.socketId !== socketId));
+    setActiveCoHosts(prev => [...prev.filter(c => c.socketId !== socketId), { socketId, name: userName, hasCamera: req?.withCamera !== false }]);
   };
 
   const rejectCoHost = (socketId: string) => {
@@ -1089,12 +1127,29 @@ export default function LiveStream() {
               </button>
             )}
             {user && coHostStatus === "accepted" && (
-              <button onClick={leaveCoHost} className="flex flex-col items-center gap-0.5" data-testid="btn-leave-cohost">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-red-600 animate-pulse">
-                  <Users className="w-6 h-6 text-white" />
-                </div>
-                <span className="text-white text-[10px] font-bold drop-shadow">إنهاء</span>
-              </button>
+              <>
+                {/* Mute self button */}
+                <button
+                  onClick={() => {
+                    const t = coHostStream.current?.getAudioTracks()[0];
+                    if (t) { t.enabled = !t.enabled; }
+                  }}
+                  className="flex flex-col items-center gap-0.5"
+                  data-testid="btn-cohost-self-mute"
+                >
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg backdrop-blur ${forceMuted ? "bg-red-600/80" : "bg-zinc-700/80"}`}>
+                    {forceMuted ? <MicOff className="w-6 h-6 text-white" /> : <Mic className="w-6 h-6 text-white" />}
+                  </div>
+                  <span className="text-white text-[10px] font-bold drop-shadow">{forceMuted ? "مكتوم" : "صوت"}</span>
+                </button>
+                {/* Leave button */}
+                <button onClick={leaveCoHost} className="flex flex-col items-center gap-0.5" data-testid="btn-leave-cohost">
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-red-600 animate-pulse">
+                    <Users className="w-6 h-6 text-white" />
+                  </div>
+                  <span className="text-white text-[10px] font-bold drop-shadow">إنهاء</span>
+                </button>
+              </>
             )}
             {user && coHostStatus === "rejected" && (
               <button className="flex flex-col items-center gap-0.5" disabled data-testid="btn-cohost-rejected">
@@ -1222,22 +1277,51 @@ export default function LiveStream() {
                     [document.documentElement.dir === "rtl" ? "left" : "right"]: "0.75rem",
                   }}
                 >
-                  <video
-                    autoPlay playsInline
+                  {/* Hidden audio element for audio-only guests */}
+                  <audio
+                    autoPlay
                     ref={el => {
                       if (el) {
-                        coHostVideoRefs.current.set(ch.socketId, el);
                         const ms = coHostStreams.current.get(ch.socketId);
-                        if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(() => {}); }
+                        if (ms && !ch.hasCamera && !el.srcObject) { el.srcObject = ms; el.play().catch(() => {}); }
                       }
                     }}
-                    onClick={() => setSwappedCohostId(isSwapped ? "" : ch.socketId)}
-                    className={isSwapped
-                      ? "w-full h-full object-cover cursor-pointer"
-                      : "w-24 h-36 rounded-xl object-cover border-2 border-purple-500 shadow-xl cursor-pointer"
-                    }
-                    data-testid={`video-cohost-${idx}`}
+                    style={{ display: "none" }}
                   />
+                  {/* Video (hidden for audio-only guests) */}
+                  {ch.hasCamera !== false ? (
+                    <video
+                      autoPlay playsInline
+                      ref={el => {
+                        if (el) {
+                          coHostVideoRefs.current.set(ch.socketId, el);
+                          const ms = coHostStreams.current.get(ch.socketId);
+                          if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(() => {}); }
+                        }
+                      }}
+                      onClick={() => setSwappedCohostId(isSwapped ? "" : ch.socketId)}
+                      className={isSwapped
+                        ? "w-full h-full object-cover cursor-pointer"
+                        : "w-24 h-36 rounded-xl object-cover border-2 border-purple-500 shadow-xl cursor-pointer"
+                      }
+                      data-testid={`video-cohost-${idx}`}
+                    />
+                  ) : (
+                    /* Audio-only guest placeholder */
+                    <div
+                      onClick={() => {}}
+                      className={isSwapped
+                        ? "w-full h-full bg-zinc-900 flex flex-col items-center justify-center"
+                        : "w-24 h-36 rounded-xl bg-zinc-900 border-2 border-purple-500 shadow-xl flex flex-col items-center justify-center gap-2"
+                      }
+                      data-testid={`video-cohost-${idx}`}
+                    >
+                      <div className="w-10 h-10 rounded-full bg-purple-600/30 flex items-center justify-center">
+                        <Mic className="w-5 h-5 text-purple-300" />
+                      </div>
+                      <span className="text-[9px] text-purple-300 font-bold">صوت فقط</span>
+                    </div>
+                  )}
                   {/* Name badge */}
                   <div className={`absolute ${isSwapped ? "top-4 start-4" : "top-1 inset-x-0"} flex items-center justify-center`}>
                     <span className="text-[9px] text-white bg-purple-600 rounded-full px-1.5 py-0.5 font-bold truncate max-w-[100px]">{ch.name}</span>
@@ -1248,15 +1332,34 @@ export default function LiveStream() {
                       <span className="text-[10px] text-white bg-black/60 rounded-full px-2 py-1">اضغط للمبادلة</span>
                     </div>
                   )}
-                  {/* Remove button */}
+                  {/* Muted badge */}
+                  {mutedCohosts.has(ch.socketId) && (
+                    <div className="absolute bottom-1 start-1">
+                      <MicOff className="w-3 h-3 text-red-400" />
+                    </div>
+                  )}
+                  {/* Controls when not swapped */}
                   {!isSwapped && (
-                    <button
-                      onClick={e => { e.stopPropagation(); endCoHostFromBroadcaster(ch.socketId); }}
-                      className="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center shadow-lg"
-                      data-testid={`btn-end-cohost-${idx}`}
-                    >
-                      <X className="w-2.5 h-2.5 text-white" />
-                    </button>
+                    <>
+                      {/* Remove button */}
+                      <button
+                        onClick={e => { e.stopPropagation(); endCoHostFromBroadcaster(ch.socketId); }}
+                        className="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center shadow-lg"
+                        data-testid={`btn-end-cohost-${idx}`}
+                      >
+                        <X className="w-2.5 h-2.5 text-white" />
+                      </button>
+                      {/* Mute/Unmute button */}
+                      <button
+                        onClick={e => { e.stopPropagation(); toggleMuteCohost(ch.socketId); }}
+                        className={`absolute -bottom-1.5 -end-1.5 w-5 h-5 rounded-full flex items-center justify-center shadow-lg ${mutedCohosts.has(ch.socketId) ? "bg-red-500" : "bg-zinc-700"}`}
+                        data-testid={`btn-mute-cohost-${idx}`}
+                      >
+                        {mutedCohosts.has(ch.socketId)
+                          ? <MicOff className="w-2.5 h-2.5 text-white" />
+                          : <Mic className="w-2.5 h-2.5 text-white" />}
+                      </button>
+                    </>
                   )}
                 </div>
               );
@@ -1385,6 +1488,54 @@ export default function LiveStream() {
           </div>
         )}
       </div>
+
+      {/* JOIN MODE DIALOG — guest chooses camera or audio-only */}
+      {!isBroadcast && coHostStatus === "choosing" && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setCoHostStatus("idle")}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-6 pb-safe" onClick={e => e.stopPropagation()} dir="rtl">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="text-white font-bold text-lg">انضم للبث كضيف</h3>
+                <p className="text-white/50 text-xs mt-0.5">اختر طريقة الانضمام</p>
+              </div>
+              <button onClick={() => setCoHostStatus("idle")} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {/* With camera */}
+              <button
+                onClick={() => joinAsCoHost(true)}
+                className="flex flex-col items-center gap-3 bg-purple-600/20 border border-purple-500/40 rounded-2xl p-5 hover:bg-purple-600/30 transition-colors"
+                data-testid="btn-join-with-camera"
+              >
+                <div className="w-14 h-14 rounded-full bg-purple-600 flex items-center justify-center">
+                  <Video className="w-7 h-7 text-white" />
+                </div>
+                <div className="text-center">
+                  <p className="text-white font-bold text-sm">بالكاميرا</p>
+                  <p className="text-white/50 text-[11px] mt-0.5">صوت وصورة</p>
+                </div>
+              </button>
+              {/* Audio only */}
+              <button
+                onClick={() => joinAsCoHost(false)}
+                className="flex flex-col items-center gap-3 bg-zinc-700/40 border border-zinc-600/40 rounded-2xl p-5 hover:bg-zinc-700/60 transition-colors"
+                data-testid="btn-join-audio-only"
+              >
+                <div className="w-14 h-14 rounded-full bg-zinc-600 flex items-center justify-center">
+                  <Mic className="w-7 h-7 text-white" />
+                </div>
+                <div className="text-center">
+                  <p className="text-white font-bold text-sm">صوت فقط</p>
+                  <p className="text-white/50 text-[11px] mt-0.5">بدون كاميرا</p>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* SHARE MODAL */}
       {showShare && (

@@ -341,9 +341,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
         socket.emit("cohost-accepted", { broadcasterId: room.broadcasterId });
         // Also notify broadcaster that someone joined automatically
-        socket.to(room.broadcasterId).emit("cohost-auto-joined", { socketId: socket.id, userName: data.userName });
+        socket.to(room.broadcasterId).emit("cohost-auto-joined", { socketId: socket.id, userName: data.userName, withCamera: data.withCamera });
       } else {
-        socket.to(room.broadcasterId).emit("cohost-request", { socketId: socket.id, userId: data.userId, userName: data.userName });
+        socket.to(room.broadcasterId).emit("cohost-request", { socketId: socket.id, userId: data.userId, userName: data.userName, withCamera: data.withCamera });
       }
     });
 
@@ -397,6 +397,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         room.cohostNames.delete(socket.id);
       }
       io.to(`stream:${streamId}`).emit("cohost-left", socket.id);
+    });
+
+    // Broadcaster force-mutes/unmutes a specific guest
+    socket.on("force-mute-cohost", (data: { streamId: string; guestSocketId: string; muted: boolean }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room || room.broadcasterId !== socket.id) return;
+      io.to(data.guestSocketId).emit("force-muted", data.muted);
     });
 
     // ── TikTok-style Live Features ──────────────────────────────────
