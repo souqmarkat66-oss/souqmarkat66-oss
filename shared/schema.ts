@@ -427,3 +427,64 @@ export const coupons = pgTable("coupons", {
 export const insertCouponSchema = createInsertSchema(coupons).omit({ id: true, createdAt: true, usedCount: true });
 export type Coupon = typeof coupons.$inferSelect;
 export type InsertCoupon = z.infer<typeof insertCouponSchema>;
+
+// ============================================================
+// COIN WALLETS TABLE — user coin balance (real money)
+// ============================================================
+export const coinWallets = pgTable("coin_wallets", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id).notNull().unique(),
+  balance: integer("balance").default(0).notNull(),
+  totalSpent: integer("total_spent").default(0).notNull(),
+  totalEarned: integer("total_earned").default(0).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+export type CoinWallet = typeof coinWallets.$inferSelect;
+
+// ============================================================
+// COIN PACKAGES TABLE — packages sold (admin sets prices)
+// ============================================================
+export const coinPackages = pgTable("coin_packages", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  coins: integer("coins").notNull(),
+  priceEGP: real("price_egp").notNull(),
+  bonusCoins: integer("bonus_coins").default(0),
+  isActive: boolean("is_active").default(true),
+  sortOrder: integer("sort_order").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+export const insertCoinPackageSchema = createInsertSchema(coinPackages).omit({ id: true, createdAt: true });
+export type CoinPackage = typeof coinPackages.$inferSelect;
+export type InsertCoinPackage = z.infer<typeof insertCoinPackageSchema>;
+
+// ============================================================
+// COIN RECHARGE CODES TABLE — admin generates codes for offline payment
+// ============================================================
+export const coinRechargeCodes = pgTable("coin_recharge_codes", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique(),
+  coins: integer("coins").notNull(),
+  priceEGP: real("price_egp").notNull(),
+  usedByUserId: varchar("used_by_user_id").references(() => users.id),
+  usedAt: timestamp("used_at"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+export type CoinRechargeCode = typeof coinRechargeCodes.$inferSelect;
+
+// ============================================================
+// COIN TRANSACTIONS TABLE — all coin movements
+// ============================================================
+export const coinTransactions = pgTable("coin_transactions", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  type: text("type", { enum: ["recharge", "gift_sent", "gift_received", "purchase", "refund", "admin_grant"] }).notNull(),
+  coins: integer("coins").notNull(),
+  description: text("description"),
+  relatedStreamId: integer("related_stream_id"),
+  relatedUserId: varchar("related_user_id"),
+  rechargeCodeId: integer("recharge_code_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+export type CoinTransaction = typeof coinTransactions.$inferSelect;

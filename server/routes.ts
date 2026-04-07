@@ -216,8 +216,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   const streamRooms: Map<string, {
     broadcasterId: string | null;
-    cohostIds: string[];          // up to 3 co-hosts
-    cohostNames: Map<string, string>; // socketId → display name
+    cohostIds: string[];
+    cohostNames: Map<string, string>;
     viewers: Set<string>;
     peakViewers: number;
     startedAt: number;
@@ -227,7 +227,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     giftGoal: number | null;
     totalGiftCoins: number;
     socketToUser: Map<string, { userId: string; userName: string }>;
-    autoAccept: boolean;          // auto-accept all co-host join requests
+    autoAccept: boolean;
+    raisedHands?: Map<string, { userId: string; userName: string; raisedAt: number }>;
   }> = new Map();
 
   // Arabic & English bad words basic filter
@@ -406,8 +407,92 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       io.to(data.guestSocketId).emit("force-muted", data.muted);
     });
 
+    // ── Hand Raise System ────────────────────────────────────────────
+    socket.on("raise-hand", (data: { streamId: string; userId: string; userName: string }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room) return;
+      if (!room.raisedHands) room.raisedHands = new Map();
+      room.raisedHands.set(socket.id, { userId: data.userId, userName: data.userName, raisedAt: Date.now() });
+      // Notify broadcaster
+      if (room.broadcasterId) {
+        io.to(room.broadcasterId).emit("hand-raised", { socketId: socket.id, userId: data.userId, userName: data.userName });
+      }
+      socket.emit("hand-raise-confirmed");
+    });
+
+    socket.on("lower-hand", (data: { streamId: string }) => {
+      const room = streamRooms.get(data.streamId);
+      if (room?.raisedHands) room.raisedHands.delete(socket.id);
+      if (room?.broadcasterId) io.to(room.broadcasterId).emit("hand-lowered", { socketId: socket.id });
+    });
+
+    socket.on("invite-raised-hand", (data: { streamId: string; guestSocketId: string }) => {
+      // Broadcaster invites a raised-hand viewer as co-host
+      const room = streamRooms.get(data.streamId);
+      if (!room || room.broadcasterId !== socket.id) return;
+      io.to(data.guestSocketId).emit("hand-invite", { broadcasterId: socket.id });
+      if (room.raisedHands) room.raisedHands.delete(data.guestSocketId);
+      if (room.broadcasterId) io.to(room.broadcasterId).emit("hand-lowered", { socketId: data.guestSocketId });
+    });
+
+    socket.on("dismiss-hand", (data: { streamId: string; guestSocketId: string }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room || room.broadcasterId !== socket.id) return;
+      if (room.raisedHands) room.raisedHands.delete(data.guestSocketId);
+      io.to(data.guestSocketId).emit("hand-dismissed");
+    });
+
     // ── TikTok-style Live Features ──────────────────────────────────
-    socket.on("send-gift", (data: { streamId: string; giftType: string; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId: string }) => {
+    socket.on("send-gift", async (data: { streamId: string; giftType: string; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId: string; broadcasterUserId?: string }) => {
+      // Deduct coins from sender & credit broadcaster in DB
+      try {
+        if (data.userId && data.giftCoins > 0) {
+          // Deduct from sender
+          await pool.query(
+            `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
+             VALUES ($1, GREATEST(0, -$2::int), $2::int, 0)
+             ON CONFLICT (user_id) DO UPDATE
+             SET balance = GREATEST(0, coin_wallets.balance - $2::int),
+                 total_spent = coin_wallets.total_spent + $2::int,
+                 updated_at = NOW()`,
+            [data.userId, data.giftCoins]
+          );
+          // Log sender transaction
+          await pool.query(
+            `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id, related_user_id)
+             VALUES ($1, 'gift_sent', $2, $3, $4, $5)`,
+            [data.userId, -data.giftCoins, `هدية ${data.giftName} في البث`, data.streamId ? parseInt(data.streamId) : null, data.broadcasterUserId || null]
+          );
+          // Credit broadcaster (60% to broadcaster, platform keeps 40%)
+          if (data.broadcasterUserId) {
+            const broadcasterCoins = Math.floor(data.giftCoins * 0.6);
+            await pool.query(
+              `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
+               VALUES ($1, $2::int, 0, $2::int)
+               ON CONFLICT (user_id) DO UPDATE
+               SET balance = coin_wallets.balance + $2::int,
+                   total_earned = coin_wallets.total_earned + $2::int,
+                   updated_at = NOW()`,
+              [data.broadcasterUserId, broadcasterCoins]
+            );
+            // Log broadcaster transaction
+            await pool.query(
+              `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id, related_user_id)
+               VALUES ($1, 'gift_received', $2, $3, $4, $5)`,
+              [data.broadcasterUserId, broadcasterCoins, `استلام هدية ${data.giftName} من ${data.userName}`, data.streamId ? parseInt(data.streamId) : null, data.userId]
+            );
+            // Also credit revenue_transactions in EGP (1 coin = 0.05 EGP)
+            const egpAmount = parseFloat((broadcasterCoins * 0.05).toFixed(2));
+            await pool.query(
+              `INSERT INTO revenue_transactions (user_id, type, amount_egp, description, channel_id)
+               SELECT $1, 'earning', $2, $3, id FROM channels WHERE user_id = $1 LIMIT 1`,
+              [data.broadcasterUserId, egpAmount, `هدايا من بث مباشر - ${data.giftName}`]
+            );
+          }
+        }
+      } catch (err) {
+        console.error("Gift coin transaction error:", err);
+      }
       io.to(`stream:${data.streamId}`).emit("stream-gift", { id: Date.now() + Math.random(), ...data, timestamp: new Date().toISOString() });
     });
 
@@ -450,6 +535,146 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         room.viewers.delete(socket.id);
       });
     });
+  });
+
+  // ================================================================
+  // COIN SYSTEM ROUTES
+  // ================================================================
+
+  // Get my coin wallet
+  app.get("/api/coins/wallet", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const r = await pool.query(`SELECT * FROM coin_wallets WHERE user_id = $1`, [userId]);
+    if (r.rows.length === 0) {
+      // Create wallet with 0 coins
+      const ins = await pool.query(
+        `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned) VALUES ($1, 0, 0, 0) RETURNING *`,
+        [userId]
+      );
+      return res.json(ins.rows[0]);
+    }
+    res.json(r.rows[0]);
+  });
+
+  // Get my coin transaction history
+  app.get("/api/coins/transactions", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const r = await pool.query(
+      `SELECT * FROM coin_transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`,
+      [userId]
+    );
+    res.json(r.rows);
+  });
+
+  // Get active coin packages
+  app.get("/api/coins/packages", async (_req, res) => {
+    const r = await pool.query(`SELECT * FROM coin_packages WHERE is_active = true ORDER BY sort_order, price_egp`);
+    if (r.rows.length === 0) {
+      // Seed default packages
+      await pool.query(`
+        INSERT INTO coin_packages (name, coins, price_egp, bonus_coins, sort_order) VALUES
+        ('باقة صغيرة', 100, 10, 0, 1),
+        ('باقة متوسطة', 250, 22, 20, 2),
+        ('باقة كبيرة', 500, 40, 75, 3),
+        ('باقة مميزة', 1000, 70, 200, 4),
+        ('باقة الكنز', 3000, 180, 800, 5)
+        ON CONFLICT DO NOTHING
+      `);
+      const r2 = await pool.query(`SELECT * FROM coin_packages WHERE is_active = true ORDER BY sort_order`);
+      return res.json(r2.rows);
+    }
+    res.json(r.rows);
+  });
+
+  // Redeem a recharge code
+  app.post("/api/coins/redeem", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const { code } = req.body || {};
+    if (!code) return res.status(400).json({ message: "الكود مطلوب" });
+
+    const r = await pool.query(`SELECT * FROM coin_recharge_codes WHERE code = $1`, [code.toUpperCase().trim()]);
+    if (r.rows.length === 0) return res.status(404).json({ message: "الكود غير صحيح" });
+    const row = r.rows[0];
+    if (row.used_by_user_id) return res.status(400).json({ message: "هذا الكود مستخدم بالفعل" });
+    if (row.expires_at && new Date(row.expires_at) < new Date()) return res.status(400).json({ message: "الكود منتهي الصلاحية" });
+
+    // Mark as used
+    await pool.query(
+      `UPDATE coin_recharge_codes SET used_by_user_id = $1, used_at = NOW() WHERE id = $2`,
+      [userId, row.id]
+    );
+    // Add coins to wallet
+    await pool.query(
+      `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
+       VALUES ($1, $2::int, 0, $2::int)
+       ON CONFLICT (user_id) DO UPDATE
+       SET balance = coin_wallets.balance + $2::int,
+           total_earned = coin_wallets.total_earned + $2::int,
+           updated_at = NOW()`,
+      [userId, row.coins]
+    );
+    // Log transaction
+    await pool.query(
+      `INSERT INTO coin_transactions (user_id, type, coins, description, recharge_code_id)
+       VALUES ($1, 'recharge', $2, $3, $4)`,
+      [userId, row.coins, `شحن بكود - ${row.coins} عملة`, row.id]
+    );
+    res.json({ success: true, coins: row.coins, message: `تم إضافة ${row.coins} عملة لمحفظتك` });
+  });
+
+  // ADMIN: Generate recharge codes
+  app.post("/api/admin/coins/generate-codes", isAuthenticated, async (req: any, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
+    const { coins, priceEGP, count, expiresInDays } = req.body || {};
+    if (!coins || !priceEGP || !count) return res.status(400).json({ message: "Missing fields" });
+
+    const codes: string[] = [];
+    const expiresAt = expiresInDays ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000) : null;
+
+    for (let i = 0; i < Math.min(count, 500); i++) {
+      const code = `SOUQ-${Math.random().toString(36).toUpperCase().slice(2, 7)}-${Math.random().toString(36).toUpperCase().slice(2, 7)}`;
+      codes.push(code);
+      await pool.query(
+        `INSERT INTO coin_recharge_codes (code, coins, price_egp, expires_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+        [code, coins, priceEGP, expiresAt]
+      );
+    }
+    res.json({ success: true, codes, count: codes.length });
+  });
+
+  // ADMIN: List recharge codes
+  app.get("/api/admin/coins/codes", isAuthenticated, async (req: any, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
+    const page = parseInt((req.query.page as string) || "1");
+    const limit = parseInt((req.query.limit as string) || "20");
+    const offset = (page - 1) * limit;
+    const countR = await pool.query(`SELECT COUNT(*) FROM coin_recharge_codes`);
+    const total = parseInt(countR.rows[0].count);
+    const r = await pool.query(
+      `SELECT crc.*, u.first_name, u.last_name FROM coin_recharge_codes crc
+       LEFT JOIN users u ON u.id::text = crc.used_by_user_id::text
+       ORDER BY crc.created_at DESC LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+    res.json({ codes: r.rows, total, page, limit, pages: Math.ceil(total / limit) });
+  });
+
+  // ADMIN: Manage coin packages
+  app.post("/api/admin/coins/packages", isAuthenticated, async (req: any, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
+    const { name, coins, priceEGP, bonusCoins, sortOrder } = req.body || {};
+    const r = await pool.query(
+      `INSERT INTO coin_packages (name, coins, price_egp, bonus_coins, sort_order) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [name, coins, priceEGP, bonusCoins || 0, sortOrder || 0]
+    );
+    res.json(r.rows[0]);
+  });
+
+  app.patch("/api/admin/coins/packages/:id", isAuthenticated, async (req: any, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
+    const { isActive } = req.body || {};
+    await pool.query(`UPDATE coin_packages SET is_active = $1 WHERE id = $2`, [isActive, req.params.id]);
+    res.json({ success: true });
   });
 
   // ================================================================

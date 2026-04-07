@@ -49,6 +49,7 @@ const NAV = [
   { key: "media",          label: "مكتبة الملفات",         icon: FolderOpen,      color: "text-lime-400" },
   { key: "pricing",        label: "إدارة الأسعار",          icon: DollarSign,      color: "text-yellow-400" },
   { key: "aipricing",      label: "أسعار الذكاء الاصطناعي", icon: Sparkles,       color: "text-violet-400" },
+  { key: "coins",          label: "نظام العملات",          icon: Gift,            color: "text-yellow-400" },
   { key: "settings",       label: "إعدادات المنصة",       icon: Settings,        color: "text-gray-400" },
   { key: "activity",       label: "سجل النشاط",           icon: Activity,        color: "text-slate-400" },
 ];
@@ -210,6 +211,7 @@ export default function AdminPanel() {
           {section === "media"      && <MediaSection logAction={logAction} />}
           {section === "pricing"    && <PricingSection />}
           {section === "aipricing"  && <AiPricingSection />}
+          {section === "coins"      && <CoinsSection logAction={logAction} />}
           {section === "settings"   && <SettingsSection logAction={logAction} />}
           {section === "activity"   && <ActivitySection />}
         </div>
@@ -2983,6 +2985,260 @@ function RenewalOrdersSection() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── CoinsSection ────────────────────────────────────────────────
+function CoinsSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const [genCount, setGenCount] = useState("10");
+  const [genCoins, setGenCoins] = useState("100");
+  const [generating, setGenerating] = useState(false);
+  const [generatedCodes, setGeneratedCodes] = useState<string[]>([]);
+  const [codesPage, setCodesPage] = useState(1);
+
+  const { data: codesData, isLoading: codesLoading, refetch: refetchCodes } = useQuery<any>({
+    queryKey: ["/api/admin/coins/codes", codesPage],
+    queryFn: () => fetch(`/api/admin/coins/codes?page=${codesPage}&limit=20`).then(r => r.json()),
+  });
+
+  const { data: packagesData } = useQuery<any[]>({
+    queryKey: ["/api/coins/packages"],
+    queryFn: () => fetch("/api/coins/packages").then(r => r.json()),
+  });
+
+  const handleGenerate = async () => {
+    const count = parseInt(genCount);
+    const coins = parseInt(genCoins);
+    if (isNaN(count) || count < 1 || count > 200) {
+      toast({ title: "خطأ", description: "العدد يجب أن يكون بين 1 و200", variant: "destructive" });
+      return;
+    }
+    if (isNaN(coins) || coins < 1) {
+      toast({ title: "خطأ", description: "قيمة العملات غير صالحة", variant: "destructive" });
+      return;
+    }
+    setGenerating(true);
+    try {
+      const res = await fetch("/api/admin/coins/generate-codes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ count, coins }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "فشل التوليد");
+      setGeneratedCodes(data.codes || []);
+      await refetchCodes();
+      logAction(`generated ${count} coin recharge codes (${coins} coins each)`);
+      toast({ title: "✅ تم التوليد", description: `تم إنشاء ${count} كود شحن بقيمة ${coins} عملة لكل كود` });
+    } catch (e: any) {
+      toast({ title: "خطأ", description: e.message, variant: "destructive" });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const copyAll = () => {
+    navigator.clipboard.writeText(generatedCodes.join("\n"));
+    toast({ title: "✅ تم النسخ", description: `تم نسخ ${generatedCodes.length} كود` });
+  };
+
+  const codes = codesData?.codes || [];
+  const totalCodes = codesData?.total || 0;
+  const totalPages = codesData?.pages || 1;
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">نظام العملات 🪙</h2>
+        <p className="text-white/50 text-sm">توليد وإدارة أكواد شحن العملات للمستخدمين</p>
+      </div>
+
+      {/* Stats row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="bg-zinc-900 border-zinc-700">
+          <CardContent className="p-4">
+            <p className="text-white/50 text-xs mb-1">إجمالي الأكواد</p>
+            <p className="text-2xl font-bold text-yellow-400">{totalCodes}</p>
+          </CardContent>
+        </Card>
+        <Card className="bg-zinc-900 border-zinc-700">
+          <CardContent className="p-4">
+            <p className="text-white/50 text-xs mb-1">الأكواد المستخدمة</p>
+            <p className="text-2xl font-bold text-green-400">
+              {codes.filter((c: any) => c.used_at).length || 0}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="bg-zinc-900 border-zinc-700">
+          <CardContent className="p-4">
+            <p className="text-white/50 text-xs mb-1">الأكواد المتاحة</p>
+            <p className="text-2xl font-bold text-blue-400">
+              {codes.filter((c: any) => !c.used_at).length || 0}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="bg-zinc-900 border-zinc-700">
+          <CardContent className="p-4">
+            <p className="text-white/50 text-xs mb-1">الباقات المتاحة</p>
+            <p className="text-2xl font-bold text-violet-400">{packagesData?.length || 0}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Generate codes */}
+      <Card className="bg-zinc-900 border-zinc-700">
+        <CardHeader>
+          <CardTitle className="text-white text-base flex items-center gap-2">
+            <Plus className="w-4 h-4 text-yellow-400" />
+            توليد أكواد شحن جديدة
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-white/60 text-xs">عدد الأكواد</label>
+              <Input
+                type="number"
+                value={genCount}
+                onChange={e => setGenCount(e.target.value)}
+                min="1" max="200"
+                className="bg-zinc-800 border-zinc-600 text-white w-36"
+                data-testid="input-gen-count"
+                dir="ltr"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-white/60 text-xs">قيمة كل كود (عملة)</label>
+              <Select value={genCoins} onValueChange={setGenCoins}>
+                <SelectTrigger className="bg-zinc-800 border-zinc-600 text-white w-48" data-testid="select-gen-coins">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-zinc-800 border-zinc-700">
+                  <SelectItem value="50">50 عملة</SelectItem>
+                  <SelectItem value="100">100 عملة</SelectItem>
+                  <SelectItem value="250">250 عملة</SelectItem>
+                  <SelectItem value="500">500 عملة</SelectItem>
+                  <SelectItem value="1000">1,000 عملة</SelectItem>
+                  <SelectItem value="3000">3,000 عملة</SelectItem>
+                  <SelectItem value="5000">5,000 عملة</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-end">
+              <Button
+                onClick={handleGenerate}
+                disabled={generating}
+                className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold"
+                data-testid="btn-generate-codes"
+              >
+                {generating ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : <Sparkles className="w-4 h-4 ml-2" />}
+                توليد الأكواد
+              </Button>
+            </div>
+          </div>
+
+          {/* Generated codes display */}
+          {generatedCodes.length > 0 && (
+            <div className="bg-zinc-950 rounded-xl p-4 border border-zinc-700">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-white font-bold text-sm">الأكواد المولَّدة ({generatedCodes.length})</p>
+                <Button size="sm" variant="outline" onClick={copyAll} className="border-zinc-600 text-white text-xs" data-testid="btn-copy-codes">
+                  نسخ الكل
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+                {generatedCodes.map((code, i) => (
+                  <div key={i} className="flex items-center justify-between bg-zinc-900 rounded-lg px-3 py-2">
+                    <code className="text-yellow-400 text-sm font-mono tracking-wider" data-testid={`code-${i}`}>{code}</code>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(code); toast({ title: "تم نسخ الكود" }); }}
+                      className="text-white/40 hover:text-white text-xs"
+                    >
+                      نسخ
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Codes list */}
+      <Card className="bg-zinc-900 border-zinc-700">
+        <CardHeader>
+          <CardTitle className="text-white text-base flex items-center justify-between">
+            <span>سجل الأكواد</span>
+            <Button size="sm" variant="ghost" onClick={() => refetchCodes()} className="text-white/60 hover:text-white" data-testid="btn-refresh-codes">
+              <RefreshCw className="w-3 h-3" />
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {codesLoading ? (
+            <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 text-yellow-400 animate-spin" /></div>
+          ) : codes.length === 0 ? (
+            <p className="text-white/40 text-center py-8">لا توجد أكواد بعد</p>
+          ) : (
+            <div className="space-y-2">
+              {codes.map((code: any) => (
+                <div key={code.id} className="flex items-center justify-between bg-zinc-800 rounded-xl px-4 py-3" data-testid={`row-code-${code.id}`}>
+                  <div>
+                    <code className="text-yellow-400 font-mono text-sm tracking-wider">{code.code}</code>
+                    <p className="text-white/40 text-xs mt-0.5">
+                      {code.coins} عملة
+                      {code.used_at && <span className="text-green-400 mr-2">• مستخدم في {new Date(code.used_at).toLocaleDateString("ar-EG")}</span>}
+                      {code.used_by_user_id && <span className="text-blue-400 mr-1">بواسطة: {code.used_by_user_id}</span>}
+                    </p>
+                  </div>
+                  <Badge className={code.used_at ? "bg-zinc-700 text-zinc-400" : "bg-green-500/20 text-green-400 border-green-500/30"}>
+                    {code.used_at ? "مستخدم" : "متاح"}
+                  </Badge>
+                </div>
+              ))}
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-3 pt-4">
+                  <Button size="sm" variant="outline" disabled={codesPage <= 1} onClick={() => setCodesPage(p => p - 1)} className="border-zinc-600 text-white">
+                    السابق
+                  </Button>
+                  <span className="text-white/50 text-sm">{codesPage} / {totalPages}</span>
+                  <Button size="sm" variant="outline" disabled={codesPage >= totalPages} onClick={() => setCodesPage(p => p + 1)} className="border-zinc-600 text-white">
+                    التالي
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Packages overview */}
+      <Card className="bg-zinc-900 border-zinc-700">
+        <CardHeader>
+          <CardTitle className="text-white text-base">باقات الشحن الحالية</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!packagesData || packagesData.length === 0 ? (
+            <p className="text-white/40 text-center py-4">لا توجد باقات</p>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+              {packagesData.map((pkg: any) => (
+                <div key={pkg.id} className="bg-gradient-to-b from-yellow-500/10 to-zinc-800 border border-yellow-500/20 rounded-2xl p-3 text-center" data-testid={`pkg-${pkg.id}`}>
+                  <p className="text-yellow-400 font-bold text-lg">{pkg.coins + (pkg.bonus_coins || 0)}</p>
+                  <p className="text-white/40 text-xs">عملة</p>
+                  {pkg.bonus_coins > 0 && <p className="text-green-400 text-xs">+{pkg.bonus_coins} مجانًا</p>}
+                  <p className="text-white font-bold mt-2">{pkg.price_egp} ج.م</p>
+                  <p className="text-white/30 text-[10px] mt-1">{pkg.name}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

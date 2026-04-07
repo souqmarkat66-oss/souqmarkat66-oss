@@ -76,9 +76,19 @@ export default function LiveStream() {
   // Share & Gift state
   const [showShare,       setShowShare]       = useState(false);
   const [showGiftPanel,   setShowGiftPanel]   = useState(false);
+  const [showRechargeModal, setShowRechargeModal] = useState(false);
+  const [rechargeCode,    setRechargeCode]    = useState("");
+  const [rechargeLoading, setRechargeLoading] = useState(false);
   interface FlyingGift { id: number; emoji: string; x: number; }
   const [flyingGifts,     setFlyingGifts]     = useState<FlyingGift[]>([]);
-  const [myCoins,         setMyCoins]         = useState(500); // starter coins
+  const [myCoins,         setMyCoins]         = useState(0); // loaded from DB
+
+  // Hand raise state (viewer)
+  const [handRaised,      setHandRaised]      = useState(false);
+  const [handInvited,     setHandInvited]     = useState(false);
+  // Hand raise state (broadcaster — list of raised hands)
+  const [raisedHands,     setRaisedHands]     = useState<{socketId:string; userName:string; userId:string}[]>([]);
+  const [showHandsList,   setShowHandsList]   = useState(false);
 
   // RTMP mode state
   const [broadcastMode,   setBroadcastMode]   = useState<"webrtc"|"rtmp">("webrtc");
@@ -114,6 +124,20 @@ export default function LiveStream() {
     enabled: !!id,
     refetchInterval: 5000,
   });
+
+  /* ── coin wallet ── */
+  const { data: coinWallet, refetch: refetchWallet } = useQuery<any>({
+    queryKey: ["/api/coins/wallet"],
+    queryFn: () => fetch("/api/coins/wallet", { credentials: "include" }).then(r => r.json()),
+    enabled: !!user,
+  });
+  const { data: coinPackages } = useQuery<any[]>({
+    queryKey: ["/api/coins/packages"],
+    queryFn: () => fetch("/api/coins/packages").then(r => r.json()),
+  });
+  useEffect(() => {
+    if (coinWallet?.balance !== undefined) setMyCoins(coinWallet.balance);
+  }, [coinWallet?.balance]);
 
   /* ─── HLS player for viewers (RTMP streams) ─────────── */
   const startHlsPlayer = useCallback(async (url: string) => {
@@ -260,6 +284,17 @@ export default function LiveStream() {
       socket.on("candidate", async (fromId: string, candidate: RTCIceCandidateInit) => {
         const pc = peers.current.get(fromId);
         if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      });
+
+      // ── Hand Raise events (broadcaster side) ──
+      socket.on("hand-raised", (data: { socketId: string; userName: string; userId: string }) => {
+        setRaisedHands(prev => [...prev.filter(h => h.socketId !== data.socketId), data]);
+        toast({ title: "✋ رفع إيده", description: `${data.userName} يريد التحدث` });
+        setShowHandsList(true);
+      });
+
+      socket.on("hand-lowered", (data: { socketId: string }) => {
+        setRaisedHands(prev => prev.filter(h => h.socketId !== data.socketId));
       });
 
       // ── Co-host events (broadcaster side) ──
@@ -431,6 +466,22 @@ export default function LiveStream() {
         const audioTrack = coHostStream.current?.getAudioTracks()[0];
         if (audioTrack) audioTrack.enabled = !muted;
         toast({ title: muted ? "🔇 تم كتم ميكروفونك من المذيع" : "🎙️ فعّل المذيع ميكروفونك" });
+      });
+
+      // Hand raise events (viewer side)
+      socket.on("hand-raise-confirmed", () => {
+        setHandRaised(true);
+      });
+
+      socket.on("hand-invite", (data: { broadcasterId: string }) => {
+        setHandInvited(true);
+        setHandRaised(false);
+        toast({ title: "🎉 دعوة من المذيع!", description: "المذيع دعاك للتحدث — انضم كضيف الآن" });
+      });
+
+      socket.on("hand-dismissed", () => {
+        setHandRaised(false);
+        toast({ title: "تم رفض طلبك", description: "المذيع لم يقبل طلبك حالياً" });
       });
 
       // Broadcaster removed this guest
@@ -659,6 +710,49 @@ export default function LiveStream() {
     toast({ title: newVal ? "✅ القبول التلقائي مفعّل" : "القبول التلقائي معطّل", description: newVal ? "كل من يطلب سيدخل مباشرة" : "ستراجع طلبات المشاركة يدوياً" });
   };
 
+  /* ─── Hand Raise helpers ─────────────────────────────── */
+  const raiseHand = () => {
+    if (!user) return;
+    const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مستخدم";
+    socketRef.current?.emit("raise-hand", { streamId: id, userId: (user as any).id, userName });
+  };
+
+  const lowerHand = () => {
+    setHandRaised(false);
+    socketRef.current?.emit("lower-hand", { streamId: id });
+  };
+
+  const inviteRaisedHand = (socketId: string) => {
+    socketRef.current?.emit("invite-raised-hand", { streamId: id, guestSocketId: socketId });
+    setRaisedHands(prev => prev.filter(h => h.socketId !== socketId));
+  };
+
+  const dismissHand = (socketId: string) => {
+    socketRef.current?.emit("dismiss-hand", { streamId: id, guestSocketId: socketId });
+    setRaisedHands(prev => prev.filter(h => h.socketId !== socketId));
+  };
+
+  /* ─── Coin recharge helper ────────────────────────────── */
+  const redeemCoinCode = async () => {
+    if (!rechargeCode.trim()) return;
+    setRechargeLoading(true);
+    try {
+      const res = await apiRequest("POST", "/api/coins/redeem", { code: rechargeCode.trim() });
+      const data = await res.json();
+      if (res.ok) {
+        toast({ title: "✅ تم الشحن!", description: data.message });
+        setRechargeCode("");
+        setShowRechargeModal(false);
+        refetchWallet();
+      } else {
+        toast({ title: "خطأ", description: data.message, variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "خطأ في الاتصال", variant: "destructive" });
+    }
+    setRechargeLoading(false);
+  };
+
   /* ─── Gift helpers ────────────────────────────────────── */
   const GIFTS = [
     { type: "rose",    emoji: "🌹", name: "وردة",      coins: 5   },
@@ -681,8 +775,11 @@ export default function LiveStream() {
     socketRef.current?.emit("send-gift", {
       streamId: id, giftType: gift.type, giftEmoji: gift.emoji,
       giftName: gift.name, giftCoins: gift.coins, userName, userId: (user as any).id,
+      broadcasterUserId: stream?.userId,
     });
     setMyCoins(prev => prev - gift.coins);
+    // Sync wallet from server after a short delay
+    setTimeout(() => refetchWallet(), 1500);
   };
 
   /* ─── Share helpers ───────────────────────────────────── */
@@ -1100,12 +1197,48 @@ export default function LiveStream() {
 
             {/* GIFT BUTTON */}
             {user && (
-              <button onClick={() => { setShowGiftPanel(p => !p); setShowShare(false); }} className="flex flex-col items-center gap-0.5" data-testid="btn-gift-panel">
+              <button onClick={() => { setShowGiftPanel(p => !p); setShowShare(false); setShowRechargeModal(false); }} className="flex flex-col items-center gap-0.5" data-testid="btn-gift-panel">
                 <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-yellow-500/80 backdrop-blur relative">
                   <Gift className="w-6 h-6 text-white" />
                   <span className="absolute -top-1 -end-1 bg-black/70 text-white text-[9px] font-bold rounded-full px-1">{myCoins}</span>
                 </div>
                 <span className="text-white text-[10px] font-bold drop-shadow">هدية</span>
+              </button>
+            )}
+
+            {/* COIN RECHARGE BUTTON */}
+            {user && (
+              <button onClick={() => { setShowRechargeModal(true); setShowGiftPanel(false); setShowShare(false); }} className="flex flex-col items-center gap-0.5" data-testid="btn-recharge-coins">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-amber-600/80 backdrop-blur">
+                  <span className="text-xl">🪙</span>
+                </div>
+                <span className="text-white text-[10px] font-bold drop-shadow">شحن</span>
+              </button>
+            )}
+
+            {/* RAISE HAND BUTTON */}
+            {user && coHostStatus === "idle" && !handRaised && !handInvited && (
+              <button onClick={raiseHand} className="flex flex-col items-center gap-0.5" data-testid="btn-raise-hand">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-orange-500/80 backdrop-blur">
+                  <span className="text-2xl">✋</span>
+                </div>
+                <span className="text-white text-[10px] font-bold drop-shadow">رفع إيد</span>
+              </button>
+            )}
+            {user && handRaised && !handInvited && (
+              <button onClick={lowerHand} className="flex flex-col items-center gap-0.5 animate-pulse" data-testid="btn-lower-hand">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-orange-600 backdrop-blur">
+                  <span className="text-2xl">✋</span>
+                </div>
+                <span className="text-white text-[10px] font-bold drop-shadow">انتظار...</span>
+              </button>
+            )}
+            {user && handInvited && coHostStatus === "idle" && (
+              <button onClick={() => { setHandInvited(false); requestCoHost(); }} className="flex flex-col items-center gap-0.5 animate-bounce" data-testid="btn-accept-hand-invite">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-green-500 backdrop-blur">
+                  <span className="text-2xl">🎤</span>
+                </div>
+                <span className="text-white text-[10px] font-bold drop-shadow">انضم!</span>
               </button>
             )}
 
@@ -1205,9 +1338,57 @@ export default function LiveStream() {
           </>
         )}
 
+        {/* RAISED HANDS PANEL (broadcaster) */}
+        {isBroadcast && raisedHands.length > 0 && showHandsList && (
+          <div className="absolute top-16 inset-x-4 z-20 bg-black/85 backdrop-blur-lg rounded-2xl border border-orange-500/40 overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">✋</span>
+                <span className="text-white font-bold text-xs">الأيدي المرفوعة ({raisedHands.length})</span>
+              </div>
+              <button onClick={() => setShowHandsList(false)} className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
+                <X className="w-3 h-3 text-white" />
+              </button>
+            </div>
+            <div className="flex flex-col divide-y divide-white/5">
+              {raisedHands.map(h => (
+                <div key={h.socketId} className="flex items-center gap-2 px-3 py-2">
+                  <div className="w-8 h-8 rounded-full bg-orange-500/30 flex items-center justify-center flex-shrink-0 text-base">✋</div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-xs font-bold truncate">{h.userName}</p>
+                    <p className="text-white/40 text-[10px]">يريد التحدث</p>
+                  </div>
+                  <button
+                    onClick={() => inviteRaisedHand(h.socketId)}
+                    className="px-2.5 py-1 rounded-full bg-green-500 text-white text-[10px] font-bold flex-shrink-0"
+                    data-testid={`btn-invite-hand-${h.socketId}`}
+                  >دعوة</button>
+                  <button
+                    onClick={() => dismissHand(h.socketId)}
+                    className="w-6 h-6 rounded-full bg-red-500/60 flex items-center justify-center flex-shrink-0"
+                    data-testid={`btn-dismiss-hand-${h.socketId}`}
+                  ><X className="w-3 h-3 text-white" /></button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Hand raise count badge for broadcaster */}
+        {isBroadcast && raisedHands.length > 0 && !showHandsList && (
+          <button
+            onClick={() => setShowHandsList(true)}
+            className="absolute top-16 start-4 z-20 flex items-center gap-1.5 bg-orange-500 rounded-full px-3 py-1.5 shadow-lg animate-bounce"
+            data-testid="btn-show-hands-list"
+          >
+            <span className="text-sm">✋</span>
+            <span className="text-white text-xs font-bold">{raisedHands.length}</span>
+          </button>
+        )}
+
         {/* CO-HOST REQUESTS PANEL (broadcaster) */}
         {isBroadcast && coHostRequests.length > 0 && (
-          <div className="absolute top-16 inset-x-4 z-20 flex flex-col gap-2">
+          <div className="absolute top-32 inset-x-4 z-20 flex flex-col gap-2">
             {coHostRequests.map(req => (
               <div key={req.socketId} className="flex items-center gap-2 bg-black/80 backdrop-blur rounded-2xl px-3 py-2.5 border border-purple-500/40">
                 <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center flex-shrink-0">
@@ -1215,7 +1396,7 @@ export default function LiveStream() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-white text-xs font-bold truncate">{req.userName}</p>
-                  <p className="text-white/50 text-[10px]">يطلب المشاركة بالصوت والصورة</p>
+                  <p className="text-white/50 text-[10px]">{req.withCamera === false ? "🎙️ صوت فقط" : "📷 صوت وصورة"}</p>
                 </div>
                 <button
                   onClick={() => acceptCoHost(req.socketId, req.userName)}
@@ -1533,6 +1714,78 @@ export default function LiveStream() {
                 </div>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* COIN RECHARGE MODAL */}
+      {showRechargeModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowRechargeModal(false)}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-6 pb-safe" onClick={e => e.stopPropagation()} dir="rtl">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-white font-bold text-lg">شحن العملات 🪙</h3>
+                <p className="text-yellow-400 text-sm font-bold mt-0.5">رصيدك: {myCoins} عملة</p>
+              </div>
+              <button onClick={() => setShowRechargeModal(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+
+            {/* Recharge code input */}
+            <div className="bg-white/5 rounded-2xl p-4 mb-4 border border-white/10">
+              <p className="text-white/70 text-xs mb-2 font-bold">لديك كود شحن؟</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={rechargeCode}
+                  onChange={e => setRechargeCode(e.target.value.toUpperCase())}
+                  placeholder="SOUQ-XXXXX-XXXXX"
+                  className="flex-1 bg-white/10 border border-white/20 text-white placeholder:text-white/30 rounded-xl px-3 py-2.5 text-sm font-mono tracking-wider"
+                  data-testid="input-recharge-code"
+                  dir="ltr"
+                />
+                <button
+                  onClick={redeemCoinCode}
+                  disabled={rechargeLoading || !rechargeCode.trim()}
+                  className="px-4 py-2.5 rounded-xl bg-yellow-500 text-black font-bold text-sm disabled:opacity-50"
+                  data-testid="btn-redeem-code"
+                >
+                  {rechargeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "تفعيل"}
+                </button>
+              </div>
+              <p className="text-white/30 text-[10px] mt-2">اشتري كود من أي وكيل أو عبر التطبيق</p>
+            </div>
+
+            {/* Packages */}
+            <p className="text-white/60 text-xs font-bold mb-3">باقات الشحن</p>
+            <div className="grid grid-cols-2 gap-2.5 max-h-64 overflow-y-auto">
+              {(coinPackages || [
+                { id:1, name:"باقة صغيرة",  coins:100,  price_egp:10,  bonus_coins:0   },
+                { id:2, name:"باقة متوسطة", coins:250,  price_egp:22,  bonus_coins:20  },
+                { id:3, name:"باقة كبيرة",  coins:500,  price_egp:40,  bonus_coins:75  },
+                { id:4, name:"باقة مميزة",  coins:1000, price_egp:70,  bonus_coins:200 },
+                { id:5, name:"باقة الكنز",  coins:3000, price_egp:180, bonus_coins:800 },
+              ]).map((pkg: any) => (
+                <button
+                  key={pkg.id}
+                  className="bg-gradient-to-b from-yellow-500/20 to-yellow-600/10 border border-yellow-500/30 rounded-2xl p-3 text-right hover:from-yellow-500/30 transition-colors"
+                  data-testid={`btn-buy-package-${pkg.id}`}
+                  onClick={() => {
+                    toast({ title: "قريباً 🔜", description: "الدفع الإلكتروني سيتوفر قريباً — استخدم أكواد الشحن حالياً" });
+                  }}
+                >
+                  <div className="text-2xl mb-1">🪙</div>
+                  <p className="text-yellow-400 font-bold text-sm">{(pkg.coins + (pkg.bonus_coins || 0)).toLocaleString()} عملة</p>
+                  {pkg.bonus_coins > 0 && <p className="text-green-400 text-[10px]">+{pkg.bonus_coins} مجاناً</p>}
+                  <p className="text-white font-bold text-sm mt-1">{pkg.price_egp} ج.م</p>
+                  <p className="text-white/40 text-[10px]">{pkg.name}</p>
+                </button>
+              ))}
+            </div>
+
+            <p className="text-white/20 text-[10px] text-center mt-4">1 عملة = 0.10 جنيه مصري • المدفوع لا يُسترد</p>
           </div>
         </div>
       )}
