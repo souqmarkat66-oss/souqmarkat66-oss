@@ -1855,7 +1855,7 @@ export default function LiveStream() {
                   {payMethod === "vodafone" && (
                     <>
                       <p className="text-white/60 text-xs mb-1">حوّل المبلغ لرقم فودافون كاش التالي:</p>
-                      <p className="text-white font-bold text-xl tracking-widest" dir="ltr">01098553911</p>
+                      <p className="text-white font-bold text-xl tracking-widest" dir="ltr">01126665741</p>
                       <p className="text-white/40 text-xs mt-1">سوق ماركات للإعلانات</p>
                     </>
                   )}
