@@ -10,6 +10,9 @@ import fs from "fs";
 const app = express();
 const httpServer = createServer(app);
 
+// Trust Replit's reverse proxy so cookies + req.ip work correctly in production
+app.set("trust proxy", 1);
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
