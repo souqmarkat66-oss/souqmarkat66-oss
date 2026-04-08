@@ -183,7 +183,8 @@ async function runMigrations() {
       ('ai_price_animation', '80'),
       ('ai_price_content', '5'),
       ('ai_price_post', '8'),
-      ('ai_referral_bonus_egp', '5')
+      ('ai_referral_bonus_egp', '5'),
+      ('boost_share_reward_egp', '50')
       ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`
       UPDATE users SET referral_code = UPPER(SUBSTRING(MD5(id::text) FROM 1 FOR 8))

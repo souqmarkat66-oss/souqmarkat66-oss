@@ -4250,7 +4250,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.get("/api/pricing", async (_req, res) => {
     try {
       const allowedKeys = new Set([
-        'boost_price_egp','boost_enabled',
+        'boost_price_egp','boost_enabled','boost_share_reward_egp',
         'renewal_price_7','renewal_price_30','renewal_price_60','renewal_price_90',
         'campaign_min_budget_egp','wallet_min_withdrawal_egp',
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
@@ -4264,7 +4264,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
         if (allowedKeys.has(r.key)) settings[r.key] = r.value;
       }
       const defaults: Record<string, string> = {
-        boost_price_egp: '200', boost_enabled: 'true',
+        boost_price_egp: '200', boost_enabled: 'true', boost_share_reward_egp: '50',
         renewal_price_7: '50', renewal_price_30: '350', renewal_price_60: '90', renewal_price_90: '130',
         campaign_min_budget_egp: '100', wallet_min_withdrawal_egp: '100',
         ai_price_image: '10', ai_price_video: '25', ai_price_animation: '20',
@@ -4281,7 +4281,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const keys = [
         'cpm_rate_egp','cpc_rate_egp','publisher_share_pct','campaign_min_budget_egp',
-        'boost_price_egp','boost_enabled',
+        'boost_price_egp','boost_enabled','boost_share_reward_egp',
         'renewal_price_30','renewal_price_60','renewal_price_90',
         'wallet_min_withdrawal_egp','wallet_max_deposit_egp',
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
@@ -4301,7 +4301,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const { settings } = req.body;
       const allowed = [
         'cpm_rate_egp','cpc_rate_egp','publisher_share_pct','campaign_min_budget_egp',
-        'boost_price_egp','boost_enabled',
+        'boost_price_egp','boost_enabled','boost_share_reward_egp',
         'renewal_price_30','renewal_price_60','renewal_price_90',
         'wallet_min_withdrawal_egp','wallet_max_deposit_egp',
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',

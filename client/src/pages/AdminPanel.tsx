@@ -2564,7 +2564,16 @@ function PricingSection() {
           <Zap className="w-4 h-4 text-orange-500" /> تعزيز الإعلان (Boost)
         </h3>
         <PriceCard icon={Zap} color="bg-orange-500" label="إعدادات التعزيز" desc="سعر وتفعيل خاصية تعزيز الإعلانات">
-          <NumInput k="boost_price_egp" label="سعر التعزيز" unit="ج.م" def="0" step="5" />
+          <NumInput k="boost_price_egp" label="سعر التعزيز الإجمالي" unit="ج.م" def="200" step="5" />
+          <NumInput k="boost_share_reward_egp" label="مكافأة المشاركة (للشخص الذي يشارك الإعلان)" unit="ج.م" def="50" step="5" />
+          <div className="mt-1 p-2 bg-amber-50 dark:bg-amber-950/20 rounded-lg text-xs text-amber-700 dark:text-amber-400">
+            💡 صافي المنصة = سعر التعزيز − مكافأة المشاركة
+            {(() => {
+              const price = parseFloat(v("boost_price_egp","200"));
+              const reward = parseFloat(v("boost_share_reward_egp","50"));
+              return ` (${price} − ${reward} = ${price - reward} ج.م)`;
+            })()}
+          </div>
           <div className="flex items-center justify-between mt-2">
             <span className="text-xs text-muted-foreground">تفعيل التعزيز</span>
             <button
