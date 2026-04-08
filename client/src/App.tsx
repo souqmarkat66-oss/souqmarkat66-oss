@@ -7,6 +7,7 @@ import { LanguageProvider } from "@/components/LanguageProvider";
 import { Navbar } from "@/components/Navbar";
 import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
+import { useEffect } from "react";
 
 import Home from "@/pages/Home";
 import Ads from "@/pages/Ads";
@@ -41,6 +42,22 @@ import { InterestOnboarding } from "@/components/InterestOnboarding";
 import BottomNav from "@/components/BottomNav";
 import NotFound from "@/pages/not-found";
 
+// Captures ?ref=CODE from URL and stores in localStorage for auto-apply after login
+function RefTracker() {
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get("ref");
+    if (ref && ref.length >= 4) {
+      localStorage.setItem("pending_referral_code", ref.toUpperCase());
+      params.delete("ref");
+      const newSearch = params.toString();
+      const newUrl = window.location.pathname + (newSearch ? "?" + newSearch : "") + window.location.hash;
+      window.history.replaceState({}, "", newUrl);
+    }
+  }, []);
+  return null;
+}
+
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { user, isLoading } = useAuth();
   if (isLoading) return (
@@ -62,6 +79,7 @@ function ReelsPage() {
 function Router() {
   return (
     <>
+    <RefTracker />
     <Switch>
       <Route path="/reels" component={ReelsPage} />
       <Route>
