@@ -497,7 +497,7 @@ export default function Profile() {
                   </div>
                   {r.review && <p className="text-sm text-muted-foreground">{r.review}</p>}
                   <p className="text-xs text-muted-foreground/60 mt-1">
-                    {format(new Date(r.created_at), "d MMM yyyy", { locale: ar })}
+                    {r.created_at ? (() => { try { return format(new Date(r.created_at), "d MMM yyyy", { locale: ar }); } catch { return ""; } })() : ""}
                   </p>
                 </div>
               </div>

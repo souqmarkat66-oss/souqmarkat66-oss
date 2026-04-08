@@ -3530,9 +3530,14 @@ function RatingsSection({ logAction }: { logAction: any }) {
     );
   }
 
+  const getName  = (r: any) => r.userName  ?? r.user_name  ?? "";
+  const getType  = (r: any) => r.targetType ?? r.target_type ?? "";
+  const getId    = (r: any) => r.targetId   ?? r.target_id   ?? "";
+  const getDate  = (r: any) => r.createdAt  ?? r.created_at  ?? null;
+
   const filtered = ratings.filter((r: any) =>
     !search ||
-    r.user_name?.toLowerCase().includes(search.toLowerCase()) ||
+    getName(r).toLowerCase().includes(search.toLowerCase()) ||
     r.review?.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -3566,14 +3571,14 @@ function RatingsSection({ logAction }: { logAction: any }) {
         <Card className="rounded-2xl border-border/50">
           <CardContent className="p-4 text-center">
             <Users className="w-6 h-6 mx-auto mb-2 text-purple-500" />
-            <p className="text-3xl font-black">{ratings.filter((r: any) => r.target_type === "user").length}</p>
+            <p className="text-3xl font-black">{ratings.filter((r: any) => getType(r) === "user").length}</p>
             <p className="text-xs text-muted-foreground">تقييمات البائعين</p>
           </CardContent>
         </Card>
         <Card className="rounded-2xl border-border/50">
           <CardContent className="p-4 text-center">
             <Megaphone className="w-6 h-6 mx-auto mb-2 text-orange-500" />
-            <p className="text-3xl font-black">{ratings.filter((r: any) => r.target_type === "ad").length}</p>
+            <p className="text-3xl font-black">{ratings.filter((r: any) => getType(r) === "ad").length}</p>
             <p className="text-xs text-muted-foreground">تقييمات الإعلانات</p>
           </CardContent>
         </Card>
@@ -3647,24 +3652,24 @@ function RatingsSection({ logAction }: { logAction: any }) {
               data-testid={`rating-${r.id}`}
             >
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/30 to-secondary/30 flex items-center justify-center text-white font-bold text-sm shrink-0">
-                {r.user_name?.[0] || "م"}
+                {getName(r)?.[0] || "م"}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <span className="font-semibold text-sm">{r.user_name}</span>
+                  <span className="font-semibold text-sm">{getName(r)}</span>
                   <StarDisplay value={r.rating} />
                   <Badge variant="outline" className="text-[10px] h-4">
-                    {r.target_type === "user" ? "بائع" : "إعلان"}
+                    {getType(r) === "user" ? "بائع" : "إعلان"}
                   </Badge>
                   <span className="text-xs text-muted-foreground">
-                    {format(new Date(r.created_at), "d MMM yyyy", { locale: ar })}
+                    {getDate(r) ? (() => { try { return format(new Date(getDate(r)), "d MMM yyyy", { locale: ar }); } catch { return ""; } })() : ""}
                   </span>
                 </div>
                 {r.review && (
                   <p className="text-sm text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">{r.review}</p>
                 )}
                 <p className="text-xs text-muted-foreground/60 mt-1">
-                  المستهدف: {r.target_type === "user" ? "مستخدم" : "إعلان"} #{r.target_id}
+                  المستهدف: {getType(r) === "user" ? "مستخدم" : "إعلان"} #{getId(r)}
                 </p>
               </div>
               <Button
