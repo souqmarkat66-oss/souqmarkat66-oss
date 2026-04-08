@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AdCard } from "@/components/AdCard";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MessageCircle, LayoutGrid, Eye, Heart, Tv, Star, Shield, AlertTriangle, Sparkles, Edit2, Camera, Copy, Gift, Check, Users, Cake, Briefcase, MapPin, ExternalLink } from "lucide-react";
+import { MessageCircle, LayoutGrid, Eye, Heart, Tv, Star, Shield, AlertTriangle, Sparkles, Edit2, Camera, Copy, Gift, Check, Users, Cake, Briefcase, MapPin, ExternalLink, ThumbsUp } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect, useRef } from "react";
@@ -15,6 +15,31 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
+
+function StarRating({ value, onChange, readonly = false, size = "md" }: {
+  value: number; onChange?: (v: number) => void; readonly?: boolean; size?: "sm" | "md" | "lg";
+}) {
+  const [hover, setHover] = useState(0);
+  const sz = size === "sm" ? "w-4 h-4" : size === "lg" ? "w-8 h-8" : "w-6 h-6";
+  return (
+    <div className="flex gap-0.5">
+      {[1,2,3,4,5].map(n => (
+        <button
+          key={n}
+          type="button"
+          disabled={readonly}
+          onClick={() => onChange?.(n)}
+          onMouseEnter={() => !readonly && setHover(n)}
+          onMouseLeave={() => setHover(0)}
+          className={`transition-transform ${readonly ? "cursor-default" : "hover:scale-125 cursor-pointer"}`}
+          data-testid={`star-${n}`}
+        >
+          <Star className={`${sz} ${(hover || value) >= n ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground/30"}`} />
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const ALL_INTERESTS = [
   { id: "tech", label: "تقنية وإلكترونيات", emoji: "📱" },
@@ -52,6 +77,9 @@ export default function Profile() {
   const [referralInput, setReferralInput] = useState("");
   const [copied, setCopied] = useState(false);
   const [referralStats, setReferralStats] = useState<{ count: string; earned: string } | null>(null);
+  const [myRating, setMyRating] = useState(0);
+  const [myReview, setMyReview] = useState("");
+  const [showRatingForm, setShowRatingForm] = useState(false);
 
   const targetUserId = params?.userId || user?.id;
   const isOwn = user?.id === targetUserId;
@@ -90,6 +118,27 @@ export default function Profile() {
     queryKey: ["/api/profile", targetUserId, "ads"],
     queryFn: () => fetch(`/api/profile/${targetUserId}/ads`, { credentials: "include" }).then(r => r.json()),
     enabled: !!targetUserId,
+  });
+
+  const { data: ratingsData } = useQuery<{ ratings: any[]; avg: number; count: number }>({
+    queryKey: ["/api/ratings/user", targetUserId],
+    queryFn: () => fetch(`/api/ratings/user/${targetUserId}`).then(r => r.json()),
+    enabled: !!targetUserId,
+  });
+
+  const ratingMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/ratings", {
+      targetType: "user",
+      targetId: String(targetUserId),
+      rating: myRating,
+      review: myReview || null,
+    }),
+    onSuccess: () => {
+      toast({ title: "✅ تم إرسال تقييمك، شكراً!" });
+      setShowRatingForm(false);
+      qc.invalidateQueries({ queryKey: ["/api/ratings/user", targetUserId] });
+    },
+    onError: () => toast({ title: "❌ حدث خطأ أثناء إرسال التقييم", variant: "destructive" }),
   });
 
   const interestsMutation = useMutation({
@@ -244,6 +293,13 @@ export default function Profile() {
                   <Shield className="w-3 h-3" /> موثّق
                 </Badge>
               )}
+              {ratingsData && ratingsData.count > 0 && (
+                <div className="flex items-center gap-1" title={`${ratingsData.count} تقييم`}>
+                  <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                  <span className="text-sm font-bold text-yellow-600">{ratingsData.avg.toFixed(1)}</span>
+                  <span className="text-xs text-muted-foreground">({ratingsData.count})</span>
+                </div>
+              )}
               {isOwn && (
                 <button
                   onClick={() => setEditOpen(true)}
@@ -321,9 +377,17 @@ export default function Profile() {
 
           {/* Actions */}
           {!isOwn && user && (
-            <div className="flex gap-2 flex-shrink-0">
+            <div className="flex gap-2 flex-shrink-0 flex-wrap justify-center sm:justify-end">
               <Button size="sm" className="gap-2" onClick={startChat} data-testid="btn-start-chat">
                 <MessageCircle className="w-4 h-4" /> راسله
+              </Button>
+              <Button
+                size="sm" variant="outline"
+                className="gap-2 border-yellow-300 text-yellow-700 hover:bg-yellow-50 dark:hover:bg-yellow-950/20"
+                onClick={() => setShowRatingForm(v => !v)}
+                data-testid="btn-rate-seller"
+              >
+                <Star className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" /> قيّمه
               </Button>
               <Button
                 size="sm" variant="outline"
@@ -361,6 +425,100 @@ export default function Profile() {
             <p className="text-xs text-muted-foreground">{label}</p>
           </div>
         ))}
+      </div>
+
+      {/* Seller Ratings Section */}
+      <div className="bg-card border border-border/60 rounded-2xl p-5 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Star className="w-5 h-5 fill-yellow-400 text-yellow-400" />
+            <h2 className="font-bold">تقييمات البائع</h2>
+            {ratingsData && ratingsData.count > 0 && (
+              <Badge variant="secondary">{ratingsData.count} تقييم</Badge>
+            )}
+          </div>
+          {ratingsData && ratingsData.count > 0 && (
+            <div className="flex items-center gap-2">
+              <StarRating value={Math.round(ratingsData.avg)} readonly size="sm" />
+              <span className="font-black text-xl text-yellow-600">{ratingsData.avg.toFixed(1)}</span>
+              <span className="text-xs text-muted-foreground">/ 5</span>
+            </div>
+          )}
+        </div>
+
+        {/* Rating form for non-owners */}
+        {!isOwn && user && showRatingForm && (
+          <div className="bg-muted/40 rounded-xl p-4 mb-4 border border-border/60">
+            <p className="text-sm font-semibold mb-3">✍️ قيّم هذا البائع</p>
+            <div className="flex items-center gap-3 mb-3">
+              <StarRating value={myRating} onChange={setMyRating} size="lg" />
+              {myRating > 0 && (
+                <span className="text-sm text-muted-foreground">
+                  {["", "ضعيف", "مقبول", "جيد", "جيد جداً", "ممتاز"][myRating]}
+                </span>
+              )}
+            </div>
+            <Textarea
+              value={myReview}
+              onChange={e => setMyReview(e.target.value)}
+              placeholder="اكتب تعليقك (اختياري)..."
+              className="min-h-[80px] resize-none text-sm mb-3"
+              maxLength={300}
+              data-testid="input-rating-review"
+            />
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                className="gap-2 bg-yellow-500 hover:bg-yellow-600 text-white"
+                onClick={() => ratingMutation.mutate()}
+                disabled={myRating === 0 || ratingMutation.isPending}
+                data-testid="btn-submit-rating"
+              >
+                <ThumbsUp className="w-3.5 h-3.5" />
+                {ratingMutation.isPending ? "جاري الإرسال..." : "إرسال التقييم"}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowRatingForm(false)}>إلغاء</Button>
+            </div>
+          </div>
+        )}
+
+        {/* Reviews list */}
+        {ratingsData && ratingsData.ratings.length > 0 ? (
+          <div className="space-y-3">
+            {ratingsData.ratings.slice(0, 5).map((r: any) => (
+              <div key={r.id} className="flex gap-3 p-3 bg-muted/30 rounded-xl">
+                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary/40 to-secondary/40 flex items-center justify-center text-white text-sm font-bold shrink-0">
+                  {r.user_name?.[0] || "م"}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-semibold truncate">{r.user_name}</span>
+                    <StarRating value={r.rating} readonly size="sm" />
+                  </div>
+                  {r.review && <p className="text-sm text-muted-foreground">{r.review}</p>}
+                  <p className="text-xs text-muted-foreground/60 mt-1">
+                    {format(new Date(r.created_at), "d MMM yyyy", { locale: ar })}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-6 text-muted-foreground">
+            <Star className="w-8 h-8 mx-auto mb-2 opacity-30" />
+            <p className="text-sm">لا توجد تقييمات بعد</p>
+            {!isOwn && user && !showRatingForm && (
+              <Button
+                size="sm" variant="outline"
+                className="mt-3 gap-2 border-yellow-300 text-yellow-700"
+                onClick={() => setShowRatingForm(true)}
+                data-testid="btn-be-first-rater"
+              >
+                <Star className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" /> كن أول من يقيّم
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Referral Section — only for owner */}

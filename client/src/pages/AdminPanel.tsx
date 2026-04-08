@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -42,6 +43,7 @@ const NAV = [
   { key: "payreceipts",    label: "إيصالات الدفع",          icon: Banknote,        color: "text-emerald-500" },
   { key: "renewalorders",  label: "طلبات التجديد",           icon: RefreshCw,       color: "text-blue-400" },
   { key: "reports",        label: "البلاغات",             icon: Flag,            color: "text-yellow-400" },
+  { key: "ratings",        label: "تقييمات البائعين",      icon: Star,            color: "text-yellow-400" },
   { key: "fraud",          label: "كشف الاحتيال",         icon: ShieldX,         color: "text-red-500" },
   { key: "analytics",      label: "تقرير الأداء",          icon: PieChart,        color: "text-sky-400" },
   { key: "revenue",        label: "الإيرادات",            icon: DollarSign,      color: "text-emerald-400" },
@@ -204,6 +206,7 @@ export default function AdminPanel() {
           {section === "payreceipts"   && <PayReceiptsSection />}
           {section === "renewalorders" && <RenewalOrdersSection />}
           {section === "reports"       && <ReportsSection logAction={logAction} />}
+          {section === "ratings"       && <RatingsSection logAction={logAction} />}
           {section === "fraud"      && <FraudSection />}
           {section === "analytics"  && <AnalyticsSection />}
           {section === "revenue"    && <RevenueSection />}
@@ -3490,6 +3493,194 @@ function CoinsSection({ logAction }: { logAction: any }) {
         </div>
       )}
 
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RATINGS SECTION
+// ═══════════════════════════════════════════════════════════════
+function RatingsSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState<"all" | "user" | "ad">("all");
+
+  const { data: ratings = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/ratings", filterType],
+    queryFn: () => fetch(`/api/admin/ratings?type=${filterType}`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  const deleteRatingMutation = useMutation({
+    mutationFn: (id: number) => fetch(`/api/admin/ratings/${id}`, { method: "DELETE", credentials: "include" }).then(r => r.json()),
+    onSuccess: (_: any, id: number) => {
+      toast({ title: "✅ تم حذف التقييم" });
+      logAction("delete_rating", { id });
+      qc.invalidateQueries({ queryKey: ["/api/admin/ratings"] });
+    },
+  });
+
+  function StarDisplay({ value }: { value: number }) {
+    return (
+      <div className="flex gap-0.5">
+        {[1,2,3,4,5].map(n => (
+          <Star key={n} className={`w-3.5 h-3.5 ${n <= value ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground/20"}`} />
+        ))}
+      </div>
+    );
+  }
+
+  const filtered = ratings.filter((r: any) =>
+    !search ||
+    r.user_name?.toLowerCase().includes(search.toLowerCase()) ||
+    r.review?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const avgRating = ratings.length > 0
+    ? (ratings.reduce((s: number, r: any) => s + r.rating, 0) / ratings.length).toFixed(1)
+    : "0.0";
+
+  const dist = [5,4,3,2,1].map(star => ({
+    star,
+    count: ratings.filter((r: any) => r.rating === star).length,
+    pct: ratings.length ? Math.round(ratings.filter((r: any) => r.rating === star).length / ratings.length * 100) : 0,
+  }));
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="rounded-2xl border-border/50">
+          <CardContent className="p-4 text-center">
+            <Star className="w-6 h-6 mx-auto mb-2 fill-yellow-400 text-yellow-400" />
+            <p className="text-3xl font-black text-yellow-500">{avgRating}</p>
+            <p className="text-xs text-muted-foreground">متوسط التقييم</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-2xl border-border/50">
+          <CardContent className="p-4 text-center">
+            <MessageSquare className="w-6 h-6 mx-auto mb-2 text-blue-500" />
+            <p className="text-3xl font-black">{ratings.length}</p>
+            <p className="text-xs text-muted-foreground">إجمالي التقييمات</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-2xl border-border/50">
+          <CardContent className="p-4 text-center">
+            <Users className="w-6 h-6 mx-auto mb-2 text-purple-500" />
+            <p className="text-3xl font-black">{ratings.filter((r: any) => r.target_type === "user").length}</p>
+            <p className="text-xs text-muted-foreground">تقييمات البائعين</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-2xl border-border/50">
+          <CardContent className="p-4 text-center">
+            <Megaphone className="w-6 h-6 mx-auto mb-2 text-orange-500" />
+            <p className="text-3xl font-black">{ratings.filter((r: any) => r.target_type === "ad").length}</p>
+            <p className="text-xs text-muted-foreground">تقييمات الإعلانات</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {ratings.length > 0 && (
+        <Card className="rounded-2xl border-border/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">توزيع التقييمات</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {dist.map(({ star, count, pct }) => (
+                <div key={star} className="flex items-center gap-3">
+                  <div className="flex items-center gap-1 w-12 shrink-0">
+                    <Star className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" />
+                    <span className="text-sm font-bold">{star}</span>
+                  </div>
+                  <div className="flex-1 bg-muted rounded-full h-2.5 overflow-hidden">
+                    <div className="h-full bg-yellow-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-xs text-muted-foreground w-16 text-left">{count} ({pct}%)</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="flex gap-3 flex-wrap items-center">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            placeholder="ابحث في التقييمات..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="pr-9 h-9 rounded-xl"
+            data-testid="input-search-ratings"
+          />
+        </div>
+        <div className="flex gap-2">
+          {(["all","user","ad"] as const).map(type => (
+            <button
+              key={type}
+              onClick={() => setFilterType(type)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+                filterType === type ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/50"
+              }`}
+              data-testid={`filter-ratings-${type}`}
+            >
+              {type === "all" ? "الكل" : type === "user" ? "تقييمات البائعين" : "تقييمات الإعلانات"}
+            </button>
+          ))}
+        </div>
+        <Badge variant="secondary">{filtered.length} تقييم</Badge>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-16 text-muted-foreground">
+          <Star className="w-12 h-12 mx-auto mb-3 opacity-20" />
+          <p>لا توجد تقييمات</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((r: any) => (
+            <div
+              key={r.id}
+              className="flex items-start gap-4 p-4 bg-card border border-border/60 rounded-2xl hover:shadow-sm transition-all"
+              data-testid={`rating-${r.id}`}
+            >
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/30 to-secondary/30 flex items-center justify-center text-white font-bold text-sm shrink-0">
+                {r.user_name?.[0] || "م"}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className="font-semibold text-sm">{r.user_name}</span>
+                  <StarDisplay value={r.rating} />
+                  <Badge variant="outline" className="text-[10px] h-4">
+                    {r.target_type === "user" ? "بائع" : "إعلان"}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {format(new Date(r.created_at), "d MMM yyyy", { locale: ar })}
+                  </span>
+                </div>
+                {r.review && (
+                  <p className="text-sm text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">{r.review}</p>
+                )}
+                <p className="text-xs text-muted-foreground/60 mt-1">
+                  المستهدف: {r.target_type === "user" ? "مستخدم" : "إعلان"} #{r.target_id}
+                </p>
+              </div>
+              <Button
+                size="sm" variant="ghost"
+                className="text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 h-8 w-8 p-0 shrink-0"
+                onClick={() => deleteRatingMutation.mutate(r.id)}
+                disabled={deleteRatingMutation.isPending}
+                data-testid={`btn-delete-rating-${r.id}`}
+                title="حذف التقييم"
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

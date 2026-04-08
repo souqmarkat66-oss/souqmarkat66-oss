@@ -3008,6 +3008,28 @@ Sitemap: ${BASE}/sitemap-pages.xml
     res.json(report);
   });
 
+  // ── Admin: Ratings management ──────────────────────────────
+  app.get("/api/admin/ratings", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { type } = req.query;
+    const { ratings } = await import("@shared/schema");
+    const { db } = await import("./db");
+    const { desc, eq } = await import("drizzle-orm");
+    let query = db.select().from(ratings).orderBy(desc(ratings.createdAt)).$dynamic();
+    if (type && type !== "all") {
+      query = query.where(eq(ratings.targetType, type as string));
+    }
+    const rows = await query.limit(500);
+    res.json(rows);
+  });
+
+  app.delete("/api/admin/ratings/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { ratings } = await import("@shared/schema");
+    const { db } = await import("./db");
+    const { eq } = await import("drizzle-orm");
+    await db.delete(ratings).where(eq(ratings.id, Number(req.params.id)));
+    res.json({ success: true });
+  });
+
   app.get("/api/admin/campaigns", isAuthenticated, requireAdmin, async (req: any, res) => {
     const campaigns = await storage.getAllAdCampaigns();
     res.json(campaigns);
