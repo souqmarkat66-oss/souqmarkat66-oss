@@ -4538,7 +4538,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // ================================================================
-  // WHATSAPP CLICK TRACKING
+  // WHATSAPP CLICK TRACKING (legacy)
   // ================================================================
   app.post("/api/ads/:id/whatsapp-click", async (req, res) => {
     const id = parseInt(req.params.id);
@@ -4546,6 +4546,105 @@ Sitemap: ${BASE}/sitemap-pages.xml
       await db.execute(sql`UPDATE ads SET whatsapp_clicks = COALESCE(whatsapp_clicks, 0) + 1 WHERE id = ${id}`);
       res.json({ ok: true });
     } catch { res.json({ ok: false }); }
+  });
+
+  // ================================================================
+  // LINK REDIRECT TRACKER — /api/go/:adId/:type
+  // يتتبع كل نقرة ثم يُحوّل المستخدم للرابط الحقيقي
+  // ================================================================
+  app.get("/api/go/:adId/:type", async (req: any, res) => {
+    const adId  = parseInt(req.params.adId);
+    const ltype = req.params.type; // googleplay | appstore | appgallery | whatsapp | payment | website | facebook | other
+    const ip    = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
+    const ua    = req.headers["user-agent"] || "";
+    const uid   = req.user?.claims?.sub || null;
+
+    try {
+      // 1. جلب بيانات الإعلان
+      const adR = await db.execute(
+        sql`SELECT id, user_id, whatsapp_number, payment_link, app_store_url,
+                   google_play_url, app_gallery_url
+            FROM ads WHERE id = ${adId} LIMIT 1`
+      );
+      const ad: any = adR.rows[0];
+      if (!ad) return res.status(404).send("الإعلان غير موجود");
+
+      // 2. تحديد الرابط الهدف
+      const urlMap: Record<string, string> = {
+        whatsapp:   ad.whatsapp_number ? `https://wa.me/${String(ad.whatsapp_number).replace(/\D/g, "")}` : "",
+        payment:    ad.payment_link    || "",
+        appstore:   ad.app_store_url   || "",
+        googleplay: ad.google_play_url || "",
+        appgallery: ad.app_gallery_url || "",
+      };
+      const destUrl = urlMap[ltype] || "";
+      if (!destUrl) return res.status(404).send("الرابط غير متاح");
+
+      // 3. كشف الاحتيال — نفس IP نقر نفس النوع خلال ساعتين
+      const recentR = await db.execute(
+        sql`SELECT COUNT(*) as cnt FROM ad_link_clicks
+            WHERE ad_id = ${adId} AND link_type = ${ltype}
+              AND ip = ${ip} AND created_at > NOW() - INTERVAL '2 hours'`
+      );
+      const recentCount = parseInt((recentR.rows[0] as any)?.cnt || "0");
+      const isSelfClick  = uid && uid === ad.user_id;
+      const isFlood      = recentCount >= 3;
+      const isFraud      = isSelfClick || isFlood;
+      const fraudReason  = isSelfClick ? "self_click" : isFlood ? `flood_${recentCount}` : null;
+
+      // 4. تسجيل النقرة
+      await db.execute(
+        sql`INSERT INTO ad_link_clicks (ad_id, link_type, dest_url, ip, user_agent, user_id, is_fraud, fraud_reason)
+            VALUES (${adId}, ${ltype}, ${destUrl}, ${ip}, ${ua.slice(0, 300)}, ${uid}, ${isFraud}, ${fraudReason})`
+      );
+
+      // 5. تحديث العداد في جدول الإعلانات (فقط غير مزوّرة)
+      if (!isFraud) {
+        if (ltype === "whatsapp") {
+          await db.execute(sql`UPDATE ads SET whatsapp_clicks = COALESCE(whatsapp_clicks, 0) + 1 WHERE id = ${adId}`);
+        }
+      }
+
+      // 6. التحويل للرابط الحقيقي
+      res.redirect(302, destUrl);
+    } catch (e: any) {
+      console.error("[TRACKER]", e.message);
+      res.status(500).send("خطأ في الخادم");
+    }
+  });
+
+  // ================================================================
+  // LINK CLICK ANALYTICS — /api/ads/:id/link-clicks
+  // ================================================================
+  app.get("/api/ads/:id/link-clicks", isAuthenticated, async (req: any, res) => {
+    const adId  = parseInt(req.params.id);
+    const userId = req.user?.claims?.sub;
+    try {
+      // فقط صاحب الإعلان أو الأدمن
+      const ownerR = await db.execute(sql`SELECT user_id FROM ads WHERE id = ${adId}`);
+      const owner: any = ownerR.rows[0];
+      if (!owner) return res.status(404).json({ message: "الإعلان غير موجود" });
+      if (owner.user_id !== userId && !isAdminUser(req)) return res.status(403).json({ message: "غير مصرح" });
+
+      const stats = await db.execute(
+        sql`SELECT
+              link_type,
+              COUNT(*) FILTER (WHERE is_fraud = false) AS real_clicks,
+              COUNT(*) FILTER (WHERE is_fraud = true)  AS fraud_clicks,
+              COUNT(*) AS total_clicks,
+              MAX(created_at) AS last_click
+            FROM ad_link_clicks
+            WHERE ad_id = ${adId}
+            GROUP BY link_type
+            ORDER BY real_clicks DESC`
+      );
+      const total = await db.execute(
+        sql`SELECT COUNT(*) FILTER (WHERE is_fraud = false) AS real,
+                   COUNT(*) FILTER (WHERE is_fraud = true)  AS fraud
+            FROM ad_link_clicks WHERE ad_id = ${adId}`
+      );
+      res.json({ byType: stats.rows, totals: total.rows[0] });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   // ================================================================

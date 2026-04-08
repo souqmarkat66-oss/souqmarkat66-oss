@@ -71,6 +71,22 @@ export type Ad = typeof ads.$inferSelect;
 export type InsertAd = z.infer<typeof insertAdSchema>;
 
 // ============================================================
+// AD LINK CLICKS — تتبع النقرات على روابط الإعلانات
+// ============================================================
+export const adLinkClicks = pgTable("ad_link_clicks", {
+  id:            serial("id").primaryKey(),
+  adId:          integer("ad_id").notNull(),
+  linkType:      text("link_type").notNull(), // googleplay | appstore | appgallery | whatsapp | payment | website | facebook | other
+  destUrl:       text("dest_url"),
+  ip:            varchar("ip", { length: 60 }),
+  userAgent:     text("user_agent"),
+  userId:        varchar("user_id", { length: 100 }),
+  isFraud:       boolean("is_fraud").default(false),
+  fraudReason:   text("fraud_reason"),
+  createdAt:     timestamp("created_at").defaultNow(),
+});
+
+// ============================================================
 // REELS TABLE
 // ============================================================
 export const reels = pgTable("reels", {
