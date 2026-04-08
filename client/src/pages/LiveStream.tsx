@@ -9,7 +9,7 @@ import {
   WifiOff, Volume2, VolumeX, FlipHorizontal,
   Copy, Check, Radio, Monitor, UserPlus, Users,
   Loader2, X, CheckCircle, XCircle,
-  Share2, Gift,
+  Share2, Gift, Flag, AlertTriangle, ShieldOff,
 } from "lucide-react";
 import { SiWhatsapp, SiFacebook, SiX, SiTelegram, SiInstagram, SiTiktok, SiSnapchat } from "react-icons/si";
 import { Button } from "@/components/ui/button";
@@ -96,6 +96,14 @@ export default function LiveStream() {
   // Hand raise state (broadcaster — list of raised hands)
   const [raisedHands,     setRaisedHands]     = useState<{socketId:string; userName:string; userId:string}[]>([]);
   const [showHandsList,   setShowHandsList]   = useState(false);
+
+  // Content moderation (viewer report + broadcaster warning)
+  const [showReportDialog, setShowReportDialog] = useState(false);
+  const [reportReason,     setReportReason]     = useState("");
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [reportDone,       setReportDone]       = useState(false);
+  const [contentWarning,   setContentWarning]   = useState<string|null>(null); // shown to broadcaster
+  const [forceEndReason,   setForceEndReason]   = useState<string|null>(null); // force-close overlay
 
   // RTMP mode state
   const [broadcastMode,   setBroadcastMode]   = useState<"webrtc"|"rtmp">("webrtc");
@@ -510,6 +518,19 @@ export default function LiveStream() {
       if (isBroadcast) {
         toast({ title: `🎁 هدية من ${data.userName}!`, description: `${data.giftEmoji} ${data.giftName} — ${data.giftCoins} عملة` });
       }
+    });
+
+    // ── Content moderation events ──────────────────────────────────
+    socket.on("stream-content-warning", (data: { count: number; message: string }) => {
+      setContentWarning(data.message);
+      // Auto-dismiss after 15 seconds
+      setTimeout(() => setContentWarning(null), 15000);
+    });
+
+    socket.on("stream-force-ended", (data: { reason: string }) => {
+      setForceEndReason(data.reason);
+      // Stop local stream tracks if broadcaster
+      localStream.current?.getTracks().forEach(t => t.stop());
     });
 
     return () => {
@@ -1253,6 +1274,28 @@ export default function LiveStream() {
               </button>
             )}
 
+            {/* REPORT STREAM BUTTON (viewer only) */}
+            {user && !reportDone && (
+              <button
+                onClick={() => setShowReportDialog(true)}
+                className="flex flex-col items-center gap-0.5"
+                data-testid="btn-report-stream"
+              >
+                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-red-700/60 backdrop-blur">
+                  <Flag className="w-5 h-5 text-white" />
+                </div>
+                <span className="text-white text-[10px] font-bold drop-shadow">بلاغ</span>
+              </button>
+            )}
+            {user && reportDone && (
+              <div className="flex flex-col items-center gap-0.5">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-green-600/60">
+                  <CheckCircle className="w-5 h-5 text-white" />
+                </div>
+                <span className="text-white text-[10px] font-bold drop-shadow">تم</span>
+              </div>
+            )}
+
             {/* RAISE HAND BUTTON */}
             {user && coHostStatus === "idle" && !handRaised && !handInvited && (
               <button onClick={raiseHand} className="flex flex-col items-center gap-0.5" data-testid="btn-raise-hand">
@@ -1760,6 +1803,48 @@ export default function LiveStream() {
           </button>
         )}
 
+        {/* ── CONTENT WARNING overlay (shown to broadcaster when flagged) ── */}
+        {contentWarning && (
+          <div className="absolute inset-x-4 z-40 rounded-2xl overflow-hidden shadow-2xl border-2 border-orange-500"
+            style={{ top: "60px", animation: "slideInLeft 0.4s ease-out" }}
+          >
+            <div className="bg-orange-950/95 backdrop-blur-md p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center flex-shrink-0">
+                  <AlertTriangle className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-orange-300 text-xs font-bold mb-1">تحذير من الإدارة</p>
+                  <p className="text-white text-sm leading-relaxed">{contentWarning}</p>
+                </div>
+                <button onClick={() => setContentWarning(null)} className="text-white/40 flex-shrink-0">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── FORCE-END overlay (stream closed by admin or auto-system) ── */}
+        {forceEndReason && (
+          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/95 gap-6 text-white px-8 text-center">
+            <div className="w-20 h-20 rounded-full bg-red-600/30 flex items-center justify-center">
+              <ShieldOff className="w-10 h-10 text-red-400" />
+            </div>
+            <div>
+              <p className="font-bold text-xl mb-3">أُغلق البث</p>
+              <p className="text-white/70 text-sm leading-relaxed">{forceEndReason}</p>
+            </div>
+            <button
+              onClick={() => setLocation("/livestream")}
+              className="px-8 py-3 rounded-full bg-white text-black font-bold text-sm"
+              data-testid="btn-after-force-end"
+            >
+              العودة للبثوث
+            </button>
+          </div>
+        )}
+
         {/* BROADCASTER CONTROLS (WebRTC) */}
         {isBroadcast && streaming && broadcastMode === "webrtc" && (
           <div className="absolute inset-x-0 z-10 flex items-center justify-center gap-3 px-5" style={{ bottom: "84px" }}>
@@ -2141,6 +2226,86 @@ export default function LiveStream() {
                 نسخ
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* REPORT DIALOG */}
+      {showReportDialog && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowReportDialog(false)}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-8" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-red-600/30 flex items-center justify-center">
+                  <Flag className="w-4 h-4 text-red-400" />
+                </div>
+                <h3 className="text-white font-bold text-base">الإبلاغ عن البث</h3>
+              </div>
+              <button onClick={() => setShowReportDialog(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+
+            <p className="text-white/60 text-xs mb-4 leading-relaxed">
+              اختر سبب البلاغ. عند تجاوز عدد البلاغات الحد المسموح به، سيتم تحذير المذيع أو إيقاف البث تلقائياً.
+            </p>
+
+            {/* Reason options */}
+            <div className="flex flex-col gap-2 mb-5">
+              {[
+                { value: "revealing_clothes",  label: "ملابس غير لائقة أو إباحية" },
+                { value: "sexual_content",     label: "محتوى جنسي أو حديث مخل" },
+                { value: "drugs_alcohol",      label: "مخدرات أو كحول أو تدخين" },
+                { value: "mixed_conversation", label: "خلطة بين رجال ونساء بطريقة مخالفة" },
+                { value: "hate_speech",        label: "إهانة أو تحريض أو خطاب كراهية" },
+                { value: "fraud",              label: "احتيال أو نصب" },
+                { value: "other",              label: "سبب آخر" },
+              ].map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setReportReason(opt.value)}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all text-start ${
+                    reportReason === opt.value
+                      ? "border-red-500 bg-red-600/20 text-white"
+                      : "border-white/10 bg-white/5 text-white/70"
+                  }`}
+                  data-testid={`report-reason-${opt.value}`}
+                >
+                  <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${reportReason === opt.value ? "border-red-400 bg-red-400" : "border-white/30"}`} />
+                  <span className="text-sm">{opt.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Submit */}
+            <button
+              onClick={async () => {
+                if (!reportReason || reportSubmitting) return;
+                setReportSubmitting(true);
+                try {
+                  await fetch(`/api/streams/${id}/report`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ reason: reportReason }),
+                  });
+                  setReportDone(true);
+                  setShowReportDialog(false);
+                  toast({ title: "✅ تم إرسال البلاغ", description: "شكراً لمساعدتنا في الحفاظ على بيئة آمنة." });
+                } catch {
+                  toast({ title: "خطأ", description: "فشل إرسال البلاغ. حاول مجدداً.", variant: "destructive" });
+                } finally {
+                  setReportSubmitting(false);
+                }
+              }}
+              disabled={!reportReason || reportSubmitting}
+              className="w-full py-3 rounded-2xl bg-red-600 text-white font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2"
+              data-testid="btn-submit-stream-report"
+            >
+              {reportSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Flag className="w-4 h-4" />}
+              إرسال البلاغ
+            </button>
           </div>
         </div>
       )}

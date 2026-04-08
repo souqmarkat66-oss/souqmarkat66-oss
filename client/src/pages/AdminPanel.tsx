@@ -941,14 +941,31 @@ function ChannelsSection({ logAction }: { logAction: any }) {
 // ═══════════════════════════════════════════════════════════════
 // STREAMS
 // ═══════════════════════════════════════════════════════════════
+const STREAM_REPORT_LABELS: Record<string, string> = {
+  revealing_clothes:  "ملابس غير لائقة",
+  sexual_content:     "محتوى جنسي",
+  drugs_alcohol:      "مخدرات / كحول",
+  mixed_conversation: "خلطة غير لائقة",
+  hate_speech:        "خطاب كراهية",
+  fraud:              "احتيال",
+  other:              "أخرى",
+};
+
 function StreamsSection({ logAction }: { logAction: any }) {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [streamTab, setStreamTab] = useState<"live"|"reports">("live");
 
   const { data: streams = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/admin/streams"],
     queryFn: () => fetch("/api/admin/streams", { credentials: "include" }).then(r => r.json()),
     refetchInterval: 15000,
+  });
+
+  const { data: streamReports = [], isLoading: reportsLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/stream-reports"],
+    queryFn: () => fetch("/api/admin/stream-reports", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 30000,
   });
 
   const updateStream = useMutation({
@@ -957,48 +974,152 @@ function StreamsSection({ logAction }: { logAction: any }) {
     onSuccess: (_, vars) => { qc.invalidateQueries({ queryKey: ["/api/admin/streams"] }); toast({ title: vars.status === "ended" ? "🛑 تم إيقاف البث" : "✅ تم تحديث البث" }); logAction("update_stream", `stream#${vars.id}`, vars.status); },
   });
 
+  const warnStream = useMutation({
+    mutationFn: (streamId: number) =>
+      fetch(`/api/admin/streams/${streamId}/warn`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }).then(r => r.json()),
+    onSuccess: () => { toast({ title: "⚠️ تم إرسال التحذير للمذيع" }); },
+  });
+
+  const forceEndStream = useMutation({
+    mutationFn: (streamId: number) =>
+      fetch(`/api/admin/streams/${streamId}/force-end`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "أُغلق البث من قِبَل الإدارة بسبب محتوى مخالف لسياسة المنصة." }) }).then(r => r.json()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/admin/streams"] }); qc.invalidateQueries({ queryKey: ["/api/admin/stream-reports"] }); toast({ title: "🛑 تم إغلاق البث" }); },
+  });
+
   const liveCount = streams.filter((s: any) => s.status === "live").length;
+  const pendingReports = streamReports.filter((r: any) => r.status === "pending");
+
+  // Group reports by stream_id
+  const reportsByStream = pendingReports.reduce((acc: Record<number, any[]>, r: any) => {
+    const sid = r.stream_id;
+    if (!acc[sid]) acc[sid] = [];
+    acc[sid].push(r);
+    return acc;
+  }, {} as Record<number, any[]>);
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        {liveCount > 0 && <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-full">
-          <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-          <span className="text-xs text-red-600 font-medium">{liveCount} بث مباشر حالياً</span>
-        </div>}
-        <span className="text-sm text-muted-foreground">إجمالي {streams.length} بث</span>
+      {/* Tab header */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setStreamTab("live")}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${streamTab === "live" ? "bg-red-500/10 border-red-500/30 text-red-500" : "border-border text-muted-foreground"}`}
+          data-testid="tab-streams-live"
+        >
+          <Radio className="w-3.5 h-3.5" />
+          البثوث {liveCount > 0 && <span className="bg-red-500 text-white rounded-full px-1.5 py-0.5 text-[10px]">{liveCount}</span>}
+        </button>
+        <button
+          onClick={() => setStreamTab("reports")}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${streamTab === "reports" ? "bg-orange-500/10 border-orange-500/30 text-orange-500" : "border-border text-muted-foreground"}`}
+          data-testid="tab-streams-reports"
+        >
+          <Flag className="w-3.5 h-3.5" />
+          بلاغات البث {Object.keys(reportsByStream).length > 0 && <span className="bg-orange-500 text-white rounded-full px-1.5 py-0.5 text-[10px]">{Object.keys(reportsByStream).length}</span>}
+        </button>
       </div>
 
-      {isLoading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : (
-        <div className="space-y-2">
-          {streams.map((s: any) => (
-            <Card key={s.id} className="rounded-xl" data-testid={`stream-${s.id}`}>
-              <CardContent className="p-4 flex items-center gap-4">
-                <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${s.status === "live" ? "bg-red-500/10" : "bg-muted"}`}>
-                  <Radio className={`w-5 h-5 ${s.status === "live" ? "text-red-500" : "text-muted-foreground"}`} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="font-semibold text-sm truncate">{s.title}</span>
-                    <StatusBadge status={s.status} />
+      {/* LIVE STREAMS TAB */}
+      {streamTab === "live" && (
+        isLoading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : (
+          <div className="space-y-2">
+            {streams.map((s: any) => (
+              <Card key={s.id} className="rounded-xl" data-testid={`stream-${s.id}`}>
+                <CardContent className="p-4 flex items-center gap-4">
+                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${s.status === "live" ? "bg-red-500/10" : "bg-muted"}`}>
+                    <Radio className={`w-5 h-5 ${s.status === "live" ? "text-red-500" : "text-muted-foreground"}`} />
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    👁️ {s.viewerCount || 0} مشاهد · ❤️ {s.likesCount || 0} · {s.startedAt ? format(new Date(s.startedAt), "dd/MM HH:mm", { locale: ar }) : ""}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="font-semibold text-sm truncate">{s.title}</span>
+                      <StatusBadge status={s.status} />
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      👁️ {s.viewerCount || 0} مشاهد · ❤️ {s.likesCount || 0} · {s.startedAt ? format(new Date(s.startedAt), "dd/MM HH:mm", { locale: ar }) : ""}
+                    </div>
                   </div>
-                </div>
-                {s.status === "live" && (
-                  <Button size="sm" variant="destructive" className="text-xs flex-shrink-0"
-                    onClick={() => { if (confirm("إيقاف البث المباشر نهائياً؟")) updateStream.mutate({ id: s.id, status: "ended" }); }}>
-                    <VideoOff className="w-3 h-3 me-1" /> إيقاف
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-          {streams.length === 0 && !isLoading && (
-            <div className="text-center py-16 text-muted-foreground"><Radio className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد بثوث</p></div>
-          )}
-        </div>
+                  {s.status === "live" && (
+                    <div className="flex gap-1.5">
+                      <Button size="sm" variant="outline" className="text-xs border-orange-500/30 text-orange-500 hover:bg-orange-500/10 flex-shrink-0"
+                        onClick={() => warnStream.mutate(s.id)}>
+                        <AlertTriangle className="w-3 h-3 me-1" /> تحذير
+                      </Button>
+                      <Button size="sm" variant="destructive" className="text-xs flex-shrink-0"
+                        onClick={() => { if (confirm("إيقاف البث المباشر نهائياً بسبب انتهاك؟")) forceEndStream.mutate(s.id); }}>
+                        <VideoOff className="w-3 h-3 me-1" /> إيقاف
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+            {streams.length === 0 && !isLoading && (
+              <div className="text-center py-16 text-muted-foreground"><Radio className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد بثوث</p></div>
+            )}
+          </div>
+        )
+      )}
+
+      {/* STREAM REPORTS TAB */}
+      {streamTab === "reports" && (
+        reportsLoading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">البثوث التي تلقّت بلاغات من المشاهدين بسبب محتوى مخالف</p>
+            {Object.entries(reportsByStream).length === 0 && (
+              <div className="text-center py-16 text-muted-foreground"><Flag className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد بلاغات</p></div>
+            )}
+            {Object.entries(reportsByStream).map(([streamIdStr, reps]: [string, any[]]) => {
+              const streamId = Number(streamIdStr);
+              const firstRep = reps[0];
+              const streamInfo = streams.find((s: any) => s.id === streamId);
+              const isLive = firstRep.stream_status === "live" || streamInfo?.status === "live";
+              const title = firstRep.stream_title || `بث #${streamId}`;
+              const reasons = [...new Set(reps.map((r: any) => STREAM_REPORT_LABELS[r.reason] || r.reason))];
+              return (
+                <Card key={streamId} className={`rounded-xl border-2 ${reps.length >= 5 ? "border-red-500/50" : reps.length >= 3 ? "border-orange-500/40" : "border-border"}`} data-testid={`stream-report-${streamId}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3 mb-3">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isLive ? "bg-red-500/10" : "bg-muted"}`}>
+                        <Radio className={`w-5 h-5 ${isLive ? "text-red-500" : "text-muted-foreground"}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <span className="font-semibold text-sm">{title}</span>
+                          {isLive && <span className="text-[10px] bg-red-500 text-white px-1.5 py-0.5 rounded-full font-bold">مباشر</span>}
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${reps.length >= 5 ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"}`}>
+                            {reps.length} بلاغ
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {reasons.map((r, i) => (
+                            <span key={i} className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded">{r}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    {isLive && (
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" className="flex-1 text-xs border-orange-500/30 text-orange-600 hover:bg-orange-500/10"
+                          onClick={() => warnStream.mutate(streamId)}
+                          data-testid={`btn-warn-stream-${streamId}`}>
+                          <AlertTriangle className="w-3 h-3 me-1" /> إرسال تحذير
+                        </Button>
+                        <Button size="sm" variant="destructive" className="flex-1 text-xs"
+                          onClick={() => { if (confirm(`إغلاق البث "${title}" بسبب بلاغات؟`)) forceEndStream.mutate(streamId); }}
+                          data-testid={`btn-force-end-stream-${streamId}`}>
+                          <VideoOff className="w-3 h-3 me-1" /> إغلاق البث
+                        </Button>
+                      </div>
+                    )}
+                    {!isLive && (
+                      <p className="text-xs text-muted-foreground text-center py-1">البث منتهٍ</p>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )
       )}
     </div>
   );

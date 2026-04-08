@@ -2882,6 +2882,107 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
+  // ── Stream content report (viewer → flags violation) ─────────────────
+  app.post("/api/streams/:id/report", isAuthenticated, async (req: any, res) => {
+    try {
+      const streamId = Number(req.params.id);
+      const userId   = req.user.claims.sub as string;
+      const { reason } = req.body as { reason: string };
+      if (!reason) return res.status(400).json({ message: "reason required" });
+
+      // Insert into generic reports table (targetType = 'stream')
+      await db.execute(sql`
+        INSERT INTO reports (reporter_id, target_type, target_id, reason, status)
+        VALUES (${userId}, 'stream', ${streamId}, ${reason}, 'pending')
+        ON CONFLICT DO NOTHING
+      `);
+
+      // Count total unique-reporter reports for this stream
+      const countRes = await db.execute(sql`
+        SELECT COUNT(DISTINCT reporter_id) as cnt
+        FROM reports
+        WHERE target_type = 'stream' AND target_id = ${streamId} AND status = 'pending'
+      `);
+      const reportCount = Number((countRes.rows[0] as any)?.cnt || 0);
+
+      // 3+ reports → emit warning to broadcaster
+      if (reportCount >= 3 && reportCount < 5) {
+        io.to(`stream:${streamId}`).emit("stream-content-warning", {
+          count: reportCount,
+          message: "⚠️ تلقّى بثّك عدة بلاغات بسبب محتوى مخالف. يرجى الالتزام بسياسة المنصة."
+        });
+      }
+      // 5+ reports → force-end the stream
+      if (reportCount >= 5) {
+        await storage.updateLiveStream(streamId, { status: 'ended' });
+        io.to(`stream:${streamId}`).emit("stream-force-ended", {
+          reason: "أُغلق البث بسبب بلاغات متعددة عن محتوى مخالف لسياسة المنصة."
+        });
+      }
+
+      res.json({ ok: true, reportCount });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Admin: get pending stream reports ────────────────────────────────
+  app.get("/api/admin/stream-reports", isAuthenticated, requireAdmin, async (_req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT
+          r.id, r.reporter_id, r.target_id as stream_id, r.reason,
+          r.status, r.created_at,
+          ls.title as stream_title, ls.status as stream_status,
+          ls.user_id as broadcaster_id,
+          COUNT(*) OVER (PARTITION BY r.target_id) as total_reports
+        FROM reports r
+        LEFT JOIN live_streams ls ON ls.id = r.target_id
+        WHERE r.target_type = 'stream'
+        ORDER BY r.created_at DESC
+        LIMIT 200
+      `);
+      res.json(result.rows);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Admin: warn broadcaster via socket ───────────────────────────────
+  app.post("/api/admin/streams/:id/warn", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      const streamId = Number(req.params.id);
+      const { message } = req.body as { message?: string };
+      io.to(`stream:${streamId}`).emit("stream-content-warning", {
+        count: 99,
+        message: message || "⚠️ تحذير من الإدارة: يرجى الالتزام بسياسة المنصة وإزالة المحتوى المخالف فوراً."
+      });
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Admin: force-close a live stream ────────────────────────────────
+  app.post("/api/admin/streams/:id/force-end", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      const streamId = Number(req.params.id);
+      const { reason } = req.body as { reason?: string };
+      await storage.updateLiveStream(streamId, { status: 'ended' });
+      io.to(`stream:${streamId}`).emit("stream-force-ended", {
+        reason: reason || "أُغلق البث من قِبَل الإدارة بسبب انتهاك سياسة المنصة."
+      });
+      // Mark all pending reports for this stream as resolved
+      await db.execute(sql`
+        UPDATE reports SET status='resolved'
+        WHERE target_type='stream' AND target_id=${streamId} AND status='pending'
+      `);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // ================================================================
   // ADMIN PANEL ROUTES (admin only)
   // ================================================================
