@@ -2,15 +2,32 @@ import NodeMediaServer from "node-media-server";
 import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
+import net from "net";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
+
+function isPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", () => resolve(false));
+    server.once("listening", () => { server.close(); resolve(true); });
+    server.listen(port);
+  });
+}
 
 const HLS_DIR = "/tmp/hls";
 if (!fs.existsSync(HLS_DIR)) fs.mkdirSync(HLS_DIR, { recursive: true });
 
 const activeTranscoders = new Map<string, ReturnType<typeof spawn>>();
 
-export function startRtmpServer() {
+export async function startRtmpServer() {
+  const rtmpFree = await isPortFree(1935);
+  const hlsFree  = await isPortFree(8000);
+  if (!rtmpFree || !hlsFree) {
+    console.warn("[RTMP] Port already in use — RTMP/HLS skipped this run.");
+    return null;
+  }
+
   const nms = new NodeMediaServer({
     rtmp: {
       port: 1935,

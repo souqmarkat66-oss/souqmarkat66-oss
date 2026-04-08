@@ -283,23 +283,11 @@ async function runMigrations() {
     }
   }));
 
-  // Start RTMP server — handle port conflicts gracefully
-  const rtmpErrGuard = (err: Error & { code?: string }) => {
-    if (err.code === 'EADDRINUSE') {
-      console.warn('[RTMP] Port already in use — RTMP/HLS skipped this run.');
-    } else {
-      // Re-throw non-port errors so they don't get silently swallowed
-      throw err;
-    }
-  };
-  process.once('uncaughtException', rtmpErrGuard);
+  // Start RTMP server — port availability checked inside startRtmpServer
   try {
     const { startRtmpServer } = await import("./rtmp");
-    startRtmpServer();
-    // Give the server 500ms to bind, then remove our guard
-    setTimeout(() => process.removeListener('uncaughtException', rtmpErrGuard), 500);
+    await startRtmpServer();
   } catch (e: any) {
-    process.removeListener('uncaughtException', rtmpErrGuard);
     console.warn("[RTMP] Could not start RTMP server:", e.message);
   }
 
