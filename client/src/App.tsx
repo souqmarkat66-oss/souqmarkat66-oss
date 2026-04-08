@@ -33,6 +33,7 @@ import Social from "@/pages/Social";
 import Help from "@/pages/Help";
 import Consultations from "@/pages/Consultations";
 import Coupons from "@/pages/Coupons";
+import MenuGenerator from "@/pages/MenuGenerator";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import { GlobalAssistant } from "@/components/GlobalAssistant";
 import { PushSetup } from "@/components/PushSetup";
@@ -121,6 +122,9 @@ function Router() {
               </Route>
               <Route path="/coupons">
                 <ProtectedRoute component={Coupons} />
+              </Route>
+              <Route path="/menu-generator">
+                <ProtectedRoute component={MenuGenerator} />
               </Route>
               <Route component={NotFound} />
             </Switch>
@@ -259,6 +263,7 @@ function AppFooter() {
               <li><a href="/embed-guide" className="hover:text-foreground transition-colors font-bold text-primary">دليل ربط الإعلانات</a></li>
               <li><a href="/consultations" className="hover:text-foreground transition-colors font-bold text-primary">💬 الاستشارات</a></li>
               <li><a href="/coupons" className="hover:text-foreground transition-colors font-bold text-primary">🎟️ كوبونات الخصم الذكية</a></li>
+              <li><a href="/menu-generator" className="hover:text-foreground transition-colors font-bold text-orange-600 dark:text-orange-400">🍽️ منشئ المنيو الذكي</a></li>
               <li><a href="/help" className="hover:text-foreground transition-colors font-bold text-amber-600 dark:text-amber-400">مركز المساعدة</a></li>
             </ul>
           </div>

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   Megaphone, Eye, Heart, MessageSquare, BarChart2, TrendingUp,
   DollarSign, Radio, Film, Tv, PlusCircle, ArrowUpRight,
-  Loader2, Star, Users, MousePointerClick, Wallet, PieChart
+  Loader2, Star, Users, MousePointerClick, Wallet, PieChart, Utensils
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -164,10 +164,10 @@ export default function MyDashboard() {
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
-                { href: "/create",       icon: PlusCircle, label: "إعلان جديد",    color: "text-violet-500" },
-                { href: "/campaigns",    icon: BarChart2,  label: "إدارة الحملات", color: "text-teal-500"   },
-                { href: "/revenue",      icon: DollarSign, label: "الإيرادات",     color: "text-green-500"  },
-                { href: "/stream/start", icon: Radio,      label: "بدء البث",      color: "text-red-500"    },
+                { href: "/create",          icon: PlusCircle, label: "إعلان جديد",      color: "text-violet-500" },
+                { href: "/campaigns",      icon: BarChart2,  label: "إدارة الحملات",  color: "text-teal-500"   },
+                { href: "/menu-generator", icon: Utensils,   label: "🍽️ منيو ذكي",    color: "text-orange-500" },
+                { href: "/stream/start",   icon: Radio,      label: "بدء البث",        color: "text-red-500"    },
               ].map(item => (
                 <Link key={item.href} href={item.href}>
                   <Card className="border-border/50 hover:border-primary/40 transition-colors cursor-pointer group">

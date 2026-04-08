@@ -3428,6 +3428,69 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
+  // ─── AI MENU CARD GENERATOR ───────────────────────────────────
+  app.post("/api/ai/menu-card", isAuthenticated, checkAiCredits, async (req: any, res) => {
+    try {
+      const { restaurantName, dishName, price, description, category, style } = req.body || {};
+      if (!dishName) return res.status(400).json({ message: "اسم الأكلة مطلوب" });
+
+      const styleMap: Record<string, string> = {
+        photo: "ultra-realistic professional food photography, studio lighting, shallow depth of field",
+        elegant: "elegant fine dining presentation, dark moody background, luxury restaurant style",
+        street: "vibrant colorful street food style, warm lighting, appetizing",
+        cartoon: "colorful cartoon illustration style, flat design, playful food art",
+      };
+      const catMap: Record<string, string> = {
+        grills: "grilled meat dish",
+        seafood: "fresh seafood dish",
+        sweets: "dessert and sweets",
+        drinks: "beverage drink",
+        fastfood: "fast food meal",
+        salads: "fresh salad",
+        pizza: "pizza and pasta",
+        oriental: "traditional Egyptian oriental food",
+      };
+
+      const styleDesc = styleMap[style] || styleMap.photo;
+      const catDesc = catMap[category] || "delicious food";
+      const prompt = `${styleDesc}, ${catDesc}, dish name: "${dishName}", ${description ? `description: ${description},` : ""} served beautifully on a plate, menu photography, high quality, appetizing, no text, no watermark`;
+
+      const imgResp = await openai.images.generate({
+        model: "gpt-image-1",
+        prompt,
+        n: 1,
+        size: "1024x1024",
+      });
+
+      const b64 = imgResp.data?.[0]?.b64_json;
+      const imageUrl = imgResp.data?.[0]?.url;
+      const filename = `menu-${Date.now()}.png`;
+      const savePath = path.join(process.cwd(), 'uploads', filename);
+      if (b64) {
+        fs.writeFileSync(savePath, Buffer.from(b64, 'base64'));
+      } else if (imageUrl) {
+        const r = await fetch(imageUrl);
+        fs.writeFileSync(savePath, Buffer.from(await r.arrayBuffer()));
+      }
+
+      // Generate Arabic caption
+      const captionResp = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{
+          role: "user",
+          content: `اكتب وصفاً تسويقياً قصيراً وشهياً باللغة العربية لـ"${dishName}" ${description ? `(${description})` : ""} ${restaurantName ? `من مطعم ${restaurantName}` : ""} ${price ? `بسعر ${price} جنيه` : ""}. الوصف لا يزيد عن 3 جمل قصيرة ومشوّقة.`
+        }],
+        max_tokens: 150,
+      });
+      const caption = captionResp.choices?.[0]?.message?.content?.trim() || "";
+
+      res.json({ imageUrl: `/uploads/${filename}`, caption });
+    } catch (e: any) {
+      console.error("menu-card error:", e.message);
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   // ─── AI TEXT-TO-SPEECH (Egyptian Arabic via gpt-audio) ───────
   app.post("/api/ai/tts", isAuthenticated, async (req: any, res) => {
     try {
