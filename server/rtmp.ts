@@ -78,8 +78,17 @@ export function startRtmpServer() {
     }, 30000);
   });
 
-  nms.run();
-  console.log("[RTMP] Server started on port 1935 (RTMP) and 8000 (HLS)");
+  // Handle port-already-in-use gracefully
+  nms.on('error', (err: any) => {
+    console.warn("[RTMP] Server error (non-fatal):", err?.message || err);
+  });
+
+  try {
+    nms.run();
+    console.log("[RTMP] Server started on port 1935 (RTMP) and 8000 (HLS)");
+  } catch (e: any) {
+    console.warn("[RTMP] Could not start (port may be busy):", e.message);
+  }
   return nms;
 }
 

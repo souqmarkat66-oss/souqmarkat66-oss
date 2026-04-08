@@ -902,9 +902,18 @@ Sitemap: ${BASE}/sitemap-pages.xml
   // ================================================================
   // PLATFORM SETTINGS (Admin only)
   // ================================================================
+  // ── Public settings — NEVER return secrets ─────────────────────
+  const PRIVATE_KEYS = new Set([
+    'vapid_private_key', 'admin_pin', 'admin_recovery_email',
+    'admin_recovery_phone', 'password_hash',
+  ]);
   app.get("/api/settings", async (req, res) => {
-    const settings = await storage.getAllSettings();
-    res.json(settings);
+    const all = await storage.getAllSettings();
+    const safe: Record<string, string> = {};
+    for (const [k, v] of Object.entries(all)) {
+      if (!PRIVATE_KEYS.has(k)) safe[k] = v;
+    }
+    res.json(safe);
   });
 
   // ── Admin PIN ────────────────────────────────────────────────────

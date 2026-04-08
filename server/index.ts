@@ -26,6 +26,32 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+// ── Security headers ───────────────────────────────────────────
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
+// ── Simple API rate limiter (max 120 req/min per IP) ──────────
+const rateMap = new Map<string, { count: number; reset: number }>();
+app.use('/api', (req, res, next) => {
+  const ip = req.ip || 'unknown';
+  const now = Date.now();
+  const entry = rateMap.get(ip);
+  if (!entry || now > entry.reset) {
+    rateMap.set(ip, { count: 1, reset: now + 60_000 });
+    return next();
+  }
+  entry.count++;
+  if (entry.count > 120) {
+    return res.status(429).json({ message: 'طلبات كثيرة — حاول بعد دقيقة' });
+  }
+  next();
+});
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -257,11 +283,23 @@ async function runMigrations() {
     }
   }));
 
-  // Start RTMP server (RTMP on 1935, used when deployed on ads-as.com)
+  // Start RTMP server — handle port conflicts gracefully
+  const rtmpErrGuard = (err: Error & { code?: string }) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn('[RTMP] Port already in use — RTMP/HLS skipped this run.');
+    } else {
+      // Re-throw non-port errors so they don't get silently swallowed
+      throw err;
+    }
+  };
+  process.once('uncaughtException', rtmpErrGuard);
   try {
     const { startRtmpServer } = await import("./rtmp");
     startRtmpServer();
+    // Give the server 500ms to bind, then remove our guard
+    setTimeout(() => process.removeListener('uncaughtException', rtmpErrGuard), 500);
   } catch (e: any) {
+    process.removeListener('uncaughtException', rtmpErrGuard);
     console.warn("[RTMP] Could not start RTMP server:", e.message);
   }
 
