@@ -841,16 +841,27 @@ export default function LiveStream() {
   };
 
   /* ─── Share helpers ───────────────────────────────────── */
+  const { data: myReferralData } = useQuery<{ code: string }>({
+    queryKey: ["/api/auth/me/referral"],
+    queryFn: () => fetch("/api/auth/me/referral", { credentials: "include" }).then(r => r.json()),
+    enabled: !!user,
+    staleTime: 10 * 60 * 1000,
+  });
+  const myRefCode = myReferralData?.code;
   const streamUrl = typeof window !== "undefined" ? `${window.location.origin}/streams/${id}` : "";
-  const shareText = encodeURIComponent(`شاهد البث المباشر على شبكة سوق! ${streamUrl}`);
+  const streamShareUrl = myRefCode ? `${streamUrl}?ref=${myRefCode}` : streamUrl;
+  const shareText = encodeURIComponent(
+    `شاهد البث المباشر على شبكة سوق! ${streamShareUrl}` +
+    (myRefCode ? ` 🎁 كود الإحالة: ${myRefCode}` : "")
+  );
   const shareLinks = [
     { icon: SiWhatsapp,   label: "واتساب",    color: "#25D366", href: `https://wa.me/?text=${shareText}` },
-    { icon: SiFacebook,   label: "فيسبوك",    color: "#1877F2", href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(streamUrl)}` },
+    { icon: SiFacebook,   label: "فيسبوك",    color: "#1877F2", href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(streamShareUrl)}` },
     { icon: SiX,          label: "تويتر X",   color: "#000000", href: `https://twitter.com/intent/tweet?text=${shareText}` },
-    { icon: SiTelegram,   label: "تيليغرام",  color: "#26A5E4", href: `https://t.me/share/url?url=${encodeURIComponent(streamUrl)}&text=${encodeURIComponent("شاهد البث المباشر على شبكة سوق!")}` },
+    { icon: SiTelegram,   label: "تيليغرام",  color: "#26A5E4", href: `https://t.me/share/url?url=${encodeURIComponent(streamShareUrl)}&text=${encodeURIComponent("شاهد البث المباشر على شبكة سوق!")}` },
     { icon: SiInstagram,  label: "انستجرام",  color: "#E1306C", href: null, copy: true },
     { icon: SiTiktok,     label: "تيك توك",   color: "#010101", href: null, copy: true },
-    { icon: SiSnapchat,   label: "سناب شات",  color: "#FFFC00", href: `https://www.snapchat.com/scan?attachmentUrl=${encodeURIComponent(streamUrl)}`, textDark: true },
+    { icon: SiSnapchat,   label: "سناب شات",  color: "#FFFC00", href: `https://www.snapchat.com/scan?attachmentUrl=${encodeURIComponent(streamShareUrl)}`, textDark: true },
   ];
 
   const unlockAudio = () => {
@@ -2216,10 +2227,16 @@ export default function LiveStream() {
                 )
               ))}
             </div>
+            {myRefCode && (
+              <div className="bg-amber-500/20 border border-amber-400/30 rounded-xl px-3 py-2 mb-3 text-center">
+                <p className="text-amber-300 text-xs font-bold">💰 شارك واكسب! كل مستخدم جديد يسجّل من رابطك = مكافأة</p>
+                <p className="text-amber-400/70 text-xs mt-0.5">كودك: <span className="font-mono font-bold">{myRefCode}</span></p>
+              </div>
+            )}
             <div className="flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
-              <span className="text-white/70 text-xs flex-1 truncate">{streamUrl}</span>
+              <span className="text-white/70 text-xs flex-1 truncate">{streamShareUrl}</span>
               <button
-                onClick={() => { navigator.clipboard.writeText(streamUrl); toast({ title: "✅ تم نسخ الرابط" }); }}
+                onClick={() => { navigator.clipboard.writeText(streamShareUrl); toast({ title: "✅ تم نسخ الرابط" }); }}
                 className="bg-white/20 text-white text-xs px-3 py-1.5 rounded-lg font-bold flex-shrink-0"
                 data-testid="btn-copy-stream-link"
               >

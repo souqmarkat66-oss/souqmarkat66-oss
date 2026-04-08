@@ -4250,7 +4250,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.get("/api/pricing", async (_req, res) => {
     try {
       const allowedKeys = new Set([
-        'boost_price_egp','boost_enabled','boost_share_reward_egp',
+        'boost_price_egp','boost_enabled',
         'renewal_price_7','renewal_price_30','renewal_price_60','renewal_price_90',
         'campaign_min_budget_egp','wallet_min_withdrawal_egp',
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',

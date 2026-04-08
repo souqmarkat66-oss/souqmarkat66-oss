@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Share2, Copy, Check, ExternalLink } from "lucide-react";
 import { SiWhatsapp, SiFacebook, SiTelegram, SiX, SiInstagram, SiTiktok, SiSnapchat } from "react-icons/si";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/use-auth";
 
 interface ShareMenuProps {
   url: string;
@@ -27,10 +29,20 @@ export function ShareMenu({
   "data-testid": testId,
 }: ShareMenuProps) {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState(false);
 
-  const fullUrl = url.startsWith("http") ? url : `${window.location.origin}${url}`;
+  const { data: refData } = useQuery<{ code: string }>({
+    queryKey: ["/api/auth/me/referral"],
+    queryFn: () => fetch("/api/auth/me/referral", { credentials: "include" }).then(r => r.json()),
+    enabled: !!user,
+    staleTime: 10 * 60 * 1000,
+  });
+  const refCode = refData?.code;
+
+  const baseUrl = url.startsWith("http") ? url : `${window.location.origin}${url}`;
+  const fullUrl = refCode ? `${baseUrl}?ref=${refCode}` : baseUrl;
   const encodedUrl = encodeURIComponent(fullUrl);
   const encodedTitle = encodeURIComponent(title);
 
@@ -142,6 +154,11 @@ export function ShareMenu({
           sideOffset={6}
           onClick={e => e.stopPropagation()}
         >
+          {refCode && (
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-700 rounded-xl px-3 py-2 mb-3 text-xs text-amber-800 dark:text-amber-400">
+              💰 <strong>شارك واكسب!</strong> رابطك يحتوي على كودك الشخصي — كل تسجيل جديد = مكافأة في محفظتك
+            </div>
+          )}
           <p className="text-sm font-bold text-foreground mb-2 flex items-center gap-1.5">
             <Share2 className="w-4 h-4 text-primary" />
             شارك على
