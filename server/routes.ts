@@ -1282,7 +1282,9 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const { insertAdSchema } = await import("@shared/schema");
       const input = insertAdSchema.parse(req.body);
-      const ad = await storage.createAd({ ...input, userId: req.user.claims.sub });
+      // Default ad duration = 7 days from creation
+      const defaultExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      const ad = await storage.createAd({ ...input, userId: req.user.claims.sub, expiresAt: input.expiresAt ?? defaultExpiry });
       res.status(201).json(ad);
 
       // ── Notify targeted users about the new ad (async, non-blocking) ──
@@ -2498,8 +2500,8 @@ Sitemap: ${BASE}/sitemap-pages.xml
       if (!title || !description || !mediaUrl || !mediaType) return res.status(400).json({ message: "بيانات ناقصة" });
       const adminId = req.user.id;
       const result = await db.execute(sql`
-        INSERT INTO ads (title, description, media_url, media_type, user_id, price_egp, whatsapp_number, is_admin_promo, status, language)
-        VALUES (${title}, ${description}, ${mediaUrl}, ${mediaType}, ${adminId}, ${priceEGP || null}, ${whatsappNumber || null}, true, 'active', 'ar')
+        INSERT INTO ads (title, description, media_url, media_type, user_id, price_egp, whatsapp_number, is_admin_promo, status, language, expires_at)
+        VALUES (${title}, ${description}, ${mediaUrl}, ${mediaType}, ${adminId}, ${priceEGP || null}, ${whatsappNumber || null}, true, 'active', 'ar', NOW() + INTERVAL '7 days')
         RETURNING id
       `);
       res.json({ success: true, id: (result.rows[0] as any).id });
@@ -4127,7 +4129,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       }
       const defaults: Record<string, string> = {
         boost_price_egp: '50', boost_enabled: 'true',
-        renewal_price_7: '50', renewal_price_30: '50', renewal_price_60: '90', renewal_price_90: '130',
+        renewal_price_7: '50', renewal_price_30: '350', renewal_price_60: '90', renewal_price_90: '130',
         campaign_min_budget_egp: '100', wallet_min_withdrawal_egp: '100',
         ai_price_image: '10', ai_price_video: '25', ai_price_animation: '20',
         ai_price_content: '5', ai_price_post: '5',
@@ -4492,7 +4494,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       res.json({
         options: [
           { days: 7,  price: settings['renewal_price_7']  ?? 50,  label: "7 أيام 🔥",  badge: "الأكثر طلباً" },
-          { days: 30, price: settings['renewal_price_30'] ?? 50,  label: "30 يوماً" },
+          { days: 30, price: settings['renewal_price_30'] ?? 350, label: "30 يوماً" },
           { days: 60, price: settings['renewal_price_60'] ?? 90,  label: "60 يوماً" },
           { days: 90, price: settings['renewal_price_90'] ?? 130, label: "90 يوماً" },
         ]

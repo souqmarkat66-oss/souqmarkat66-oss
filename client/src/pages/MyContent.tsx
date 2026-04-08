@@ -251,7 +251,7 @@ function AuthenticatedContent({ user }: { user: any }) {
   // renewAdMut kept for backward compat (admin only)
   const renewAdMut = useMutation({
     mutationFn: (id: number) => apiRequest("POST", `/api/ads/${id}/renew`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/ads/mine"] }); toast({ title: "✅ تم تجديد الإعلان 30 يوماً!" }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/ads/mine"] }); toast({ title: "✅ تم تجديد الإعلان 7 أيام إضافية!" }); },
   });
 
   return (
@@ -371,6 +371,22 @@ function AuthenticatedContent({ user }: { user: any }) {
                       <Badge variant={ad.status === "active" ? "default" : "secondary"} className="text-[10px] h-5">
                         {ad.status === "active" ? "✅ نشط" : ad.status}
                       </Badge>
+                      {ad.expires_at && (() => {
+                        const exp = new Date(ad.expires_at);
+                        const now = new Date();
+                        const daysLeft = Math.ceil((exp.getTime() - now.getTime()) / 86400000);
+                        const isExpired = daysLeft <= 0;
+                        const isSoon = daysLeft > 0 && daysLeft <= 2;
+                        return (
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${
+                            isExpired ? "bg-red-50 dark:bg-red-900/20 border-red-200 text-red-600" :
+                            isSoon ? "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 text-yellow-700" :
+                            "bg-green-50 dark:bg-green-900/20 border-green-200 text-green-600"
+                          }`}>
+                            {isExpired ? "⛔ انتهى" : `⏱ ${daysLeft} يوم`}
+                          </span>
+                        );
+                      })()}
                       <button
                         onClick={() => handleRenewClick(ad)}
                         className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-600 hover:bg-blue-100 transition-colors"
