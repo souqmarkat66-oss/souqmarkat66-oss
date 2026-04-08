@@ -5365,5 +5365,72 @@ ${reelTags}
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ================================================================
+  // DYNAMIC OG META TAGS — for WhatsApp / Facebook / Telegram bots
+  // When a bot scrapes /ads/:id, serve HTML with ad-specific OG tags
+  // Regular users pass through to the SPA normally
+  // ================================================================
+  const BOT_UA = /whatsapp|facebookexternalhit|facebot|twitterbot|telegrambot|linkedinbot|discordbot|slackbot|pinterest|snapchat|googlebot|bingbot|applebot|line-poker|viber|iframely/i;
+
+  const escHtml = (s: string) => s.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+  app.get("/ads/:id", async (req, res, next) => {
+    const ua = req.headers["user-agent"] || "";
+    if (!BOT_UA.test(ua)) return next(); // real user → SPA handles it
+
+    const adId = parseInt(req.params.id);
+    if (isNaN(adId)) return next();
+
+    try {
+      const adR = await db.execute(
+        sql`SELECT title, description, media_url, media_type, price_egp, user_id FROM ads WHERE id = ${adId} AND status = 'active' LIMIT 1`
+      );
+      if (!adR.rows.length) return next();
+      const ad: any = adR.rows[0];
+
+      const BASE   = "https://ads-as.com";
+      const pageUrl = `${BASE}/ads/${adId}`;
+      const rawMedia = ad.media_url || "";
+      const imageUrl = rawMedia.startsWith("http") ? rawMedia : `${BASE}${rawMedia}`;
+      const priceStr = ad.price_egp && Number(ad.price_egp) > 0 ? ` — السعر: ${Number(ad.price_egp).toLocaleString("ar-EG")} ج.م` : "";
+      const title   = escHtml(`${ad.title || "إعلان"} | ads-as.com`);
+      const desc    = escHtml(`${(ad.description || "").slice(0, 200)}${priceStr} | شبكة سوق للإعلانات ads-as.com`);
+      const siteName = "شبكة سوق للإعلانات | ads-as.com";
+
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(`<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta http-equiv="refresh" content="0; url=${pageUrl}"/>
+  <title>${title}</title>
+
+  <meta property="og:type" content="website"/>
+  <meta property="og:url" content="${pageUrl}"/>
+  <meta property="og:title" content="${title}"/>
+  <meta property="og:description" content="${desc}"/>
+  <meta property="og:image" content="${imageUrl}"/>
+  <meta property="og:image:width" content="800"/>
+  <meta property="og:image:height" content="800"/>
+  <meta property="og:site_name" content="${siteName}"/>
+  <meta property="og:locale" content="ar_EG"/>
+
+  <meta name="twitter:card" content="summary_large_image"/>
+  <meta name="twitter:title" content="${title}"/>
+  <meta name="twitter:description" content="${desc}"/>
+  <meta name="twitter:image" content="${imageUrl}"/>
+  <meta name="twitter:site" content="@souqads"/>
+
+  <link rel="canonical" href="${pageUrl}"/>
+</head>
+<body>
+  <p>جارٍ تحميل الإعلان... <a href="${pageUrl}">اضغط هنا إذا لم يتم التحميل تلقائياً</a></p>
+</body>
+</html>`);
+    } catch {
+      next();
+    }
+  });
+
   return httpServer;
 }
