@@ -2776,13 +2776,14 @@ Sitemap: ${BASE}/sitemap-pages.xml
         );
         await createNotification(userId, 'system', '⚡ تم تعزيز إعلانك!',
           `إعلانك #${adId} أصبح مميزاً في الصدارة لمدة 30 يوماً`, `/ads/${adId}`);
-      } else if (svcType === 'renewal' && adId) {
+      } else if ((svcType === 'renewal' || svcType === 'renewal_30') && adId) {
+        const renewDays = svcType === 'renewal' ? 7 : 30;
         await pool.query(
-          `UPDATE ads SET status = 'active', expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + INTERVAL '30 days' WHERE id = $1`,
-          [adId]
+          `UPDATE ads SET status = 'active', expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + INTERVAL '1 day' * $2 WHERE id = $1`,
+          [adId, renewDays]
         );
         await createNotification(userId, 'system', '🔄 تم تجديد إعلانك!',
-          `إعلانك #${adId} تم تجديده لمدة 30 يوماً إضافية`, `/ads/${adId}`);
+          `إعلانك #${adId} تم تجديده لمدة ${renewDays} يوماً إضافية`, `/ads/${adId}`);
       } else if (svcType === 'ai_credits') {
         const creditsRow = await pool.query(
           `SELECT value FROM platform_settings WHERE key = 'ai_free_credits' LIMIT 1`
@@ -4112,7 +4113,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const allowedKeys = new Set([
         'boost_price_egp','boost_enabled',
-        'renewal_price_30','renewal_price_60','renewal_price_90',
+        'renewal_price_7','renewal_price_30','renewal_price_60','renewal_price_90',
         'campaign_min_budget_egp','wallet_min_withdrawal_egp',
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
         'ai_free_credits','ai_price_per_credit_egp',
@@ -4126,7 +4127,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       }
       const defaults: Record<string, string> = {
         boost_price_egp: '50', boost_enabled: 'true',
-        renewal_price_30: '30', renewal_price_60: '55', renewal_price_90: '75',
+        renewal_price_7: '50', renewal_price_30: '50', renewal_price_60: '90', renewal_price_90: '130',
         campaign_min_budget_egp: '100', wallet_min_withdrawal_egp: '100',
         ai_price_image: '10', ai_price_video: '25', ai_price_animation: '20',
         ai_price_content: '5', ai_price_post: '5',
@@ -4484,14 +4485,15 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const rows = await db.execute(sql`
         SELECT key, value FROM platform_settings
-        WHERE key IN ('renewal_price_30', 'renewal_price_60', 'renewal_price_90')
+        WHERE key IN ('renewal_price_7', 'renewal_price_30', 'renewal_price_60', 'renewal_price_90')
       `);
       const settings: Record<string, number> = {};
       for (const r of rows.rows as any[]) settings[r.key] = parseFloat(r.value);
       res.json({
         options: [
-          { days: 30, price: settings['renewal_price_30'] ?? 50, label: "30 يوماً" },
-          { days: 60, price: settings['renewal_price_60'] ?? 90, label: "60 يوماً" },
+          { days: 7,  price: settings['renewal_price_7']  ?? 50,  label: "7 أيام 🔥",  badge: "الأكثر طلباً" },
+          { days: 30, price: settings['renewal_price_30'] ?? 50,  label: "30 يوماً" },
+          { days: 60, price: settings['renewal_price_60'] ?? 90,  label: "60 يوماً" },
           { days: 90, price: settings['renewal_price_90'] ?? 130, label: "90 يوماً" },
         ]
       });
