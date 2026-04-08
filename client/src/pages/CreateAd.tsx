@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -22,7 +22,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { EgyptTargetingMap } from "@/components/EgyptTargetingMap";
 import LocationPickerMap from "@/components/LocationPickerMap";
 import { useTTS } from "@/hooks/use-tts";
-import { useRef } from "react";
 
 const formSchema = insertAdSchema.extend({
   title: z.string().min(2, "العنوان مطلوب (2 أحرف على الأقل)"),
@@ -118,35 +117,96 @@ export default function CreateAd() {
   const [editingImage, setEditingImage] = useState(false);
   const refImgInputRef = useRef<HTMLInputElement>(null);
   const [ttsVoice, setTtsVoice] = useState<"nova" | "onyx">("nova");
+  const [cinemaKey, setCinemaKey] = useState(0);
+  const cinemaAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+
+  // Ken Burns animation variants cycling per scene
+  const kenBurnsVariants = [
+    'kenBurns0', 'kenBurns1', 'kenBurns2', 'kenBurns3'
+  ];
+
+  // Start full-audio (OpenAI TTS) through Web Audio API with +12dB boost
+  const playBoostedAudio = (url: string) => {
+    try {
+      if (cinemaAudioRef.current) {
+        cinemaAudioRef.current.pause();
+        cinemaAudioRef.current = null;
+      }
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioCtxRef.current = ctx;
+      const gain = ctx.createGain();
+      gain.gain.value = 3.5;
+      gainNodeRef.current = gain;
+      const audio = new Audio(url);
+      audio.crossOrigin = 'anonymous';
+      cinemaAudioRef.current = audio;
+      const src = ctx.createMediaElementSource(audio);
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      audio.play().catch(() => {});
+      setAudioPlaying(true);
+      audio.onended = () => setAudioPlaying(false);
+    } catch (e) {
+      // fallback: plain audio
+      const audio = new Audio(url);
+      cinemaAudioRef.current = audio;
+      audio.volume = 1;
+      audio.play().catch(() => {});
+      setAudioPlaying(true);
+      audio.onended = () => setAudioPlaying(false);
+    }
+  };
+
+  const stopCinema = () => {
+    setCinemaPlaying(false);
+    window.speechSynthesis?.cancel?.();
+    if (cinemaAudioRef.current) { cinemaAudioRef.current.pause(); cinemaAudioRef.current = null; }
+    if (audioCtxRef.current) { audioCtxRef.current.close().catch(() => {}); audioCtxRef.current = null; }
+  };
 
   // Auto-advance cinema slideshow
   useEffect(() => {
     if (!cinemaPlaying || !videoScript?.scenes?.length) return;
     const scenes = videoScript.scenes;
-    const text = scenes[cinemaScene]?.narration || scenes[cinemaScene]?.visual || '';
-    // Speak
-    setAudioPlaying(true);
-    if ('speechSynthesis' in window) {
+    setCinemaKey(k => k + 1);
+
+    // If we're at scene 0 and have boosted TTS audio, start it
+    if (cinemaScene === 0 && scriptTtsAudioUrl) {
+      playBoostedAudio(scriptTtsAudioUrl);
+    }
+
+    // Per-scene speech if no full TTS audio
+    if (!scriptTtsAudioUrl && 'speechSynthesis' in window) {
+      const text = scenes[cinemaScene]?.narration || scenes[cinemaScene]?.visual || '';
       window.speechSynthesis.cancel();
       const utt = new SpeechSynthesisUtterance(text);
       utt.lang = 'ar-EG';
-      utt.rate = 0.85;
-      utt.pitch = 1.1;
+      utt.rate = 0.75;
+      utt.pitch = 1.05;
+      utt.volume = 1;
       const voices = window.speechSynthesis.getVoices();
       const arVoice = voices.find(v => v.lang.startsWith('ar')) || voices[0];
       if (arVoice) utt.voice = arVoice;
+      utt.onstart = () => setAudioPlaying(true);
       utt.onend = () => setAudioPlaying(false);
       window.speechSynthesis.speak(utt);
     }
+
+    const sceneDuration = scriptTtsAudioUrl
+      ? Math.max(5000, ((cinemaAudioRef.current?.duration || 20) / scenes.length) * 1000)
+      : 6500;
+
     const timer = setTimeout(() => {
       const next = cinemaScene + 1;
       if (next >= scenes.length) {
-        setCinemaPlaying(false);
+        stopCinema();
         setCinemaScene(0);
       } else {
         setCinemaScene(next);
       }
-    }, 6000);
+    }, sceneDuration);
     return () => { clearTimeout(timer); };
   }, [cinemaPlaying, cinemaScene, videoScript]);
 
@@ -404,102 +464,184 @@ export default function CreateAd() {
 
   return (
     <div className="container max-w-3xl px-4 py-12">
-    {/* ===== FULLSCREEN CINEMA OVERLAY ===== */}
-    {cinemaPlaying && videoScript?.scenes && (
-      <div className="fixed inset-0 z-[9999] bg-black flex flex-col" dir="rtl">
-        {/* Top bar */}
-        <div className="flex items-center justify-between p-4 bg-black/80 backdrop-blur border-b border-white/10">
-          <div className="flex items-center gap-2">
-            <Film className="w-5 h-5 text-primary" />
-            <span className="text-white font-bold text-sm">{videoScript.title}</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-white/60 text-xs">
-              مشهد {cinemaScene + 1} / {videoScript.scenes.length}
-            </span>
-            <button
-              onClick={() => { setCinemaPlaying(false); window.speechSynthesis?.cancel?.(); }}
-              className="text-white/70 hover:text-white text-sm border border-white/20 rounded-full px-3 py-1 hover:bg-white/10 transition-all"
-            >
-              ⏹ إيقاف
-            </button>
-          </div>
-        </div>
-
-        {/* Main scene */}
-        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-          {/* Time badge */}
-          <div className="mb-6">
-            <span className="bg-primary/20 text-primary border border-primary/40 rounded-full px-4 py-1 text-sm font-medium">
-              ⏱ {videoScript.scenes[cinemaScene]?.time}
-            </span>
-          </div>
-
-          {/* Narration — BIG TEXT */}
-          <p className="text-white text-2xl md:text-4xl font-extrabold leading-relaxed mb-6 max-w-3xl">
-            {videoScript.scenes[cinemaScene]?.narration}
-          </p>
-
-          {/* Visual description */}
-          <p className="text-white/50 text-base md:text-lg max-w-2xl leading-relaxed">
-            🎥 {videoScript.scenes[cinemaScene]?.visual}
-          </p>
-
-          {/* Mood */}
-          {videoScript.scenes[cinemaScene]?.mood && (
-            <span className="mt-4 text-white/40 text-sm italic">
-              {videoScript.scenes[cinemaScene].mood}
-            </span>
+    {/* ===== FULLSCREEN CINEMATIC OVERLAY ===== */}
+    <AnimatePresence>
+    {cinemaPlaying && videoScript?.scenes && (() => {
+      const scene = videoScript.scenes[cinemaScene];
+      const bgImg = aiImageUrl || adImageUrls[0] || '';
+      const kbClass = kenBurnsVariants[cinemaScene % kenBurnsVariants.length];
+      return (
+        <motion.div
+          key="cinema-overlay"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.5 }}
+          className="fixed inset-0 z-[9999] bg-black flex flex-col overflow-hidden"
+          dir="rtl"
+        >
+          {/* ── Background image with Ken Burns ── */}
+          {bgImg && (
+            <div className="absolute inset-0 overflow-hidden">
+              <img
+                key={`kb-${cinemaScene}`}
+                src={bgImg}
+                alt=""
+                className={`absolute inset-0 w-full h-full object-cover cinema-kb ${kbClass}`}
+              />
+              {/* Cinematic gradient overlays */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/20" />
+              <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-transparent" />
+            </div>
           )}
-        </div>
+          {!bgImg && (
+            <div className="absolute inset-0 bg-gradient-to-br from-gray-950 via-black to-gray-900" />
+          )}
 
-        {/* Audio wave indicator */}
-        <div className="flex items-center justify-center gap-1.5 py-4">
-          {[1,2,3,4,5,6,7].map(i => (
-            <div
-              key={i}
-              className="w-1 bg-primary rounded-full"
-              style={{
-                height: audioPlaying ? `${12 + Math.sin(Date.now()/200 + i) * 10}px` : '4px',
-                animation: audioPlaying ? `audioWave 0.6s ease-in-out ${i * 0.1}s infinite alternate` : 'none',
-                transition: 'height 0.2s'
-              }}
+          {/* ── Letterbox bars ── */}
+          <div className="absolute top-0 left-0 right-0 h-[7vh] bg-black z-10" />
+          <div className="absolute bottom-0 left-0 right-0 h-[7vh] bg-black z-10" />
+
+          {/* ── Floating particles ── */}
+          <div className="absolute inset-0 pointer-events-none z-10 overflow-hidden">
+            {[...Array(12)].map((_, i) => (
+              <div
+                key={i}
+                className="absolute rounded-full bg-white/20 cinema-particle"
+                style={{
+                  width: `${2 + (i % 3)}px`,
+                  height: `${2 + (i % 3)}px`,
+                  left: `${(i * 8.3) % 100}%`,
+                  animationDelay: `${i * 0.4}s`,
+                  animationDuration: `${4 + (i % 4)}s`,
+                }}
+              />
+            ))}
+          </div>
+
+          {/* ── Top HUD bar ── */}
+          <div className="relative z-20 flex items-center justify-between px-5 py-3 mt-[7vh] bg-gradient-to-b from-black/80 to-transparent">
+            <div className="flex items-center gap-2">
+              <Film className="w-4 h-4 text-primary animate-pulse" />
+              <span className="text-white font-bold text-sm tracking-wide line-clamp-1 max-w-[180px]">{videoScript.title}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-white/50 text-xs bg-white/10 rounded-full px-3 py-0.5">
+                {cinemaScene + 1} / {videoScript.scenes.length}
+              </span>
+              <button
+                onClick={stopCinema}
+                className="text-white/70 hover:text-white text-xs border border-white/20 rounded-full px-3 py-1 hover:bg-red-500/30 hover:border-red-400/50 transition-all"
+              >
+                ⏹ إيقاف
+              </button>
+            </div>
+          </div>
+
+          {/* ── Main scene content ── */}
+          <div className="relative z-20 flex-1 flex flex-col items-center justify-end pb-8 px-6 text-center">
+            {/* Time/mood badge */}
+            <motion.div
+              key={`badge-${cinemaScene}`}
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.1 }}
+              className="mb-4"
+            >
+              <span className="bg-primary/30 text-primary border border-primary/50 backdrop-blur-sm rounded-full px-4 py-1 text-xs font-semibold tracking-widest uppercase">
+                ⏱ {scene?.time}{scene?.mood ? ` · ${scene.mood}` : ''}
+              </span>
+            </motion.div>
+
+            {/* Narration — animated per scene */}
+            <motion.p
+              key={`narration-${cinemaScene}-${cinemaKey}`}
+              initial={{ opacity: 0, y: 40, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, y: -20, filter: 'blur(4px)' }}
+              transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+              className="text-white text-2xl md:text-4xl font-extrabold leading-relaxed mb-4 max-w-3xl drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]"
+              style={{ textShadow: '0 2px 20px rgba(0,0,0,0.8), 0 0 40px rgba(0,0,0,0.5)' }}
+            >
+              {scene?.narration}
+            </motion.p>
+
+            {/* Visual description */}
+            <motion.p
+              key={`visual-${cinemaScene}-${cinemaKey}`}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.25 }}
+              className="text-white/55 text-sm md:text-base max-w-2xl leading-relaxed mb-5 drop-shadow-lg"
+            >
+              🎥 {scene?.visual}
+            </motion.p>
+
+            {/* Audio visualizer */}
+            <div className="flex items-end justify-center gap-[3px] h-7 mb-2">
+              {[...Array(16)].map((_, i) => (
+                <div
+                  key={i}
+                  className="w-[3px] bg-primary rounded-full cinema-bar"
+                  style={{
+                    animationDelay: `${i * 0.07}s`,
+                    animationPlayState: audioPlaying ? 'running' : 'paused',
+                    height: audioPlaying ? undefined : '3px',
+                    opacity: audioPlaying ? 1 : 0.3,
+                  }}
+                />
+              ))}
+              <span className="text-white/40 text-[10px] mr-2 self-center">
+                {audioPlaying ? '🔊' : '🔇'}
+              </span>
+            </div>
+          </div>
+
+          {/* ── Progress bar ── */}
+          <div className="relative z-20 h-[3px] bg-white/10 mb-[7vh]">
+            <motion.div
+              key={`progress-${cinemaScene}`}
+              className="h-full bg-primary"
+              initial={{ width: '0%' }}
+              animate={{ width: '100%' }}
+              transition={{ duration: 6.5, ease: 'linear' }}
             />
-          ))}
-          <span className="text-white/50 text-xs mr-2 ml-1">
-            {audioPlaying ? '🔊 يتحدث...' : '🔇 في الانتظار'}
-          </span>
-        </div>
+          </div>
 
-        {/* Progress bar */}
-        <div className="h-1 bg-white/10">
-          <div
-            className="h-full bg-primary transition-all"
-            style={{
-              width: `${((cinemaScene + 1) / videoScript.scenes.length) * 100}%`,
-              transitionDuration: '6000ms'
-            }}
-          />
-        </div>
-
-        {/* Scene dots */}
-        <div className="flex items-center justify-center gap-2 py-3 bg-black/50">
-          {videoScript.scenes.map((_: any, i: number) => (
-            <button
-              key={i}
-              onClick={() => { window.speechSynthesis?.cancel?.(); setCinemaScene(i); }}
-              className={`rounded-full transition-all ${i === cinemaScene ? 'w-6 h-2 bg-primary' : 'w-2 h-2 bg-white/30 hover:bg-white/60'}`}
-            />
-          ))}
-        </div>
-      </div>
-    )}
+          {/* ── Scene dots ── */}
+          <div className="absolute bottom-[7vh] left-0 right-0 z-20 flex items-center justify-center gap-2 py-2">
+            {videoScript.scenes.map((_: any, i: number) => (
+              <button
+                key={i}
+                onClick={() => { window.speechSynthesis?.cancel?.(); setCinemaScene(i); }}
+                className={`rounded-full transition-all duration-300 ${i === cinemaScene ? 'w-6 h-2 bg-primary shadow-[0_0_8px_theme(colors.primary)]' : 'w-2 h-2 bg-white/25 hover:bg-white/50'}`}
+              />
+            ))}
+          </div>
+        </motion.div>
+      );
+    })()}
+    </AnimatePresence>
 
     <style>{`
-      @keyframes audioWave {
-        from { height: 4px; }
-        to { height: 24px; }
-      }
+      /* Ken Burns variants */
+      @keyframes kb0 { from { transform: scale(1.0) translate(0,0); } to { transform: scale(1.18) translate(-2%, -1%); } }
+      @keyframes kb1 { from { transform: scale(1.1) translate(2%, 1%); } to { transform: scale(1.22) translate(-3%, -2%); } }
+      @keyframes kb2 { from { transform: scale(1.05) translate(-3%, 2%); } to { transform: scale(1.2) translate(2%, -1%); } }
+      @keyframes kb3 { from { transform: scale(1.18) translate(1%, -2%); } to { transform: scale(1.0) translate(-1%, 2%); } }
+      .cinema-kb { animation-timing-function: ease-in-out; animation-fill-mode: both; animation-duration: 7s; }
+      .kenBurns0 { animation-name: kb0; }
+      .kenBurns1 { animation-name: kb1; }
+      .kenBurns2 { animation-name: kb2; }
+      .kenBurns3 { animation-name: kb3; }
+
+      /* Floating particles */
+      @keyframes floatUp { 0% { transform: translateY(100vh) scale(0); opacity: 0; } 10% { opacity: 0.6; } 90% { opacity: 0.2; } 100% { transform: translateY(-10vh) scale(1.5); opacity: 0; } }
+      .cinema-particle { animation: floatUp linear infinite; }
+
+      /* Audio bars */
+      @keyframes audioBar { 0%, 100% { height: 3px; } 50% { height: 22px; } }
+      .cinema-bar { animation: audioBar 0.5s ease-in-out infinite; }
     `}</style>
       <div className="flex items-center gap-3 mb-8">
         <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
