@@ -4128,7 +4128,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
         if (allowedKeys.has(r.key)) settings[r.key] = r.value;
       }
       const defaults: Record<string, string> = {
-        boost_price_egp: '50', boost_enabled: 'true',
+        boost_price_egp: '200', boost_enabled: 'true',
         renewal_price_7: '50', renewal_price_30: '350', renewal_price_60: '90', renewal_price_90: '130',
         campaign_min_budget_egp: '100', wallet_min_withdrawal_egp: '100',
         ai_price_image: '10', ai_price_video: '25', ai_price_animation: '20',
