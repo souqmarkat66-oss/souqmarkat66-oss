@@ -39,6 +39,15 @@ export function isAuthenticated(req: Request, res: Response, next: NextFunction)
   return res.status(401).json({ message: "Unauthorized" });
 }
 
+// ── Normalize Egyptian phone numbers ─────────────────────────────
+function normalizePhone(raw: string): string {
+  let p = raw.replace(/[\s\-().]/g, "");
+  if (p.startsWith("+20")) p = "0" + p.slice(3);
+  if (p.startsWith("20") && p.length >= 12) p = "0" + p.slice(2);
+  if (/^[17]\d{8}$/.test(p)) p = "0" + p; // 9 digits missing leading 0
+  return /^0[0-9]{9,10}$/.test(p) ? p : "";
+}
+
 // ── Ensure columns exist ──────────────────────────────────────────
 async function ensureColumns() {
   await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
@@ -81,21 +90,26 @@ export function registerCustomAuthRoutes(app: Express) {
 
   // ── POST /api/auth/login ────────────────────────────────────────
   app.post("/api/auth/login", async (req: Request, res: Response) => {
-    const { identifier, password } = req.body; // identifier = email or phone
+    const { identifier, password } = req.body;
     if (!identifier || !password)
       return res.status(400).json({ message: "البريد / الهاتف وكلمة المرور مطلوبة" });
+
+    const id = String(identifier).trim();
+    const phone = normalizePhone(id);
 
     try {
       const result = await db.execute(
         sql`SELECT id, email, phone, first_name, last_name, profile_image_url, password_hash
             FROM users
-            WHERE (LOWER(email) = LOWER(${identifier}) OR phone = ${identifier} OR id = ${identifier})
+            WHERE (LOWER(email) = LOWER(${id})
+               OR phone = ${id}
+               OR (${phone} <> '' AND phone = ${phone})
+               OR id = ${id})
             LIMIT 1`
       );
       const user: any = result.rows[0];
       if (!user) return res.status(401).json({ message: "البريد الإلكتروني أو رقم الهاتف أو الـ ID غير موجود" });
 
-      // First-time login for Replit-imported accounts (no password set)
       if (!user.password_hash) {
         return res.status(403).json({ message: "first_login", userId: user.id });
       }
@@ -112,7 +126,10 @@ export function registerCustomAuthRoutes(app: Express) {
         profileImageUrl: user.profile_image_url,
       };
 
-      res.json({ success: true, user: { id: user.id, email: user.email, firstName: user.first_name, lastName: user.last_name } });
+      req.session.save((err) => {
+        if (err) return res.status(500).json({ message: "خطأ في حفظ الجلسة" });
+        res.json({ success: true, user: { id: user.id, email: user.email, firstName: user.first_name, lastName: user.last_name } });
+      });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -152,7 +169,10 @@ export function registerCustomAuthRoutes(app: Express) {
         profileImageUrl: null,
       };
 
-      res.status(201).json({ success: true, user: { id: newId, email, firstName, lastName } });
+      req.session.save((err) => {
+        if (err) return res.status(500).json({ message: "خطأ في حفظ الجلسة" });
+        res.status(201).json({ success: true, user: { id: newId, email, firstName, lastName } });
+      });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -166,7 +186,6 @@ export function registerCustomAuthRoutes(app: Express) {
     try {
       const hash = await bcrypt.hash(password, 10);
       await db.execute(sql`UPDATE users SET password_hash = ${hash} WHERE id = ${userId}`);
-      // Fetch user and log them in
       const result = await db.execute(
         sql`SELECT id, email, phone, first_name, last_name, profile_image_url FROM users WHERE id = ${userId} LIMIT 1`
       );
@@ -180,7 +199,11 @@ export function registerCustomAuthRoutes(app: Express) {
         lastName:        user.last_name,
         profileImageUrl: user.profile_image_url,
       };
-      res.json({ success: true });
+      // Explicitly save session before responding
+      req.session.save((err) => {
+        if (err) return res.status(500).json({ message: "خطأ في حفظ الجلسة" });
+        res.json({ success: true });
+      });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -189,21 +212,24 @@ export function registerCustomAuthRoutes(app: Express) {
   // ── POST /api/auth/forgot-password ─────────────────────────────
   app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
     const { email, phone, identifier } = req.body;
-    const lookup = identifier || email || phone;
-    if (!lookup)
+    const raw = (identifier || email || phone || "").trim();
+    if (!raw)
       return res.status(400).json({ message: "البريد الإلكتروني أو رقم الهاتف أو الـ ID مطلوب" });
+    const normalizedPhone = normalizePhone(raw);
     try {
       const result = await db.execute(
         sql`SELECT id, email, phone, first_name FROM users
-            WHERE (LOWER(email) = LOWER(${lookup}) OR phone = ${lookup} OR id = ${lookup})
+            WHERE (LOWER(email) = LOWER(${raw})
+               OR phone = ${raw}
+               OR (${normalizedPhone} <> '' AND phone = ${normalizedPhone})
+               OR id = ${raw})
             LIMIT 1`
       );
       const user: any = result.rows[0];
-      // For security, always respond the same even if user not found
-      if (!user) return res.status(200).json({ message: "first_login", userId: null, notFound: true });
+      if (!user) return res.status(200).json({ message: "not_found", userId: null, notFound: true });
       // Clear password to force reset
       await db.execute(sql`UPDATE users SET password_hash = NULL WHERE id = ${user.id}`);
-      return res.json({ message: "first_login", userId: user.id, firstName: user.first_name });
+      return res.json({ message: "ok", userId: user.id, firstName: user.first_name });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }

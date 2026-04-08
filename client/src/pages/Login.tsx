@@ -132,18 +132,28 @@ export default function Login() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ identifier: forgotIdentifier }),
+        body: JSON.stringify({ identifier: forgotIdentifier.trim() }),
       });
-      const json = await res.json();
+      let json: any = {};
+      try { json = await res.json(); } catch { json = {}; }
+
+      if (!res.ok && res.status >= 500) {
+        toast({ variant: "destructive", title: "خطأ في الخادم، حاول مجدداً بعد قليل" });
+        return;
+      }
       if (json.notFound || !json.userId) {
-        toast({ variant: "destructive", title: "البيانات غير مسجّلة، تأكد من الإيميل أو الـ ID" });
+        toast({
+          variant: "destructive",
+          title: "الحساب غير موجود",
+          description: "تأكد من الإيميل أو رقم الهاتف أو الـ ID. إذا نسيت بياناتك تواصل مع الدعم على واتساب."
+        });
         return;
       }
       setFirstLoginUserId(json.userId);
       setScreen("set-password");
       toast({ title: `مرحباً ${json.firstName || ""}، عيّن كلمة مرور جديدة` });
     } catch {
-      toast({ variant: "destructive", title: "حدث خطأ، حاول مجدداً" });
+      toast({ variant: "destructive", title: "تعذّر الاتصال، تحقق من الإنترنت وحاول مجدداً" });
     } finally {
       setForgotLoading(false);
     }
@@ -516,19 +526,21 @@ export default function Login() {
               </div>
             </div>
 
-            <div className="p-3 mb-4 bg-blue-500/10 border border-blue-500/20 rounded-xl text-sm text-blue-600">
-              💡 <strong>ملاحظة:</strong> إذا كنت سجّلت حسابك قبلاً عبر Replit أو Google، أدخل إيميلك هنا وستتمكن من تعيين كلمة مرور جديدة
+            <div className="space-y-3 mb-4">
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-700 dark:text-amber-400">
+                📋 <strong>ادخل أي من:</strong> البريد الإلكتروني المسجّل، أو رقم الهاتف (مثل 01012345678)، أو رقم الـ ID الخاص بك
+              </div>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-semibold mb-1.5 block">البريد الإلكتروني أو رقم الهاتف أو الـ ID</label>
+                <label className="text-sm font-semibold mb-1.5 block">البريد الإلكتروني / رقم الهاتف / الـ ID</label>
                 <div className="relative">
                   <Mail className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     value={forgotIdentifier}
                     onChange={e => setForgotIdentifier(e.target.value)}
-                    placeholder="example@email.com أو 01XXXXXXXXX أو 54219806"
+                    placeholder="example@email.com أو 01XXXXXXXXX"
                     className="pr-9 h-11"
                     dir="ltr"
                     data-testid="input-forgot-identifier"
@@ -550,10 +562,19 @@ export default function Login() {
                 إعادة تعيين كلمة المرور
               </Button>
 
-              <p className="text-center text-sm text-muted-foreground">
-                تذكرت كلمة المرور؟{" "}
-                <button onClick={() => setScreen("login")} className="text-primary hover:underline font-medium">سجّل الدخول</button>
-              </p>
+              <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
+                <button onClick={() => setScreen("login")} className="text-primary hover:underline font-medium">
+                  تذكرت كلمة المرور؟ سجّل الدخول
+                </button>
+                <a
+                  href="https://wa.me/201126665741?text=أحتاج%20مساعدة%20في%20استرجاع%20حسابي"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-green-600 hover:text-green-700 text-xs flex items-center gap-1 hover:underline"
+                >
+                  💬 مشكلة في الاسترجاع؟ تواصل مع الدعم على واتساب
+                </a>
+              </div>
             </div>
           </div>
         )}
