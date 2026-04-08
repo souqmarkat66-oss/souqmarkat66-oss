@@ -20,13 +20,17 @@ import express from "express";
 import * as webpushModule from "web-push";
 const webpush: typeof webpushModule = (webpushModule as any).default || webpushModule;
 
-// Admin user ID
-const ADMIN_USER_ID = "54219806";
-const ADMIN_EMAIL   = "souqmarkat66@gmail.com";
+// Admin user IDs
+const ADMIN_USER_ID  = "54219806";
+const ADMIN_EMAIL    = "souqmarkat66@gmail.com";
+const ADMIN_USER_ID2 = "54165148";
+const ADMIN_EMAIL2   = "ahmedesmat.5151@gmail.com";
 
 function isAdminUser(req: any): boolean {
-  return req.user?.claims?.sub === ADMIN_USER_ID ||
-         req.user?.claims?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  const sub   = req.user?.claims?.sub;
+  const email = (req.user?.claims?.email || "").toLowerCase();
+  return sub === ADMIN_USER_ID  || email === ADMIN_EMAIL.toLowerCase() ||
+         sub === ADMIN_USER_ID2 || email === ADMIN_EMAIL2.toLowerCase();
 }
 
 async function requireAdmin(req: any, res: any, next: any) {
