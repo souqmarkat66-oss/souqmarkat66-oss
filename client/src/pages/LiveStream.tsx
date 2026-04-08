@@ -68,6 +68,7 @@ export default function LiveStream() {
   const [streamAds,       setStreamAds]       = useState<any[]>([]);
   const [currentAdIdx,    setCurrentAdIdx]    = useState(0);
   const [adVisible,       setAdVisible]       = useState(false);
+  const [adExpanded,      setAdExpanded]      = useState(false); // expanded bottom-sheet view
 
   // Video swap state (tap PiP to swap with main screen)
   const [swappedCohostId, setSwappedCohostId] = useState<string>(""); // broadcaster: which cohost is full-screen
@@ -1595,31 +1596,120 @@ export default function LiveStream() {
           </div>
         ))}
 
-        {/* IN-STREAM AD BANNER */}
+        {/* IN-STREAM AD — mini banner + expanded bottom-sheet (stream stays alive) */}
         {streaming && adVisible && streamAds.length > 0 && stream?.showAds !== false && (() => {
           const ad = streamAds[currentAdIdx];
-          return (
-            <div className="absolute inset-x-3 z-20 flex items-center gap-3 bg-black/85 backdrop-blur-md rounded-2xl p-2.5 border border-white/10 shadow-2xl"
-              style={{ bottom: "92px", animation: "slideInLeft 0.4s ease-out" }}
+
+          /* ── EXPANDED bottom-sheet (stream continues behind it) ── */
+          if (adExpanded) return (
+            <div
+              className="absolute inset-x-0 bottom-0 z-30 rounded-t-3xl overflow-hidden shadow-2xl"
+              style={{ animation: "slideInUp 0.35s ease-out" }}
             >
-              {/* Ad thumbnail */}
+              {/* translucent backdrop so viewer can still see stream above */}
+              <div className="bg-black/92 backdrop-blur-xl pb-8 pt-1">
+                {/* drag handle */}
+                <div className="flex justify-center mb-3 pt-2">
+                  <div className="w-10 h-1 bg-white/30 rounded-full" />
+                </div>
+
+                {/* ad label + close */}
+                <div className="flex items-center justify-between px-4 mb-3">
+                  <span className="text-[10px] text-yellow-400 font-bold bg-yellow-400/15 rounded px-2 py-1">
+                    إعلان ممول
+                  </span>
+                  <button
+                    onClick={() => { setAdVisible(false); setAdExpanded(false); }}
+                    className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white/60"
+                    data-testid="btn-ad-close-expanded"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* ad image */}
+                <div className="px-4 mb-3">
+                  <img
+                    src={ad.media_url}
+                    alt={ad.title}
+                    className="w-full h-44 object-cover rounded-2xl border border-white/10"
+                  />
+                </div>
+
+                {/* title + price */}
+                <div className="px-4 mb-4">
+                  <p className="text-white font-bold text-base leading-snug mb-1">{ad.title}</p>
+                  {ad.description && (
+                    <p className="text-white/60 text-xs leading-relaxed line-clamp-2">{ad.description}</p>
+                  )}
+                  {ad.price_egp && (
+                    <p className="text-green-400 font-bold text-lg mt-2">
+                      {Number(ad.price_egp).toLocaleString("ar-EG")} <span className="text-sm">ج.م</span>
+                    </p>
+                  )}
+                </div>
+
+                {/* CTA buttons — all open new tab, stream stays alive */}
+                <div className="px-4 flex gap-2">
+                  {ad.whatsapp_number && (
+                    <a
+                      href={`https://wa.me/${ad.whatsapp_number.replace(/\D/g, "")}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 flex items-center justify-center gap-2 bg-green-500 text-white text-sm font-bold py-3 rounded-2xl"
+                      data-testid="btn-ad-whatsapp-expanded"
+                    >
+                      <SiWhatsapp className="w-4 h-4" />
+                      تواصل واتساب
+                    </a>
+                  )}
+                  <a
+                    href={`/ads/${ad.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 flex items-center justify-center gap-2 bg-white/15 border border-white/20 text-white text-sm font-bold py-3 rounded-2xl"
+                    data-testid="btn-ad-view-expanded"
+                  >
+                    عرض الإعلان
+                  </a>
+                </div>
+
+                {/* back to stream hint */}
+                <button
+                  onClick={() => setAdExpanded(false)}
+                  className="w-full mt-3 text-white/40 text-[11px] text-center py-1"
+                  data-testid="btn-ad-back-to-stream"
+                >
+                  ← العودة للبث المباشر
+                </button>
+              </div>
+            </div>
+          );
+
+          /* ── MINI banner (default) ── */
+          return (
+            <button
+              onClick={() => setAdExpanded(true)}
+              className="absolute inset-x-3 z-20 flex items-center gap-3 bg-black/85 backdrop-blur-md rounded-2xl p-2.5 border border-white/10 shadow-2xl text-start"
+              style={{ bottom: "92px", animation: "slideInLeft 0.4s ease-out" }}
+              data-testid="btn-ad-expand"
+            >
+              {/* thumbnail */}
               <img
                 src={ad.media_url}
                 alt={ad.title}
                 className="w-14 h-14 rounded-xl object-cover flex-shrink-0 border border-white/10"
               />
-              {/* Ad info */}
+              {/* info */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1 mb-0.5">
-                  <span className="text-[9px] text-yellow-400 font-bold bg-yellow-400/15 rounded px-1 py-0.5">إعلان</span>
-                </div>
-                <p className="text-white text-xs font-bold truncate leading-tight">{ad.title}</p>
+                <span className="text-[9px] text-yellow-400 font-bold bg-yellow-400/15 rounded px-1 py-0.5">إعلان</span>
+                <p className="text-white text-xs font-bold truncate leading-tight mt-0.5">{ad.title}</p>
                 {ad.price_egp && (
                   <p className="text-green-400 text-[11px] font-bold">{Number(ad.price_egp).toLocaleString("ar-EG")} ج.م</p>
                 )}
               </div>
-              {/* CTA button */}
-              <div className="flex flex-col gap-1.5 flex-shrink-0">
+              {/* actions */}
+              <div className="flex flex-col gap-1.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
                 {ad.whatsapp_number ? (
                   <a
                     href={`https://wa.me/${ad.whatsapp_number.replace(/\D/g, "")}`}
@@ -1634,6 +1724,8 @@ export default function LiveStream() {
                 ) : (
                   <a
                     href={`/ads/${ad.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="bg-white/20 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-xl"
                     data-testid="btn-ad-view"
                   >
@@ -1641,14 +1733,14 @@ export default function LiveStream() {
                   </a>
                 )}
                 <button
-                  onClick={() => setAdVisible(false)}
+                  onClick={() => { setAdVisible(false); setAdExpanded(false); }}
                   className="text-white/40 text-[9px] text-center"
                   data-testid="btn-ad-dismiss"
                 >
                   إغلاق
                 </button>
               </div>
-            </div>
+            </button>
           );
         })()}
 
