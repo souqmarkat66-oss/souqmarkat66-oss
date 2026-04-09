@@ -3185,6 +3185,7 @@ function CoinsSection({ logAction }: { logAction: any }) {
     try {
       const res = await fetch("/api/admin/coins/generate-codes", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ count, coins }),
       });

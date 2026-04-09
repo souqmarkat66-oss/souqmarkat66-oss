@@ -735,7 +735,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/admin/coins/generate-codes", isAuthenticated, async (req: any, res) => {
     if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
     const { coins, priceEGP, count, expiresInDays } = req.body || {};
-    if (!coins || !priceEGP || !count) return res.status(400).json({ message: "Missing fields" });
+    if (!coins || !count) return res.status(400).json({ message: "Missing fields" });
+    const resolvedPrice = priceEGP || 0;
 
     const codes: string[] = [];
     const expiresAt = expiresInDays ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000) : null;
@@ -745,7 +746,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       codes.push(code);
       await pool.query(
         `INSERT INTO coin_recharge_codes (code, coins, price_egp, expires_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-        [code, coins, priceEGP, expiresAt]
+        [code, coins, resolvedPrice, expiresAt]
       );
     }
     res.json({ success: true, codes, count: codes.length });
