@@ -29,6 +29,7 @@ const formSchema = insertAdSchema.extend({
   productName: z.string().optional(),
   targetAudience: z.string().optional(),
   adTitle: z.string().optional(),
+  customPrompt: z.string().optional(),
   userId: z.string().optional(),
   mediaUrl: z.string().optional().default(""),
   appStoreUrl: z.string().optional(),
@@ -228,7 +229,7 @@ export default function CreateAd() {
     defaultValues: {
       title: "", description: "", mediaUrl: "", mediaType: "image",
       language: language as 'ar' | 'en', status: "active",
-      userId: "", productName: "", targetAudience: "", adTitle: "", targetRegion: "",
+      userId: "", productName: "", targetAudience: "", adTitle: "", customPrompt: "", targetRegion: "",
       appStoreUrl: "", googlePlayUrl: "", appGalleryUrl: "",
       paymentLink: "", whatsappNumber: "",
     },
@@ -236,7 +237,7 @@ export default function CreateAd() {
 
   const onSubmit = async (values: FormValues) => {
     try {
-      const { productName, targetAudience, adTitle, ...adData } = values;
+      const { productName, targetAudience, adTitle, customPrompt, ...adData } = values;
       const expiresAt = adDuration > 0
         ? new Date(Date.now() + adDuration * 24 * 60 * 60 * 1000)
         : null;
@@ -266,14 +267,14 @@ export default function CreateAd() {
   };
 
   const handleGenerateCopy = async () => {
-    const { productName, targetAudience, adTitle, language: lang } = form.getValues();
+    const { productName, targetAudience, adTitle, customPrompt, language: lang } = form.getValues();
     if (!productName) { toast({ variant: "destructive", title: "أدخل اسم المنتج أولاً" }); return; }
     setGeneratingCopy(true);
     try {
       const res = await fetch("/api/ai/generate-copy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productName, targetAudience, adTitle, language: lang }),
+        body: JSON.stringify({ productName, targetAudience, adTitle, customPrompt, language: lang }),
         credentials: "include"
       });
       const data = await res.json();
@@ -294,8 +295,9 @@ export default function CreateAd() {
   };
 
   const handleGenerateImage = async () => {
-    const { description, productName, adTitle, title } = form.getValues();
-    const prompt = `Professional Arabic advertisement image for ${adTitle || productName || title || description}. High quality, vibrant colors, suitable for Egyptian market.`;
+    const { description, productName, adTitle, title, customPrompt } = form.getValues();
+    const basePrompt = `Professional Arabic advertisement image for ${adTitle || productName || title || description}. High quality, vibrant colors, suitable for Egyptian market.`;
+    const prompt = customPrompt ? `${basePrompt} Additional context: ${customPrompt}` : basePrompt;
     setGeneratingImage(true);
     try {
       const res = await fetch("/api/ai/generate-image", {
@@ -323,14 +325,14 @@ export default function CreateAd() {
   };
 
   const handleGenerateVideoScript = async () => {
-    const { productName, adTitle } = form.getValues();
+    const { productName, adTitle, customPrompt } = form.getValues();
     if (!productName) { toast({ variant: "destructive", title: "أدخل اسم المنتج أولاً" }); return; }
     setGeneratingScript(true);
     try {
       const res = await fetch("/api/ai/generate-video-script", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productName, adTitle, duration: 30, language: form.getValues("language") }),
+        body: JSON.stringify({ productName, adTitle, customPrompt, duration: 30, language: form.getValues("language") }),
         credentials: "include"
       });
       const data = await res.json();
@@ -708,6 +710,25 @@ export default function CreateAd() {
                         </FormItem>
                       )} />
                     </div>
+                    <FormField control={form.control} name="customPrompt" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-purple-500" />
+                          برومبت مخصص <span className="text-xs text-muted-foreground font-normal">(اختياري — تفاصيل إضافية للذكاء الاصطناعي)</span>
+                        </FormLabel>
+                        <FormControl>
+                          <Textarea
+                            placeholder="مثال: المنتج مصري الصنع 100٪، السعر 299 جنيه فقط، متوفر بجميع المحافظات، نقدم ضمان سنة كاملة. أسلوب الإعلان يكون حماسي وموجّه للشباب المصري."
+                            className="resize-none min-h-[80px] text-sm"
+                            {...field}
+                            data-testid="input-custom-prompt"
+                          />
+                        </FormControl>
+                        <p className="text-[10px] text-muted-foreground">
+                          أضف هنا أي تفاصيل عن منتجك أو خدمتك أو الأسلوب الذي تريده — الذكاء الاصطناعي سيأخذها بعين الاعتبار عند توليد الإعلان.
+                        </p>
+                      </FormItem>
+                    )} />
                     {/* Reference images upload */}
                     <div className="space-y-2">
                       <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">

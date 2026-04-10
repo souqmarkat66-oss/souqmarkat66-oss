@@ -3395,11 +3395,12 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.post("/api/ai/generate-copy", isAuthenticated, checkAiCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const { productName, targetAudience, adTitle, language } = req.body;
+      const { productName, targetAudience, adTitle, customPrompt, language } = req.body;
       const titleHint = adTitle ? (language === 'ar' ? ` عنوان الإعلان المقترح: "${adTitle}".` : ` Suggested ad title: "${adTitle}".`) : '';
+      const customHint = customPrompt ? (language === 'ar' ? ` معلومات إضافية عن المنتج والأسلوب المطلوب: "${customPrompt}".` : ` Additional context: "${customPrompt}".`) : '';
       const prompt = language === 'ar'
-        ? `اكتب عنوان ووصف جذاب لإعلان باللغة العربية. المنتج: "${productName}". الجمهور المستهدف: "${targetAudience}".${titleHint} أعد JSON مع مفاتيح "title" و"description".`
-        : `Write a catchy title and description for an ad. Product: "${productName}". Target: "${targetAudience}".${titleHint} Return JSON with "title" and "description".`;
+        ? `اكتب عنوان ووصف جذاب لإعلان باللغة العربية المصرية. المنتج: "${productName}". الجمهور المستهدف: "${targetAudience}".${titleHint}${customHint} أعد JSON مع مفاتيح "title" و"description" فقط.`
+        : `Write a catchy title and description for an ad. Product: "${productName}". Target: "${targetAudience}".${titleHint}${customHint} Return JSON with "title" and "description".`;
       const response = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [{ role: "user", content: prompt }],
@@ -3442,11 +3443,12 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.post("/api/ai/generate-video-script", isAuthenticated, checkAiCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const { productName, adTitle, duration, language } = req.body;
+      const { productName, adTitle, customPrompt, duration, language } = req.body;
       const titleHint = adTitle ? (language === 'ar' ? ` عنوان الإعلان: "${adTitle}".` : ` Ad title: "${adTitle}".`) : '';
+      const customHint = customPrompt ? (language === 'ar' ? ` معلومات إضافية: "${customPrompt}".` : ` Additional context: "${customPrompt}".`) : '';
       const prompt = language === 'ar'
-        ? `اكتب سكريبت فيديو إعلاني سينمائي احترافي بالكامل لـ "${productName}"${titleHint} مدته ${duration || 30} ثانية. أعد JSON مع: "title", "script" (النص الكامل), "voiceover" (التعليق الصوتي بالعربية المصرية العامية), "scenes" (مصفوفة من 4-6 مشاهد كل منها: "time" الوقت, "visual" وصف الصورة المتحركة, "narration" التعليق الصوتي, "mood" المزاج, "transition" طريقة الانتقال), "music" (وصف الموسيقى التصويرية), "callToAction" (دعوة للعمل).`
-        : `Write a complete professional cinematic video ad script for "${productName}"${titleHint} (${duration || 30} seconds). Return JSON: "title", "script", "voiceover", "scenes" (4-6 scenes with "time", "visual", "narration", "mood", "transition"), "music", "callToAction".`;
+        ? `اكتب سكريبت فيديو إعلاني سينمائي احترافي بالكامل لـ "${productName}"${titleHint}${customHint} مدته ${duration || 30} ثانية. أعد JSON مع: "title", "script" (النص الكامل), "voiceover" (التعليق الصوتي بالعربية المصرية العامية), "scenes" (مصفوفة من 4-6 مشاهد كل منها: "time" الوقت, "visual" وصف الصورة المتحركة, "narration" التعليق الصوتي, "mood" المزاج, "transition" طريقة الانتقال), "music" (وصف الموسيقى التصويرية), "callToAction" (دعوة للعمل).`
+        : `Write a complete professional cinematic video ad script for "${productName}"${titleHint}${customHint} (${duration || 30} seconds). Return JSON: "title", "script", "voiceover", "scenes" (4-6 scenes with "time", "visual", "narration", "mood", "transition"), "music", "callToAction".`;
       const response = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [{ role: "user", content: prompt }],
