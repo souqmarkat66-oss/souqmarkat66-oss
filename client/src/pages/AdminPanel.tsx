@@ -1277,6 +1277,22 @@ function PaymentsSection({ logAction }: { logAction: any }) {
                       <Button size="sm" variant="destructive" className="text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "rejected" })}><XCircle className="w-3 h-3 me-1" />رفض</Button>
                     </div>
                   </div>
+
+                  {/* رقم العملية — أبرز شيء للأدمن */}
+                  {p.paymentRef ? (
+                    <div className="rounded-xl bg-green-50 dark:bg-green-950/20 border-2 border-green-400/50 px-4 py-2.5 flex items-center gap-2">
+                      <span className="text-green-600 text-lg">✅</span>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">رقم العملية / رقم الإيداع</p>
+                        <p className="font-mono font-extrabold text-sm text-green-700 dark:text-green-400 tracking-wider" dir="ltr">{p.paymentRef}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-300 dark:border-red-800 px-4 py-2 text-xs text-red-600 dark:text-red-400 font-bold">
+                      ⚠️ المستخدم لم يُدخل رقم العملية — تحقق من الإيصال قبل الموافقة
+                    </div>
+                  )}
+
                   {p.screenshotUrl && (
                     <a href={p.screenshotUrl} target="_blank" rel="noopener noreferrer" className="block">
                       <img

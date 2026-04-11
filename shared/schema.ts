@@ -324,6 +324,7 @@ export const paymentRequests = pgTable("payment_requests", {
   amountEGP: real("amount_egp").notNull(),
   method: text("method", { enum: ["vodafone", "etisalat", "instapay", "souq"] }).notNull(),
   phoneNumber: text("phone_number"),
+  paymentRef: text("payment_ref"),
   serviceType: text("service_type"),
   screenshotUrl: text("screenshot_url"),
   status: text("status", { enum: ["pending", "approved", "rejected"] }).default("pending"),

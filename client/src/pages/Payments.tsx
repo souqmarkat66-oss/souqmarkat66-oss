@@ -75,6 +75,7 @@ export default function Payments() {
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [manualAmount, setManualAmount] = useState("");
   const [amountOverride, setAmountOverride] = useState(false);
+  const [paymentRef, setPaymentRef] = useState("");
   const [screenshotUrl, setScreenshotUrl] = useState("");
   const [screenshotPreview, setScreenshotPreview] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -150,6 +151,7 @@ export default function Payments() {
       setSelectedServices(new Set());
       setManualAmount("");
       setAmountOverride(false);
+      setPaymentRef("");
       setScreenshotUrl("");
       setScreenshotPreview("");
     },
@@ -251,10 +253,10 @@ export default function Payments() {
               <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
                 <th className="text-right px-4 py-3 font-bold">رقم الطلب</th>
                 <th className="text-right px-4 py-3 font-bold">رقم الإعلان</th>
-                <th className="text-right px-4 py-3 font-bold">النوع</th>
                 <th className="text-right px-4 py-3 font-bold">الخدمة</th>
                 <th className="text-right px-4 py-3 font-bold">المبلغ (ج.م)</th>
                 <th className="text-right px-4 py-3 font-bold">طريقة الدفع</th>
+                <th className="text-right px-4 py-3 font-bold">رقم العملية</th>
                 <th className="text-right px-4 py-3 font-bold">الحالة</th>
                 <th className="text-right px-4 py-3 font-bold">الإيصال</th>
                 <th className="text-right px-4 py-3 font-bold">التاريخ</th>
@@ -303,17 +305,12 @@ export default function Payments() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-xs font-bold">
-                        {p.type === "withdrawal" ? "🏧 سحب" : "💰 إيداع"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
                       {svcLabels ? (
                         <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold whitespace-nowrap">
                           {svcLabels}
                         </span>
                       ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
+                        <span className="text-muted-foreground text-xs">{p.type === "withdrawal" ? "🏧 سحب" : "—"}</span>
                       )}
                     </td>
                     <td className="px-4 py-3 font-bold text-green-600">
@@ -323,6 +320,15 @@ export default function Payments() {
                       <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-bold ${method.color}`}>
                         {method.emoji} {method.label}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {p.paymentRef ? (
+                        <span className="font-mono text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-0.5 rounded font-bold" data-testid={`ref-${p.id}`}>
+                          {p.paymentRef}
+                        </span>
+                      ) : (
+                        <span className="text-red-400 text-xs font-bold">غير مُدخل</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-bold ${status.color}`}>
@@ -565,12 +571,38 @@ export default function Payments() {
               </div>
             </div>
 
+            {/* بطاقة الدفع — أرقام التحويل */}
+            {formData.method !== "souq" && selectedMethod?.number && (
+              <div className="rounded-2xl border-2 border-amber-400/60 bg-amber-50 dark:bg-amber-950/20 p-4 space-y-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xl">💸</span>
+                  <p className="font-extrabold text-sm text-amber-800 dark:text-amber-300">حوّل المبلغ على هذا الرقم</p>
+                </div>
+                <div className="flex items-center justify-between bg-white dark:bg-black/30 rounded-xl px-4 py-3 border border-amber-300/50">
+                  <div>
+                    <p className="text-[10px] text-muted-foreground mb-0.5">{selectedMethod.label}</p>
+                    <p className="font-mono font-extrabold text-lg tracking-widest text-primary" dir="ltr">{selectedMethod.number}</p>
+                  </div>
+                  {effectiveAmount && Number(effectiveAmount) > 0 && (
+                    <div className="text-right">
+                      <p className="text-[10px] text-muted-foreground">المبلغ</p>
+                      <p className="font-extrabold text-lg text-green-600">{Number(effectiveAmount).toLocaleString()} ج.م</p>
+                    </div>
+                  )}
+                </div>
+                <p className="text-[10px] text-amber-700 dark:text-amber-400 flex items-start gap-1">
+                  <span>⚠️</span>
+                  بعد إتمام التحويل، ستجد <strong>رقم العملية</strong> في رسالة التأكيد — أدخله أدناه
+                </p>
+              </div>
+            )}
+
             {/* Phone — للطرق غير سوق ماركات */}
             {formData.method !== "souq" && (
               <div className="space-y-1">
                 <label className="text-xs font-bold flex items-center gap-1">
                   <Smartphone className="w-3 h-3" />
-                  رقم المحفظة الخاصة بك
+                  رقم محفظتك (الذي دفعت منه)
                 </label>
                 <Input
                   type="tel"
@@ -581,13 +613,33 @@ export default function Payments() {
                   dir="ltr"
                   data-testid="input-phone"
                 />
-                {selectedMethod?.number && (
-                  <p className="text-[10px] text-muted-foreground">
-                    حوّل المبلغ على: <span className="font-mono font-bold">{selectedMethod.number}</span>
-                  </p>
-                )}
               </div>
             )}
+
+            {/* رقم العملية — مطلوب دائماً */}
+            <div className="space-y-1">
+              <label className="text-xs font-bold flex items-center gap-1.5">
+                <Receipt className="w-3 h-3 text-primary" />
+                رقم العملية / رقم الإيداع
+                <span className="text-red-500 font-extrabold">*</span>
+                <span className="text-[10px] text-muted-foreground font-normal">(مطلوب)</span>
+              </label>
+              <Input
+                type="text"
+                placeholder="مثال: 20241231123456 أو TXN-ABC123"
+                value={paymentRef}
+                onChange={e => setPaymentRef(e.target.value)}
+                className={`text-sm h-10 font-mono border-2 ${paymentRef.trim() ? "border-green-400 bg-green-50 dark:bg-green-950/20" : "border-red-300"}`}
+                dir="ltr"
+                data-testid="input-payment-ref"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                🔍 هذا الرقم يظهر في رسالة التأكيد من فودافون / InstaPay / البنك بعد إتمام التحويل
+              </p>
+              {!paymentRef.trim() && (
+                <p className="text-[10px] text-red-500 font-bold">⚠️ رقم العملية إلزامي — الطلب لن يُقبل بدونه</p>
+              )}
+            </div>
 
             {/* سوق ماركات — خطوات الدفع */}
             {formData.method === "souq" && (
@@ -691,34 +743,43 @@ export default function Payments() {
 
 
             {/* Submit */}
-            <Button
-              className="w-full gap-2"
-              disabled={!effectiveAmount || Number(effectiveAmount) <= 0 || !screenshotUrl || uploading || createMutation.isPending}
-              onClick={() => createMutation.mutate({
-                type: formData.type,
-                amountEGP: Number(effectiveAmount),
-                method: formData.method,
-                phoneNumber: formData.phoneNumber || undefined,
-                adId: formData.adId && formData.adId !== "none" ? Number(formData.adId) : undefined,
-                serviceType: selectedServices.size > 0 ? Array.from(selectedServices).join(",") : undefined,
-                screenshotUrl: screenshotUrl || undefined,
-              })}
-              data-testid="btn-submit-payment"
-            >
-              {createMutation.isPending ? "جاري الإرسال..." : (
-                <>
-                  📤 إرسال الطلب
-                  {effectiveAmount && Number(effectiveAmount) > 0 && (
-                    <span className="mr-1 bg-white/20 px-2 py-0.5 rounded-lg font-mono text-sm">
-                      {Number(effectiveAmount).toLocaleString()} ج.م
-                    </span>
-                  )}
-                </>
+            <div className="space-y-2">
+              {(!screenshotUrl || !paymentRef.trim()) && (
+                <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 p-3 text-xs text-red-700 dark:text-red-400 space-y-1">
+                  {!paymentRef.trim() && <p>❌ أدخل <strong>رقم العملية</strong> الذي وصلك بعد التحويل</p>}
+                  {!screenshotUrl && <p>❌ ارفع <strong>صورة إيصال الدفع</strong> لإثبات التحويل</p>}
+                </div>
               )}
-            </Button>
-            <p className="text-[10px] text-center text-muted-foreground">
-              سيصلك إشعار فور مراجعة الطلب · التفعيل فوري عند القبول
-            </p>
+              <Button
+                className="w-full gap-2"
+                disabled={!effectiveAmount || Number(effectiveAmount) <= 0 || !screenshotUrl || !paymentRef.trim() || uploading || createMutation.isPending}
+                onClick={() => createMutation.mutate({
+                  type: formData.type,
+                  amountEGP: Number(effectiveAmount),
+                  method: formData.method,
+                  phoneNumber: formData.phoneNumber || undefined,
+                  paymentRef: paymentRef.trim() || undefined,
+                  adId: formData.adId && formData.adId !== "none" ? Number(formData.adId) : undefined,
+                  serviceType: selectedServices.size > 0 ? Array.from(selectedServices).join(",") : undefined,
+                  screenshotUrl: screenshotUrl || undefined,
+                })}
+                data-testid="btn-submit-payment"
+              >
+                {createMutation.isPending ? "جاري الإرسال..." : (
+                  <>
+                    📤 إرسال الطلب
+                    {effectiveAmount && Number(effectiveAmount) > 0 && (
+                      <span className="mr-1 bg-white/20 px-2 py-0.5 rounded-lg font-mono text-sm">
+                        {Number(effectiveAmount).toLocaleString()} ج.م
+                      </span>
+                    )}
+                  </>
+                )}
+              </Button>
+              <p className="text-[10px] text-center text-muted-foreground">
+                سيصلك إشعار فور مراجعة الطلب · التفعيل فوري عند القبول
+              </p>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
