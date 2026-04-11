@@ -81,6 +81,7 @@ export default function CreateAd() {
   const [talkingPhotoText, setTalkingPhotoText] = useState("");
   const [talkingPhotoVoice, setTalkingPhotoVoice] = useState("ar-EG-SalmaNeural");
   const [generatingTalkingPhoto, setGeneratingTalkingPhoto] = useState(false);
+  const [generatingProScript, setGeneratingProScript] = useState(false);
   const [talkingPhotoVideoUrl, setTalkingPhotoVideoUrl] = useState("");
   const [talkingPhotoFaceUrl, setTalkingPhotoFaceUrl] = useState("/uploads/avatar-male-1.jpg");
   const [showTalkingPhotoPanel, setShowTalkingPhotoPanel] = useState(false);
@@ -411,6 +412,31 @@ export default function CreateAd() {
     const text = `${scene.narration || scene.visual}`;
     speakEgyptian(text);
     setTimeout(() => setSpeakingScene(null), 3000);
+  };
+
+  const handleImproveScript = async () => {
+    const rawText = talkingPhotoText.trim() || form.getValues("description") || form.getValues("title") || "";
+    if (!rawText) { toast({ variant: "destructive", title: "اكتب بعض الكلمات أولاً ثم اضغط تحسين" }); return; }
+    setGeneratingProScript(true);
+    try {
+      const res = await fetch("/api/ai/generate-copy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: form.getValues("title") || "منصة إعلانات",
+          productName: form.getValues("title") || "شبكة سوق للإعلانات",
+          targetAudience: "المصريين من كل المحافظات",
+          customPrompt: `حوّل النص التالي إلى سكريبت فيديو تسويقي قصير (30-45 ثانية) باللهجة المصرية العامية. يكون حماسي وجذاب وينتهي بدعوة للعمل. النص: ${rawText}. أكتب السكريبت فقط بدون أي شرح إضافي، من 3 إلى 5 جمل قصيرة.`,
+        }),
+        credentials: "include"
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      const improved = data.description || data.title || "";
+      if (improved) { setTalkingPhotoText(improved); toast({ title: "✨ تم تحسين السكريبت!", description: "النص أصبح أقوى وأكثر احترافية" }); }
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "فشل التحسين", description: e.message });
+    } finally { setGeneratingProScript(false); }
   };
 
   // Upload reference images for AI analysis
@@ -1018,14 +1044,29 @@ export default function CreateAd() {
                         </div>
 
                         <div className="space-y-2">
-                          <p className="text-xs font-medium text-purple-700">النص الذي سيقوله الشخص:</p>
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-medium text-purple-700">النص الذي سيقوله الشخص:</p>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={handleImproveScript}
+                              disabled={generatingProScript}
+                              className="h-7 text-xs gap-1 border-purple-400 text-purple-600 hover:bg-purple-50 px-2"
+                              data-testid="btn-improve-script"
+                            >
+                              {generatingProScript ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                              {generatingProScript ? "جاري التحسين..." : "✨ سكريبت احترافي"}
+                            </Button>
+                          </div>
                           <Textarea
                             value={talkingPhotoText}
                             onChange={e => setTalkingPhotoText(e.target.value)}
-                            placeholder="اكتب هنا ما تريد الشخص أن يقوله... مثال: أهلاً بكم في متجرنا! نقدم أفضل المنتجات بأسعار لا تُقاوم"
+                            placeholder="اكتب أي كلام عن منتجك أو اضغط ✨ لتحسينه تلقائياً... مثال: عندي هواتف بأسعار ممتازة للبيع"
                             className="text-sm min-h-[80px] border-purple-300 focus:border-purple-500"
                             data-testid="textarea-talking-photo-text"
                           />
+                          <p className="text-xs text-muted-foreground">💡 اكتب أي كلام عادي ← اضغط ✨ ← الذكاء الاصطناعي يحوّله لسكريبت احترافي</p>
                         </div>
 
                         <div className="space-y-1">
