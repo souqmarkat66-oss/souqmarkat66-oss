@@ -20,13 +20,40 @@ import express from "express";
 import * as webpushModule from "web-push";
 const webpush: typeof webpushModule = (webpushModule as any).default || webpushModule;
 
-// Admin user IDs
+// Admin user IDs — hardcoded superadmins (always admin, cannot be removed)
 const ADMIN_USER_ID  = "54219806";
 const ADMIN_EMAIL    = "souqmarkat66@gmail.com";
 const ADMIN_USER_ID2 = "54165148";
 const ADMIN_EMAIL2   = "ahmedesmat.5151@gmail.com";
 
+// Extra admin IDs stored in platform_settings (dynamic, managed via admin panel)
+let _extraAdminIds: Set<string> = new Set();
+let _extraAdminLoaded = false;
+
+async function loadExtraAdminIds(): Promise<void> {
+  try {
+    const row = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'extra_admin_ids' LIMIT 1`);
+    const val = (row.rows[0] as any)?.value || "";
+    _extraAdminIds = new Set(val.split(",").map((s: string) => s.trim()).filter(Boolean));
+    _extraAdminLoaded = true;
+  } catch { _extraAdminIds = new Set(); _extraAdminLoaded = true; }
+}
+
+async function saveExtraAdminIds(): Promise<void> {
+  const val = Array.from(_extraAdminIds).join(",");
+  await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('extra_admin_ids', ${val})
+    ON CONFLICT (key) DO UPDATE SET value = ${val}`);
+}
+
 function isAdminUser(req: any): boolean {
+  const sub   = req.user?.claims?.sub;
+  const email = (req.user?.claims?.email || "").toLowerCase();
+  return sub === ADMIN_USER_ID  || email === ADMIN_EMAIL.toLowerCase() ||
+         sub === ADMIN_USER_ID2 || email === ADMIN_EMAIL2.toLowerCase() ||
+         (!!sub && _extraAdminIds.has(sub));
+}
+
+function isSuperAdmin(req: any): boolean {
   const sub   = req.user?.claims?.sub;
   const email = (req.user?.claims?.email || "").toLowerCase();
   return sub === ADMIN_USER_ID  || email === ADMIN_EMAIL.toLowerCase() ||
@@ -35,6 +62,7 @@ function isAdminUser(req: any): boolean {
 
 async function requireAdmin(req: any, res: any, next: any) {
   if (!req.user) return res.status(401).json({ message: "Unauthorized" });
+  if (!_extraAdminLoaded) await loadExtraAdminIds();
   if (!isAdminUser(req)) return res.status(403).json({ message: "Admin access required" });
   next();
 }
@@ -3333,6 +3361,47 @@ Sitemap: ${BASE}/sitemap-pages.xml
       ORDER BY u.created_at DESC
       LIMIT 200`);
     res.json(rows.rows);
+  });
+
+  // ─── ADMIN MANAGEMENT ─────────────────────────────────────────
+  // Only superadmins can manage admins
+
+  app.get("/api/admin/admins", isAuthenticated, requireAdmin, async (req: any, res) => {
+    if (!isSuperAdmin(req)) return res.status(403).json({ message: "superadmin only" });
+    if (!_extraAdminLoaded) await loadExtraAdminIds();
+    const extraIds = Array.from(_extraAdminIds);
+    let extraUsers: any[] = [];
+    if (extraIds.length > 0) {
+      const idsLiteral = extraIds.map(id => `'${id.replace(/'/g,"''")}'`).join(",");
+      const rows = await db.execute(sql.raw(`
+        SELECT id, email, first_name, last_name, profile_image_url, phone, created_at
+        FROM users WHERE id IN (${idsLiteral})`));
+      extraUsers = rows.rows;
+    }
+    const hardcoded = [
+      { id: ADMIN_USER_ID,  email: ADMIN_EMAIL,  superAdmin: true },
+      { id: ADMIN_USER_ID2, email: ADMIN_EMAIL2, superAdmin: true },
+    ];
+    res.json({ hardcoded, extra: extraUsers });
+  });
+
+  app.post("/api/admin/admins/add", isAuthenticated, requireAdmin, async (req: any, res) => {
+    if (!isSuperAdmin(req)) return res.status(403).json({ message: "superadmin only" });
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ message: "userId مطلوب" });
+    if (!_extraAdminLoaded) await loadExtraAdminIds();
+    _extraAdminIds.add(String(userId));
+    await saveExtraAdminIds();
+    res.json({ success: true, adminCount: _extraAdminIds.size });
+  });
+
+  app.post("/api/admin/admins/remove", isAuthenticated, requireAdmin, async (req: any, res) => {
+    if (!isSuperAdmin(req)) return res.status(403).json({ message: "superadmin only" });
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ message: "userId مطلوب" });
+    _extraAdminIds.delete(String(userId));
+    await saveExtraAdminIds();
+    res.json({ success: true });
   });
 
   app.put("/api/admin/streams/:id", isAuthenticated, requireAdmin, async (req: any, res) => {

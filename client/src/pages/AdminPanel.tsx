@@ -52,6 +52,7 @@ const NAV = [
   { key: "pricing",        label: "إدارة الأسعار",          icon: DollarSign,      color: "text-yellow-400" },
   { key: "aipricing",      label: "أسعار الذكاء الاصطناعي", icon: Sparkles,       color: "text-violet-400" },
   { key: "coins",          label: "نظام العملات",          icon: Gift,            color: "text-yellow-400" },
+  { key: "admins",         label: "إدارة الأدمن",          icon: Shield,          color: "text-red-400" },
   { key: "settings",       label: "إعدادات المنصة",       icon: Settings,        color: "text-gray-400" },
   { key: "activity",       label: "سجل النشاط",           icon: Activity,        color: "text-slate-400" },
 ];
@@ -215,6 +216,7 @@ export default function AdminPanel() {
           {section === "pricing"    && <PricingSection />}
           {section === "aipricing"  && <AiPricingSection />}
           {section === "coins"      && <CoinsSection logAction={logAction} />}
+          {section === "admins"     && <AdminsSection />}
           {section === "settings"   && <SettingsSection logAction={logAction} />}
           {section === "activity"   && <ActivitySection />}
         </div>
@@ -3757,6 +3759,224 @@ function RatingsSection({ logAction }: { logAction: any }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ADMINS SECTION
+// ═══════════════════════════════════════════════════════════════
+function AdminsSection() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [searchUser, setSearchUser] = useState("");
+  const [selectedUser, setSelectedUser] = useState<any>(null);
+
+  const { data: adminsData, isLoading } = useQuery<any>({
+    queryKey: ["/api/admin/admins"],
+  });
+
+  const { data: allUsers = [] } = useQuery<any[]>({
+    queryKey: ["/api/admin/users", searchUser],
+    queryFn: () => fetch(`/api/admin/users?search=${encodeURIComponent(searchUser)}`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  const addMutation = useMutation({
+    mutationFn: (userId: string) =>
+      fetch("/api/admin/admins/add", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId }) }).then(r => r.json()),
+    onSuccess: () => {
+      toast({ title: "✅ تم منح صلاحية الأدمن" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/admins"] });
+      setSelectedUser(null);
+      setSearchUser("");
+    },
+    onError: () => toast({ variant: "destructive", title: "خطأ في إضافة الأدمن" }),
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (userId: string) =>
+      fetch("/api/admin/admins/remove", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId }) }).then(r => r.json()),
+    onSuccess: () => {
+      toast({ title: "✅ تم سحب صلاحية الأدمن" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/admins"] });
+    },
+    onError: () => toast({ variant: "destructive", title: "خطأ في إزالة الأدمن" }),
+  });
+
+  const extraAdmins: any[] = adminsData?.extra || [];
+  const hardcoded: any[]   = adminsData?.hardcoded || [];
+
+  const filteredUsers = allUsers.filter(u =>
+    !hardcoded.some(h => h.id === u.id) &&
+    !extraAdmins.some(e => e.id === u.id)
+  );
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      <div>
+        <h2 className="text-2xl font-bold flex items-center gap-2">
+          <Shield className="w-6 h-6 text-red-500" />
+          إدارة الأدمن
+        </h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          أضف أو أزل صلاحيات الأدمن لأي مستخدم في المنصة
+        </p>
+      </div>
+
+      {/* Superadmins — hardcoded */}
+      <div className="rounded-2xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 p-5 space-y-3">
+        <div className="flex items-center gap-2 mb-1">
+          <Shield className="w-4 h-4 text-red-500" />
+          <h3 className="font-bold text-red-700 dark:text-red-400">سوبر أدمن (لا يمكن إزالتهم)</h3>
+        </div>
+        {hardcoded.map((h: any) => (
+          <div key={h.id} className="flex items-center gap-3 bg-white dark:bg-black/30 rounded-xl px-4 py-2.5 border border-red-200/50">
+            <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center">
+              <Shield className="w-4 h-4 text-red-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-bold text-sm">{h.email}</p>
+              <p className="text-[10px] text-muted-foreground font-mono">{h.id}</p>
+            </div>
+            <span className="text-[10px] bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 font-bold px-2 py-0.5 rounded-full">
+              سوبر أدمن
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Extra admins — dynamic */}
+      <div className="rounded-2xl border bg-card p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <Users className="w-4 h-4 text-primary" />
+          <h3 className="font-bold">الأدمن المضافون ({extraAdmins.length})</h3>
+        </div>
+        {isLoading ? (
+          <div className="text-sm text-muted-foreground py-4 text-center">جاري التحميل...</div>
+        ) : extraAdmins.length === 0 ? (
+          <div className="text-sm text-muted-foreground py-6 text-center border-2 border-dashed rounded-xl">
+            لا يوجد أدمن مضافون بعد — أضف من القائمة أدناه
+          </div>
+        ) : (
+          extraAdmins.map((u: any) => (
+            <div key={u.id} className="flex items-center gap-3 bg-muted/30 rounded-xl px-4 py-2.5 border">
+              {u.profile_image_url ? (
+                <img src={u.profile_image_url} className="w-9 h-9 rounded-full object-cover" alt="" />
+              ) : (
+                <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Users className="w-4 h-4 text-primary" />
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="font-bold text-sm">{u.first_name} {u.last_name}</p>
+                <p className="text-[10px] text-muted-foreground">{u.email || u.phone || "—"}</p>
+                <p className="text-[10px] text-muted-foreground font-mono">{u.id}</p>
+              </div>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="text-xs h-8 gap-1"
+                onClick={() => removeMutation.mutate(u.id)}
+                disabled={removeMutation.isPending}
+                data-testid={`btn-remove-admin-${u.id}`}
+              >
+                <Trash2 className="w-3 h-3" />
+                إزالة
+              </Button>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Add new admin */}
+      <div className="rounded-2xl border bg-card p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Plus className="w-4 h-4 text-green-500" />
+          <h3 className="font-bold">إضافة أدمن جديد</h3>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs font-bold">ابحث عن المستخدم</label>
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="ابحث بالاسم أو الإيميل أو رقم التليفون..."
+              value={searchUser}
+              onChange={e => { setSearchUser(e.target.value); setSelectedUser(null); }}
+              className="w-full rounded-xl border-2 px-3 py-2.5 text-sm outline-none transition-colors bg-background"
+              data-testid="input-admin-search"
+            />
+          </div>
+        </div>
+
+        {/* Search results */}
+        {searchUser.trim().length >= 2 && (
+          <div className="border rounded-xl overflow-hidden divide-y max-h-64 overflow-y-auto">
+            {filteredUsers.length === 0 ? (
+              <p className="text-sm text-muted-foreground p-4 text-center">لا يوجد مستخدمون بهذا الاسم</p>
+            ) : filteredUsers.slice(0, 20).map((u: any) => (
+              <div
+                key={u.id}
+                className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors hover:bg-primary/5 ${selectedUser?.id === u.id ? "bg-primary/10 border-r-2 border-primary" : ""}`}
+                onClick={() => setSelectedUser(u)}
+                data-testid={`user-row-${u.id}`}
+              >
+                {u.profile_image_url ? (
+                  <img src={u.profile_image_url} className="w-8 h-8 rounded-full object-cover" alt="" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
+                    {(u.first_name?.[0] || "؟")}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-sm">{u.first_name} {u.last_name}</p>
+                  <p className="text-[10px] text-muted-foreground">{u.email || u.phone || "—"}</p>
+                </div>
+                <p className="text-[10px] font-mono text-muted-foreground">{u.id}</p>
+                {selectedUser?.id === u.id && (
+                  <Check className="w-4 h-4 text-primary" />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Selected user preview + confirm */}
+        {selectedUser && (
+          <div className="rounded-xl bg-green-50 dark:bg-green-950/20 border-2 border-green-400/50 p-4 space-y-3">
+            <p className="text-xs font-bold text-green-700 dark:text-green-400">✅ المستخدم المختار:</p>
+            <div className="flex items-center gap-3">
+              {selectedUser.profile_image_url ? (
+                <img src={selectedUser.profile_image_url} className="w-12 h-12 rounded-full object-cover border-2 border-green-400" alt="" />
+              ) : (
+                <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center text-lg font-bold text-green-600">
+                  {selectedUser.first_name?.[0] || "؟"}
+                </div>
+              )}
+              <div>
+                <p className="font-bold">{selectedUser.first_name} {selectedUser.last_name}</p>
+                <p className="text-xs text-muted-foreground">{selectedUser.email || selectedUser.phone || "—"}</p>
+                <p className="text-[10px] font-mono text-muted-foreground">{selectedUser.id}</p>
+              </div>
+            </div>
+            <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-300/50 rounded-lg px-3 py-2 text-xs text-amber-800 dark:text-amber-400">
+              ⚠️ سيحصل هذا المستخدم على <strong>صلاحيات أدمن كاملة</strong> — تأكد من اختيار الشخص الصحيح
+            </div>
+            <Button
+              className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white"
+              onClick={() => addMutation.mutate(selectedUser.id)}
+              disabled={addMutation.isPending}
+              data-testid="btn-confirm-add-admin"
+            >
+              {addMutation.isPending ? (
+                <><RefreshCw className="w-4 h-4 animate-spin" /> جاري الإضافة...</>
+              ) : (
+                <><Shield className="w-4 h-4" /> منح صلاحية الأدمن</>
+              )}
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
