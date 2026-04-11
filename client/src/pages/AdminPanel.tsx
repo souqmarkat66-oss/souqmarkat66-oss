@@ -1278,16 +1278,61 @@ function PaymentsSection({ logAction }: { logAction: any }) {
                     </div>
                   </div>
 
-                  {/* رقم العملية — أبرز شيء للأدمن */}
-                  {p.paymentRef ? (
-                    <div className="rounded-xl bg-green-50 dark:bg-green-950/20 border-2 border-green-400/50 px-4 py-2.5 flex items-center gap-2">
-                      <span className="text-green-600 text-lg">✅</span>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground">رقم العملية / رقم الإيداع</p>
-                        <p className="font-mono font-extrabold text-sm text-green-700 dark:text-green-400 tracking-wider" dir="ltr">{p.paymentRef}</p>
+                  {/* رقم العملية / بيانات السحب — أبرز شيء للأدمن */}
+                  {p.paymentRef ? (() => {
+                    const isWithdrawalRef = p.type === "withdrawal" && p.paymentRef.includes("||");
+                    if (isWithdrawalRef) {
+                      const parts = p.paymentRef.split("||").map((s: string) => s.trim());
+                      const holderName   = parts[0] || "—";
+                      const accountType  = parts[1] || "—";
+                      const accountNum   = parts[2] || "—";
+                      const maskedNum    = accountNum.length >= 4
+                        ? "•".repeat(Math.max(0, accountNum.length - 4)) + accountNum.slice(-4)
+                        : accountNum;
+                      const typeLabel: Record<string,string> = {
+                        vodafone: "📱 فودافون كاش",
+                        instapay: "⚡ InstaPay",
+                        bank:     "🏦 حساب بنكي",
+                        visa:     "💳 كارت فيزا / بنكي",
+                      };
+                      return (
+                        <div className="rounded-xl bg-blue-50 dark:bg-blue-950/20 border-2 border-blue-400/50 px-4 py-3 space-y-2">
+                          <p className="text-[10px] font-bold text-blue-700 dark:text-blue-400 flex items-center gap-1">
+                            🏧 بيانات حساب الاستلام (تحويل المبلغ لهذا الحساب)
+                          </p>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                            <div>
+                              <p className="text-[10px] text-muted-foreground">اسم صاحب الحساب</p>
+                              <p className="font-bold text-foreground">{holderName}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-muted-foreground">نوع الحساب</p>
+                              <p className="font-bold text-foreground">{typeLabel[accountType] || accountType}</p>
+                            </div>
+                          </div>
+                          <div className="bg-white dark:bg-black/30 rounded-lg border border-blue-200 dark:border-blue-800 px-3 py-2 flex items-center gap-3">
+                            <div className="flex-1">
+                              <p className="text-[10px] text-muted-foreground">رقم الحساب (الأرقام الأخيرة فقط)</p>
+                              <p className="font-mono font-extrabold text-base tracking-widest text-blue-700 dark:text-blue-300" dir="ltr">{maskedNum}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] text-muted-foreground">الرقم الكامل</p>
+                              <p className="font-mono text-xs text-foreground/60 select-all" dir="ltr">{accountNum}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="rounded-xl bg-green-50 dark:bg-green-950/20 border-2 border-green-400/50 px-4 py-2.5 flex items-center gap-2">
+                        <span className="text-green-600 text-lg">✅</span>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">رقم العملية / رقم الإيداع</p>
+                          <p className="font-mono font-extrabold text-sm text-green-700 dark:text-green-400 tracking-wider" dir="ltr">{p.paymentRef}</p>
+                        </div>
                       </div>
-                    </div>
-                  ) : (
+                    );
+                  })() : (
                     <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-300 dark:border-red-800 px-4 py-2 text-xs text-red-600 dark:text-red-400 font-bold">
                       ⚠️ المستخدم لم يُدخل رقم العملية — تحقق من الإيصال قبل الموافقة
                     </div>

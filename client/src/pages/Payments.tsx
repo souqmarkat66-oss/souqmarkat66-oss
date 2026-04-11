@@ -78,6 +78,10 @@ export default function Payments() {
   const [manualAmount, setManualAmount] = useState("");
   const [amountOverride, setAmountOverride] = useState(false);
   const [paymentRef, setPaymentRef] = useState("");
+  // Withdrawal-specific fields
+  const [withdrawalName, setWithdrawalName]               = useState("");
+  const [withdrawalAccountType, setWithdrawalAccountType] = useState("vodafone");
+  const [withdrawalAccountNumber, setWithdrawalAccountNumber] = useState("");
   const [screenshotUrl, setScreenshotUrl] = useState("");
   const [screenshotPreview, setScreenshotPreview] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -154,6 +158,9 @@ export default function Payments() {
       setManualAmount("");
       setAmountOverride(false);
       setPaymentRef("");
+      setWithdrawalName("");
+      setWithdrawalAccountType("vodafone");
+      setWithdrawalAccountNumber("");
       setScreenshotUrl("");
       setScreenshotPreview("");
     },
@@ -554,7 +561,117 @@ export default function Payments() {
               )}
             </div>
 
-            {/* Method */}
+            {/* ===== WITHDRAWAL DETAILS ===== */}
+            {formData.type === "withdrawal" && (
+              <div className="space-y-4 rounded-2xl border-2 border-blue-400/50 bg-blue-50 dark:bg-blue-950/20 p-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">🏧</span>
+                  <div>
+                    <p className="font-extrabold text-sm text-blue-800 dark:text-blue-300">بيانات حساب الاستلام</p>
+                    <p className="text-[10px] text-blue-600 dark:text-blue-400">سيحول لك الأدمن المبلغ على هذا الحساب</p>
+                  </div>
+                </div>
+
+                {/* اسم صاحب الحساب */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-blue-900 dark:text-blue-200">
+                    👤 اسمك الكامل (كما في الكارت أو المحفظة)
+                    <span className="text-red-500 mr-1">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="مثال: أحمد محمد علي"
+                    value={withdrawalName}
+                    onChange={e => setWithdrawalName(e.target.value)}
+                    className={`w-full rounded-xl border-2 px-3 py-2.5 text-sm outline-none transition-colors bg-white dark:bg-black/40 ${
+                      withdrawalName.trim()
+                        ? "border-green-400"
+                        : "border-red-300 dark:border-red-700"
+                    }`}
+                    data-testid="input-withdrawal-name"
+                  />
+                </div>
+
+                {/* نوع الحساب */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-blue-900 dark:text-blue-200">
+                    💳 نوع حساب الاستلام
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { value: "vodafone",  label: "📱 فودافون كاش",      hint: "رقم المحفظة" },
+                      { value: "instapay",  label: "⚡ InstaPay",          hint: "رقم الموبايل" },
+                      { value: "bank",      label: "🏦 حساب بنكي",        hint: "رقم الحساب" },
+                      { value: "visa",      label: "💳 كارت فيزا / بنكي", hint: "رقم الكارت" },
+                    ].map(opt => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setWithdrawalAccountType(opt.value)}
+                        className={`flex flex-col items-start p-2.5 rounded-xl border-2 text-xs font-bold transition-all ${
+                          withdrawalAccountType === opt.value
+                            ? "border-blue-500 bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200"
+                            : "border-blue-200 dark:border-blue-800/50 bg-white dark:bg-black/30 hover:border-blue-400"
+                        }`}
+                        data-testid={`btn-wtype-${opt.value}`}
+                      >
+                        <span>{opt.label}</span>
+                        <span className="text-[9px] font-normal text-muted-foreground mt-0.5">{opt.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* رقم الحساب / الكارت / المحفظة */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-blue-900 dark:text-blue-200">
+                    {withdrawalAccountType === "vodafone"
+                      ? "📱 رقم محفظة فودافون كاش"
+                      : withdrawalAccountType === "instapay"
+                      ? "⚡ رقم الموبايل (InstaPay)"
+                      : withdrawalAccountType === "bank"
+                      ? "🏦 رقم الحساب البنكي"
+                      : "💳 رقم الكارت البنكي (فيزا / ماستر)"}
+                    <span className="text-red-500 mr-1">*</span>
+                  </label>
+                  <input
+                    type={withdrawalAccountType === "vodafone" || withdrawalAccountType === "instapay" ? "tel" : "text"}
+                    placeholder={
+                      withdrawalAccountType === "bank"
+                        ? "مثال: 1234567890123456"
+                        : withdrawalAccountType === "visa"
+                        ? "مثال: 4111 1111 1111 1111"
+                        : "01XXXXXXXXX"
+                    }
+                    value={withdrawalAccountNumber}
+                    onChange={e => setWithdrawalAccountNumber(e.target.value)}
+                    className={`w-full rounded-xl border-2 px-3 py-2.5 text-sm font-mono outline-none transition-colors bg-white dark:bg-black/40 ${
+                      withdrawalAccountNumber.trim()
+                        ? "border-green-400 bg-green-50 dark:bg-green-950/20"
+                        : "border-red-300 dark:border-red-700"
+                    }`}
+                    dir="ltr"
+                    data-testid="input-withdrawal-account"
+                  />
+                  {withdrawalAccountNumber.trim().length >= 4 && (
+                    <div className="flex items-center gap-2 bg-white dark:bg-black/30 rounded-xl border border-blue-200 dark:border-blue-800 px-3 py-2 mt-1">
+                      <span className="text-[10px] text-muted-foreground">الأرقام الأخيرة:</span>
+                      <span className="font-mono font-extrabold text-sm text-primary tracking-widest">
+                        {"•".repeat(Math.max(0, withdrawalAccountNumber.trim().length - 4))}
+                        {withdrawalAccountNumber.trim().slice(-4)}
+                      </span>
+                      <span className="text-[9px] text-green-600 font-bold mr-auto">✓ سيظهر للأدمن</span>
+                    </div>
+                  )}
+                  {!withdrawalAccountNumber.trim() && (
+                    <p className="text-[10px] text-red-500 font-bold">⚠️ رقم الحساب إلزامي</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Method — للإيداع فقط */}
+            {formData.type !== "withdrawal" && (
             <div className="space-y-1">
               <label className="text-xs font-bold">💳 طريقة الدفع</label>
               <div className="grid grid-cols-2 gap-2">
@@ -572,9 +689,10 @@ export default function Payments() {
                 ))}
               </div>
             </div>
+            )}
 
             {/* بطاقة الدفع — أرقام التحويل */}
-            {formData.method !== "souq" && selectedMethod?.number && (
+            {formData.type !== "withdrawal" && formData.method !== "souq" && selectedMethod?.number && (
               <div className="rounded-2xl border-2 border-amber-400/60 bg-amber-50 dark:bg-amber-950/20 p-4 space-y-2">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-xl">💸</span>
@@ -599,8 +717,8 @@ export default function Payments() {
               </div>
             )}
 
-            {/* Phone — للطرق غير سوق ماركات */}
-            {formData.method !== "souq" && (
+            {/* Phone — للإيداع فقط، وللطرق غير سوق ماركات */}
+            {formData.type !== "withdrawal" && formData.method !== "souq" && (
               <div className="space-y-1">
                 <label className="text-xs font-bold flex items-center gap-1">
                   <Smartphone className="w-3 h-3" />
@@ -618,30 +736,32 @@ export default function Payments() {
               </div>
             )}
 
-            {/* رقم العملية — مطلوب دائماً */}
-            <div className="space-y-1">
-              <label className="text-xs font-bold flex items-center gap-1.5">
-                <Receipt className="w-3 h-3 text-primary" />
-                رقم العملية / رقم الإيداع
-                <span className="text-red-500 font-extrabold">*</span>
-                <span className="text-[10px] text-muted-foreground font-normal">(مطلوب)</span>
-              </label>
-              <Input
-                type="text"
-                placeholder="مثال: 20241231123456 أو TXN-ABC123"
-                value={paymentRef}
-                onChange={e => setPaymentRef(e.target.value)}
-                className={`text-sm h-10 font-mono border-2 ${paymentRef.trim() ? "border-green-400 bg-green-50 dark:bg-green-950/20" : "border-red-300"}`}
-                dir="ltr"
-                data-testid="input-payment-ref"
-              />
-              <p className="text-[10px] text-muted-foreground">
-                🔍 هذا الرقم يظهر في رسالة التأكيد من فودافون / InstaPay / البنك بعد إتمام التحويل
-              </p>
-              {!paymentRef.trim() && (
-                <p className="text-[10px] text-red-500 font-bold">⚠️ رقم العملية إلزامي — الطلب لن يُقبل بدونه</p>
-              )}
-            </div>
+            {/* رقم العملية — للإيداع فقط */}
+            {formData.type !== "withdrawal" && (
+              <div className="space-y-1">
+                <label className="text-xs font-bold flex items-center gap-1.5">
+                  <Receipt className="w-3 h-3 text-primary" />
+                  رقم العملية / رقم الإيداع
+                  <span className="text-red-500 font-extrabold">*</span>
+                  <span className="text-[10px] text-muted-foreground font-normal">(مطلوب)</span>
+                </label>
+                <Input
+                  type="text"
+                  placeholder="مثال: 20241231123456 أو TXN-ABC123"
+                  value={paymentRef}
+                  onChange={e => setPaymentRef(e.target.value)}
+                  className={`text-sm h-10 font-mono border-2 ${paymentRef.trim() ? "border-green-400 bg-green-50 dark:bg-green-950/20" : "border-red-300"}`}
+                  dir="ltr"
+                  data-testid="input-payment-ref"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  🔍 هذا الرقم يظهر في رسالة التأكيد من فودافون / InstaPay / البنك بعد إتمام التحويل
+                </p>
+                {!paymentRef.trim() && (
+                  <p className="text-[10px] text-red-500 font-bold">⚠️ رقم العملية إلزامي — الطلب لن يُقبل بدونه</p>
+                )}
+              </div>
+            )}
 
             {/* سوق ماركات — خطوات الدفع */}
             {formData.method === "souq" && (
@@ -746,25 +866,47 @@ export default function Payments() {
 
             {/* Submit */}
             <div className="space-y-2">
-              {(!screenshotUrl || !paymentRef.trim()) && (
-                <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 p-3 text-xs text-red-700 dark:text-red-400 space-y-1">
-                  {!paymentRef.trim() && <p>❌ أدخل <strong>رقم العملية</strong> الذي وصلك بعد التحويل</p>}
-                  {!screenshotUrl && <p>❌ ارفع <strong>صورة إيصال الدفع</strong> لإثبات التحويل</p>}
-                </div>
+              {formData.type === "withdrawal" ? (
+                (!screenshotUrl || !withdrawalName.trim() || !withdrawalAccountNumber.trim()) && (
+                  <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 p-3 text-xs text-red-700 dark:text-red-400 space-y-1">
+                    {!withdrawalName.trim() && <p>❌ أدخل <strong>اسمك الكامل</strong> كما في الكارت أو المحفظة</p>}
+                    {!withdrawalAccountNumber.trim() && <p>❌ أدخل <strong>رقم الحساب</strong> المراد التحويل عليه</p>}
+                    {!screenshotUrl && <p>❌ ارفع <strong>صورة</strong> (اختياري — تساعد في التحقق)</p>}
+                  </div>
+                )
+              ) : (
+                (!screenshotUrl || !paymentRef.trim()) && (
+                  <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 p-3 text-xs text-red-700 dark:text-red-400 space-y-1">
+                    {!paymentRef.trim() && <p>❌ أدخل <strong>رقم العملية</strong> الذي وصلك بعد التحويل</p>}
+                    {!screenshotUrl && <p>❌ ارفع <strong>صورة إيصال الدفع</strong> لإثبات التحويل</p>}
+                  </div>
+                )
               )}
               <Button
                 className="w-full gap-2"
-                disabled={!effectiveAmount || Number(effectiveAmount) <= 0 || !screenshotUrl || !paymentRef.trim() || uploading || createMutation.isPending}
-                onClick={() => createMutation.mutate({
-                  type: formData.type,
-                  amountEGP: Number(effectiveAmount),
-                  method: formData.method,
-                  phoneNumber: formData.phoneNumber || undefined,
-                  paymentRef: paymentRef.trim() || undefined,
-                  adId: formData.adId && formData.adId !== "none" ? Number(formData.adId) : undefined,
-                  serviceType: selectedServices.size > 0 ? Array.from(selectedServices).join(",") : undefined,
-                  screenshotUrl: screenshotUrl || undefined,
-                })}
+                disabled={
+                  !effectiveAmount || Number(effectiveAmount) <= 0 || uploading || createMutation.isPending ||
+                  (formData.type === "withdrawal"
+                    ? !withdrawalName.trim() || !withdrawalAccountNumber.trim()
+                    : !screenshotUrl || !paymentRef.trim()
+                  )
+                }
+                onClick={() => {
+                  const isWithdrawal = formData.type === "withdrawal";
+                  const withdrawalRef = isWithdrawal
+                    ? `${withdrawalName.trim()} || ${withdrawalAccountType} || ${withdrawalAccountNumber.trim()}`
+                    : undefined;
+                  createMutation.mutate({
+                    type: formData.type,
+                    amountEGP: Number(effectiveAmount),
+                    method: isWithdrawal ? withdrawalAccountType : formData.method,
+                    phoneNumber: isWithdrawal ? withdrawalAccountNumber : (formData.phoneNumber || undefined),
+                    paymentRef: isWithdrawal ? withdrawalRef : (paymentRef.trim() || undefined),
+                    adId: formData.adId && formData.adId !== "none" ? Number(formData.adId) : undefined,
+                    serviceType: selectedServices.size > 0 ? Array.from(selectedServices).join(",") : undefined,
+                    screenshotUrl: screenshotUrl || undefined,
+                  });
+                }}
                 data-testid="btn-submit-payment"
               >
                 {createMutation.isPending ? "جاري الإرسال..." : (
