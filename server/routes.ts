@@ -3396,14 +3396,25 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const userId = req.user.claims.sub;
       const { productName, targetAudience, adTitle, customPrompt, language } = req.body;
-      const titleHint = adTitle ? (language === 'ar' ? ` عنوان الإعلان المقترح: "${adTitle}".` : ` Suggested ad title: "${adTitle}".`) : '';
-      const customHint = customPrompt ? (language === 'ar' ? ` معلومات إضافية عن المنتج والأسلوب المطلوب: "${customPrompt}".` : ` Additional context: "${customPrompt}".`) : '';
-      const prompt = language === 'ar'
-        ? `اكتب عنوان ووصف جذاب لإعلان باللغة العربية المصرية. المنتج: "${productName}". الجمهور المستهدف: "${targetAudience}".${titleHint}${customHint} أعد JSON مع مفاتيح "title" و"description" فقط.`
-        : `Write a catchy title and description for an ad. Product: "${productName}". Target: "${targetAudience}".${titleHint}${customHint} Return JSON with "title" and "description".`;
+      const titleHint = adTitle ? ` عنوان الإعلان المقترح: "${adTitle}".` : '';
+      const customHint = customPrompt ? ` معلومات إضافية عن المنتج والأسلوب المطلوب: "${customPrompt}".` : '';
+      const sysMsg = language === 'ar'
+        ? `أنت كاتب إعلانات محترف متخصص في السوق العربي. قواعدك الصارمة:
+١- اكتب بلغة عربية فصيحة سليمة خالية تماماً من الأخطاء الإملائية والنحوية.
+٢- استخدم أسلوباً تسويقياً جذاباً ومقنعاً يناسب الجمهور العربي.
+٣- لا تستخدم كلمات أجنبية إلا إذا كانت اسم المنتج أو علامة تجارية.
+٤- اجعل العناوين قصيرة وقوية، والأوصاف واضحة ومفصّلة.
+٥- لا تضع أي تعليق خارج JSON المطلوب.`
+        : `You are a professional copywriter. Write error-free, compelling ad copy.`;
+      const userMsg = language === 'ar'
+        ? `اكتب عنواناً ووصفاً إعلانياً جذاباً للمنتج التالي:\n- المنتج: "${productName}"\n- الجمهور المستهدف: "${targetAudience}"${titleHint}${customHint}\nأعد JSON بمفتاحين فقط: "title" (عنوان لا يتجاوز 10 كلمات) و"description" (وصف من 2-4 جمل).`
+        : `Write a catchy ad for: "${productName}". Target: "${targetAudience}".${titleHint}${customHint} Return JSON with "title" and "description".`;
       const response = await openai.chat.completions.create({
         model: "gpt-4o",
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          { role: "system", content: sysMsg },
+          { role: "user", content: userMsg },
+        ],
         response_format: { type: "json_object" },
       });
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
@@ -3421,12 +3432,22 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const userId = req.user.claims.sub;
       const { topic, language, tone } = req.body;
-      const prompt = language === 'ar'
-        ? `اكتب مقالة تسويقية احترافية عن: "${topic}". الأسلوب: ${tone || 'رسمي'}. أعد JSON مع مفاتيح "title" و"content".`
+      const sysMsg = language === 'ar'
+        ? `أنت كاتب محتوى تسويقي محترف. قواعدك:
+١- اكتب بلغة عربية فصيحة سليمة تماماً، خالية من أي أخطاء إملائية أو نحوية.
+٢- استخدم أسلوباً ${tone || 'رسمياً'} مناسباً للسوق العربي.
+٣- نظّم المحتوى بفقرات واضحة مع عناوين فرعية إن لزم.
+٤- لا تضع أي تعليق خارج JSON المطلوب.`
+        : `You are a professional content writer. Write error-free, well-structured content.`;
+      const userMsg = language === 'ar'
+        ? `اكتب مقالة تسويقية احترافية عن: "${topic}". أعد JSON بمفتاحين: "title" (عنوان جذاب) و"content" (المقالة كاملة منظّمة بفقرات).`
         : `Write a professional marketing article about: "${topic}". Tone: ${tone || 'professional'}. Return JSON with "title" and "content".`;
       const response = await openai.chat.completions.create({
         model: "gpt-4o",
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          { role: "system", content: sysMsg },
+          { role: "user", content: userMsg },
+        ],
         response_format: { type: "json_object" },
       });
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
@@ -3444,14 +3465,25 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const userId = req.user.claims.sub;
       const { productName, adTitle, customPrompt, duration, language } = req.body;
-      const titleHint = adTitle ? (language === 'ar' ? ` عنوان الإعلان: "${adTitle}".` : ` Ad title: "${adTitle}".`) : '';
-      const customHint = customPrompt ? (language === 'ar' ? ` معلومات إضافية: "${customPrompt}".` : ` Additional context: "${customPrompt}".`) : '';
-      const prompt = language === 'ar'
-        ? `اكتب سكريبت فيديو إعلاني سينمائي احترافي بالكامل لـ "${productName}"${titleHint}${customHint} مدته ${duration || 30} ثانية. أعد JSON مع: "title", "script" (النص الكامل), "voiceover" (التعليق الصوتي بالعربية المصرية العامية), "scenes" (مصفوفة من 4-6 مشاهد كل منها: "time" الوقت, "visual" وصف الصورة المتحركة, "narration" التعليق الصوتي, "mood" المزاج, "transition" طريقة الانتقال), "music" (وصف الموسيقى التصويرية), "callToAction" (دعوة للعمل).`
-        : `Write a complete professional cinematic video ad script for "${productName}"${titleHint}${customHint} (${duration || 30} seconds). Return JSON: "title", "script", "voiceover", "scenes" (4-6 scenes with "time", "visual", "narration", "mood", "transition"), "music", "callToAction".`;
+      const titleHint = adTitle ? ` عنوان الإعلان: "${adTitle}".` : '';
+      const customHint = customPrompt ? ` معلومات إضافية: "${customPrompt}".` : '';
+      const sysMsg = language === 'ar'
+        ? `أنت مخرج إعلانات ومؤلف سيناريو محترف متخصص في الإعلانات العربية. قواعدك:
+١- اكتب جميع النصوص بلغة عربية فصيحة سليمة خالية تماماً من الأخطاء الإملائية والنحوية.
+٢- التعليق الصوتي (voiceover) يكون بلغة عربية فصيحة جذابة وواضحة.
+٣- أوصاف المشاهد (visual) تكون دقيقة واحترافية لتوجيه المصوّر.
+٤- استخدم أسلوباً سينمائياً درامياً يستحوذ على الانتباه.
+٥- لا تضع أي تعليق خارج JSON المطلوب.`
+        : `You are a professional cinematographer and scriptwriter. Write error-free, compelling video ad scripts.`;
+      const userMsg = language === 'ar'
+        ? `اكتب سكريبت فيديو إعلاني سينمائي احترافي للمنتج: "${productName}"${titleHint}${customHint}\nمدة الفيديو: ${duration || 30} ثانية.\nأعد JSON بالمفاتيح التالية:\n- "title": عنوان الفيديو\n- "script": النص الكامل\n- "voiceover": التعليق الصوتي بالعربية الفصحى\n- "scenes": مصفوفة 4-6 مشاهد، كل مشهد يحتوي: "time" و"visual" و"narration" و"mood" و"transition"\n- "music": وصف الموسيقى التصويرية\n- "callToAction": دعوة للعمل`
+        : `Write a cinematic video ad script for "${productName}"${titleHint}${customHint} (${duration || 30}s). Return JSON: "title", "script", "voiceover", "scenes" (4-6 with "time","visual","narration","mood","transition"), "music", "callToAction".`;
       const response = await openai.chat.completions.create({
         model: "gpt-4o",
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          { role: "system", content: sysMsg },
+          { role: "user", content: userMsg },
+        ],
         response_format: { type: "json_object" },
       });
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
@@ -3514,11 +3546,15 @@ Sitemap: ${BASE}/sitemap-pages.xml
       });
 
       const systemPrompt = language === 'ar'
-        ? "أنت خبير تسويق إبداعي متخصص في الإعلانات العربية. حلّل الصور وأنشئ محتوى إعلاني احترافي."
-        : "You are a creative marketing expert. Analyze images and create professional ad content.";
+        ? `أنت خبير تسويق إبداعي متخصص في الإعلانات العربية. قواعدك الصارمة:
+١- اكتب بلغة عربية فصيحة سليمة خالية تماماً من الأخطاء الإملائية والنحوية.
+٢- حلّل الصور بدقة واستخرج أبرز مميزات المنتج.
+٣- اكتب نصاً إعلانياً جذاباً ومقنعاً يستهدف الجمهور العربي.
+٤- لا تضع أي تعليق خارج JSON المطلوب.`
+        : `You are a creative marketing expert. Analyze images and create professional, error-free ad content.`;
 
       const userPrompt = language === 'ar'
-        ? `حلّل هذه الصور وأنشئ إعلاناً احترافياً${productName ? ` لـ ${productName}` : ''}${targetAudience ? ` يستهدف ${targetAudience}` : ''}.\nأرجع JSON: {"title": "...", "description": "..."}`
+        ? `حلّل هذه الصور واكتب إعلاناً احترافياً${productName ? ` للمنتج: ${productName}` : ''}${targetAudience ? `، الجمهور المستهدف: ${targetAudience}` : ''}.\nأعد JSON بمفتاحين فقط: "title" (عنوان جذاب ومختصر) و"description" (وصف إعلاني مقنع من 2-3 جمل).`
         : `Analyze these images and create a professional ad${productName ? ` for ${productName}` : ''}${targetAudience ? ` targeting ${targetAudience}` : ''}.\nReturn JSON: {"title": "...", "description": "..."}`;
 
       const response = await openai.chat.completions.create({
