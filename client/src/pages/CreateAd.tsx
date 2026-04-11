@@ -82,6 +82,8 @@ export default function CreateAd() {
   const [talkingPhotoVoice, setTalkingPhotoVoice] = useState("ar-EG-SalmaNeural");
   const [generatingTalkingPhoto, setGeneratingTalkingPhoto] = useState(false);
   const [talkingPhotoVideoUrl, setTalkingPhotoVideoUrl] = useState("");
+  const [talkingPhotoFaceUrl, setTalkingPhotoFaceUrl] = useState("/uploads/avatar-male-1.jpg");
+  const [showTalkingPhotoPanel, setShowTalkingPhotoPanel] = useState(false);
   const [showTTS, setShowTTS] = useState(false);
   const [ttsText, setTtsText] = useState("");
   const [ttsVoice, setTtsVoice] = useState("nova");
@@ -383,15 +385,14 @@ export default function CreateAd() {
   };
 
   const handleTalkingPhoto = async () => {
-    const imageUrl = aiImageUrl || form.getValues("mediaUrl");
-    if (!imageUrl) { toast({ variant: "destructive", title: "ارفع صورة أو ولّد صورة أولاً" }); return; }
+    if (!talkingPhotoFaceUrl) { toast({ variant: "destructive", title: "اختر شخصية أو ارفع صورة وجه" }); return; }
     if (!talkingPhotoText.trim()) { toast({ variant: "destructive", title: "اكتب النص الذي سيقوله الشخص" }); return; }
     setGeneratingTalkingPhoto(true);
     try {
       const res = await fetch("/api/ai/talking-photo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl, text: talkingPhotoText, voiceId: talkingPhotoVoice }),
+        body: JSON.stringify({ imageUrl: talkingPhotoFaceUrl, text: talkingPhotoText, voiceId: talkingPhotoVoice }),
         credentials: "include"
       });
       const data = await res.json();
@@ -845,7 +846,7 @@ export default function CreateAd() {
                         {generatingScript ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
                         سكريبت فيديو سينمائي
                       </Button>
-                      <Button type="button" onClick={() => setTalkingPhotoText(t => t || form.getValues("description") || "")} size="sm" variant="outline" className="gap-2 border-purple-400 text-purple-600 hover:bg-purple-50" data-testid="btn-talking-photo-open">
+                      <Button type="button" onClick={() => { setShowTalkingPhotoPanel(true); setTalkingPhotoText(t => t || form.getValues("description") || ""); }} size="sm" variant="outline" className="gap-2 border-purple-400 text-purple-600 hover:bg-purple-50" data-testid="btn-talking-photo-open">
                         <Camera className="w-4 h-4" />
                         صورة ناطقة 🎭
                       </Button>
@@ -949,32 +950,72 @@ export default function CreateAd() {
                     )}
 
                     {/* Talking Photo Section */}
-                    {(talkingPhotoText !== "" || talkingPhotoVideoUrl) && (
+                    {(showTalkingPhotoPanel || talkingPhotoVideoUrl) && (
                       <div className="border-2 border-purple-300 rounded-xl p-4 bg-purple-50 dark:bg-purple-950/20 space-y-3">
                         <div className="flex items-center gap-2">
                           <Camera className="w-4 h-4 text-purple-600" />
                           <p className="text-sm font-bold text-purple-700">🎭 صورة ناطقة — الشخص يتكلم</p>
-                          <Button type="button" size="sm" variant="ghost" className="mr-auto h-6 w-6 p-0" onClick={() => { setTalkingPhotoText(""); setTalkingPhotoVideoUrl(""); }}>
+                          <Button type="button" size="sm" variant="ghost" className="mr-auto h-6 w-6 p-0" onClick={() => { setTalkingPhotoText(""); setTalkingPhotoVideoUrl(""); setTalkingPhotoFaceUrl("/uploads/avatar-male-1.jpg"); setShowTalkingPhotoPanel(false); }}>
                             <X className="w-3 h-3" />
                           </Button>
                         </div>
 
-                        {!(aiImageUrl || form.getValues("mediaUrl")) && (
-                          <p className="text-xs text-orange-600 flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3" /> ولّد صورة أو ارفع صورة شخص أولاً ثم استخدم هذه الأداة
-                          </p>
-                        )}
-
-                        {(aiImageUrl || form.getValues("mediaUrl")) && (
-                          <div className="flex items-center gap-2 p-2 bg-white dark:bg-black/20 rounded-lg border border-purple-200">
-                            <img
-                              src={aiImageUrl || form.getValues("mediaUrl")}
-                              alt="صورة الشخص"
-                              className="w-12 h-12 rounded-lg object-cover"
-                            />
-                            <p className="text-xs text-muted-foreground">هذه الصورة ستتكلم ✅</p>
+                        {/* Avatar / Face selection */}
+                        <div className="space-y-2">
+                          <p className="text-xs font-bold text-purple-700">اختر الشخصية التي ستتكلم:</p>
+                          <p className="text-xs text-muted-foreground">⚠️ الذكاء الاصطناعي يحتاج وجه بشري واضح — اختر شخصية أو ارفع صورة وجهك</p>
+                          <div className="grid grid-cols-4 gap-2">
+                            {[
+                              { url: "/uploads/avatar-male-1.jpg", label: "رجل ١" },
+                              { url: "/uploads/avatar-male-2.jpg", label: "رجل ٢" },
+                              { url: "/uploads/avatar-female-1.jpg", label: "سيدة ١" },
+                              { url: "/uploads/avatar-female-2.jpg", label: "سيدة ٢" },
+                            ].map((av) => (
+                              <button
+                                key={av.url}
+                                type="button"
+                                onClick={() => setTalkingPhotoFaceUrl(av.url)}
+                                className={`relative rounded-xl overflow-hidden border-2 transition-all ${talkingPhotoFaceUrl === av.url ? "border-purple-600 ring-2 ring-purple-400" : "border-purple-200 hover:border-purple-400"}`}
+                                data-testid={`btn-avatar-${av.label}`}
+                              >
+                                <img src={av.url} alt={av.label} className="w-full aspect-square object-cover" />
+                                {talkingPhotoFaceUrl === av.url && (
+                                  <div className="absolute inset-0 bg-purple-600/20 flex items-center justify-center">
+                                    <div className="bg-purple-600 rounded-full p-0.5">
+                                      <CheckCircle2 className="w-4 h-4 text-white" />
+                                    </div>
+                                  </div>
+                                )}
+                                <p className="text-center text-xs py-0.5 font-medium text-purple-700">{av.label}</p>
+                              </button>
+                            ))}
                           </div>
-                        )}
+                          {/* Upload custom face */}
+                          <label className="flex items-center gap-2 cursor-pointer text-xs text-purple-700 font-medium border border-dashed border-purple-300 rounded-lg p-2 hover:bg-purple-100 transition-colors">
+                            <Upload className="w-3 h-3" />
+                            ارفع صورة وجهك الخاصة (jpg/png)
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/jpg,image/png"
+                              className="hidden"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const fd = new FormData();
+                                fd.append("file", file);
+                                const r = await fetch("/api/upload", { method: "POST", body: fd, credentials: "include" });
+                                const d = await r.json();
+                                if (d.url) { setTalkingPhotoFaceUrl(d.url); toast({ title: "✅ تم رفع صورة الوجه" }); }
+                              }}
+                            />
+                          </label>
+                          {talkingPhotoFaceUrl && (
+                            <div className="flex items-center gap-2 p-2 bg-white dark:bg-black/20 rounded-lg border border-purple-200">
+                              <img src={talkingPhotoFaceUrl} alt="الشخصية المختارة" className="w-10 h-10 rounded-full object-cover border-2 border-purple-400" />
+                              <p className="text-xs text-purple-700 font-medium">هذه الشخصية ستتكلم ✅</p>
+                            </div>
+                          )}
+                        </div>
 
                         <div className="space-y-2">
                           <p className="text-xs font-medium text-purple-700">النص الذي سيقوله الشخص:</p>
