@@ -3578,6 +3578,81 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
+  // ─── D-ID TALKING PHOTO ─────────────────────────────────────────
+  app.post("/api/ai/talking-photo", isAuthenticated, checkAiCredits, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { imageUrl, text, voiceId } = req.body;
+      if (!imageUrl || !text) return res.status(400).json({ message: "imageUrl والنص مطلوبان" });
+
+      const DID_API_KEY = process.env.DID_API_KEY;
+      if (!DID_API_KEY) return res.status(503).json({ message: "خدمة الصورة الناطقة غير مفعّلة بعد. تواصل مع المسؤول." });
+
+      const imageFullUrl = imageUrl.startsWith('/') ? `https://${req.headers.host}${imageUrl}` : imageUrl;
+
+      const createRes = await fetch("https://api.d-id.com/talks", {
+        method: "POST",
+        headers: {
+          "Authorization": `Basic ${DID_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          source_url: imageFullUrl,
+          script: {
+            type: "text",
+            input: text,
+            provider: {
+              type: "microsoft",
+              voice_id: voiceId || "ar-EG-ShakirNeural",
+            },
+          },
+          config: { fluent: true, pad_audio: 0.5 },
+        }),
+      });
+
+      const createData: any = await createRes.json();
+      if (!createRes.ok) throw new Error(createData?.description || createData?.message || "فشل إنشاء الفيديو");
+
+      const talkId = createData.id;
+
+      // Poll until done (max 60 seconds)
+      let videoUrl: string | null = null;
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const statusRes = await fetch(`https://api.d-id.com/talks/${talkId}`, {
+          headers: { "Authorization": `Basic ${DID_API_KEY}` },
+        });
+        const statusData: any = await statusRes.json();
+        if (statusData.status === "done") { videoUrl = statusData.result_url; break; }
+        if (statusData.status === "error") throw new Error("فشل D-ID في معالجة الفيديو");
+      }
+
+      if (!videoUrl) return res.status(504).json({ message: "انتهت مهلة توليد الفيديو، حاول مرة أخرى" });
+
+      // Download and save locally
+      const vidRes = await fetch(videoUrl);
+      const buf = Buffer.from(await vidRes.arrayBuffer());
+      const filename = `talking-${Date.now()}.mp4`;
+      const savePath = path.join(process.cwd(), 'uploads', filename);
+      fs.writeFileSync(savePath, buf);
+      const localUrl = `/uploads/${filename}`;
+
+      await storage.recordAiUsage(userId, 'talking_photo');
+      if (req.aiChargeEGP) {
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم صورة ناطقة بالذكاء الاصطناعي', channelId: null, campaignId: null });
+      }
+      res.json({ videoUrl: localUrl });
+    } catch (error: any) {
+      res.status(500).json({ message: "فشل توليد الصورة الناطقة: " + error.message });
+    }
+  });
+
+  // ─── D-ID STATUS CHECK ──────────────────────────────────────────
+  app.get("/api/ai/talking-photo/status", isAuthenticated, async (req: any, res) => {
+    const hasKey = !!process.env.DID_API_KEY;
+    res.json({ available: hasKey });
+  });
+
   // ─── AI TRANSLATE ─────────────────────────────────────────────
   app.post("/api/ai/translate", isAuthenticated, checkAiCredits, async (req: any, res) => {
     try {

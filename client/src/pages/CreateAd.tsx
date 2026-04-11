@@ -78,6 +78,10 @@ export default function CreateAd() {
   const [generatingImage, setGeneratingImage] = useState(false);
   const [generatingCopy, setGeneratingCopy] = useState(false);
   const [aiImageUrl, setAiImageUrl] = useState("");
+  const [talkingPhotoText, setTalkingPhotoText] = useState("");
+  const [talkingPhotoVoice, setTalkingPhotoVoice] = useState("ar-EG-SalmaNeural");
+  const [generatingTalkingPhoto, setGeneratingTalkingPhoto] = useState(false);
+  const [talkingPhotoVideoUrl, setTalkingPhotoVideoUrl] = useState("");
   const [speakingScene, setSpeakingScene] = useState<number | null>(null);
   const [cinemaScene, setCinemaScene] = useState(0);
   const [cinemaPlaying, setCinemaPlaying] = useState(false);
@@ -350,6 +354,29 @@ export default function CreateAd() {
     } catch (e: any) {
       toast({ variant: "destructive", title: "فشل التوليد", description: e.message });
     } finally { setGeneratingScript(false); }
+  };
+
+  const handleTalkingPhoto = async () => {
+    const imageUrl = aiImageUrl || form.getValues("mediaUrl");
+    if (!imageUrl) { toast({ variant: "destructive", title: "ارفع صورة أو ولّد صورة أولاً" }); return; }
+    if (!talkingPhotoText.trim()) { toast({ variant: "destructive", title: "اكتب النص الذي سيقوله الشخص" }); return; }
+    setGeneratingTalkingPhoto(true);
+    try {
+      const res = await fetch("/api/ai/talking-photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl, text: talkingPhotoText, voiceId: talkingPhotoVoice }),
+        credentials: "include"
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setTalkingPhotoVideoUrl(data.videoUrl);
+      form.setValue("mediaUrl", data.videoUrl);
+      form.setValue("mediaType", "video");
+      toast({ title: "🎭 تم توليد الصورة الناطقة!" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "فشل التوليد", description: e.message });
+    } finally { setGeneratingTalkingPhoto(false); }
   };
 
   const speakScene = (scene: any, idx: number) => {
@@ -792,6 +819,10 @@ export default function CreateAd() {
                         {generatingScript ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
                         سكريبت فيديو سينمائي
                       </Button>
+                      <Button type="button" onClick={() => setTalkingPhotoText(t => t || form.getValues("description") || "")} size="sm" variant="outline" className="gap-2 border-purple-400 text-purple-600 hover:bg-purple-50" data-testid="btn-talking-photo-open">
+                        <Camera className="w-4 h-4" />
+                        صورة ناطقة 🎭
+                      </Button>
                       <Button type="button" onClick={handleTranslate} disabled={translating} size="sm" variant="outline" className="gap-2" data-testid="btn-translate">
                         {translating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Languages className="w-4 h-4" />}
                         ترجمة النص
@@ -801,6 +832,107 @@ export default function CreateAd() {
                         تحميل كملف
                       </Button>
                     </div>
+
+                    {/* Talking Photo Section */}
+                    {(talkingPhotoText !== "" || talkingPhotoVideoUrl) && (
+                      <div className="border-2 border-purple-300 rounded-xl p-4 bg-purple-50 dark:bg-purple-950/20 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Camera className="w-4 h-4 text-purple-600" />
+                          <p className="text-sm font-bold text-purple-700">🎭 صورة ناطقة — الشخص يتكلم</p>
+                          <Button type="button" size="sm" variant="ghost" className="mr-auto h-6 w-6 p-0" onClick={() => { setTalkingPhotoText(""); setTalkingPhotoVideoUrl(""); }}>
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+
+                        {!(aiImageUrl || form.getValues("mediaUrl")) && (
+                          <p className="text-xs text-orange-600 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" /> ولّد صورة أو ارفع صورة شخص أولاً ثم استخدم هذه الأداة
+                          </p>
+                        )}
+
+                        {(aiImageUrl || form.getValues("mediaUrl")) && (
+                          <div className="flex items-center gap-2 p-2 bg-white dark:bg-black/20 rounded-lg border border-purple-200">
+                            <img
+                              src={aiImageUrl || form.getValues("mediaUrl")}
+                              alt="صورة الشخص"
+                              className="w-12 h-12 rounded-lg object-cover"
+                            />
+                            <p className="text-xs text-muted-foreground">هذه الصورة ستتكلم ✅</p>
+                          </div>
+                        )}
+
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-purple-700">النص الذي سيقوله الشخص:</p>
+                          <Textarea
+                            value={talkingPhotoText}
+                            onChange={e => setTalkingPhotoText(e.target.value)}
+                            placeholder="اكتب هنا ما تريد الشخص أن يقوله... مثال: أهلاً بكم في متجرنا! نقدم أفضل المنتجات بأسعار لا تُقاوم"
+                            className="text-sm min-h-[80px] border-purple-300 focus:border-purple-500"
+                            data-testid="textarea-talking-photo-text"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-purple-700">الصوت:</p>
+                          <Select value={talkingPhotoVoice} onValueChange={setTalkingPhotoVoice}>
+                            <SelectTrigger className="h-8 text-xs border-purple-300" data-testid="select-talking-voice">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="ar-EG-SalmaNeural">🎙️ سلمى — صوت نسائي مصري</SelectItem>
+                              <SelectItem value="ar-EG-ShakirNeural">🎙️ شاكر — صوت رجالي مصري</SelectItem>
+                              <SelectItem value="ar-SA-ZariyahNeural">🎙️ زارية — صوت نسائي خليجي</SelectItem>
+                              <SelectItem value="ar-SA-HamedNeural">🎙️ حامد — صوت رجالي خليجي</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <Button
+                          type="button"
+                          onClick={handleTalkingPhoto}
+                          disabled={generatingTalkingPhoto || !talkingPhotoText.trim()}
+                          className="w-full gap-2 bg-purple-600 hover:bg-purple-700 text-white"
+                          data-testid="btn-gen-talking-photo"
+                        >
+                          {generatingTalkingPhoto ? (
+                            <><Loader2 className="w-4 h-4 animate-spin" /> جاري توليد الفيديو... (30-60 ثانية)</>
+                          ) : (
+                            <><Camera className="w-4 h-4" /> ولّد الصورة الناطقة</>
+                          )}
+                        </Button>
+
+                        {talkingPhotoVideoUrl && (
+                          <div className="space-y-2">
+                            <p className="text-xs font-bold text-green-600">✅ تم توليد الفيديو!</p>
+                            <video
+                              src={talkingPhotoVideoUrl}
+                              controls
+                              className="w-full rounded-xl border-2 border-purple-300 max-h-64"
+                              data-testid="video-talking-photo-result"
+                            />
+                            <div className="flex gap-2">
+                              <a
+                                href={talkingPhotoVideoUrl}
+                                download
+                                className="flex-1 flex items-center justify-center gap-1 text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-lg py-2 border border-purple-300"
+                              >
+                                <Download className="w-3 h-3" /> تحميل الفيديو
+                              </a>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="flex-1 text-xs border-purple-300 text-purple-600"
+                                onClick={() => { form.setValue("mediaUrl", talkingPhotoVideoUrl); form.setValue("mediaType", "video"); toast({ title: "✅ تم تعيين الفيديو للإعلان" }); }}
+                                data-testid="btn-use-talking-video"
+                              >
+                                استخدام في الإعلان
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* AI Image Edit section */}
                     {(aiImageUrl || refImages.length > 0) && (
