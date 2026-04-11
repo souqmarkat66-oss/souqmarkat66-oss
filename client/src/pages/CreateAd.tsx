@@ -82,6 +82,12 @@ export default function CreateAd() {
   const [talkingPhotoVoice, setTalkingPhotoVoice] = useState("ar-EG-SalmaNeural");
   const [generatingTalkingPhoto, setGeneratingTalkingPhoto] = useState(false);
   const [talkingPhotoVideoUrl, setTalkingPhotoVideoUrl] = useState("");
+  const [showTTS, setShowTTS] = useState(false);
+  const [ttsText, setTtsText] = useState("");
+  const [ttsVoice, setTtsVoice] = useState("nova");
+  const [ttsSpeed, setTtsSpeed] = useState(1.0);
+  const [generatingTTS, setGeneratingTTS] = useState(false);
+  const [ttsAudioUrl, setTtsAudioUrl] = useState("");
   const [speakingScene, setSpeakingScene] = useState<number | null>(null);
   const [cinemaScene, setCinemaScene] = useState(0);
   const [cinemaPlaying, setCinemaPlaying] = useState(false);
@@ -121,7 +127,6 @@ export default function CreateAd() {
   const [editImagePrompt, setEditImagePrompt] = useState("");
   const [editingImage, setEditingImage] = useState(false);
   const refImgInputRef = useRef<HTMLInputElement>(null);
-  const [ttsVoice, setTtsVoice] = useState<"nova" | "onyx">("nova");
   const [cinemaKey, setCinemaKey] = useState(0);
   const cinemaAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -354,6 +359,27 @@ export default function CreateAd() {
     } catch (e: any) {
       toast({ variant: "destructive", title: "فشل التوليد", description: e.message });
     } finally { setGeneratingScript(false); }
+  };
+
+  const handleTextToSpeech = async () => {
+    const textToSpeak = ttsText || form.getValues("description") || form.getValues("title");
+    if (!textToSpeak.trim()) { toast({ variant: "destructive", title: "اكتب النص أولاً أو ولّد محتوى الإعلان" }); return; }
+    setTtsText(textToSpeak);
+    setGeneratingTTS(true);
+    try {
+      const res = await fetch("/api/ai/text-to-speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: textToSpeak, voice: ttsVoice, speed: ttsSpeed }),
+        credentials: "include"
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setTtsAudioUrl(data.audioUrl);
+      toast({ title: "🎙️ تم توليد الصوت الطبيعي!" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "فشل توليد الصوت", description: e.message });
+    } finally { setGeneratingTTS(false); }
   };
 
   const handleTalkingPhoto = async () => {
@@ -823,6 +849,10 @@ export default function CreateAd() {
                         <Camera className="w-4 h-4" />
                         صورة ناطقة 🎭
                       </Button>
+                      <Button type="button" onClick={() => { setShowTTS(true); setTtsText(form.getValues("description") || form.getValues("title") || ""); }} size="sm" variant="outline" className="gap-2 border-green-400 text-green-700 hover:bg-green-50" data-testid="btn-tts-open">
+                        <Volume2 className="w-4 h-4" />
+                        صوت طبيعي 🎙️
+                      </Button>
                       <Button type="button" onClick={handleTranslate} disabled={translating} size="sm" variant="outline" className="gap-2" data-testid="btn-translate">
                         {translating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Languages className="w-4 h-4" />}
                         ترجمة النص
@@ -832,6 +862,91 @@ export default function CreateAd() {
                         تحميل كملف
                       </Button>
                     </div>
+
+                    {/* TTS - Natural Voice Section */}
+                    {showTTS && (
+                      <div className="border-2 border-green-300 rounded-xl p-4 bg-green-50 dark:bg-green-950/20 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Volume2 className="w-4 h-4 text-green-600" />
+                          <p className="text-sm font-bold text-green-700">🎙️ توليد صوت طبيعي</p>
+                          <Button type="button" size="sm" variant="ghost" className="mr-auto h-6 w-6 p-0" onClick={() => { setShowTTS(false); setTtsAudioUrl(""); }}>
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-green-700">النص الذي سيُقرأ بصوت طبيعي:</p>
+                          <Textarea
+                            value={ttsText}
+                            onChange={e => setTtsText(e.target.value)}
+                            placeholder="اكتب نص الإعلان هنا أو اضغط الزر وسيأخذ وصف الإعلان تلقائياً..."
+                            className="text-sm min-h-[80px] border-green-300 focus:border-green-500"
+                            data-testid="textarea-tts-text"
+                          />
+                          <p className="text-xs text-muted-foreground">{ttsText.length} / 4096 حرف</p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <p className="text-xs font-medium text-green-700">الصوت:</p>
+                            <Select value={ttsVoice} onValueChange={setTtsVoice}>
+                              <SelectTrigger className="h-8 text-xs border-green-300" data-testid="select-tts-voice">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="nova">🎙️ Nova — نسائي ناعم</SelectItem>
+                                <SelectItem value="alloy">🎙️ Alloy — محايد</SelectItem>
+                                <SelectItem value="echo">🎙️ Echo — رجالي</SelectItem>
+                                <SelectItem value="fable">🎙️ Fable — دافئ</SelectItem>
+                                <SelectItem value="onyx">🎙️ Onyx — رجالي عميق</SelectItem>
+                                <SelectItem value="shimmer">🎙️ Shimmer — نسائي حيوي</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-xs font-medium text-green-700">السرعة: {ttsSpeed}x</p>
+                            <input
+                              type="range" min="0.5" max="2.0" step="0.1"
+                              value={ttsSpeed}
+                              onChange={e => setTtsSpeed(parseFloat(e.target.value))}
+                              className="w-full h-2 accent-green-600"
+                              data-testid="range-tts-speed"
+                            />
+                            <div className="flex justify-between text-xs text-muted-foreground">
+                              <span>بطيء</span><span>عادي</span><span>سريع</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <Button
+                          type="button"
+                          onClick={handleTextToSpeech}
+                          disabled={generatingTTS || !ttsText.trim()}
+                          className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white"
+                          data-testid="btn-gen-tts"
+                        >
+                          {generatingTTS ? (
+                            <><Loader2 className="w-4 h-4 animate-spin" /> جاري توليد الصوت...</>
+                          ) : (
+                            <><Volume2 className="w-4 h-4" /> ولّد الصوت الطبيعي</>
+                          )}
+                        </Button>
+
+                        {ttsAudioUrl && (
+                          <div className="space-y-2 p-3 bg-white dark:bg-black/20 rounded-lg border border-green-200">
+                            <p className="text-xs font-bold text-green-600">✅ تم توليد الصوت!</p>
+                            <audio controls src={ttsAudioUrl} className="w-full" data-testid="audio-tts-result" />
+                            <a
+                              href={ttsAudioUrl}
+                              download
+                              className="flex items-center justify-center gap-1 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded-lg py-2 border border-green-300"
+                            >
+                              <Download className="w-3 h-3" /> تحميل ملف الصوت MP3
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Talking Photo Section */}
                     {(talkingPhotoText !== "" || talkingPhotoVideoUrl) && (

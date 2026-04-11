@@ -3578,6 +3578,37 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
+  // ─── AI TEXT TO SPEECH ──────────────────────────────────────────
+  app.post("/api/ai/text-to-speech", isAuthenticated, checkAiCredits, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { text, voice = "nova", speed = 1.0 } = req.body;
+      if (!text) return res.status(400).json({ message: "النص مطلوب" });
+      if (text.length > 4096) return res.status(400).json({ message: "النص طويل جداً (الحد الأقصى 4096 حرف)" });
+
+      const mp3 = await openai.audio.speech.create({
+        model: "tts-1-hd",
+        voice: voice as any,
+        input: text,
+        speed: Math.min(Math.max(speed, 0.25), 4.0),
+      });
+
+      const buffer = Buffer.from(await mp3.arrayBuffer());
+      const filename = `tts-${Date.now()}.mp3`;
+      const savePath = path.join(process.cwd(), 'uploads', filename);
+      fs.writeFileSync(savePath, buffer);
+      const audioUrl = `/uploads/${filename}`;
+
+      await storage.recordAiUsage(userId, 'tts');
+      if (req.aiChargeEGP) {
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد صوت بالذكاء الاصطناعي', channelId: null, campaignId: null });
+      }
+      res.json({ audioUrl });
+    } catch (error: any) {
+      res.status(500).json({ message: "فشل توليد الصوت: " + error.message });
+    }
+  });
+
   // ─── D-ID TALKING PHOTO ─────────────────────────────────────────
   app.post("/api/ai/talking-photo", isAuthenticated, checkAiCredits, async (req: any, res) => {
     try {
