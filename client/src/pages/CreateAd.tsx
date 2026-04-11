@@ -82,6 +82,8 @@ export default function CreateAd() {
   const [talkingPhotoVoice, setTalkingPhotoVoice] = useState("ar-EG-SalmaNeural");
   const [generatingTalkingPhoto, setGeneratingTalkingPhoto] = useState(false);
   const [generatingProScript, setGeneratingProScript] = useState(false);
+  const [generatingAll, setGeneratingAll] = useState(false);
+  const [generateAllStep, setGenerateAllStep] = useState("");
   const [talkingPhotoVideoUrl, setTalkingPhotoVideoUrl] = useState("");
   const [talkingPhotoFaceUrl, setTalkingPhotoFaceUrl] = useState("/uploads/avatar-male-1.jpg");
   const [showTalkingPhotoPanel, setShowTalkingPhotoPanel] = useState(false);
@@ -412,6 +414,71 @@ export default function CreateAd() {
     const text = `${scene.narration || scene.visual}`;
     speakEgyptian(text);
     setTimeout(() => setSpeakingScene(null), 3000);
+  };
+
+  const handleGenerateAll = async () => {
+    const { productName, adTitle, targetAudience, customPrompt, language: lang } = form.getValues();
+    if (!productName) { toast({ variant: "destructive", title: "أدخل اسم المنتج / الخدمة أولاً" }); return; }
+    setGeneratingAll(true);
+    try {
+      // ─── Step 1: Generate copy ────────────────────────────────────
+      setGenerateAllStep("📝 (1/4) جاري توليد النص التسويقي...");
+      const copyRes = await fetch("/api/ai/generate-copy", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ productName, targetAudience, adTitle, customPrompt, language: lang }),
+      });
+      const copyData = await copyRes.json();
+      if (!copyRes.ok) throw new Error(copyData.message || "فشل توليد النص");
+      form.setValue("title", copyData.title || "");
+      form.setValue("description", copyData.description || "");
+      const adDesc = copyData.description || copyData.title || productName;
+
+      // ─── Step 2: Generate image ───────────────────────────────────
+      setGenerateAllStep("🎨 (2/4) جاري توليد صورة الإعلان...");
+      const imgPrompt = `Professional Arabic advertisement image for ${adTitle || productName}. ${customPrompt || ""} High quality, vibrant colors, suitable for Egyptian market.`;
+      const imgRes = await fetch("/api/ai/generate-image", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ prompt: imgPrompt, size: "1024x1024" }),
+      });
+      const imgData = await imgRes.json();
+      if (!imgRes.ok) throw new Error(imgData.message || "فشل توليد الصورة");
+      setAiImageUrl(imgData.url);
+
+      // ─── Step 3: Improve script ───────────────────────────────────
+      setGenerateAllStep("✨ (3/4) جاري تحسين سكريبت الفيديو...");
+      const scriptRes = await fetch("/api/ai/generate-copy", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({
+          productName, targetAudience, adTitle,
+          customPrompt: `حوّل النص التالي إلى سكريبت فيديو تسويقي قصير (30-40 ثانية) باللهجة المصرية العامية. يكون حماسي وجذاب وينتهي بدعوة للتسجيل أو الشراء. النص: ${adDesc}. اكتب السكريبت فقط بدون أي شرح إضافي، من 3 إلى 5 جمل قصيرة.`,
+          language: lang,
+        }),
+      });
+      const scriptData = await scriptRes.json();
+      const proScript = scriptData.description || scriptData.title || adDesc;
+      setTalkingPhotoText(proScript);
+      setShowTalkingPhotoPanel(true);
+
+      // ─── Step 4: Generate talking photo ──────────────────────────
+      setGenerateAllStep("🎭 (4/4) جاري توليد الفيديو الناطق... (30-60 ثانية)");
+      const talkRes = await fetch("/api/ai/talking-photo", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ imageUrl: talkingPhotoFaceUrl, text: proScript, voiceId: talkingPhotoVoice }),
+      });
+      const talkData = await talkRes.json();
+      if (!talkRes.ok) throw new Error(talkData.message || "فشل توليد الفيديو");
+      setTalkingPhotoVideoUrl(talkData.videoUrl);
+      form.setValue("mediaUrl", talkData.videoUrl);
+      form.setValue("mediaType", "video");
+
+      setGenerateAllStep("");
+      toast({ title: "🚀 تم توليد الإعلان الكامل بالذكاء الاصطناعي!", description: "نص + صورة + فيديو ناطق — كل شيء جاهز!", className: "bg-green-600 text-white border-none" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "خطأ في التوليد", description: e.message });
+      setGenerateAllStep("");
+    } finally {
+      setGeneratingAll(false);
+    }
   };
 
   const handleImproveScript = async () => {
@@ -857,6 +924,29 @@ export default function CreateAd() {
                           </Button>
                         )}
                       </div>
+                    </div>
+
+                    {/* ─── Generate All Button ─── */}
+                    <div className="rounded-xl border-2 border-dashed border-purple-400 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-950/30 dark:to-blue-950/30 p-3 space-y-2">
+                      <Button
+                        type="button"
+                        onClick={handleGenerateAll}
+                        disabled={generatingAll}
+                        className="w-full gap-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold text-sm h-11 rounded-lg shadow-md"
+                        data-testid="btn-generate-all"
+                      >
+                        {generatingAll ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+                        {generatingAll ? generateAllStep : "🚀 ولّد الكل — نص + صورة + فيديو ناطق (ضغطة واحدة)"}
+                      </Button>
+                      {generatingAll && (
+                        <div className="w-full bg-purple-200 dark:bg-purple-900 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className="bg-purple-600 h-1.5 rounded-full transition-all duration-1000"
+                            style={{ width: generateAllStep.includes("1/4") ? "25%" : generateAllStep.includes("2/4") ? "50%" : generateAllStep.includes("3/4") ? "75%" : generateAllStep.includes("4/4") ? "90%" : "0%" }}
+                          />
+                        </div>
+                      )}
+                      {!generatingAll && <p className="text-center text-xs text-muted-foreground">أو استخدم الأدوات منفردة 👇</p>}
                     </div>
 
                     <div className="flex flex-wrap gap-2">
