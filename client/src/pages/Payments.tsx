@@ -12,16 +12,17 @@ import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartp
 import { SiGoogleplay, SiHuawei } from "react-icons/si";
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {
-  ad_boost:   "⚡ تعزيز إعلان",
-  campaign:   "📣 حملة إعلانية",
-  renewal:    "🔄 تجديد إعلان 7 أيام",
-  renewal_30: "🔄 تجديد إعلان 30 يوم",
-  ai_image:   "🖼️ ذكاء: صورة",
-  ai_video:   "🎬 ذكاء: فيديو",
-  ai_content: "✍️ ذكاء: محتوى",
-  ai_credits: "🤖 رصيد ذكاء",
-  withdrawal: "🏧 سحب أرباح",
-  other:      "📦 أخرى",
+  ad_boost:      "⚡ تعزيز إعلان",
+  campaign:      "📣 حملة إعلانية",
+  renewal:       "🔄 تجديد إعلان 7 أيام",
+  renewal_30:    "🔄 تجديد إعلان 30 يوم",
+  ai_image:      "🖼️ ذكاء: صورة",
+  ai_video:      "🎬 ذكاء: فيديو",
+  ai_content:    "✍️ ذكاء: محتوى",
+  ai_credits:    "🤖 رصيد ذكاء",
+  talking_photo: "🗣️ فيديو متكلم بصوت طبيعي",
+  withdrawal:    "🏧 سحب أرباح",
+  other:         "📦 أخرى",
 };
 
 function buildServiceTypes(p: Record<string, string>) {
@@ -33,11 +34,12 @@ function buildServiceTypes(p: Record<string, string>) {
       { value: "campaign",   label: "📣 حملة إعلانية",    price: `من ${fmt(p.campaign_min_budget_egp)}`, desc: "CPM=" + fmt(p.cpm_rate_egp) + " / نقرة=" + fmt(p.cpc_rate_egp), amount: num(p.campaign_min_budget_egp) },
       { value: "renewal",    label: "🔄 تجديد 7 أيام",    price: fmt(p.renewal_price_7 || "50"),  desc: "7 أيام ← الأكثر طلباً 🔥",  amount: num(p.renewal_price_7 || "50") },
       { value: "renewal_30", label: "🔄 تجديد 30 يوم",   price: fmt(p.renewal_price_30),         desc: "تمديد صلاحية إعلانك شهر",   amount: num(p.renewal_price_30) },
-      { value: "ai_image",   label: "🖼️ ذكاء: صورة",     price: fmt(p.ai_price_image),          desc: "توليد صورة بالذكاء",        amount: num(p.ai_price_image) },
-      { value: "ai_video",   label: "🎬 ذكاء: فيديو",     price: fmt(p.ai_price_video),          desc: "إنشاء مقطع فيديو",          amount: num(p.ai_price_video) },
-      { value: "ai_content", label: "✍️ ذكاء: محتوى",    price: fmt(p.ai_price_content),        desc: "كتابة نص إعلاني",           amount: num(p.ai_price_content) },
-      { value: "ai_credits", label: "🤖 رصيد ذكاء",      price: fmt(p.ai_price_per_credit_egp) + "/كريدت", desc: `${p.ai_free_credits || 3} مجاناً`, amount: num(p.ai_price_per_credit_egp) },
-      { value: "other",      label: "📦 أخرى",            price: "",                              desc: "أي خدمة أخرى",              amount: 0 },
+      { value: "ai_image",      label: "🖼️ ذكاء: صورة",          price: fmt(p.ai_price_image),          desc: "توليد صورة بالذكاء",                    amount: num(p.ai_price_image) },
+      { value: "ai_video",      label: "🎬 ذكاء: فيديو",          price: fmt(p.ai_price_video),          desc: "إنشاء مقطع فيديو",                      amount: num(p.ai_price_video) },
+      { value: "ai_content",    label: "✍️ ذكاء: محتوى",         price: fmt(p.ai_price_content),        desc: "كتابة نص إعلاني",                       amount: num(p.ai_price_content) },
+      { value: "ai_credits",    label: "🤖 رصيد ذكاء",            price: fmt(p.ai_price_per_credit_egp) + "/كريدت", desc: `${p.ai_free_credits || 3} مجاناً`, amount: num(p.ai_price_per_credit_egp) },
+      { value: "talking_photo", label: "🗣️ فيديو متكلم بصوت طبيعي", price: "100 ج.م",                  desc: "خضار، منتج، شخص — أي صورة تتكلم 🔥",   amount: 100 },
+      { value: "other",         label: "📦 أخرى",                  price: "",                              desc: "أي خدمة أخرى",                          amount: 0 },
     ],
     withdrawal: [
       { value: "withdrawal", label: "🏧 سحب أرباح",  price: `أدنى ${fmt(p.wallet_min_withdrawal_egp || "100")}`, desc: "تحويل أرباحك", amount: 0 },
