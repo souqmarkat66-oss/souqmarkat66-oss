@@ -453,6 +453,8 @@ export default function CreateAd() {
       const imgData = await imgRes.json();
       if (!imgRes.ok) { setStep(1,"error"); throw new Error(imgData.message || "فشل توليد الصورة"); }
       setAiImageUrl(imgData.url);
+      form.setValue("mediaUrl", imgData.url);
+      form.setValue("mediaType", "image");
       setAllPreview(p => ({ ...p, imageUrl: imgData.url }));
       setStep(1,"done"); setStep(2,"loading");
 

@@ -4438,7 +4438,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // GET /api/admin/ai-pricing — get AI pricing settings
   app.get("/api/admin/ai-pricing", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
+    if (!isAdminUser(req)) return res.status(403).json({ message: "forbidden" });
     try {
       const keys = ['ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post','ai_free_credits','ai_price_per_credit_egp','ai_referral_bonus_egp'];
       const rows = await db.execute(sql`SELECT key, value FROM platform_settings WHERE key IN (${sql.join(keys.map(k => sql`${k}`), sql`, `)})`);
@@ -4450,7 +4450,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // POST /api/admin/ai-pricing — update AI pricing settings
   app.post("/api/admin/ai-pricing", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
+    if (!isAdminUser(req)) return res.status(403).json({ message: "forbidden" });
     try {
       const { settings } = req.body;
       for (const [key, value] of Object.entries(settings)) {
@@ -4491,7 +4491,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   app.get("/api/admin/pricing", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
+    if (!isAdminUser(req)) return res.status(403).json({ message: "forbidden" });
     try {
       const keys = [
         'cpm_rate_egp','cpc_rate_egp','publisher_share_pct','campaign_min_budget_egp',
@@ -4510,7 +4510,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // POST /api/admin/pricing — update platform pricing settings
   app.post("/api/admin/pricing", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
+    if (!isAdminUser(req)) return res.status(403).json({ message: "forbidden" });
     try {
       const { settings } = req.body;
       const allowed = [
