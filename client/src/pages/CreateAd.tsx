@@ -84,6 +84,11 @@ export default function CreateAd() {
   const [generatingProScript, setGeneratingProScript] = useState(false);
   const [generatingAll, setGeneratingAll] = useState(false);
   const [generateAllStep, setGenerateAllStep] = useState("");
+  type StepSt = "idle" | "loading" | "done" | "error";
+  const [allSteps, setAllSteps] = useState<StepSt[]>(["idle","idle","idle","idle"]);
+  const [allPreview, setAllPreview] = useState<{ text?: string; imageUrl?: string; script?: string; videoUrl?: string }>({});
+  const [allFinished, setAllFinished] = useState(false);
+  const setStep = (i: number, st: StepSt) => setAllSteps(prev => { const n=[...prev]; n[i]=st; return n; });
   const [talkingPhotoVideoUrl, setTalkingPhotoVideoUrl] = useState("");
   const [talkingPhotoFaceUrl, setTalkingPhotoFaceUrl] = useState("/uploads/avatar-male-1.jpg");
   const [showTalkingPhotoPanel, setShowTalkingPhotoPanel] = useState(false);
@@ -420,37 +425,44 @@ export default function CreateAd() {
     const { productName, adTitle, targetAudience, customPrompt, language: lang } = form.getValues();
     if (!productName) { toast({ variant: "destructive", title: "أدخل اسم المنتج / الخدمة أولاً" }); return; }
     setGeneratingAll(true);
+    setAllFinished(false);
+    setAllPreview({});
+    setAllSteps(["loading","idle","idle","idle"]);
     try {
       // ─── Step 1: Generate copy ────────────────────────────────────
-      setGenerateAllStep("📝 (1/4) جاري توليد النص التسويقي...");
+      setGenerateAllStep("توليد النص التسويقي...");
       const copyRes = await fetch("/api/ai/generate-copy", {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
         body: JSON.stringify({ productName, targetAudience, adTitle, customPrompt, language: lang }),
       });
       const copyData = await copyRes.json();
-      if (!copyRes.ok) throw new Error(copyData.message || "فشل توليد النص");
+      if (!copyRes.ok) { setStep(0,"error"); throw new Error(copyData.message || "فشل توليد النص"); }
       form.setValue("title", copyData.title || "");
       form.setValue("description", copyData.description || "");
       const adDesc = copyData.description || copyData.title || productName;
+      setAllPreview(p => ({ ...p, text: copyData.title }));
+      setStep(0,"done"); setStep(1,"loading");
 
       // ─── Step 2: Generate image ───────────────────────────────────
-      setGenerateAllStep("🎨 (2/4) جاري توليد صورة الإعلان...");
-      const imgPrompt = `Professional Arabic advertisement image for ${adTitle || productName}. ${customPrompt || ""} High quality, vibrant colors, suitable for Egyptian market.`;
+      setGenerateAllStep("توليد صورة الإعلان...");
+      const imgPrompt = `Professional Arabic advertisement image for ${adTitle || productName}. ${customPrompt || ""} High quality, vibrant colors, modern design, suitable for Egyptian market.`;
       const imgRes = await fetch("/api/ai/generate-image", {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
         body: JSON.stringify({ prompt: imgPrompt, size: "1024x1024" }),
       });
       const imgData = await imgRes.json();
-      if (!imgRes.ok) throw new Error(imgData.message || "فشل توليد الصورة");
+      if (!imgRes.ok) { setStep(1,"error"); throw new Error(imgData.message || "فشل توليد الصورة"); }
       setAiImageUrl(imgData.url);
+      setAllPreview(p => ({ ...p, imageUrl: imgData.url }));
+      setStep(1,"done"); setStep(2,"loading");
 
-      // ─── Step 3: Improve script ───────────────────────────────────
-      setGenerateAllStep("✨ (3/4) جاري تحسين سكريبت الفيديو...");
+      // ─── Step 3: Script ───────────────────────────────────────────
+      setGenerateAllStep("كتابة السكريبت الاحترافي...");
       const scriptRes = await fetch("/api/ai/generate-copy", {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
         body: JSON.stringify({
           productName, targetAudience, adTitle,
-          customPrompt: `حوّل النص التالي إلى سكريبت فيديو تسويقي قصير (30-40 ثانية) باللهجة المصرية العامية. يكون حماسي وجذاب وينتهي بدعوة للتسجيل أو الشراء. النص: ${adDesc}. اكتب السكريبت فقط بدون أي شرح إضافي، من 3 إلى 5 جمل قصيرة.`,
+          customPrompt: `حوّل النص التالي إلى سكريبت فيديو تسويقي قصير (30-40 ثانية) باللهجة المصرية العامية. يكون حماسي وجذاب وينتهي بدعوة للتسجيل أو الشراء. النص: ${adDesc}. اكتب السكريبت فقط بدون أي شرح، من 3 إلى 5 جمل قصيرة فقط.`,
           language: lang,
         }),
       });
@@ -458,21 +470,26 @@ export default function CreateAd() {
       const proScript = scriptData.description || scriptData.title || adDesc;
       setTalkingPhotoText(proScript);
       setShowTalkingPhotoPanel(true);
+      setAllPreview(p => ({ ...p, script: proScript }));
+      setStep(2,"done"); setStep(3,"loading");
 
-      // ─── Step 4: Generate talking photo ──────────────────────────
-      setGenerateAllStep("🎭 (4/4) جاري توليد الفيديو الناطق... (30-60 ثانية)");
+      // ─── Step 4: Talking photo ────────────────────────────────────
+      setGenerateAllStep("توليد الفيديو الناطق...");
       const talkRes = await fetch("/api/ai/talking-photo", {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
         body: JSON.stringify({ imageUrl: talkingPhotoFaceUrl, text: proScript, voiceId: talkingPhotoVoice }),
       });
       const talkData = await talkRes.json();
-      if (!talkRes.ok) throw new Error(talkData.message || "فشل توليد الفيديو");
+      if (!talkRes.ok) { setStep(3,"error"); throw new Error(talkData.message || "فشل توليد الفيديو"); }
       setTalkingPhotoVideoUrl(talkData.videoUrl);
       form.setValue("mediaUrl", talkData.videoUrl);
       form.setValue("mediaType", "video");
+      setAllPreview(p => ({ ...p, videoUrl: talkData.videoUrl }));
+      setStep(3,"done");
 
-      setGenerateAllStep("");
-      toast({ title: "🚀 تم توليد الإعلان الكامل بالذكاء الاصطناعي!", description: "نص + صورة + فيديو ناطق — كل شيء جاهز!", className: "bg-green-600 text-white border-none" });
+      setGenerateAllStep("done");
+      setAllFinished(true);
+      toast({ title: "🎉 إعلانك الكامل جاهز!", description: "نص + صورة + سكريبت + فيديو ناطق ✅", className: "bg-green-600 text-white border-none" });
     } catch (e: any) {
       toast({ variant: "destructive", title: "خطأ في التوليد", description: e.message });
       setGenerateAllStep("");
@@ -926,27 +943,104 @@ export default function CreateAd() {
                       </div>
                     </div>
 
-                    {/* ─── Generate All Button ─── */}
-                    <div className="rounded-xl border-2 border-dashed border-purple-400 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-950/30 dark:to-blue-950/30 p-3 space-y-2">
-                      <Button
-                        type="button"
-                        onClick={handleGenerateAll}
-                        disabled={generatingAll}
-                        className="w-full gap-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold text-sm h-11 rounded-lg shadow-md"
-                        data-testid="btn-generate-all"
-                      >
-                        {generatingAll ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-                        {generatingAll ? generateAllStep : "🚀 ولّد الكل — نص + صورة + فيديو ناطق (ضغطة واحدة)"}
-                      </Button>
-                      {generatingAll && (
-                        <div className="w-full bg-purple-200 dark:bg-purple-900 rounded-full h-1.5 overflow-hidden">
-                          <div
-                            className="bg-purple-600 h-1.5 rounded-full transition-all duration-1000"
-                            style={{ width: generateAllStep.includes("1/4") ? "25%" : generateAllStep.includes("2/4") ? "50%" : generateAllStep.includes("3/4") ? "75%" : generateAllStep.includes("4/4") ? "90%" : "0%" }}
-                          />
+                    {/* ─── AI Studio: Generate All ─── */}
+                    <div className="rounded-2xl border border-purple-200 dark:border-purple-800 bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 dark:from-purple-950/40 dark:via-blue-950/30 dark:to-indigo-950/30 overflow-hidden shadow-sm">
+                      {/* Header */}
+                      <div className="bg-gradient-to-r from-purple-600 to-blue-600 px-4 py-3 flex items-center gap-2">
+                        <Sparkles className="w-5 h-5 text-white" />
+                        <div>
+                          <p className="text-white font-bold text-sm">استوديو الإعلان الذكي</p>
+                          <p className="text-purple-200 text-xs">نص + صورة + سكريبت + فيديو ناطق — بضغطة واحدة</p>
                         </div>
-                      )}
-                      {!generatingAll && <p className="text-center text-xs text-muted-foreground">أو استخدم الأدوات منفردة 👇</p>}
+                        {allFinished && <CheckCircle2 className="w-6 h-6 text-green-300 mr-auto" />}
+                      </div>
+
+                      <div className="p-4 space-y-3">
+                        {/* Step tracker */}
+                        <div className="grid grid-cols-4 gap-2">
+                          {[
+                            { icon: "📝", label: "النص", sub: allPreview.text ? allPreview.text.slice(0,20)+"..." : "النص التسويقي" },
+                            { icon: "🎨", label: "الصورة", sub: allPreview.imageUrl ? "تم ✓" : "صورة AI" },
+                            { icon: "✨", label: "السكريبت", sub: allPreview.script ? allPreview.script.slice(0,20)+"..." : "سكريبت الفيديو" },
+                            { icon: "🎭", label: "الفيديو", sub: allPreview.videoUrl ? "جاهز ✓" : "الناطق" },
+                          ].map((s, i) => (
+                            <div key={i} className={`relative rounded-xl p-2 text-center border-2 transition-all duration-300 ${
+                              allSteps[i] === "done" ? "border-green-400 bg-green-50 dark:bg-green-950/30" :
+                              allSteps[i] === "loading" ? "border-purple-400 bg-purple-50 dark:bg-purple-950/30 animate-pulse" :
+                              allSteps[i] === "error" ? "border-red-400 bg-red-50 dark:bg-red-950/30" :
+                              "border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-black/10"
+                            }`}>
+                              <div className="text-xl mb-0.5">{s.icon}</div>
+                              <p className="text-xs font-bold text-foreground">{s.label}</p>
+                              {allSteps[i] === "done" && <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center"><CheckCircle2 className="w-3 h-3 text-white" /></div>}
+                              {allSteps[i] === "loading" && <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-purple-500 rounded-full flex items-center justify-center"><Loader2 className="w-2.5 h-2.5 text-white animate-spin" /></div>}
+                              {allSteps[i] === "idle" && <div className="w-2 h-2 rounded-full bg-gray-300 mx-auto mt-0.5" />}
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Progress bar */}
+                        {(generatingAll || allFinished) && (
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-xs text-muted-foreground">
+                              <span>{generateAllStep === "done" ? "✅ اكتمل!" : generateAllStep}</span>
+                              <span>{allSteps.filter(s => s === "done").length * 25}%</span>
+                            </div>
+                            <div className="w-full bg-purple-100 dark:bg-purple-900/40 rounded-full h-2 overflow-hidden">
+                              <div
+                                className="bg-gradient-to-r from-purple-500 to-blue-500 h-2 rounded-full transition-all duration-700"
+                                style={{ width: `${allSteps.filter(s => s === "done").length * 25}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Previews */}
+                        {(allPreview.imageUrl || allPreview.videoUrl) && (
+                          <div className="flex gap-2">
+                            {allPreview.imageUrl && (
+                              <div className="flex-1 rounded-lg overflow-hidden border border-purple-200 aspect-square max-h-20">
+                                <img src={allPreview.imageUrl} className="w-full h-full object-cover" alt="صورة الإعلان" />
+                              </div>
+                            )}
+                            {allPreview.videoUrl && (
+                              <div className="flex-1 rounded-lg overflow-hidden border-2 border-green-400">
+                                <video src={allPreview.videoUrl} controls className="w-full h-full max-h-20 object-cover" />
+                              </div>
+                            )}
+                            {allPreview.text && (
+                              <div className="flex-1 rounded-lg p-2 bg-white dark:bg-black/20 border border-purple-200 flex items-center">
+                                <p className="text-xs text-foreground line-clamp-3 text-right">{allPreview.text}</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Launch button */}
+                        <Button
+                          type="button"
+                          onClick={allFinished ? () => { setAllFinished(false); setAllSteps(["idle","idle","idle","idle"]); setAllPreview({}); } : handleGenerateAll}
+                          disabled={generatingAll}
+                          className={`w-full gap-2 font-bold h-11 rounded-xl text-sm shadow transition-all ${
+                            allFinished
+                              ? "bg-green-600 hover:bg-green-700 text-white"
+                              : "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
+                          }`}
+                          data-testid="btn-generate-all"
+                        >
+                          {generatingAll ? (
+                            <><Loader2 className="w-5 h-5 animate-spin" /> جاري التوليد — انتظر دقيقة واحدة...</>
+                          ) : allFinished ? (
+                            <><CheckCircle2 className="w-5 h-5" /> إعلانك جاهز! — اضغط لبدء من جديد</>
+                          ) : (
+                            <><Sparkles className="w-5 h-5" /> 🚀 ابدأ التوليد التلقائي — كل شيء بضغطة واحدة</>
+                          )}
+                        </Button>
+
+                        {!generatingAll && !allFinished && (
+                          <p className="text-center text-xs text-muted-foreground">أو استخدم الأدوات منفردة 👇</p>
+                        )}
+                      </div>
                     </div>
 
                     <div className="flex flex-wrap gap-2">
