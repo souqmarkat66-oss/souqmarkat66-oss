@@ -1016,26 +1016,112 @@ export default function CreateAd() {
                           </div>
                         )}
 
-                        {/* Launch button */}
-                        <Button
-                          type="button"
-                          onClick={allFinished ? () => { setAllFinished(false); setAllSteps(["idle","idle","idle","idle"]); setAllPreview({}); } : handleGenerateAll}
-                          disabled={generatingAll}
-                          className={`w-full gap-2 font-bold h-11 rounded-xl text-sm shadow transition-all ${
-                            allFinished
-                              ? "bg-green-600 hover:bg-green-700 text-white"
-                              : "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
-                          }`}
-                          data-testid="btn-generate-all"
-                        >
-                          {generatingAll ? (
-                            <><Loader2 className="w-5 h-5 animate-spin" /> جاري التوليد — انتظر دقيقة واحدة...</>
-                          ) : allFinished ? (
-                            <><CheckCircle2 className="w-5 h-5" /> إعلانك جاهز! — اضغط لبدء من جديد</>
-                          ) : (
-                            <><Sparkles className="w-5 h-5" /> 🚀 ابدأ التوليد التلقائي — كل شيء بضغطة واحدة</>
-                          )}
-                        </Button>
+                        {/* Launch / Publish / Share buttons */}
+                        {allFinished ? (
+                          <div className="space-y-2">
+                            {/* Publish now */}
+                            <Button
+                              type="button"
+                              onClick={() => form.handleSubmit(onSubmit)()}
+                              className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white font-bold h-11 rounded-xl text-sm shadow"
+                              data-testid="btn-publish-now"
+                            >
+                              <CheckCircle2 className="w-5 h-5" /> 🚀 انشر الإعلان الآن على المنصة
+                            </Button>
+
+                            {/* Download + Share row */}
+                            <div className="grid grid-cols-2 gap-2">
+                              {/* Download video */}
+                              {allPreview.videoUrl && (
+                                <a
+                                  href={allPreview.videoUrl}
+                                  download="my-ad-video.mp4"
+                                  className="flex items-center justify-center gap-1.5 bg-purple-100 hover:bg-purple-200 text-purple-700 font-medium text-xs rounded-lg py-2.5 border border-purple-300 transition-colors"
+                                  data-testid="btn-download-video"
+                                >
+                                  <Download className="w-3.5 h-3.5" /> تحميل الفيديو
+                                </a>
+                              )}
+                              {/* Download image */}
+                              {allPreview.imageUrl && (
+                                <a
+                                  href={allPreview.imageUrl}
+                                  download="my-ad-image.jpg"
+                                  className="flex items-center justify-center gap-1.5 bg-blue-100 hover:bg-blue-200 text-blue-700 font-medium text-xs rounded-lg py-2.5 border border-blue-300 transition-colors"
+                                  data-testid="btn-download-image"
+                                >
+                                  <Download className="w-3.5 h-3.5" /> تحميل الصورة
+                                </a>
+                              )}
+                            </div>
+
+                            {/* Social share */}
+                            <div className="space-y-1">
+                              <p className="text-xs text-center text-muted-foreground font-medium">شارك على منصاتك</p>
+                              <div className="flex gap-2 justify-center flex-wrap">
+                                {/* WhatsApp */}
+                                <a
+                                  href={`https://wa.me/?text=${encodeURIComponent((allPreview.text || form.getValues("title") || "") + "\n\n" + window.location.origin)}`}
+                                  target="_blank" rel="noopener noreferrer"
+                                  className="flex items-center gap-1 bg-green-500 hover:bg-green-600 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+                                  data-testid="btn-share-whatsapp"
+                                >
+                                  📱 واتساب
+                                </a>
+                                {/* Facebook */}
+                                <a
+                                  href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.origin)}&quote=${encodeURIComponent(allPreview.text || form.getValues("title") || "")}`}
+                                  target="_blank" rel="noopener noreferrer"
+                                  className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+                                  data-testid="btn-share-facebook"
+                                >
+                                  📘 فيسبوك
+                                </a>
+                                {/* Twitter/X */}
+                                <a
+                                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent((allPreview.text || form.getValues("title") || "") + " " + window.location.origin)}`}
+                                  target="_blank" rel="noopener noreferrer"
+                                  className="flex items-center gap-1 bg-black hover:bg-gray-800 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+                                  data-testid="btn-share-twitter"
+                                >
+                                  𝕏 تويتر
+                                </a>
+                                {/* Copy link */}
+                                <button
+                                  type="button"
+                                  onClick={() => { navigator.clipboard.writeText(window.location.origin); toast({ title: "✅ تم نسخ الرابط!" }); }}
+                                  className="flex items-center gap-1 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-foreground text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+                                  data-testid="btn-copy-link"
+                                >
+                                  🔗 نسخ الرابط
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Reset */}
+                            <button
+                              type="button"
+                              onClick={() => { setAllFinished(false); setAllSteps(["idle","idle","idle","idle"]); setAllPreview({}); }}
+                              className="w-full text-xs text-muted-foreground hover:text-foreground text-center py-1 transition-colors"
+                            >
+                              ↩ بدء إعلان جديد من الصفر
+                            </button>
+                          </div>
+                        ) : (
+                          <Button
+                            type="button"
+                            onClick={handleGenerateAll}
+                            disabled={generatingAll}
+                            className="w-full gap-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold h-11 rounded-xl text-sm shadow"
+                            data-testid="btn-generate-all"
+                          >
+                            {generatingAll ? (
+                              <><Loader2 className="w-5 h-5 animate-spin" /> جاري التوليد — انتظر دقيقة واحدة...</>
+                            ) : (
+                              <><Sparkles className="w-5 h-5" /> 🚀 ابدأ التوليد التلقائي — كل شيء بضغطة واحدة</>
+                            )}
+                          </Button>
+                        )}
 
                         {!generatingAll && !allFinished && (
                           <p className="text-center text-xs text-muted-foreground">أو استخدم الأدوات منفردة 👇</p>
