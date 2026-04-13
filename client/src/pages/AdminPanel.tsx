@@ -114,6 +114,14 @@ export default function AdminPanel() {
     }).catch(() => {});
   }, []);
 
+  // Must be called before any conditional returns (Rules of Hooks)
+  const { data: pendingCounts = { payments: 0, walletcharges: 0, ads: 0, boostorders: 0, renewalorders: 0 } } = useQuery<any>({
+    queryKey: ["/api/admin/pending-counts"],
+    queryFn: () => fetch("/api/admin/pending-counts", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 20000,
+    enabled: !!isAdmin && pinUnlocked,
+  });
+
   if (isAdmin && !pinUnlocked) {
     return <AdminPinLock onUnlocked={() => setPinUnlocked(true)} />;
   }
@@ -131,12 +139,6 @@ export default function AdminPanel() {
     window.location.replace("/my-dashboard");
     return null;
   }
-
-  const { data: pendingCounts = { payments: 0, walletcharges: 0, ads: 0 } } = useQuery<any>({
-    queryKey: ["/api/admin/pending-counts"],
-    queryFn: () => fetch("/api/admin/pending-counts", { credentials: "include" }).then(r => r.json()),
-    refetchInterval: 20000,
-  });
 
   return (
     <div className="flex h-screen overflow-hidden bg-background" dir="rtl">
