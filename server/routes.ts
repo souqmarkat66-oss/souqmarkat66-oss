@@ -705,13 +705,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending') RETURNING *`,
       [userId, userName || null, packageId || null, coins, amountEGP, paymentMethod, paymentRef || null, screenshotUrl || null]
     );
-    // Notify admin
+    // Notify admins about new coin purchase
     try {
-      const adminId = "54219806";
-      await pool.query(
-        `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coin_purchase', $2, $3)`,
-        [adminId, `طلب شحن عملات: ${userName || userId} دفع ${amountEGP} ج.م مقابل ${coins} عملة`, JSON.stringify({ orderId: r.rows[0].id, paymentMethod })]
-      );
+      for (const adminId of [ADMIN_USER_ID, ADMIN_USER_ID2]) {
+        await createNotification(adminId, "system",
+          `🪙 طلب شحن عملات جديد`,
+          `${userName || userId} — ${coins} عملة مقابل ${amountEGP} ج.م (${paymentMethod})`,
+          "/admin"
+        );
+      }
     } catch (_) {}
     res.json({ success: true, order: r.rows[0], message: "تم استلام طلبك — سيتم تأكيد الشحن خلال دقائق" });
   });
@@ -774,9 +776,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       );
       // Notify user
       try {
-        await pool.query(
-          `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coins_approved', $2, $3)`,
-          [order.user_id, `✅ تم قبول طلب شحن ${order.coins} عملة وإضافتها لمحفظتك`, JSON.stringify({ orderId, coins: order.coins })]
+        await createNotification(order.user_id, "payment",
+          `✅ تم قبول طلب شحن العملات`,
+          `تمت إضافة ${order.coins} عملة إلى محفظتك بنجاح 🎉`,
+          "/coins"
         );
       } catch (_) {}
       return res.json({ success: true, message: `تم قبول الطلب وإضافة ${order.coins} عملة` });
@@ -788,9 +791,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         [adminNote || null, adminId, orderId]
       );
       try {
-        await pool.query(
-          `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coins_rejected', $2, $3)`,
-          [order.user_id, `❌ تم رفض طلب شحن العملات${adminNote ? ": " + adminNote : ""}`, JSON.stringify({ orderId })]
+        await createNotification(order.user_id, "payment",
+          `❌ تم رفض طلب شحن العملات`,
+          adminNote ? `سبب الرفض: ${adminNote}` : `للاستفسار تواصل مع الإدارة`,
+          "/coins"
         );
       } catch (_) {}
       return res.json({ success: true, message: "تم رفض الطلب" });
@@ -928,13 +932,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       [userId, amount, paymentMethod, effectivePaymentRef, safeScreenshotUrl, orderNumber]
     );
 
-    // Notify both admins
+    // Notify both admins about new wallet top-up request
     for (const adminId of [ADMIN_USER_ID, ADMIN_USER_ID2]) {
       try {
-        await pool.query(
-          `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'wallet_topup', $2, $3)`,
-          [adminId, `💰 طلب شحن محفظة: ${userName} — ${amount} ج.م — ${paymentMethod}`,
-           JSON.stringify({ orderId: r.rows[0].id, userId, amount, paymentMethod })]
+        await createNotification(adminId, "payment",
+          `💰 طلب شحن محفظة جديد`,
+          `${userName} — ${amount} ج.م عبر ${paymentMethod}`,
+          "/admin"
         );
       } catch (_) {}
     }
@@ -1009,10 +1013,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
         // Notify user (outside transaction — non-critical)
         try {
-          await pool.query(
-            `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'wallet_approved', $2, $3)`,
-            [order.user_id, `✅ تم قبول شحن محفظتك بمبلغ ${order.amount_egp} ج.م — رصيدك تم تحديثه`,
-             JSON.stringify({ orderId, amount: order.amount_egp })]
+          await createNotification(order.user_id, "payment",
+            `✅ تمت الموافقة على شحن محفظتك`,
+            `تم إضافة ${order.amount_egp} ج.م إلى رصيدك بنجاح 💰`,
+            "/wallet"
           );
         } catch (_) {}
         return res.json({ success: true, message: "تمت الموافقة وإضافة الرصيد" });
@@ -1024,10 +1028,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         await client.query("COMMIT");
 
         try {
-          await pool.query(
-            `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'wallet_rejected', $2, $3)`,
-            [order.user_id, `❌ تم رفض طلب شحن المحفظة${adminNote ? ": " + adminNote : ""}`,
-             JSON.stringify({ orderId })]
+          await createNotification(order.user_id, "payment",
+            `❌ تم رفض طلب شحن المحفظة`,
+            adminNote ? `سبب الرفض: ${adminNote}` : `للاستفسار تواصل مع الإدارة`,
+            "/wallet"
           );
         } catch (_) {}
         return res.json({ success: true, message: "تم رفض الطلب" });
@@ -5349,8 +5353,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // GET /api/renewal/orders — admin: list all pending renewal orders
-  app.get("/api/renewal/orders", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
+  app.get("/api/renewal/orders", isAuthenticated, requireAdmin, async (req: any, res) => {
     try {
       const rows = await db.execute(sql`
         SELECT ro.*, u.first_name, u.last_name, u.phone, a.title as ad_title
@@ -5364,8 +5367,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // PATCH /api/renewal/orders/:id — admin: confirm or reject renewal
-  app.patch("/api/renewal/orders/:id", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
+  app.patch("/api/renewal/orders/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { status } = req.body;
     try {
       const orderRow = await db.execute(sql`SELECT * FROM renewal_orders WHERE id = ${req.params.id} LIMIT 1`);
