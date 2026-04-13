@@ -73,13 +73,26 @@ export default function WalletPage() {
   });
 
   const topUpMutation = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/wallet/top-up", data),
+    mutationFn: async (data: any) => {
+      const res = await apiRequest("POST", "/api/wallet/top-up", data);
+      return res.json();
+    },
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["/api/wallet/balance"] });
-      toast({
-        title: "✅ تم إرسال طلب الشحن",
-        description: `رقم الطلب: ${data.orderNumber} — سيتم المراجعة وإضافة الرصيد قريباً`,
-      });
+      if (data?.souqOrderRef) {
+        // Show the Souq bank-transfer reference code prominently
+        toast({
+          title: "✅ تم إنشاء طلب الشحن",
+          description: `رمز التحويل البنكي: ${data.souqOrderRef} — أضفه في بيان التحويل ثم أرسل الإيصال`,
+        });
+      } else {
+        toast({
+          title: "✅ تم إرسال طلب الشحن",
+          description: data?.orderNumber
+            ? `رقم الطلب: ${data.orderNumber} — سيتم المراجعة وإضافة الرصيد قريباً`
+            : "سيتم مراجعة طلبك وإضافة الرصيد قريباً",
+        });
+      }
       setShowTopup(false);
       setAmount("");
       setPayRef("");

@@ -849,14 +849,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const amount = parseFloat(amountEGP);
     if (isNaN(amount) || amount <= 0) return res.status(400).json({ message: "مبلغ غير صالح" });
 
-    const orderNumber = `WLT-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).toUpperCase().slice(2, 6)}`;
     const userR = await pool.query(`SELECT first_name, last_name FROM users WHERE id = $1`, [userId]);
     const userName = `${userR.rows[0]?.first_name || ""} ${userR.rows[0]?.last_name || ""}`.trim() || userId;
+
+    // Generate order number — for Souq/البنك الأهلي, use a structured bank-transfer reference
+    const timestamp = Date.now();
+    const shortRand = Math.random().toString(36).toUpperCase().slice(2, 6);
+    const orderNumber = `WLT-${timestamp.toString(36).toUpperCase()}-${shortRand}`;
+
+    // For Souq method: generate a structured orderRef the user includes in their transfer description
+    let souqOrderRef: string | null = null;
+    if (paymentMethod === "souq") {
+      // Format: ADS-{userId_short}-{amount}-{timestamp_short}
+      const userShort = (userId || "").slice(-4).toUpperCase();
+      souqOrderRef = `ADS-${userShort}-${Math.round(amount)}-${shortRand}`;
+    }
+
+    const effectivePaymentRef = paymentRef || souqOrderRef || null;
 
     const r = await pool.query(
       `INSERT INTO wallet_top_up_orders (user_id, amount_egp, payment_method, payment_ref, screenshot_url, status, order_number)
        VALUES ($1, $2, $3, $4, $5, 'pending', $6) RETURNING *`,
-      [userId, amount, paymentMethod, paymentRef || null, screenshotUrl || null, orderNumber]
+      [userId, amount, paymentMethod, effectivePaymentRef, screenshotUrl || null, orderNumber]
     );
 
     // Notify both admins
@@ -870,7 +884,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       } catch (_) {}
     }
 
-    res.status(201).json({ success: true, order: r.rows[0], orderNumber });
+    res.status(201).json({
+      success: true,
+      order: r.rows[0],
+      orderNumber,
+      ...(souqOrderRef ? { souqOrderRef, message: `استخدم الرمز المرجعي ${souqOrderRef} في بيان التحويل البنكي` } : {}),
+    });
   });
 
   // GET /api/admin/wallet-topups — الأدمن يرى طلبات الشحن
@@ -5128,10 +5147,20 @@ Sitemap: ${BASE}/sitemap-pages.xml
       if (!ad) return res.status(404).json({ message: "الإعلان غير موجود" });
       if (ad.user_id !== userId) return res.status(403).json({ message: "غير مصرح" });
 
-      // Determine price from platform settings
-      const priceKey = durationDays <= 7 ? "renewal_price_7" : "renewal_price_30";
-      const priceRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = ${priceKey} LIMIT 1`);
-      const price = parseFloat((priceRow.rows[0] as any)?.value || (durationDays <= 7 ? "50" : "350"));
+      // Validate durationDays is supported (7 or 30; reject other values unless explicitly configured)
+      const ALLOWED_DURATIONS: Record<number, { key: string; defaultPrice: number }> = {
+        7:  { key: "renewal_price_7",  defaultPrice: 50 },
+        30: { key: "renewal_price_30", defaultPrice: 350 },
+        60: { key: "renewal_price_60", defaultPrice: 600 },
+        90: { key: "renewal_price_90", defaultPrice: 800 },
+      };
+      const durationConfig = ALLOWED_DURATIONS[durationDays as number];
+      if (!durationConfig) {
+        return res.status(400).json({ message: `مدة التجديد غير مدعومة: ${durationDays} يوم — الخيارات المتاحة: 7 / 30 / 60 / 90` });
+      }
+      // Fetch price from platform_settings; fall back to default if not configured
+      const priceRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = ${durationConfig.key} LIMIT 1`);
+      const price = parseFloat((priceRow.rows[0] as any)?.value || String(durationConfig.defaultPrice));
 
       // Atomic check-and-deduct using row lock
       const client = await pool.connect();
