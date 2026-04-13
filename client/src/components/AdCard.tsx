@@ -5,8 +5,7 @@ import { useLanguage } from "./LanguageProvider";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square, Heart, Star, Zap, CreditCard, Copy, Tag } from "lucide-react";
+import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square, Heart, Star, Zap, Copy, Tag } from "lucide-react";
 import { format } from "date-fns";
 import { ar, enUS } from "date-fns/locale";
 import { useAuth } from "@/hooks/use-auth";
@@ -134,9 +133,6 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
   const [cardVoice, setCardVoice] = useState<"nova" | "onyx">("nova");
   const [boosting, setBoosting]     = useState(false);
   const [boosted, setBoosted]       = useState(false);
-  const [boostPayDialog, setBoostPayDialog] = useState(false);
-  const [boostPrice, setBoostPrice] = useState(0);
-  const [payRef, setPayRef]         = useState("");
 
   const { data: favData } = useQuery<{ favorited: boolean }>({
     queryKey: ["/api/favorites", ad.id, "check"],
@@ -207,27 +203,31 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
     }
   };
 
-  const doBoost = async (paymentRef?: string) => {
+  const doBoost = async () => {
     setBoosting(true);
     try {
       const res = await fetch(`/api/ads/${ad.id}/boost-notify`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payment_ref: paymentRef || undefined }),
+        body: JSON.stringify({}),
       });
       const data = await res.json();
-      if (res.status === 402 && data.requiresPayment) {
-        setBoostPrice(data.price);
-        setBoostPayDialog(true);
+      if (res.status === 402 && data.requiresWalletTopup) {
+        toast({
+          variant: "destructive",
+          title: "💰 رصيد غير كافٍ",
+          description: `رصيدك ${data.balance} ج.م — التعزيز يحتاج ${data.price} ج.م. اضغط لشحن محفظتك`,
+          action: undefined,
+        });
+        setTimeout(() => { window.location.href = "/wallet"; }, 1800);
       } else if (res.status === 429) {
         toast({ variant: "destructive", title: "⏳ حد التعزيز", description: data.message });
       } else if (res.status === 403) {
         toast({ variant: "destructive", title: "🚫 التعزيز معطّل", description: data.message });
       } else if (res.ok) {
         setBoosted(true);
-        setBoostPayDialog(false);
         toast({
-          title: `🚀 تم إرسال الإشعار!`,
+          title: `🚀 تم التعزيز!`,
           description: data.notifiedCount > 0
             ? `وصل لـ ${data.notifiedCount} مستخدم`
             : "سيصل لجميع المستخدمين",
@@ -555,61 +555,6 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
         </CardContent>
       </Card>
 
-      {/* ── Boost Payment Dialog ── */}
-      <Dialog open={boostPayDialog} onOpenChange={setBoostPayDialog}>
-        <DialogContent dir="rtl" className="max-w-sm rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Zap className="w-5 h-5 text-orange-500" /> تعزيز الإعلان 🚀
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 text-sm">
-            <div className="bg-orange-50 dark:bg-orange-900/20 rounded-xl p-4 text-center">
-              <p className="text-2xl font-bold text-orange-600">{boostPrice} ج.م</p>
-              <p className="text-xs text-muted-foreground mt-1">رسوم التعزيز — مرة واحدة كل 30 يوم</p>
-            </div>
-            <div className="space-y-2 text-xs text-muted-foreground">
-              <p className="font-bold text-foreground">طرق الدفع المتاحة:</p>
-              {[
-                { name: "فودافون كاش", num: "01098553911" },
-                { name: "اتصالات كاش", num: "01126665741" },
-                { name: "إنستاباي",    num: "01285558567" },
-              ].map(({ name, num }) => (
-                <div key={num} className="flex items-center justify-between bg-muted/50 rounded-lg px-3 py-2">
-                  <span>{name}: <span className="font-mono font-bold">{num}</span></span>
-                  <button onClick={() => { navigator.clipboard.writeText(num); toast({ title: "✅ تم نسخ الرقم" }); }} className="text-primary hover:text-primary/80">
-                    <Copy className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium">رقم العملية / مرجع الدفع</label>
-              <input
-                value={payRef}
-                onChange={e => setPayRef(e.target.value)}
-                placeholder="أدخل رقم العملية بعد الدفع"
-                className="w-full border rounded-lg px-3 py-2 text-sm bg-background"
-                data-testid="input-boost-payref"
-              />
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={() => setBoostPayDialog(false)}>إلغاء</Button>
-              <Button
-                className="flex-1 bg-orange-500 hover:bg-orange-600 text-white gap-1.5"
-                disabled={!payRef.trim() || boosting}
-                onClick={() => doBoost(payRef.trim())}
-                data-testid="btn-confirm-boost-pay"
-              >
-                {boosting ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CreditCard className="w-4 h-4" /> تأكيد الدفع وتعزيز</>}
-              </Button>
-            </div>
-            <p className="text-[10px] text-muted-foreground text-center">
-              بعد الدفع، سيتم مراجعة رقم العملية وإرسال الإشعار لجميع المستخدمين
-            </p>
-          </div>
-        </DialogContent>
-      </Dialog>
     </motion.div>
   );
 }

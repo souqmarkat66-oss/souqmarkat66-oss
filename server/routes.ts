@@ -816,6 +816,133 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ================================================================
+  // EGP WALLET ROUTES — محفظة الجنيه المصري
+  // ================================================================
+
+  // GET /api/wallet/balance — الرصيد الحالي + آخر المعاملات
+  app.get("/api/wallet/balance", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const userR = await pool.query(`SELECT balance_egp FROM users WHERE id = $1`, [userId]);
+      const balance = parseFloat(userR.rows[0]?.balance_egp || "0");
+      // Last 30 wallet transactions
+      const txR = await pool.query(
+        `SELECT * FROM wallet_top_up_orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 30`,
+        [userId]
+      );
+      // Also fetch spending (from revenue_transactions for deductions)
+      const spendR = await pool.query(
+        `SELECT * FROM revenue_transactions WHERE user_id = $1 AND type IN ('spending','ai_charge') ORDER BY created_at DESC LIMIT 30`,
+        [userId]
+      );
+      res.json({ balance, topUps: txR.rows, spendings: spendR.rows });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // POST /api/wallet/top-up — طلب شحن المحفظة
+  app.post("/api/wallet/top-up", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const { amountEGP, paymentMethod, paymentRef, screenshotUrl } = req.body || {};
+    if (!amountEGP || !paymentMethod) return res.status(400).json({ message: "المبلغ وطريقة الدفع مطلوبان" });
+    const amount = parseFloat(amountEGP);
+    if (isNaN(amount) || amount <= 0) return res.status(400).json({ message: "مبلغ غير صالح" });
+
+    const orderNumber = `WLT-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).toUpperCase().slice(2, 6)}`;
+    const userR = await pool.query(`SELECT first_name, last_name FROM users WHERE id = $1`, [userId]);
+    const userName = `${userR.rows[0]?.first_name || ""} ${userR.rows[0]?.last_name || ""}`.trim() || userId;
+
+    const r = await pool.query(
+      `INSERT INTO wallet_top_up_orders (user_id, amount_egp, payment_method, payment_ref, screenshot_url, status, order_number)
+       VALUES ($1, $2, $3, $4, $5, 'pending', $6) RETURNING *`,
+      [userId, amount, paymentMethod, paymentRef || null, screenshotUrl || null, orderNumber]
+    );
+
+    // Notify both admins
+    for (const adminId of [ADMIN_USER_ID, ADMIN_USER_ID2]) {
+      try {
+        await pool.query(
+          `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'wallet_topup', $2, $3)`,
+          [adminId, `💰 طلب شحن محفظة: ${userName} — ${amount} ج.م — ${paymentMethod}`,
+           JSON.stringify({ orderId: r.rows[0].id, userId, amount, paymentMethod })]
+        );
+      } catch (_) {}
+    }
+
+    res.status(201).json({ success: true, order: r.rows[0], orderNumber });
+  });
+
+  // GET /api/admin/wallet-topups — الأدمن يرى طلبات الشحن
+  app.get("/api/admin/wallet-topups", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT o.*, u.first_name, u.last_name, u.email, u.balance_egp
+         FROM wallet_top_up_orders o
+         LEFT JOIN users u ON u.id = o.user_id
+         ORDER BY o.created_at DESC
+         LIMIT 200`
+      );
+      res.json(r.rows);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // PATCH /api/admin/wallet-topups/:id — قبول أو رفض طلب الشحن
+  app.patch("/api/admin/wallet-topups/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { action, adminNote } = req.body || {};
+    const orderId = parseInt(req.params.id);
+    if (!action || !["approve", "reject"].includes(action)) return res.status(400).json({ message: "إجراء غير صالح" });
+
+    const orderR = await pool.query(`SELECT * FROM wallet_top_up_orders WHERE id = $1`, [orderId]);
+    if (orderR.rows.length === 0) return res.status(404).json({ message: "الطلب غير موجود" });
+    const order = orderR.rows[0];
+
+    if (order.status !== "pending") return res.status(400).json({ message: "تم معالجة هذا الطلب مسبقاً" });
+
+    if (action === "approve") {
+      // Add balance to user
+      await pool.query(
+        `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) + $1 WHERE id = $2`,
+        [order.amount_egp, order.user_id]
+      );
+      // Log in revenue_transactions as earning
+      await pool.query(
+        `INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description)
+         VALUES ($1, 'earning', $2, $2, $3)`,
+        [order.user_id, order.amount_egp, `شحن محفظة — ${order.payment_method} — ${order.order_number}`]
+      );
+      await pool.query(
+        `UPDATE wallet_top_up_orders SET status = 'approved', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
+        [adminNote || null, req.user.claims.sub, orderId]
+      );
+      // Notify user
+      try {
+        await pool.query(
+          `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'wallet_approved', $2, $3)`,
+          [order.user_id, `✅ تم قبول شحن محفظتك بمبلغ ${order.amount_egp} ج.م — رصيدك تم تحديثه`,
+           JSON.stringify({ orderId, amount: order.amount_egp })]
+        );
+      } catch (_) {}
+      return res.json({ success: true, message: "تمت الموافقة وإضافة الرصيد" });
+    } else {
+      await pool.query(
+        `UPDATE wallet_top_up_orders SET status = 'rejected', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
+        [adminNote || null, req.user.claims.sub, orderId]
+      );
+      try {
+        await pool.query(
+          `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'wallet_rejected', $2, $3)`,
+          [order.user_id, `❌ تم رفض طلب شحن المحفظة${adminNote ? ": " + adminNote : ""}`,
+           JSON.stringify({ orderId })]
+        );
+      } catch (_) {}
+      return res.json({ success: true, message: "تم رفض الطلب" });
+    }
+  });
+
+  // ================================================================
   // FILE UPLOAD ROUTES
   // ================================================================
   app.post("/api/upload", isAuthenticated, upload.single("file"), async (req: any, res) => {
@@ -1609,9 +1736,6 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const boostPriceRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_price_egp' LIMIT 1`);
       const boostPrice = parseFloat((boostPriceRow.rows[0] as any)?.value || "0");
 
-      const { payment_ref } = req.body || {};
-      const isPaid = !!payment_ref; // client sends payment_ref when user has paid
-
       // Rate limit: check last boost time — max once per 30 days for FREE boosts
       const lastBoost = await db.execute(
         sql`SELECT created_at FROM notifications
@@ -1619,26 +1743,43 @@ Sitemap: ${BASE}/sitemap-pages.xml
             ORDER BY created_at DESC LIMIT 1`
       );
 
+      let requiresPaid = false;
       if (lastBoost.rows.length > 0) {
         const last = new Date((lastBoost.rows[0] as any).created_at);
         const daysAgo = (Date.now() - last.getTime()) / 86_400_000;
         if (daysAgo < 30) {
-          if (isPaid) {
-            // Paid extra boost — allow immediately, skip the 30-day limit
-          } else if (boostPrice > 0) {
-            // Free limit used up → offer paid option
-            const daysLeft = Math.ceil(30 - daysAgo);
-            return res.status(402).json({
-              requiresPayment: true,
-              price: boostPrice,
-              message: `استخدمت تعزيزك المجاني. يمكنك التعزيز الآن مقابل ${boostPrice} ج.م أو الانتظار ${daysLeft} يوم`,
-            });
+          if (boostPrice > 0) {
+            requiresPaid = true; // Free limit used up → must pay
           } else {
-            // Price = 0, strictly once per 30 days
             const daysLeft = Math.ceil(30 - daysAgo);
             return res.status(429).json({ message: `يمكنك تعزيز هذا الإعلان مرة واحدة كل 30 يوم. الأيام المتبقية: ${daysLeft} يوم` });
           }
         }
+      }
+
+      // If paid boost required, check wallet balance
+      if (requiresPaid && boostPrice > 0) {
+        const walletR = await pool.query(`SELECT balance_egp FROM users WHERE id = $1`, [userId]);
+        const balance = parseFloat(walletR.rows[0]?.balance_egp || "0");
+        if (balance < boostPrice) {
+          return res.status(402).json({
+            requiresWalletTopup: true,
+            price: boostPrice,
+            balance,
+            message: `رصيد محفظتك غير كافٍ (${balance} ج.م). التعزيز يكلف ${boostPrice} ج.م — اشحن محفظتك أولاً`,
+          });
+        }
+        // Deduct from wallet
+        await pool.query(
+          `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) - $1 WHERE id = $2`,
+          [boostPrice, userId]
+        );
+        // Log transaction
+        await pool.query(
+          `INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description)
+           VALUES ($1, 'spending', $2, $2, $3)`,
+          [userId, boostPrice, `تعزيز إعلان #${adId}`]
+        );
       }
 
       const publisherName = req.user.claims?.first_name || "معلن";

@@ -38,6 +38,7 @@ const NAV = [
   { key: "channels",       label: "القنوات",              icon: Tv,              color: "text-indigo-400" },
   { key: "streams",        label: "البث المباشر",          icon: Radio,           color: "text-red-400" },
   { key: "campaigns",      label: "الحملات الإعلانية",    icon: BarChart2,       color: "text-teal-400" },
+  { key: "walletcharges",  label: "طلبات شحن المحفظة",    icon: Banknote,        color: "text-emerald-400" },
   { key: "payments",       label: "طلبات السحب",          icon: Banknote,        color: "text-green-400" },
   { key: "boostorders",    label: "طلبات التعزيز",         icon: Zap,             color: "text-orange-400" },
   { key: "payreceipts",    label: "إيصالات الدفع",          icon: Banknote,        color: "text-emerald-500" },
@@ -202,6 +203,7 @@ export default function AdminPanel() {
           {section === "channels"   && <ChannelsSection logAction={logAction} />}
           {section === "streams"    && <StreamsSection logAction={logAction} />}
           {section === "campaigns"  && <CampaignsSection logAction={logAction} />}
+          {section === "walletcharges" && <WalletChargesSection logAction={logAction} />}
           {section === "payments"   && <PaymentsSection logAction={logAction} />}
           {section === "boostorders" && <BoostOrdersSection logAction={logAction} />}
           {section === "payreceipts"   && <PayReceiptsSection />}
@@ -2112,6 +2114,156 @@ function ActivitySection() {
                   ))}
                 </div>
               )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ── 💰 Wallet Charges Section — طلبات شحن المحفظة ───────────────
+function WalletChargesSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [note, setNote] = useState<Record<number, string>>({});
+
+  const { data: orders = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/wallet-topups"],
+    queryFn: () => fetch("/api/admin/wallet-topups", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 30_000,
+  });
+
+  const pending = orders.filter((o: any) => o.status === "pending");
+  const done    = orders.filter((o: any) => o.status !== "pending");
+
+  const handleAction = async (id: number, action: "approve" | "reject") => {
+    try {
+      const res = await fetch(`/api/admin/wallet-topups/${id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, adminNote: note[id] || undefined }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        qc.invalidateQueries({ queryKey: ["/api/admin/wallet-topups"] });
+        toast({ title: action === "approve" ? "✅ تمت الموافقة وإضافة الرصيد" : "✅ تم الرفض" });
+        logAction?.(`wallet_topup_${action}`, `طلب #${id}`);
+      } else {
+        toast({ variant: "destructive", title: data.message || "خطأ" });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "خطأ في الاتصال" });
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <h2 className="font-bold text-lg">طلبات شحن المحفظة</h2>
+        {pending.length > 0 && (
+          <span className="bg-emerald-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pending.length} معلق</span>
+        )}
+      </div>
+
+      {isLoading && <div className="text-center py-12 text-muted-foreground">جارٍ التحميل...</div>}
+
+      {!isLoading && pending.length === 0 && done.length === 0 && (
+        <Card className="rounded-2xl border border-border/50">
+          <CardContent className="py-12 text-center text-muted-foreground">
+            <Banknote className="w-10 h-10 mx-auto mb-3 opacity-30" />
+            لا يوجد طلبات شحن محفظة حتى الآن
+          </CardContent>
+        </Card>
+      )}
+
+      {pending.length > 0 && (
+        <Card className="rounded-2xl border border-emerald-200 dark:border-emerald-800">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base text-emerald-600">🕐 طلبات قيد المراجعة ({pending.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {pending.map((o: any) => (
+              <div key={o.id} className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 space-y-2">
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-xs font-bold text-emerald-700 dark:text-emerald-400" data-testid={`text-wallet-order-${o.id}`}>{o.order_number}</span>
+                      <span className="text-xs font-bold text-green-600">{o.amount_egp} ج.م</span>
+                      <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded-full font-bold">{o.payment_method}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {o.first_name} {o.last_name}
+                      {o.email && <span className="ml-1">({o.email})</span>}
+                      {o.payment_ref && <span> — مرجع: <span className="font-mono font-bold">{o.payment_ref}</span></span>}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      رصيد حالي: <span className="font-bold text-primary">{o.balance_egp || 0} ج.م</span>
+                      {" | "}{o.created_at ? new Date(o.created_at).toLocaleString("ar-EG") : ""}
+                    </div>
+                    <input
+                      value={note[o.id] || ""}
+                      onChange={e => setNote(n => ({ ...n, [o.id]: e.target.value }))}
+                      placeholder="ملاحظة للمستخدم (اختياري)"
+                      className="mt-1.5 w-full text-xs border rounded-lg px-2 py-1 bg-background"
+                      data-testid={`input-wallet-note-${o.id}`}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => handleAction(o.id, "approve")}
+                      className="px-3 py-1.5 rounded-lg bg-green-500 hover:bg-green-600 text-white text-xs font-bold transition-all flex items-center gap-1"
+                      data-testid={`btn-approve-wallet-${o.id}`}
+                    >
+                      <CheckCircle className="w-3 h-3" /> قبول ✓
+                    </button>
+                    <button
+                      onClick={() => handleAction(o.id, "reject")}
+                      className="px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-bold transition-all flex items-center gap-1"
+                      data-testid={`btn-reject-wallet-${o.id}`}
+                    >
+                      <XCircle className="w-3 h-3" /> رفض ✗
+                    </button>
+                  </div>
+                </div>
+                {o.screenshot_url && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1 font-semibold">📸 صورة الإيصال:</p>
+                    <a href={o.screenshot_url} target="_blank" rel="noopener noreferrer">
+                      <img
+                        src={o.screenshot_url}
+                        alt="إيصال الدفع"
+                        className="w-full max-h-48 object-contain rounded-lg border border-emerald-200 dark:border-emerald-800 cursor-pointer hover:opacity-90 transition-opacity"
+                        data-testid={`img-wallet-receipt-${o.id}`}
+                      />
+                    </a>
+                  </div>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {done.length > 0 && (
+        <Card className="rounded-2xl border border-border/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base text-muted-foreground">سجل الطلبات المكتملة</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {done.slice(0, 30).map((o: any) => (
+              <div key={o.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-muted/30 border border-border/40">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-xs">{o.order_number}</span>
+                    <span className="font-bold text-xs text-green-600">{o.amount_egp} ج.م</span>
+                    <span className="text-xs text-muted-foreground">{o.payment_method}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">{o.first_name} {o.last_name}</div>
+                </div>
+                <StatusBadge status={o.status === "approved" ? "approved" : o.status === "rejected" ? "rejected" : "pending"} />
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}

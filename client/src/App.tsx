@@ -35,6 +35,7 @@ import Help from "@/pages/Help";
 import Consultations from "@/pages/Consultations";
 import Coupons from "@/pages/Coupons";
 import MenuGenerator from "@/pages/MenuGenerator";
+import WalletPage from "@/pages/Wallet";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import { GlobalAssistant } from "@/components/GlobalAssistant";
 import { PushSetup } from "@/components/PushSetup";
@@ -143,6 +144,9 @@ function Router() {
               </Route>
               <Route path="/menu-generator">
                 <ProtectedRoute component={MenuGenerator} />
+              </Route>
+              <Route path="/wallet">
+                <ProtectedRoute component={WalletPage} />
               </Route>
               <Route component={NotFound} />
             </Switch>
@@ -277,6 +281,7 @@ function AppFooter() {
               <li><a href="/livestream" className="hover:text-foreground transition-colors font-bold text-red-600 dark:text-red-400">📡 البث المباشر</a></li>
               <li><a href="/campaigns" className="hover:text-foreground transition-colors">الحملات الإعلانية</a></li>
               <li><a href="/media-library" className="hover:text-foreground transition-colors">مكتبة الوسائط</a></li>
+              <li><a href="/wallet" className="hover:text-foreground transition-colors font-bold text-emerald-600 dark:text-emerald-400">💰 محفظتي</a></li>
               <li><a href="/revenue" className="hover:text-foreground transition-colors">الإيرادات</a></li>
               <li><a href="/embed-guide" className="hover:text-foreground transition-colors font-bold text-primary">دليل ربط الإعلانات</a></li>
               <li><a href="/consultations" className="hover:text-foreground transition-colors font-bold text-primary">💬 الاستشارات</a></li>
