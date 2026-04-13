@@ -1844,29 +1844,26 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const boostPriceRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_price_egp' LIMIT 1`);
       const boostPrice = parseFloat((boostPriceRow.rows[0] as any)?.value || "0");
 
-      // Rate limit: check last boost time — max once per 30 days for FREE boosts
+      // Rate limit: check last boost time — max once per 30 days if boost is free
+      // If boostPrice > 0, ALL boosts require wallet deduction (no free limit)
       const lastBoost = await db.execute(
         sql`SELECT created_at FROM notifications
             WHERE link = ${`/ads/${adId}`} AND title LIKE '%🚀%'
             ORDER BY created_at DESC LIMIT 1`
       );
 
-      let requiresPaid = false;
-      if (lastBoost.rows.length > 0) {
+      if (boostPrice <= 0 && lastBoost.rows.length > 0) {
+        // Free boost: enforce 30-day rate limit
         const last = new Date((lastBoost.rows[0] as any).created_at);
         const daysAgo = (Date.now() - last.getTime()) / 86_400_000;
         if (daysAgo < 30) {
-          if (boostPrice > 0) {
-            requiresPaid = true; // Free limit used up → must pay
-          } else {
-            const daysLeft = Math.ceil(30 - daysAgo);
-            return res.status(429).json({ message: `يمكنك تعزيز هذا الإعلان مرة واحدة كل 30 يوم. الأيام المتبقية: ${daysLeft} يوم` });
-          }
+          const daysLeft = Math.ceil(30 - daysAgo);
+          return res.status(429).json({ message: `يمكنك تعزيز هذا الإعلان مرة واحدة كل 30 يوم. الأيام المتبقية: ${daysLeft} يوم` });
         }
       }
 
-      // If paid boost required, atomically check+deduct wallet balance
-      if (requiresPaid && boostPrice > 0) {
+      // Paid boost: always require wallet deduction (every boost costs boostPrice EGP)
+      if (boostPrice > 0) {
         const boostClient = await pool.connect();
         try {
           await boostClient.query("BEGIN");
@@ -5215,8 +5212,8 @@ Sitemap: ${BASE}/sitemap-pages.xml
         options: [
           { days: 7,  price: settings['renewal_price_7']  ?? 50,  label: "7 أيام 🔥",  badge: "الأكثر طلباً" },
           { days: 30, price: settings['renewal_price_30'] ?? 350, label: "30 يوماً" },
-          { days: 60, price: settings['renewal_price_60'] ?? 90,  label: "60 يوماً" },
-          { days: 90, price: settings['renewal_price_90'] ?? 130, label: "90 يوماً" },
+          { days: 60, price: settings['renewal_price_60'] ?? 600, label: "60 يوماً" },
+          { days: 90, price: settings['renewal_price_90'] ?? 800, label: "90 يوماً" },
         ]
       });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
