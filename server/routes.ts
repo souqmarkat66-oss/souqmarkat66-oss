@@ -3300,6 +3300,63 @@ Sitemap: ${BASE}/sitemap-pages.xml
     res.json({ ...stats, totalUsers });
   });
 
+  // ── Wallet Revenue Summary ────────────────────────────────────
+  app.get("/api/admin/wallet-stats", isAuthenticated, requireAdmin, async (_req, res) => {
+    try {
+      const [topupRes, spendRes, balanceRes, pendingRes, recentRes] = await Promise.all([
+        // Total approved top-ups (money received from clients)
+        pool.query(`
+          SELECT COALESCE(SUM(amount_egp),0) as total_approved,
+                 COUNT(*) FILTER (WHERE status='approved') as count_approved
+          FROM wallet_top_up_orders WHERE status = 'approved'
+        `),
+        // Total spent from wallets on platform services
+        pool.query(`
+          SELECT COALESCE(SUM(amount_egp),0) as total_spent
+          FROM wallet_transactions WHERE type IN ('boost_debit','renewal_debit','ai_debit')
+        `),
+        // Total balance currently sitting in all wallets
+        pool.query(`
+          SELECT COALESCE(SUM(balance_egp),0) as total_wallet_balance, COUNT(*) as users_with_balance
+          FROM users WHERE balance_egp > 0
+        `),
+        // Pending top-up requests
+        pool.query(`
+          SELECT COALESCE(SUM(amount_egp),0) as pending_amount, COUNT(*) as pending_count
+          FROM wallet_top_up_orders WHERE status = 'pending'
+        `),
+        // Last 10 approved top-ups
+        pool.query(`
+          SELECT o.order_number, o.amount_egp, o.payment_method, o.created_at,
+                 u.first_name, u.last_name
+          FROM wallet_top_up_orders o
+          LEFT JOIN users u ON u.id = o.user_id
+          WHERE o.status = 'approved'
+          ORDER BY o.created_at DESC LIMIT 10
+        `),
+      ]);
+
+      const t = topupRes.rows[0] as any;
+      const s = spendRes.rows[0] as any;
+      const b = balanceRes.rows[0] as any;
+      const p = pendingRes.rows[0] as any;
+
+      res.json({
+        totalCollectedEGP:    Number(t.total_approved),
+        totalApprovedCount:   Number(t.count_approved),
+        totalSpentEGP:        Number(s.total_spent),
+        totalCurrentBalanceEGP: Number(b.total_wallet_balance),
+        usersWithBalance:     Number(b.users_with_balance),
+        pendingAmountEGP:     Number(p.pending_amount),
+        pendingCount:         Number(p.pending_count),
+        platformNetEGP:       Number(t.total_approved) - Number(b.total_wallet_balance),
+        recentApproved:       recentRes.rows,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   app.get("/api/admin/reports", isAuthenticated, requireAdmin, async (req: any, res) => {
     const reps = await storage.getReports(req.query.status as string);
     res.json(reps);

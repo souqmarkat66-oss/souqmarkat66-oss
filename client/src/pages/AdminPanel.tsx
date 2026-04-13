@@ -241,6 +241,11 @@ function DashboardSection() {
     queryKey: ["/api/admin/revenue"],
     queryFn: () => fetch("/api/admin/revenue", { credentials: "include" }).then(r => r.json()),
   });
+  const { data: walletStats } = useQuery<any>({
+    queryKey: ["/api/admin/wallet-stats"],
+    queryFn: () => fetch("/api/admin/wallet-stats", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 30000,
+  });
   const { data: settings, refetch: refetchSettings } = useQuery<Record<string, string>>({
     queryKey: ["/api/settings"],
     queryFn: () => fetch("/api/settings").then(r => r.json()),
@@ -319,6 +324,75 @@ function DashboardSection() {
               </CardContent>
             </Card>
           ))}
+        </div>
+      )}
+
+      {/* Wallet Revenue Panel */}
+      {walletStats && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Banknote className="w-5 h-5 text-emerald-500" />
+            <h3 className="font-bold text-base">إيرادات المحافظ من العملاء</h3>
+            {walletStats.pendingCount > 0 && (
+              <span className="bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{walletStats.pendingCount} معلق</span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Card className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-gradient-to-br from-emerald-500/10 to-transparent">
+              <CardContent className="p-4">
+                <div className="text-xs text-muted-foreground mb-1">💰 إجمالي ما استلمته</div>
+                <div className="text-xl font-bold text-emerald-600">{walletStats.totalCollectedEGP.toFixed(2)}</div>
+                <div className="text-xs text-muted-foreground">ج.م من {walletStats.totalApprovedCount} عملية شحن</div>
+              </CardContent>
+            </Card>
+            <Card className="rounded-2xl border border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-500/10 to-transparent">
+              <CardContent className="p-4">
+                <div className="text-xs text-muted-foreground mb-1">🏦 رصيد في محافظ العملاء</div>
+                <div className="text-xl font-bold text-blue-600">{walletStats.totalCurrentBalanceEGP.toFixed(2)}</div>
+                <div className="text-xs text-muted-foreground">ج.م لدى {walletStats.usersWithBalance} مستخدم</div>
+              </CardContent>
+            </Card>
+            <Card className="rounded-2xl border border-purple-200 dark:border-purple-800 bg-gradient-to-br from-purple-500/10 to-transparent">
+              <CardContent className="p-4">
+                <div className="text-xs text-muted-foreground mb-1">⚡ أُنفق على الخدمات</div>
+                <div className="text-xl font-bold text-purple-600">{walletStats.totalSpentEGP.toFixed(2)}</div>
+                <div className="text-xs text-muted-foreground">ج.م (تعزيز + تجديد + AI)</div>
+              </CardContent>
+            </Card>
+            <Card className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-gradient-to-br from-amber-500/10 to-transparent">
+              <CardContent className="p-4">
+                <div className="text-xs text-muted-foreground mb-1">⏳ طلبات شحن معلقة</div>
+                <div className="text-xl font-bold text-amber-600">{walletStats.pendingAmountEGP.toFixed(2)}</div>
+                <div className="text-xs text-muted-foreground">ج.م بانتظار مراجعتك</div>
+              </CardContent>
+            </Card>
+          </div>
+          {walletStats.recentApproved?.length > 0 && (
+            <Card className="rounded-2xl">
+              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-500" /> آخر عمليات الشحن المقبولة</CardTitle></CardHeader>
+              <CardContent className="pt-0">
+                <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                  {walletStats.recentApproved.map((r: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between px-3 py-1.5 rounded-xl hover:bg-muted/30 text-sm">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                          <ArrowUpRight className="w-3 h-3 text-emerald-500" />
+                        </div>
+                        <div>
+                          <span className="font-medium text-xs">{r.first_name} {r.last_name}</span>
+                          <span className="text-[10px] text-muted-foreground mr-1">— {r.payment_method}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs text-emerald-600">+{Number(r.amount_egp).toFixed(2)} ج.م</span>
+                        <span className="text-[10px] text-muted-foreground">{r.created_at ? format(new Date(r.created_at), "dd/MM HH:mm", { locale: ar }) : ""}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 
@@ -2154,6 +2228,12 @@ function WalletChargesSection({ logAction }: { logAction: any }) {
     refetchInterval: 30_000,
   });
 
+  const { data: ws } = useQuery<any>({
+    queryKey: ["/api/admin/wallet-stats"],
+    queryFn: () => fetch("/api/admin/wallet-stats", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 30_000,
+  });
+
   const pending = orders.filter((o: any) => o.status === "pending");
   const done    = orders.filter((o: any) => o.status !== "pending");
 
@@ -2186,6 +2266,32 @@ function WalletChargesSection({ logAction }: { logAction: any }) {
           <span className="bg-emerald-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pending.length} معلق</span>
         )}
       </div>
+
+      {/* Wallet financial summary */}
+      {ws && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-gradient-to-br from-emerald-500/10 to-transparent p-4">
+            <div className="text-xs text-muted-foreground mb-0.5">💰 إجمالي ما استلمته</div>
+            <div className="text-2xl font-bold text-emerald-600">{Number(ws.totalCollectedEGP).toFixed(2)}</div>
+            <div className="text-xs text-muted-foreground">ج.م · {ws.totalApprovedCount} عملية مقبولة</div>
+          </div>
+          <div className="rounded-2xl border border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-500/10 to-transparent p-4">
+            <div className="text-xs text-muted-foreground mb-0.5">🏦 رصيد في المحافظ</div>
+            <div className="text-2xl font-bold text-blue-600">{Number(ws.totalCurrentBalanceEGP).toFixed(2)}</div>
+            <div className="text-xs text-muted-foreground">ج.م لدى {ws.usersWithBalance} مستخدم</div>
+          </div>
+          <div className="rounded-2xl border border-purple-200 dark:border-purple-800 bg-gradient-to-br from-purple-500/10 to-transparent p-4">
+            <div className="text-xs text-muted-foreground mb-0.5">⚡ أُنفق على الخدمات</div>
+            <div className="text-2xl font-bold text-purple-600">{Number(ws.totalSpentEGP).toFixed(2)}</div>
+            <div className="text-xs text-muted-foreground">ج.م (تعزيز + تجديد + AI)</div>
+          </div>
+          <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-gradient-to-br from-amber-500/10 to-transparent p-4">
+            <div className="text-xs text-muted-foreground mb-0.5">⏳ طلبات معلقة</div>
+            <div className="text-2xl font-bold text-amber-600">{Number(ws.pendingAmountEGP).toFixed(2)}</div>
+            <div className="text-xs text-muted-foreground">ج.م · {ws.pendingCount} طلب</div>
+          </div>
+        </div>
+      )}
 
       {isLoading && <div className="text-center py-12 text-muted-foreground">جارٍ التحميل...</div>}
 
