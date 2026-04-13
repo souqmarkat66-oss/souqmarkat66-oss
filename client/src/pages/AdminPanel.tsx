@@ -1363,16 +1363,16 @@ function PaymentsSection({ logAction }: { logAction: any }) {
         visa:     "💳 كارت فيزا / بنكي",
       };
       withdrawalInfo = (
-        <div className="rounded-xl bg-blue-50 dark:bg-blue-950/20 border-2 border-blue-400/50 px-4 py-3 space-y-2">
-          <p className="text-[10px] font-bold text-blue-700 dark:text-blue-400">🏧 بيانات حساب الاستلام — حوّل لهذا الحساب</p>
+        <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border-2 border-red-400/50 px-4 py-3 space-y-2">
+          <p className="text-[10px] font-bold text-red-700 dark:text-red-400">🏧 بيانات حساب الاستلام — حوّل لهذا الحساب</p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
             <div><p className="text-[10px] text-muted-foreground">صاحب الحساب</p><p className="font-bold">{holderName}</p></div>
             <div><p className="text-[10px] text-muted-foreground">نوع الحساب</p><p className="font-bold">{typeLabel[accountType] || accountType}</p></div>
           </div>
-          <div className="bg-white dark:bg-black/30 rounded-lg border border-blue-200 dark:border-blue-800 px-3 py-2 flex items-center gap-3">
+          <div className="bg-white dark:bg-black/30 rounded-lg border border-red-200 dark:border-red-800 px-3 py-2 flex items-center gap-3">
             <div className="flex-1">
               <p className="text-[10px] text-muted-foreground">رقم الحساب (مخفي)</p>
-              <p className="font-mono font-extrabold text-base tracking-widest text-blue-700 dark:text-blue-300" dir="ltr">{maskedNum}</p>
+              <p className="font-mono font-extrabold text-base tracking-widest text-red-700 dark:text-red-300" dir="ltr">{maskedNum}</p>
             </div>
             <div className="text-right">
               <p className="text-[10px] text-muted-foreground">الرقم الكامل</p>
@@ -1386,16 +1386,16 @@ function PaymentsSection({ logAction }: { logAction: any }) {
     return (
       <Card
         key={p.id}
-        className={`rounded-xl ${isWithdrawal ? "border-blue-500/30 bg-blue-50/20 dark:bg-blue-950/10" : "border-green-500/20 bg-green-50/20 dark:bg-green-950/10"}`}
+        className={`rounded-xl ${isWithdrawal ? "border-red-500/30 bg-red-50/20 dark:bg-red-950/10" : "border-green-500/20 bg-green-50/20 dark:bg-green-950/10"}`}
         data-testid={`payment-${p.id}`}
       >
         <CardContent className="p-4 space-y-3">
           <div className="flex items-center gap-4">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
-                <span className={`font-bold text-lg ${isWithdrawal ? "text-blue-600" : "text-green-600"}`}>{p.amountEGP} ج.م</span>
+                <span className={`font-bold text-lg ${isWithdrawal ? "text-red-600" : "text-green-600"}`}>{p.amountEGP} ج.م</span>
                 <StatusBadge status={p.status} />
-                <span className={`text-xs px-2 py-0.5 rounded font-mono font-bold ${isWithdrawal ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" : "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"}`}>
+                <span className={`text-xs px-2 py-0.5 rounded font-mono font-bold ${isWithdrawal ? "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" : "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"}`}>
                   {isWithdrawal ? "🏧 سحب أرباح" : "💳 دفع مقابل خدمة"}
                 </span>
               </div>
@@ -1473,7 +1473,7 @@ function PaymentsSection({ logAction }: { logAction: any }) {
       {pendingWithdrawals.length > 0 && (
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-sm font-bold text-blue-700 dark:text-blue-400 flex items-center gap-2">
+            <h3 className="text-sm font-bold text-red-700 dark:text-red-400 flex items-center gap-2">
               <ArrowDownLeft className="w-4 h-4" /> 🏧 طلبات سحب الأرباح ({pendingWithdrawals.length})
             </h3>
           </div>
@@ -1501,7 +1501,7 @@ function PaymentsSection({ logAction }: { logAction: any }) {
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="font-semibold">{p.amountEGP} ج.م</span>
                       <StatusBadge status={p.status} />
-                      <span className={`text-xs px-1.5 py-0.5 rounded text-[10px] font-bold ${p.type === "withdrawal" ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" : "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"}`}>
+                      <span className={`text-xs px-1.5 py-0.5 rounded text-[10px] font-bold ${p.type === "withdrawal" ? "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" : "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"}`}>
                         {p.type === "withdrawal" ? "🏧 سحب" : "💳 دفع"}
                       </span>
                     </div>
