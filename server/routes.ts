@@ -75,8 +75,8 @@ async function checkAiCredits(req: any, res: any, next: any) {
   const usageCount = await storage.getAiUsageCount(userId);
   if (usageCount >= freeCredits && !isAdminUser(req)) {
     const pricePerCredit = parseFloat(await storage.getSetting('ai_price_per_credit_egp') || '5');
-    // Use canonical users.balance_egp — single source of truth
-    const balance = await storage.getUserBalanceEGP(userId);
+    // Use canonical users.balance_egp wallet balance (separate from revenue/withdrawal balance)
+    const balance = await storage.getWalletBalanceEGP(userId);
     if (balance < pricePerCredit) {
       return res.status(402).json({
         message: "insufficient_credits",

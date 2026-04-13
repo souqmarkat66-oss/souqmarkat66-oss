@@ -69,6 +69,7 @@ export interface IStorage {
   // Revenue
   getRevenueTransactions(userId: string): Promise<RevenueTransaction[]>;
   getUserBalanceEGP(userId: string): Promise<number>;
+  getWalletBalanceEGP(userId: string): Promise<number>;
   createTransaction(tx: Omit<RevenueTransaction, 'id' | 'createdAt'>): Promise<RevenueTransaction>;
 
   // Reports
@@ -424,7 +425,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserBalanceEGP(userId: string): Promise<number> {
-    // Use canonical wallet balance from users.balance_egp (single source of truth)
+    // Legacy: computes balance from revenue_transactions for publisher earnings/withdrawal UI
+    const txs = await this.getRevenueTransactions(userId);
+    return txs.reduce((sum, tx) => {
+      if (tx.type === 'earning') return sum + (tx.amountEGP || 0);
+      if (tx.type === 'spending' || tx.type === 'withdrawal' || tx.type === 'ai_charge') return sum - (tx.amountEGP || 0);
+      return sum;
+    }, 0);
+  }
+
+  async getWalletBalanceEGP(userId: string): Promise<number> {
+    // Canonical wallet balance from users.balance_egp (used by boost/renew/AI/top-up)
     const result = await pool.query(
       `SELECT COALESCE(balance_egp, 0) AS balance FROM users WHERE id = $1`,
       [userId]
