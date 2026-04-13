@@ -284,6 +284,16 @@ async function runMigrations() {
       created_at TIMESTAMP DEFAULT NOW()
     )`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_egp REAL DEFAULT 0`);
+    // Wallet transactions ledger (all wallet mutations: top-up credits + service debits)
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS wallet_transactions (
+      id SERIAL PRIMARY KEY,
+      user_id VARCHAR NOT NULL REFERENCES users(id),
+      type TEXT NOT NULL,
+      amount_egp REAL NOT NULL,
+      description TEXT,
+      ref_id TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
     console.log("Migrations applied successfully");
   } catch (e: any) {
     console.error("Migration warning:", e.message);

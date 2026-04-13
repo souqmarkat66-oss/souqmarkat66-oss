@@ -65,8 +65,7 @@ export default function WalletPage() {
 
   const { data: walletData, isLoading } = useQuery<{
     balance: number;
-    topUps: any[];
-    spendings: any[];
+    transactions: any[];
   }>({
     queryKey: ["/api/wallet/balance"],
     enabled: !!user,
@@ -143,28 +142,30 @@ export default function WalletPage() {
   };
 
   const balance = walletData?.balance || 0;
-  const topUps = walletData?.topUps || [];
-  const spendings = walletData?.spendings || [];
+  const transactions = walletData?.transactions || [];
 
-  // Merge and sort all transactions
-  const allTx = [
-    ...topUps.map(t => ({
+  // Totals derived from the unified wallet_transactions ledger
+  const totalTopUp = transactions
+    .filter((t: any) => t.type === "top_up")
+    .reduce((s: number, t: any) => s + (t.amount_egp || 0), 0);
+  const totalSpent = transactions
+    .filter((t: any) => t.type !== "top_up")
+    .reduce((s: number, t: any) => s + (t.amount_egp || 0), 0);
+
+  // Unified display list — all wallet ledger entries
+  const allTx = transactions.map((t: any) => {
+    const isCredit = t.type === "top_up";
+    return {
       ...t,
-      txType: "topup",
+      txType: isCredit ? "topup" : "spending",
       date: new Date(t.created_at),
       amount: t.amount_egp,
-      label: `شحن — ${t.payment_method}`,
-      statusInfo: STATUS_MAP[t.status] || STATUS_MAP.pending,
-    })),
-    ...spendings.map(t => ({
-      ...t,
-      txType: "spending",
-      date: new Date(t.created_at || t.createdAt),
-      amount: t.amount_egp || t.amountEgp,
-      label: t.description || "خصم خدمة",
-      statusInfo: { label: "مكتمل", color: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400", icon: CheckCircle2 },
-    })),
-  ].sort((a, b) => b.date.getTime() - a.date.getTime());
+      label: t.description || (isCredit ? "شحن محفظة" : "خصم خدمة"),
+      statusInfo: isCredit
+        ? { label: "مُضاف", color: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400", icon: CheckCircle2 }
+        : { label: "مكتمل", color: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400", icon: CheckCircle2 },
+    };
+  });
 
   const methodObj = PAYMENT_METHODS.find(m => m.value === selectedMethod)!;
 
@@ -218,7 +219,7 @@ export default function WalletPage() {
             <ArrowUpCircle className="w-3.5 h-3.5" /> إجمالي الشحن
           </p>
           <p className="text-xl font-bold text-green-700 dark:text-green-400 mt-1">
-            {topUps.filter(t => t.status === "approved").reduce((s: number, t: any) => s + (t.amount_egp || 0), 0).toLocaleString()} ج.م
+            {totalTopUp.toLocaleString()} ج.م
           </p>
         </div>
         <div className="border rounded-2xl p-4 bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900">
@@ -226,7 +227,7 @@ export default function WalletPage() {
             <ArrowDownCircle className="w-3.5 h-3.5" /> إجمالي الإنفاق
           </p>
           <p className="text-xl font-bold text-red-700 dark:text-red-400 mt-1">
-            {spendings.reduce((s: number, t: any) => s + (t.amount_egp || t.amountEgp || 0), 0).toLocaleString()} ج.م
+            {totalSpent.toLocaleString()} ج.م
           </p>
         </div>
       </div>
