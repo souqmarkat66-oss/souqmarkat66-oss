@@ -895,50 +895,74 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const orderId = parseInt(req.params.id);
     if (!action || !["approve", "reject"].includes(action)) return res.status(400).json({ message: "إجراء غير صالح" });
 
-    const orderR = await pool.query(`SELECT * FROM wallet_top_up_orders WHERE id = $1`, [orderId]);
-    if (orderR.rows.length === 0) return res.status(404).json({ message: "الطلب غير موجود" });
-    const order = orderR.rows[0];
+    // Use a DB client with transaction for atomicity and row-level lock
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
 
-    if (order.status !== "pending") return res.status(400).json({ message: "تم معالجة هذا الطلب مسبقاً" });
+      // Lock the order row to prevent concurrent double-approval
+      const orderR = await client.query(
+        `SELECT * FROM wallet_top_up_orders WHERE id = $1 FOR UPDATE`,
+        [orderId]
+      );
+      if (orderR.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "الطلب غير موجود" });
+      }
+      const order = orderR.rows[0];
 
-    if (action === "approve") {
-      // Add balance to user
-      await pool.query(
-        `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) + $1 WHERE id = $2`,
-        [order.amount_egp, order.user_id]
-      );
-      // Log in revenue_transactions as earning
-      await pool.query(
-        `INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description)
-         VALUES ($1, 'earning', $2, $2, $3)`,
-        [order.user_id, order.amount_egp, `شحن محفظة — ${order.payment_method} — ${order.order_number}`]
-      );
-      await pool.query(
-        `UPDATE wallet_top_up_orders SET status = 'approved', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
-        [adminNote || null, req.user.claims.sub, orderId]
-      );
-      // Notify user
-      try {
-        await pool.query(
-          `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'wallet_approved', $2, $3)`,
-          [order.user_id, `✅ تم قبول شحن محفظتك بمبلغ ${order.amount_egp} ج.م — رصيدك تم تحديثه`,
-           JSON.stringify({ orderId, amount: order.amount_egp })]
+      if (order.status !== "pending") {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ message: "تم معالجة هذا الطلب مسبقاً" });
+      }
+
+      if (action === "approve") {
+        // Atomically add balance + mark approved in same transaction
+        await client.query(
+          `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) + $1 WHERE id = $2`,
+          [order.amount_egp, order.user_id]
         );
-      } catch (_) {}
-      return res.json({ success: true, message: "تمت الموافقة وإضافة الرصيد" });
-    } else {
-      await pool.query(
-        `UPDATE wallet_top_up_orders SET status = 'rejected', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
-        [adminNote || null, req.user.claims.sub, orderId]
-      );
-      try {
-        await pool.query(
-          `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'wallet_rejected', $2, $3)`,
-          [order.user_id, `❌ تم رفض طلب شحن المحفظة${adminNote ? ": " + adminNote : ""}`,
-           JSON.stringify({ orderId })]
+        await client.query(
+          `INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description)
+           VALUES ($1, 'earning', $2, $2, $3)`,
+          [order.user_id, order.amount_egp, `شحن محفظة — ${order.payment_method} — ${order.order_number}`]
         );
-      } catch (_) {}
-      return res.json({ success: true, message: "تم رفض الطلب" });
+        await client.query(
+          `UPDATE wallet_top_up_orders SET status = 'approved', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
+          [adminNote || null, req.user.claims.sub, orderId]
+        );
+        await client.query("COMMIT");
+
+        // Notify user (outside transaction — non-critical)
+        try {
+          await pool.query(
+            `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'wallet_approved', $2, $3)`,
+            [order.user_id, `✅ تم قبول شحن محفظتك بمبلغ ${order.amount_egp} ج.م — رصيدك تم تحديثه`,
+             JSON.stringify({ orderId, amount: order.amount_egp })]
+          );
+        } catch (_) {}
+        return res.json({ success: true, message: "تمت الموافقة وإضافة الرصيد" });
+      } else {
+        await client.query(
+          `UPDATE wallet_top_up_orders SET status = 'rejected', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
+          [adminNote || null, req.user.claims.sub, orderId]
+        );
+        await client.query("COMMIT");
+
+        try {
+          await pool.query(
+            `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'wallet_rejected', $2, $3)`,
+            [order.user_id, `❌ تم رفض طلب شحن المحفظة${adminNote ? ": " + adminNote : ""}`,
+             JSON.stringify({ orderId })]
+          );
+        } catch (_) {}
+        return res.json({ success: true, message: "تم رفض الطلب" });
+      }
+    } catch (e: any) {
+      await client.query("ROLLBACK");
+      res.status(500).json({ message: e.message });
+    } finally {
+      client.release();
     }
   });
 
@@ -5089,6 +5113,78 @@ Sitemap: ${BASE}/sitemap-pages.xml
           { days: 90, price: settings['renewal_price_90'] ?? 130, label: "90 يوماً" },
         ]
       });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // POST /api/ads/:id/renew-wallet — renew using wallet balance directly (instant)
+  app.post("/api/ads/:id/renew-wallet", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const adId = parseInt(req.params.id);
+    const { durationDays } = req.body;
+    if (!durationDays) return res.status(400).json({ message: "مدة التجديد مطلوبة" });
+    try {
+      const adRow = await db.execute(sql`SELECT * FROM ads WHERE id = ${adId} LIMIT 1`);
+      const ad = adRow.rows[0] as any;
+      if (!ad) return res.status(404).json({ message: "الإعلان غير موجود" });
+      if (ad.user_id !== userId) return res.status(403).json({ message: "غير مصرح" });
+
+      // Determine price from platform settings
+      const priceKey = durationDays <= 7 ? "renewal_price_7" : "renewal_price_30";
+      const priceRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = ${priceKey} LIMIT 1`);
+      const price = parseFloat((priceRow.rows[0] as any)?.value || (durationDays <= 7 ? "50" : "350"));
+
+      // Atomic check-and-deduct using row lock
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const userR = await client.query(`SELECT balance_egp FROM users WHERE id = $1 FOR UPDATE`, [userId]);
+        const balance = parseFloat(userR.rows[0]?.balance_egp || "0");
+        if (balance < price) {
+          await client.query("ROLLBACK");
+          return res.status(402).json({
+            requiresWalletTopup: true,
+            price,
+            balance,
+            message: `رصيد محفظتك غير كافٍ (${balance} ج.م). التجديد يكلف ${price} ج.م — اشحن محفظتك أولاً`,
+          });
+        }
+        // Deduct from wallet
+        await client.query(
+          `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) - $1 WHERE id = $2`,
+          [price, userId]
+        );
+        // Activate renewal
+        await client.query(
+          `UPDATE ads SET
+            expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + ($1 || ' days')::INTERVAL,
+            status = 'active'
+           WHERE id = $2`,
+          [durationDays, adId]
+        );
+        // Log spending
+        await client.query(
+          `INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description)
+           VALUES ($1, 'spending', $2, $2, $3)`,
+          [userId, price, `تجديد إعلان #${adId} لمدة ${durationDays} يوم`]
+        );
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      // Notify user
+      try {
+        await createNotification(userId, "system",
+          `✅ تم تجديد إعلانك بنجاح`,
+          `إعلان #${adId} تم تجديده لمدة ${durationDays} يوم — خُصم ${price} ج.م من محفظتك`,
+          `/ads/${adId}`
+        );
+      } catch (_) {}
+
+      res.json({ ok: true, adId, durationDays, price, message: `تم تجديد الإعلان لمدة ${durationDays} يوماً` });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 

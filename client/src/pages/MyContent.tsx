@@ -64,7 +64,7 @@ function AuthenticatedContent({ user }: { user: any }) {
   const [renewDialog, setRenewDialog] = useState<{ ad: any } | null>(null);
   const [selectedDays, setSelectedDays] = useState<number>(30);
   const [renewLoading, setRenewLoading] = useState(false);
-  const [renewResult, setRenewResult] = useState<{ orderNumber: string; days: number; amount: number } | null>(null);
+  const [renewResult, setRenewResult] = useState<{ days: number; amount: number; success: boolean } | null>(null);
   const [copiedNum, setCopiedNum] = useState<string | null>(null);
 
   const { data: renewalSettings } = useQuery<{ options: { days: number; price: number; label: string }[] }>({
@@ -84,18 +84,27 @@ function AuthenticatedContent({ user }: { user: any }) {
     if (!option) return;
     setRenewLoading(true);
     try {
-      const res = await fetch(`/api/ads/${renewDialog.ad.id}/renew-order`, {
+      const res = await fetch(`/api/ads/${renewDialog.ad.id}/renew-wallet`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ durationDays: selectedDays, amount: option.price }),
+        body: JSON.stringify({ durationDays: selectedDays }),
       });
       const data = await res.json();
       if (res.ok) {
-        setRenewResult({ orderNumber: data.orderNumber, days: selectedDays, amount: option.price });
-        toast({ title: "✅ تم إنشاء طلب التجديد", description: "ارفع الإيصال للأدمن لتأكيد الدفع" });
+        setRenewResult({ days: selectedDays, amount: option.price, success: true });
+        qc.invalidateQueries({ queryKey: ["/api/ads/mine"] });
+        toast({ title: "✅ تم تجديد الإعلان بنجاح", description: `تم خصم ${option.price} ج.م من محفظتك` });
+      } else if (res.status === 402 && data.requiresWalletTopup) {
+        toast({
+          variant: "destructive",
+          title: "رصيد غير كافٍ",
+          description: data.message,
+        });
+        setRenewDialog(null);
+        window.location.href = "/wallet";
       } else {
-        toast({ variant: "destructive", title: data.message || "فشل إنشاء الطلب" });
+        toast({ variant: "destructive", title: data.message || "فشل التجديد" });
       }
     } catch {
       toast({ variant: "destructive", title: "خطأ في الاتصال" });
@@ -855,46 +864,33 @@ function AuthenticatedContent({ user }: { user: any }) {
         <DialogContent dir="rtl" className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-lg font-bold flex items-center gap-2 text-green-600">
-              ✅ تم إنشاء طلب التجديد
+              ✅ تم تجديد الإعلان بنجاح
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <div className="bg-green-50 dark:bg-green-950/20 rounded-xl p-4 border border-green-200 dark:border-green-800 space-y-3 text-sm">
               <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">رقم الطلب</span>
-                <button
-                  className="font-mono font-black text-green-700 dark:text-green-400 text-sm flex items-center gap-1 hover:opacity-70"
-                  onClick={() => renewResult && copyToClipboard(renewResult.orderNumber)}
-                  data-testid="text-renew-order-number"
-                >
-                  {copiedNum === renewResult?.orderNumber
-                    ? <><Check className="w-3 h-3" /> نُسخ!</>
-                    : <><Copy className="w-3 h-3" />{renewResult?.orderNumber}</>
-                  }
-                </button>
-              </div>
-              <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">مدة التجديد</span>
                 <span className="font-bold">{renewResult?.days} يوماً</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">المبلغ المدفوع</span>
-                <span className="font-bold text-blue-600">{renewResult?.amount} ج.م</span>
+                <span className="text-muted-foreground">المبلغ المخصوم من محفظتك</span>
+                <span className="font-bold text-green-700 dark:text-green-400">{renewResult?.amount} ج.م</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">الحالة</span>
-                <span className="bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 px-2 py-0.5 rounded-full text-xs font-bold">قيد المراجعة</span>
+                <span className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-0.5 rounded-full text-xs font-bold">مُجدَّد فوراً ✓</span>
               </div>
             </div>
             <p className="text-xs text-muted-foreground text-center bg-blue-50 dark:bg-blue-950/20 rounded-lg p-2 border border-blue-200 dark:border-blue-800">
-              📬 أُرسل طلبك للإدارة — ستصلك رسالة تأكيد فور مراجعة الدفع
+              🎉 تم تجديد إعلانك مباشرةً من رصيد محفظتك — لا حاجة لانتظار موافقة
             </p>
             <button
               onClick={() => { setRenewResult(null); setRenewDialog(null); }}
               className="w-full py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white font-bold text-sm transition-all"
               data-testid="btn-close-renew-receipt"
             >
-              حسناً، شكراً 🙏
+              ممتاز، شكراً 🙏
             </button>
           </div>
         </DialogContent>

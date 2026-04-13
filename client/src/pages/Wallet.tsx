@@ -22,14 +22,7 @@ const PAYMENT_METHODS = [
     number: "01098553911",
     color: "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900",
     textColor: "text-red-700 dark:text-red-400",
-  },
-  {
-    value: "etisalat",
-    label: "اتصالات e& كاش",
-    emoji: "📲",
-    number: "01126665741",
-    color: "bg-orange-50 dark:bg-orange-950/20 border-orange-200 dark:border-orange-900",
-    textColor: "text-orange-700 dark:text-orange-400",
+    instructions: "حوّل المبلغ على رقم فودافون كاش",
   },
   {
     value: "instapay",
@@ -38,14 +31,16 @@ const PAYMENT_METHODS = [
     number: "01285558567",
     color: "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900",
     textColor: "text-blue-700 dark:text-blue-400",
+    instructions: "حوّل المبلغ عبر تطبيق InstaPay",
   },
   {
     value: "souq",
-    label: "تطبيق سوق ماركات / البنك الأهلي",
-    emoji: "🛒",
-    number: "1234567890123456",
+    label: "سوق ماركات / البنك الأهلي المصري",
+    emoji: "🏦",
+    number: "01285558567",
     color: "bg-primary/5 border-primary/20",
     textColor: "text-primary",
+    instructions: "ادفع عبر تطبيق سوق ماركات أو تحويل بنكي إلى البنك الأهلي المصري",
   },
 ];
 
@@ -333,11 +328,11 @@ export default function WalletPage() {
 
             {/* Payment instructions */}
             <div className={`rounded-2xl border p-4 ${methodObj.color}`}>
-              <p className={`text-xs font-bold mb-2 ${methodObj.textColor}`}>
-                {methodObj.emoji} ادفع على {methodObj.label}:
+              <p className={`text-xs font-bold mb-1 ${methodObj.textColor}`}>
+                {methodObj.emoji} {methodObj.instructions}:
               </p>
               <div className="flex items-center gap-2 bg-white/60 dark:bg-black/20 rounded-xl px-3 py-2">
-                <span className="font-mono font-bold text-sm flex-1">{methodObj.number}</span>
+                <span className="font-mono font-bold text-sm flex-1 select-all">{methodObj.number}</span>
                 <button
                   onClick={() => copyNumber(methodObj.number)}
                   className="p-1 rounded-lg hover:bg-primary/10 transition-colors"

@@ -476,6 +476,27 @@ export type CoinPackage = typeof coinPackages.$inferSelect;
 export type InsertCoinPackage = z.infer<typeof insertCoinPackageSchema>;
 
 // ============================================================
+// WALLET TOP-UP ORDERS — طلبات شحن المحفظة بالجنيه المصري
+// ============================================================
+export const walletTopUpOrders = pgTable("wallet_top_up_orders", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  amountEGP: real("amount_egp").notNull(),
+  paymentMethod: text("payment_method").notNull(),
+  paymentRef: text("payment_ref"),
+  screenshotUrl: text("screenshot_url"),
+  status: text("status").default("pending").notNull(),
+  adminNote: text("admin_note"),
+  orderNumber: text("order_number"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewedBy: varchar("reviewed_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+export const insertWalletTopUpSchema = createInsertSchema(walletTopUpOrders).omit({ id: true, createdAt: true, reviewedAt: true, reviewedBy: true });
+export type WalletTopUpOrder = typeof walletTopUpOrders.$inferSelect;
+export type InsertWalletTopUpOrder = z.infer<typeof insertWalletTopUpSchema>;
+
+// ============================================================
 // COIN RECHARGE CODES TABLE — admin generates codes for offline payment
 // ============================================================
 export const coinRechargeCodes = pgTable("coin_recharge_codes", {
