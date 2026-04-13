@@ -39,7 +39,7 @@ const NAV = [
   { key: "streams",        label: "البث المباشر",          icon: Radio,           color: "text-red-400" },
   { key: "campaigns",      label: "الحملات الإعلانية",    icon: BarChart2,       color: "text-teal-400" },
   { key: "walletcharges",  label: "طلبات شحن المحفظة",    icon: Banknote,        color: "text-emerald-400" },
-  { key: "payments",       label: "طلبات السحب",          icon: Banknote,        color: "text-green-400" },
+  { key: "payments",       label: "المدفوعات",             icon: Banknote,        color: "text-green-400" },
   { key: "boostorders",    label: "طلبات التعزيز",         icon: Zap,             color: "text-orange-400" },
   { key: "payreceipts",    label: "إيصالات الدفع",          icon: Banknote,        color: "text-emerald-500" },
   { key: "renewalorders",  label: "طلبات التجديد",           icon: RefreshCw,       color: "text-blue-400" },
@@ -1337,158 +1337,183 @@ function PaymentsSection({ logAction }: { logAction: any }) {
   });
 
   const pending = payments.filter((p: any) => p.status === "pending");
+  const pendingPayments = pending.filter((p: any) => p.type !== "withdrawal");
+  const pendingWithdrawals = pending.filter((p: any) => p.type === "withdrawal");
   const done = payments.filter((p: any) => p.status !== "pending");
 
   const methodLabel: Record<string, string> = { vodafone: "فودافون كاش", etisalat: "اتصالات كاش", instapay: "إنستاباي", souq: "محفظة سوق" };
 
+  // ── PaymentCard helper (inline component) ──────────────────
+  const renderCard = (p: any) => {
+    const isWithdrawal = p.type === "withdrawal";
+    const isWithdrawalRef = isWithdrawal && p.paymentRef?.includes("||");
+    let withdrawalInfo = null;
+    if (isWithdrawalRef) {
+      const parts = p.paymentRef.split("||").map((s: string) => s.trim());
+      const holderName  = parts[0] || "—";
+      const accountType = parts[1] || "—";
+      const accountNum  = parts[2] || "—";
+      const maskedNum   = accountNum.length >= 4
+        ? "•".repeat(Math.max(0, accountNum.length - 4)) + accountNum.slice(-4)
+        : accountNum;
+      const typeLabel: Record<string, string> = {
+        vodafone: "📱 فودافون كاش",
+        instapay: "⚡ InstaPay",
+        bank:     "🏦 حساب بنكي",
+        visa:     "💳 كارت فيزا / بنكي",
+      };
+      withdrawalInfo = (
+        <div className="rounded-xl bg-blue-50 dark:bg-blue-950/20 border-2 border-blue-400/50 px-4 py-3 space-y-2">
+          <p className="text-[10px] font-bold text-blue-700 dark:text-blue-400">🏧 بيانات حساب الاستلام — حوّل لهذا الحساب</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+            <div><p className="text-[10px] text-muted-foreground">صاحب الحساب</p><p className="font-bold">{holderName}</p></div>
+            <div><p className="text-[10px] text-muted-foreground">نوع الحساب</p><p className="font-bold">{typeLabel[accountType] || accountType}</p></div>
+          </div>
+          <div className="bg-white dark:bg-black/30 rounded-lg border border-blue-200 dark:border-blue-800 px-3 py-2 flex items-center gap-3">
+            <div className="flex-1">
+              <p className="text-[10px] text-muted-foreground">رقم الحساب (مخفي)</p>
+              <p className="font-mono font-extrabold text-base tracking-widest text-blue-700 dark:text-blue-300" dir="ltr">{maskedNum}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] text-muted-foreground">الرقم الكامل</p>
+              <p className="font-mono text-xs text-foreground/60 select-all" dir="ltr">{accountNum}</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <Card
+        key={p.id}
+        className={`rounded-xl ${isWithdrawal ? "border-blue-500/30 bg-blue-50/20 dark:bg-blue-950/10" : "border-green-500/20 bg-green-50/20 dark:bg-green-950/10"}`}
+        data-testid={`payment-${p.id}`}
+      >
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center gap-4">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className={`font-bold text-lg ${isWithdrawal ? "text-blue-600" : "text-green-600"}`}>{p.amountEGP} ج.م</span>
+                <StatusBadge status={p.status} />
+                <span className={`text-xs px-2 py-0.5 rounded font-mono font-bold ${isWithdrawal ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" : "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"}`}>
+                  {isWithdrawal ? "🏧 سحب أرباح" : "💳 دفع مقابل خدمة"}
+                </span>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {methodLabel[p.method] || p.method} · {p.phoneNumber} · {p.createdAt ? format(new Date(p.createdAt), "dd MMM yyyy", { locale: ar }) : ""}
+              </div>
+              {p.serviceType && (
+                <span className="inline-block mt-1 text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold">
+                  🎯 {SERVICE_TYPE_LABELS[p.serviceType] || p.serviceType}
+                </span>
+              )}
+              <div className="text-xs text-muted-foreground opacity-60 mt-0.5">ORD: {p.orderNumber || p.id} · ID: {p.userId}</div>
+            </div>
+            <div className="flex gap-1.5 flex-shrink-0">
+              <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "approved" })}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
+              <Button size="sm" variant="destructive" className="text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "rejected" })}><XCircle className="w-3 h-3 me-1" />رفض</Button>
+            </div>
+          </div>
+
+          {/* بيانات السحب أو رقم العملية */}
+          {withdrawalInfo}
+          {!isWithdrawalRef && p.paymentRef && (
+            <div className="rounded-xl bg-green-50 dark:bg-green-950/20 border-2 border-green-400/50 px-4 py-2.5 flex items-center gap-2">
+              <span className="text-green-600 text-lg">✅</span>
+              <div>
+                <p className="text-[10px] text-muted-foreground">رقم العملية / رقم الإيداع</p>
+                <p className="font-mono font-extrabold text-sm text-green-700 dark:text-green-400 tracking-wider" dir="ltr">{p.paymentRef}</p>
+              </div>
+            </div>
+          )}
+          {!p.paymentRef && !isWithdrawal && (
+            <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-300 dark:border-red-800 px-4 py-2 text-xs text-red-600 dark:text-red-400 font-bold">
+              ⚠️ المستخدم لم يُدخل رقم العملية — تحقق من الإيصال قبل الموافقة
+            </div>
+          )}
+
+          {/* بيانات التحقق — الرقم القومي + رقم البطاقة */}
+          {(p.nationalId || p.cardNumber) && (
+            <div className="rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-300 dark:border-purple-800 px-4 py-3 space-y-2">
+              <p className="text-[10px] font-bold text-purple-700 dark:text-purple-400">🪪 بيانات التحقق من الهوية</p>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                {p.nationalId && <div><p className="text-[10px] text-muted-foreground">الرقم القومي</p><p className="font-mono font-bold" dir="ltr">{p.nationalId}</p></div>}
+                {p.cardNumber && <div><p className="text-[10px] text-muted-foreground">رقم البطاقة البنكية</p><p className="font-mono font-bold" dir="ltr">{p.cardNumber}</p></div>}
+              </div>
+            </div>
+          )}
+
+          {p.screenshotUrl && (
+            <a href={p.screenshotUrl} target="_blank" rel="noopener noreferrer" className="block">
+              <img src={p.screenshotUrl} alt="إيصال الدفع" className="w-full max-h-52 object-contain rounded-xl border bg-muted/20 cursor-zoom-in hover:opacity-90 transition-opacity" data-testid={`screenshot-payment-${p.id}`} />
+              <p className="text-[10px] text-primary mt-1 text-center">📎 صورة إيصال الدفع — اضغط للتكبير</p>
+            </a>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+
   return (
-    <div className="space-y-5">
-      {pending.length > 0 && (
+    <div className="space-y-6">
+      {/* ── قسم طلبات الدفع مقابل الخدمات ── */}
+      {pendingPayments.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-yellow-600 mb-3 flex items-center gap-2"><Clock className="w-4 h-4" /> معلقة ({pending.length})</h3>
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className="text-sm font-bold text-green-700 dark:text-green-400 flex items-center gap-2">
+              <CheckCircle className="w-4 h-4" /> 💳 طلبات الدفع مقابل خدمة ({pendingPayments.length})
+            </h3>
+          </div>
+          <p className="text-xs text-muted-foreground mb-3">مستخدم دفع مقابل تعزيز / تجديد / حملة — تحقق من رقم العملية وأكّد</p>
+          <div className="space-y-2">{pendingPayments.map(renderCard)}</div>
+        </div>
+      )}
+
+      {/* ── قسم طلبات السحب ── */}
+      {pendingWithdrawals.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className="text-sm font-bold text-blue-700 dark:text-blue-400 flex items-center gap-2">
+              <ArrowDownLeft className="w-4 h-4" /> 🏧 طلبات سحب الأرباح ({pendingWithdrawals.length})
+            </h3>
+          </div>
+          <p className="text-xs text-muted-foreground mb-3">مستخدم يريد سحب أرباحه — حوّل المبلغ للحساب الموضّح ثم أكّد</p>
+          <div className="space-y-2">{pendingWithdrawals.map(renderCard)}</div>
+        </div>
+      )}
+
+      {pending.length === 0 && !isLoading && (
+        <div className="text-center py-10 text-muted-foreground">
+          <CheckCircle className="w-10 h-10 mx-auto mb-2 text-green-400 opacity-50" />
+          <p className="text-sm">لا توجد طلبات معلقة</p>
+        </div>
+      )}
+
+      {/* ── سجل الطلبات المنجزة ── */}
+      {done.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-muted-foreground mb-3">سجل الطلبات المنجزة ({done.length})</h3>
           <div className="space-y-2">
-            {pending.map((p: any) => (
-              <Card key={p.id} className="rounded-xl border-yellow-500/20" data-testid={`payment-${p.id}`}>
-                <CardContent className="p-4 space-y-3">
-                  <div className="flex items-center gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span className="font-bold text-lg text-green-600">{p.amountEGP} ج.م</span>
-                        <StatusBadge status={p.status} />
-                        <span className="text-xs bg-muted px-2 py-0.5 rounded font-mono">{p.type === 'top_up' ? '💰 شحن' : '🏧 سحب'}</span>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {methodLabel[p.method] || p.method} · {p.phoneNumber} · {p.createdAt ? format(new Date(p.createdAt), "dd MMM yyyy", { locale: ar }) : ""}
-                      </div>
-                      {p.serviceType && (
-                        <span className="inline-block mt-1 text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold">
-                          🎯 {SERVICE_TYPE_LABELS[p.serviceType] || p.serviceType}
-                        </span>
-                      )}
-                      <div className="text-xs text-muted-foreground opacity-60 mt-0.5">ORD: {p.orderNumber || p.id} · ID: {p.userId}</div>
+            {done.map((p: any) => (
+              <Card key={p.id} className="rounded-xl opacity-75">
+                <CardContent className="p-4 flex items-center gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className="font-semibold">{p.amountEGP} ج.م</span>
+                      <StatusBadge status={p.status} />
+                      <span className={`text-xs px-1.5 py-0.5 rounded text-[10px] font-bold ${p.type === "withdrawal" ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" : "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"}`}>
+                        {p.type === "withdrawal" ? "🏧 سحب" : "💳 دفع"}
+                      </span>
                     </div>
-                    <div className="flex gap-1.5 flex-shrink-0">
-                      <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "approved" })}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
-                      <Button size="sm" variant="destructive" className="text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "rejected" })}><XCircle className="w-3 h-3 me-1" />رفض</Button>
-                    </div>
+                    <div className="text-xs text-muted-foreground">{methodLabel[p.method] || p.method} · {p.phoneNumber}</div>
                   </div>
-
-                  {/* رقم العملية / بيانات السحب — أبرز شيء للأدمن */}
-                  {p.paymentRef ? (() => {
-                    const isWithdrawalRef = p.type === "withdrawal" && p.paymentRef.includes("||");
-                    if (isWithdrawalRef) {
-                      const parts = p.paymentRef.split("||").map((s: string) => s.trim());
-                      const holderName   = parts[0] || "—";
-                      const accountType  = parts[1] || "—";
-                      const accountNum   = parts[2] || "—";
-                      const maskedNum    = accountNum.length >= 4
-                        ? "•".repeat(Math.max(0, accountNum.length - 4)) + accountNum.slice(-4)
-                        : accountNum;
-                      const typeLabel: Record<string,string> = {
-                        vodafone: "📱 فودافون كاش",
-                        instapay: "⚡ InstaPay",
-                        bank:     "🏦 حساب بنكي",
-                        visa:     "💳 كارت فيزا / بنكي",
-                      };
-                      return (
-                        <div className="rounded-xl bg-blue-50 dark:bg-blue-950/20 border-2 border-blue-400/50 px-4 py-3 space-y-2">
-                          <p className="text-[10px] font-bold text-blue-700 dark:text-blue-400 flex items-center gap-1">
-                            🏧 بيانات حساب الاستلام (تحويل المبلغ لهذا الحساب)
-                          </p>
-                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                            <div>
-                              <p className="text-[10px] text-muted-foreground">اسم صاحب الحساب</p>
-                              <p className="font-bold text-foreground">{holderName}</p>
-                            </div>
-                            <div>
-                              <p className="text-[10px] text-muted-foreground">نوع الحساب</p>
-                              <p className="font-bold text-foreground">{typeLabel[accountType] || accountType}</p>
-                            </div>
-                          </div>
-                          <div className="bg-white dark:bg-black/30 rounded-lg border border-blue-200 dark:border-blue-800 px-3 py-2 flex items-center gap-3">
-                            <div className="flex-1">
-                              <p className="text-[10px] text-muted-foreground">رقم الحساب (الأرقام الأخيرة فقط)</p>
-                              <p className="font-mono font-extrabold text-base tracking-widest text-blue-700 dark:text-blue-300" dir="ltr">{maskedNum}</p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-[10px] text-muted-foreground">الرقم الكامل</p>
-                              <p className="font-mono text-xs text-foreground/60 select-all" dir="ltr">{accountNum}</p>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    }
-                    return (
-                      <div className="rounded-xl bg-green-50 dark:bg-green-950/20 border-2 border-green-400/50 px-4 py-2.5 flex items-center gap-2">
-                        <span className="text-green-600 text-lg">✅</span>
-                        <div>
-                          <p className="text-[10px] text-muted-foreground">رقم العملية / رقم الإيداع</p>
-                          <p className="font-mono font-extrabold text-sm text-green-700 dark:text-green-400 tracking-wider" dir="ltr">{p.paymentRef}</p>
-                        </div>
-                      </div>
-                    );
-                  })() : (
-                    <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-300 dark:border-red-800 px-4 py-2 text-xs text-red-600 dark:text-red-400 font-bold">
-                      ⚠️ المستخدم لم يُدخل رقم العملية — تحقق من الإيصال قبل الموافقة
-                    </div>
-                  )}
-
-                  {/* بيانات التحقق — الرقم القومي + رقم البطاقة */}
-                  {(p.nationalId || p.cardNumber) && (
-                    <div className="rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-300 dark:border-purple-800 px-4 py-3 space-y-2">
-                      <p className="text-[10px] font-bold text-purple-700 dark:text-purple-400">🪪 بيانات التحقق من الهوية</p>
-                      <div className="grid grid-cols-2 gap-3 text-xs">
-                        {p.nationalId && (
-                          <div>
-                            <p className="text-[10px] text-muted-foreground">الرقم القومي</p>
-                            <p className="font-mono font-bold text-foreground tracking-wider" dir="ltr">{p.nationalId}</p>
-                          </div>
-                        )}
-                        {p.cardNumber && (
-                          <div>
-                            <p className="text-[10px] text-muted-foreground">رقم البطاقة البنكية</p>
-                            <p className="font-mono font-bold text-foreground tracking-wider" dir="ltr">{p.cardNumber}</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {p.screenshotUrl && (
-                    <a href={p.screenshotUrl} target="_blank" rel="noopener noreferrer" className="block">
-                      <img
-                        src={p.screenshotUrl}
-                        alt="إيصال الدفع"
-                        className="w-full max-h-52 object-contain rounded-xl border bg-muted/20 cursor-zoom-in hover:opacity-90 transition-opacity"
-                        data-testid={`screenshot-payment-${p.id}`}
-                      />
-                      <p className="text-[10px] text-primary mt-1 text-center">📎 صورة إيصال الدفع — اضغط للتكبير</p>
-                    </a>
-                  )}
                 </CardContent>
               </Card>
             ))}
           </div>
         </div>
       )}
-      <div>
-        <h3 className="text-sm font-semibold text-muted-foreground mb-3">سجل الطلبات ({done.length})</h3>
-        <div className="space-y-2">
-          {done.map((p: any) => (
-            <Card key={p.id} className="rounded-xl opacity-80">
-              <CardContent className="p-4 flex items-center gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-semibold">{p.amountEGP} ج.م</span>
-                    <StatusBadge status={p.status} />
-                  </div>
-                  <div className="text-xs text-muted-foreground">{methodLabel[p.method] || p.method} · {p.phoneNumber}</div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
+
       {payments.length === 0 && !isLoading && (
         <div className="text-center py-16 text-muted-foreground"><Banknote className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد طلبات</p></div>
       )}
