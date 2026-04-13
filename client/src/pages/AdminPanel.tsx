@@ -1342,6 +1342,27 @@ function PaymentsSection({ logAction }: { logAction: any }) {
                     </div>
                   )}
 
+                  {/* بيانات التحقق — الرقم القومي + رقم البطاقة */}
+                  {(p.nationalId || p.cardNumber) && (
+                    <div className="rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-300 dark:border-purple-800 px-4 py-3 space-y-2">
+                      <p className="text-[10px] font-bold text-purple-700 dark:text-purple-400">🪪 بيانات التحقق من الهوية</p>
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        {p.nationalId && (
+                          <div>
+                            <p className="text-[10px] text-muted-foreground">الرقم القومي</p>
+                            <p className="font-mono font-bold text-foreground tracking-wider" dir="ltr">{p.nationalId}</p>
+                          </div>
+                        )}
+                        {p.cardNumber && (
+                          <div>
+                            <p className="text-[10px] text-muted-foreground">رقم البطاقة البنكية</p>
+                            <p className="font-mono font-bold text-foreground tracking-wider" dir="ltr">{p.cardNumber}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {p.screenshotUrl && (
                     <a href={p.screenshotUrl} target="_blank" rel="noopener noreferrer" className="block">
                       <img

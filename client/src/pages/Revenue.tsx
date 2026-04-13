@@ -32,6 +32,8 @@ function WithdrawDialog({ balanceEGP, label }: { balanceEGP: number; label: stri
   const [method, setMethod] = useState("");
   const [phone, setPhone] = useState("");
   const [cardNote, setCardNote] = useState("");
+  const [nationalId, setNationalId] = useState("");
+  const [cardNumber, setCardNumber] = useState("");
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -39,6 +41,8 @@ function WithdrawDialog({ balanceEGP, label }: { balanceEGP: number; label: stri
     mutationFn: () => apiRequest('/api/payments', 'POST', {
       type: 'withdrawal', amountEGP: parseFloat(amount),
       method, phoneNumber: phone, adminNote: cardNote || undefined,
+      nationalId: nationalId || undefined,
+      cardNumber: cardNumber || undefined,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/publisher/report'] });
@@ -105,6 +109,25 @@ function WithdrawDialog({ balanceEGP, label }: { balanceEGP: number; label: stri
               <p className="text-xs text-primary font-bold">🏪 سيُضاف لرصيد تطبيق سوق ماركات فوراً بدون رسوم</p>
             </div>
           )}
+          {/* تحقق إضافي — رقم القومية + رقم البطاقة */}
+          <div className="border rounded-xl p-3 space-y-3 bg-muted/30">
+            <p className="text-xs font-bold text-muted-foreground flex items-center gap-1">
+              <CreditCard className="w-3.5 h-3.5" /> بيانات التحقق (مطلوبة لصرف الأرباح)
+            </p>
+            <div>
+              <label className="text-sm font-medium">الرقم القومي</label>
+              <Input value={nationalId} onChange={e => setNationalId(e.target.value)}
+                placeholder="14 رقم" maxLength={14} className="mt-1 font-mono"
+                data-testid="input-national-id" />
+            </div>
+            <div>
+              <label className="text-sm font-medium">رقم البطاقة البنكية (اختياري)</label>
+              <Input value={cardNumber} onChange={e => setCardNumber(e.target.value)}
+                placeholder="آخر 4 أرقام على الأقل" maxLength={19} className="mt-1 font-mono"
+                data-testid="input-card-number" />
+            </div>
+          </div>
+
           <div className="flex items-start gap-2 bg-yellow-50 dark:bg-yellow-950/20 rounded-xl p-3">
             <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 shrink-0" />
             <p className="text-xs text-yellow-700 dark:text-yellow-400">
