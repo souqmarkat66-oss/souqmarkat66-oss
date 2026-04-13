@@ -3037,6 +3037,7 @@ function AiPricingSection() {
     { key: "ai_price_content", label: "كتابة وصف إعلان (كريديت)", icon: Wand2, unit: "كريديت", desc: "توليد وصف احترافي للمنتج أو الخدمة" },
     { key: "ai_price_video", label: "توليد فيديو سينمائي (كريديت)", icon: Video, unit: "كريديت", desc: "فيديو إعلاني سينمائي بصوت وصورة عالية الجودة" },
     { key: "ai_price_animation", label: "إنشاء أنيميشن متحرك (كريديت)", icon: Sparkles, unit: "كريديت", desc: "محتوى متحرك صوت وصورة — أنيميشن احترافي" },
+    { key: "ai_price_talking_photo", label: "🗣️ الإعلان المتكلم (D-ID) — ج.م مباشر", icon: Video, unit: "ج.م", desc: "سعر إنشاء فيديو ناطق بصوت حقيقي عبر D-ID — يُخصم من محفظة المستخدم مباشرة" },
     { key: "ai_referral_bonus_egp", label: "مكافأة الإحالة (جنيه)", icon: Gift, unit: "ج.م", desc: "المبلغ الذي يحصل عليه المُحيل عند انضمام صديقه" },
   ];
 

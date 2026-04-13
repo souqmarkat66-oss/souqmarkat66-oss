@@ -94,6 +94,27 @@ async function checkAiCredits(req: any, res: any, next: any) {
   next();
 }
 
+// Dedicated middleware for Talking Photo — charges fixed price (default 100 EGP) upfront
+async function checkTalkingPhotoCredits(req: any, res: any, next: any) {
+  if (!req.user) return res.status(401).json({ message: "Unauthorized" });
+  if (isAdminUser(req)) return next(); // admins always free
+  const userId = req.user.claims.sub;
+  const price = parseFloat(await storage.getSetting('ai_price_talking_photo') || '100');
+  const balance = await storage.getWalletBalanceEGP(userId);
+  if (balance < price) {
+    return res.status(402).json({
+      message: "insufficient_credits",
+      requiresWalletTopup: true,
+      pricePerCredit: price,
+      balance,
+      service: "talking_photo",
+      serviceLabel: "الإعلان المتكلم",
+    });
+  }
+  req.talkingPhotoChargeEGP = price;
+  next();
+}
+
 // Atomically deduct AI charge from users.balance_egp and log to revenue_transactions
 async function deductAiCharge(userId: string, amountEGP: number, description: string): Promise<void> {
   const client = await pool.connect();
@@ -4024,7 +4045,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // ─── D-ID TALKING PHOTO ─────────────────────────────────────────
-  app.post("/api/ai/talking-photo", isAuthenticated, checkAiCredits, async (req: any, res) => {
+  app.post("/api/ai/talking-photo", isAuthenticated, checkTalkingPhotoCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const { imageUrl, text, voiceId } = req.body;
@@ -4032,6 +4053,11 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
       const DID_API_KEY = process.env.DID_API_KEY;
       if (!DID_API_KEY) return res.status(503).json({ message: "خدمة الصورة الناطقة غير مفعّلة بعد. تواصل مع المسؤول." });
+
+      // ─── Deduct BEFORE calling D-ID (pre-payment) ───────────────────
+      if (req.talkingPhotoChargeEGP) {
+        await deductAiCharge(userId, req.talkingPhotoChargeEGP, `رسوم إعلان متكلم بالذكاء الاصطناعي (D-ID) — ${req.talkingPhotoChargeEGP} ج.م`);
+      }
 
       const imageFullUrl = imageUrl.startsWith('/') ? `https://${req.headers.host}${imageUrl}` : imageUrl;
 
@@ -4083,10 +4109,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const localUrl = `/uploads/${filename}`;
 
       await storage.recordAiUsage(userId, 'talking_photo');
-      if (req.aiChargeEGP) {
-        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم صورة ناطقة بالذكاء الاصطناعي');
-      }
-      res.json({ videoUrl: localUrl });
+      res.json({ videoUrl: localUrl, charged: req.talkingPhotoChargeEGP || 0 });
     } catch (error: any) {
       res.status(500).json({ message: "فشل توليد الصورة الناطقة: " + error.message });
     }

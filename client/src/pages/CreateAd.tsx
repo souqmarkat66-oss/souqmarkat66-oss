@@ -404,11 +404,20 @@ export default function CreateAd() {
         credentials: "include"
       });
       const data = await res.json();
+      if (res.status === 402) {
+        // Insufficient wallet balance — guide user to top up
+        toast({
+          variant: "destructive",
+          title: "🔴 رصيد غير كافٍ",
+          description: `الإعلان المتكلم يكلف ${data.pricePerCredit} ج.م — رصيدك الحالي ${data.balance} ج.م. اشحن محفظتك أولاً من صفحة "محفظتي"`,
+        });
+        return;
+      }
       if (!res.ok) throw new Error(data.message);
       setTalkingPhotoVideoUrl(data.videoUrl);
       form.setValue("mediaUrl", data.videoUrl);
       form.setValue("mediaType", "video");
-      toast({ title: "🎭 تم توليد الصورة الناطقة!" });
+      toast({ title: `🎭 تم توليد الصورة الناطقة! ${data.charged ? `(خُصم ${data.charged} ج.م من محفظتك)` : ""}` });
     } catch (e: any) {
       toast({ variant: "destructive", title: "فشل التوليد", description: e.message });
     } finally { setGeneratingTalkingPhoto(false); }
