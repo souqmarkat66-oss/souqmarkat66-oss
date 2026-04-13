@@ -9,8 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Wallet, Plus, ArrowUpCircle, ArrowDownCircle, Clock, CheckCircle2,
-  XCircle, Upload, X, Copy, Loader2, Banknote, Smartphone, CreditCard
+  XCircle, Upload, X, Copy, Loader2, Banknote, Smartphone, CreditCard,
+  Zap, RefreshCw, Bot, ExternalLink
 } from "lucide-react";
+import { useLocation } from "wouter";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 
@@ -54,6 +56,7 @@ export default function WalletPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [, setLocation] = useLocation();
   const [showTopup, setShowTopup] = useState(false);
   const [selectedMethod, setSelectedMethod] = useState("vodafone");
   const [amount, setAmount]       = useState("");
@@ -66,6 +69,7 @@ export default function WalletPage() {
   const { data: walletData, isLoading } = useQuery<{
     balance: number;
     transactions: any[];
+    breakdown: { type: string; total: string; count: string }[];
   }>({
     queryKey: ["/api/wallet/balance"],
     enabled: !!user,
@@ -143,24 +147,42 @@ export default function WalletPage() {
 
   const balance = walletData?.balance || 0;
   const transactions = walletData?.transactions || [];
+  const breakdown = walletData?.breakdown || [];
 
   // Totals derived from the unified wallet_transactions ledger
   const totalTopUp = transactions
     .filter((t: any) => t.type === "top_up")
-    .reduce((s: number, t: any) => s + (t.amount_egp || 0), 0);
+    .reduce((s: number, t: any) => s + Number(t.amount_egp || 0), 0);
   const totalSpent = transactions
     .filter((t: any) => t.type !== "top_up")
-    .reduce((s: number, t: any) => s + (t.amount_egp || 0), 0);
+    .reduce((s: number, t: any) => s + Number(t.amount_egp || 0), 0);
+
+  const getBreakdown = (type: string) => breakdown.find(b => b.type === type);
+  const boostSpent    = Number(getBreakdown("boost_debit")?.total    || 0);
+  const renewalSpent  = Number(getBreakdown("renewal_debit")?.total  || 0);
+  const aiSpent       = Number(getBreakdown("ai_debit")?.total       || 0);
+
+  // Type icons + labels for transaction rows
+  const TX_META: Record<string, { icon: any; label: string; color: string }> = {
+    top_up:        { icon: ArrowUpCircle,  label: "شحن محفظة",     color: "text-green-500" },
+    boost_debit:   { icon: Zap,            label: "تعزيز إعلان",   color: "text-orange-500" },
+    renewal_debit: { icon: RefreshCw,      label: "تجديد إعلان",   color: "text-blue-500"   },
+    ai_debit:      { icon: Bot,            label: "خدمة AI",        color: "text-violet-500" },
+  };
 
   // Unified display list — all wallet ledger entries
   const allTx = transactions.map((t: any) => {
     const isCredit = t.type === "top_up";
+    const meta = TX_META[t.type] || { icon: ArrowDownCircle, label: "خصم", color: "text-red-500" };
     return {
       ...t,
       txType: isCredit ? "topup" : "spending",
       date: new Date(t.created_at),
-      amount: t.amount_egp,
-      label: t.description || (isCredit ? "شحن محفظة" : "خصم خدمة"),
+      amount: Number(t.amount_egp),
+      label: t.description || meta.label,
+      adTitle: t.ad_title || null,
+      adId: t.ad_id_ref || null,
+      meta,
       statusInfo: isCredit
         ? { label: "مُضاف", color: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400", icon: CheckCircle2 }
         : { label: "مكتمل", color: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400", icon: CheckCircle2 },
@@ -213,7 +235,7 @@ export default function WalletPage() {
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
+      <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="border rounded-2xl p-4 bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-900">
           <p className="text-xs text-green-700 dark:text-green-400 font-semibold flex items-center gap-1">
             <ArrowUpCircle className="w-3.5 h-3.5" /> إجمالي الشحن
@@ -231,6 +253,38 @@ export default function WalletPage() {
           </p>
         </div>
       </div>
+
+      {/* Spending Breakdown */}
+      {(boostSpent > 0 || renewalSpent > 0 || aiSpent > 0) && (
+        <div className="border rounded-2xl p-4 mb-6 bg-muted/20 space-y-2">
+          <p className="text-xs font-bold text-muted-foreground mb-2 flex items-center gap-1">
+            <Banknote className="w-3.5 h-3.5" /> تفصيل الإنفاق
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {boostSpent > 0 && (
+              <div className="text-center p-2 rounded-xl bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-900">
+                <Zap className="w-4 h-4 text-orange-500 mx-auto mb-0.5" />
+                <p className="text-xs font-bold text-orange-600">{boostSpent.toFixed(0)} ج.م</p>
+                <p className="text-[10px] text-muted-foreground">تعزيز</p>
+              </div>
+            )}
+            {renewalSpent > 0 && (
+              <div className="text-center p-2 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900">
+                <RefreshCw className="w-4 h-4 text-blue-500 mx-auto mb-0.5" />
+                <p className="text-xs font-bold text-blue-600">{renewalSpent.toFixed(0)} ج.م</p>
+                <p className="text-[10px] text-muted-foreground">تجديد</p>
+              </div>
+            )}
+            {aiSpent > 0 && (
+              <div className="text-center p-2 rounded-xl bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-900">
+                <Bot className="w-4 h-4 text-violet-500 mx-auto mb-0.5" />
+                <p className="text-xs font-bold text-violet-600">{aiSpent.toFixed(0)} ج.م</p>
+                <p className="text-[10px] text-muted-foreground">ذكاء اصطناعي</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Transaction History */}
       <div className="border rounded-2xl overflow-hidden bg-background">
@@ -258,27 +312,36 @@ export default function WalletPage() {
           <div className="divide-y">
             {allTx.map((tx: any, i) => {
               const StatusIcon = tx.statusInfo.icon;
-              const isCredit = tx.txType === "topup" && tx.status === "approved";
-              const isPending = tx.txType === "topup" && tx.status === "pending";
+              const TxIcon = tx.meta.icon;
               return (
-                <div key={`${tx.txType}-${tx.id}-${i}`} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/20 transition-colors" data-testid={`row-tx-${tx.id}`}>
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-                    tx.txType === "spending" ? "bg-red-100 dark:bg-red-900/30" :
+                <div key={`${tx.txType}-${tx.id}-${i}`} className="flex items-start gap-3 px-4 py-3 hover:bg-muted/20 transition-colors" data-testid={`row-tx-${tx.id}`}>
+                  {/* Icon */}
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                    tx.txType === "spending" ? "bg-muted/60" :
                     tx.status === "approved" ? "bg-green-100 dark:bg-green-900/30" :
                     tx.status === "rejected" ? "bg-red-100 dark:bg-red-900/30" :
                     "bg-yellow-100 dark:bg-yellow-900/30"
                   }`}>
-                    {tx.txType === "spending" ? (
-                      <ArrowDownCircle className="w-4 h-4 text-red-500" />
-                    ) : (
-                      <ArrowUpCircle className={`w-4 h-4 ${
-                        tx.status === "approved" ? "text-green-500" :
-                        tx.status === "rejected" ? "text-red-500" : "text-yellow-500"
-                      }`} />
-                    )}
+                    <TxIcon className={`w-4 h-4 ${
+                      tx.txType === "spending" ? tx.meta.color :
+                      tx.status === "approved" ? "text-green-500" :
+                      tx.status === "rejected" ? "text-red-500" : "text-yellow-500"
+                    }`} />
                   </div>
+
+                  {/* Content */}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold truncate">{tx.label}</p>
+                    {/* Ad title link */}
+                    {tx.adTitle && tx.adId && (
+                      <button
+                        onClick={() => setLocation(`/ads/${tx.adId}`)}
+                        className="flex items-center gap-1 text-[11px] text-primary hover:underline mt-0.5"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        {tx.adTitle}
+                      </button>
+                    )}
                     <div className="flex items-center gap-2 mt-0.5">
                       {tx.order_number && (
                         <span className="font-mono text-[10px] text-muted-foreground">{tx.order_number}</span>
@@ -288,13 +351,16 @@ export default function WalletPage() {
                       </span>
                     </div>
                   </div>
+
+                  {/* Amount + badge */}
                   <div className="flex flex-col items-end gap-1 flex-shrink-0">
                     <span className={`text-sm font-bold tabular-nums ${
                       tx.txType === "spending" ? "text-red-500" :
                       tx.status === "approved" ? "text-green-600 dark:text-green-400" :
                       "text-muted-foreground"
                     }`}>
-                      {tx.txType === "spending" ? "-" : (tx.status === "approved" ? "+" : "")}{(tx.amount || 0).toLocaleString()} ج.م
+                      {tx.txType === "spending" ? "-" : (tx.status === "approved" ? "+" : "")}
+                      {(tx.amount || 0).toLocaleString()} ج.م
                     </span>
                     <span className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-bold ${tx.statusInfo.color}`}>
                       <StatusIcon className="w-2.5 h-2.5" />

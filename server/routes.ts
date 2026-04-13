@@ -863,18 +863,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // EGP WALLET ROUTES — محفظة الجنيه المصري
   // ================================================================
 
-  // GET /api/wallet/balance — الرصيد الحالي + آخر المعاملات
+  // GET /api/wallet/balance — الرصيد الحالي + آخر المعاملات مع تفاصيل الإعلانات
   app.get("/api/wallet/balance", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
     try {
       const userR = await pool.query(`SELECT balance_egp FROM users WHERE id = $1`, [userId]);
       const balance = parseFloat(userR.rows[0]?.balance_egp || "0");
-      // All wallet mutations from the dedicated wallet ledger table
+      // All wallet mutations with ad title joined where available
       const txR = await pool.query(
-        `SELECT * FROM wallet_transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`,
+        `SELECT wt.*, a.title as ad_title, a.id as ad_id_ref
+         FROM wallet_transactions wt
+         LEFT JOIN ads a ON a.id::text = wt.ref_id
+         WHERE wt.user_id = $1
+         ORDER BY wt.created_at DESC LIMIT 100`,
         [userId]
       );
-      res.json({ balance, transactions: txR.rows });
+      // Spending breakdown by type
+      const breakdownR = await pool.query(
+        `SELECT type,
+                COALESCE(SUM(amount_egp),0) as total,
+                COUNT(*) as count
+         FROM wallet_transactions
+         WHERE user_id = $1 AND type != 'top_up'
+         GROUP BY type`,
+        [userId]
+      );
+      res.json({ balance, transactions: txR.rows, breakdown: breakdownR.rows });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
