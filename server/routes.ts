@@ -849,17 +849,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const amount = parseFloat(amountEGP);
     if (isNaN(amount) || amount <= 0) return res.status(400).json({ message: "مبلغ غير صالح" });
 
-    // Sanitize screenshotUrl: only allow http/https URLs pointing to our own /uploads/ path
+    // Sanitize screenshotUrl: accept safe relative /uploads/ paths and http/https absolute URLs pointing to /uploads/
     let safeScreenshotUrl: string | null = null;
     if (screenshotUrl && typeof screenshotUrl === "string") {
-      try {
-        const parsed = new URL(screenshotUrl);
-        if ((parsed.protocol === "http:" || parsed.protocol === "https:") &&
-            (parsed.pathname.startsWith("/uploads/") || parsed.pathname.startsWith("/api/uploads/"))) {
-          safeScreenshotUrl = screenshotUrl;
-        }
-        // Reject javascript:, data:, and external domains silently
-      } catch { /* malformed URL — skip */ }
+      const trimmed = screenshotUrl.trim();
+      if (/^\/uploads\/[^\s<>"]+$/.test(trimmed) || /^\/api\/uploads\/[^\s<>"]+$/.test(trimmed)) {
+        // Safe relative path from our own upload handler
+        safeScreenshotUrl = trimmed;
+      } else {
+        // Try to parse as absolute URL and only accept http/https pointing to /uploads/
+        try {
+          const parsed = new URL(trimmed);
+          if ((parsed.protocol === "http:" || parsed.protocol === "https:") &&
+              (parsed.pathname.startsWith("/uploads/") || parsed.pathname.startsWith("/api/uploads/"))) {
+            safeScreenshotUrl = trimmed;
+          }
+          // Reject javascript:, data:, and external domains silently
+        } catch { /* malformed URL — skip */ }
+      }
+    }
+
+    // Require proof of payment: at least a screenshot or a payment reference
+    if (!safeScreenshotUrl && !paymentRef) {
+      return res.status(400).json({ message: "يرجى رفع إيصال الدفع أو إدخال رقم العملية كدليل على الدفع" });
     }
 
     const userR = await pool.query(`SELECT first_name, last_name FROM users WHERE id = $1`, [userId]);
