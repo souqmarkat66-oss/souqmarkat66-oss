@@ -1715,15 +1715,17 @@ Sitemap: ${BASE}/sitemap-pages.xml
         VALUES (${orderNumber}, ${adId}, ${userId}, ${amount || 0}, ${paymentRef}, 'pending', ${paymentMethod || null}, ${screenshotUrl || null})
       `);
 
-      // Notify admin
+      // Notify both admins
       const userName = req.user.claims?.first_name || "مستخدم";
-      await createNotification(
-        ADMIN_USER_ID,
-        "system",
-        `💳 طلب تعزيز جديد #${orderNumber}`,
-        `${userName} دفع ${amount || 0} ج.م لتعزيز إعلان رقم ${adId} — مرجع الدفع: ${paymentRef}. تحقق وأكّد.`,
-        `/admin`
-      );
+      for (const adminId of [ADMIN_USER_ID, ADMIN_USER_ID2]) {
+        await createNotification(
+          adminId,
+          "payment",
+          `⚡ طلب تعزيز جديد`,
+          `${userName} — ${amount || 0} ج.م لتعزيز إعلان #${adId} (${orderNumber})`,
+          `/admin`
+        );
+      }
 
       // Send DM (from admin) to user with receipt
       const receiptMsg =
@@ -3359,15 +3361,19 @@ Sitemap: ${BASE}/sitemap-pages.xml
   // ── Pending Counts for Admin Badges ──────────────────────────
   app.get("/api/admin/pending-counts", isAuthenticated, requireAdmin, async (_req, res) => {
     try {
-      const [paymentsRes, topupsRes, adsRes] = await Promise.all([
+      const [paymentsRes, topupsRes, adsRes, boostRes, renewalRes] = await Promise.all([
         pool.query(`SELECT COUNT(*) as cnt FROM payment_requests WHERE status = 'pending'`),
         pool.query(`SELECT COUNT(*) as cnt FROM wallet_top_up_orders WHERE status = 'pending'`),
         pool.query(`SELECT COUNT(*) as cnt FROM ads WHERE status = 'pending'`),
+        pool.query(`SELECT COUNT(*) as cnt FROM boost_orders WHERE status = 'pending'`),
+        pool.query(`SELECT COUNT(*) as cnt FROM renewal_orders WHERE status = 'pending'`),
       ]);
       res.json({
-        payments: Number(paymentsRes.rows[0]?.cnt || 0),
+        payments:      Number(paymentsRes.rows[0]?.cnt || 0),
         walletcharges: Number(topupsRes.rows[0]?.cnt || 0),
-        ads: Number(adsRes.rows[0]?.cnt || 0),
+        ads:           Number(adsRes.rows[0]?.cnt || 0),
+        boostorders:   Number(boostRes.rows[0]?.cnt || 0),
+        renewalorders: Number(renewalRes.rows[0]?.cnt || 0),
       });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
@@ -5472,12 +5478,14 @@ Sitemap: ${BASE}/sitemap-pages.xml
         VALUES (${userId}, ${ADMIN_USER_ID}, ${adId}, ${msg}, false, false)
       `);
 
-      // Bell notification to admin
-      await createNotification(ADMIN_USER_ID, "system",
-        `🔄 طلب تجديد إعلان #${adId}`,
-        `رقم الطلب: ${orderNumber} — ${durationDays} يوماً مقابل ${amount} ج.م`,
-        "/admin"
-      );
+      // Bell notification to both admins
+      for (const adminId of [ADMIN_USER_ID, ADMIN_USER_ID2]) {
+        await createNotification(adminId, "payment",
+          `🔄 طلب تجديد إعلان`,
+          `إعلان #${adId} — ${durationDays} يوماً مقابل ${amount} ج.م (${orderNumber})`,
+          "/admin"
+        );
+      }
 
       res.json({ ok: true, orderNumber, adId, durationDays, amount });
     } catch (e: any) { res.status(500).json({ message: e.message }); }

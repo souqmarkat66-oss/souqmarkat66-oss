@@ -2421,6 +2421,7 @@ function BoostOrdersSection({ logAction }: { logAction: any }) {
   const { data: orders = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/boost/orders"],
     queryFn: () => fetch("/api/boost/orders", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 20000,
   });
 
   const updateOrder = async (id: number, status: string) => {
