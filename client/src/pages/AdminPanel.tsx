@@ -132,6 +132,12 @@ export default function AdminPanel() {
     return null;
   }
 
+  const { data: pendingCounts = { payments: 0, walletcharges: 0, ads: 0 } } = useQuery<any>({
+    queryKey: ["/api/admin/pending-counts"],
+    queryFn: () => fetch("/api/admin/pending-counts", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 20000,
+  });
+
   return (
     <div className="flex h-screen overflow-hidden bg-background" dir="rtl">
       {/* ── Sidebar ───────────────────────────────────────────── */}
@@ -154,21 +160,29 @@ export default function AdminPanel() {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-2">
-          {NAV.map(item => (
-            <button
-              key={item.key}
-              onClick={() => setSection(item.key)}
-              data-testid={`nav-${item.key}`}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 text-right
-                ${section === item.key
-                  ? "bg-primary/10 text-primary font-semibold"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                }`}
-            >
-              <item.icon className={`w-4 h-4 flex-shrink-0 ${section === item.key ? "text-primary" : item.color}`} />
-              {sidebarOpen && <span className="truncate">{item.label}</span>}
-            </button>
-          ))}
+          {NAV.map(item => {
+            const badge = (pendingCounts as any)[item.key];
+            return (
+              <button
+                key={item.key}
+                onClick={() => setSection(item.key)}
+                data-testid={`nav-${item.key}`}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 text-right
+                  ${section === item.key
+                    ? "bg-primary/10 text-primary font-semibold"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
+              >
+                <item.icon className={`w-4 h-4 flex-shrink-0 ${section === item.key ? "text-primary" : item.color}`} />
+                {sidebarOpen && <span className="flex-1 truncate text-right">{item.label}</span>}
+                {badge > 0 && (
+                  <span className="flex-shrink-0 min-w-[20px] h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center px-1">
+                    {badge > 99 ? "99+" : badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </nav>
 
         {/* Footer */}
@@ -1311,6 +1325,7 @@ function PaymentsSection({ logAction }: { logAction: any }) {
   const { data: payments = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/admin/payments"],
     queryFn: () => fetch("/api/admin/payments", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 20000,
   });
 
   const updatePayment = useMutation({

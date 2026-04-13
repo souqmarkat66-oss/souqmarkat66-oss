@@ -3356,6 +3356,22 @@ Sitemap: ${BASE}/sitemap-pages.xml
     res.json({ ...stats, totalUsers });
   });
 
+  // ── Pending Counts for Admin Badges ──────────────────────────
+  app.get("/api/admin/pending-counts", isAuthenticated, requireAdmin, async (_req, res) => {
+    try {
+      const [paymentsRes, topupsRes, adsRes] = await Promise.all([
+        pool.query(`SELECT COUNT(*) as cnt FROM payment_requests WHERE status = 'pending'`),
+        pool.query(`SELECT COUNT(*) as cnt FROM wallet_top_up_orders WHERE status = 'pending'`),
+        pool.query(`SELECT COUNT(*) as cnt FROM ads WHERE status = 'pending'`),
+      ]);
+      res.json({
+        payments: Number(paymentsRes.rows[0]?.cnt || 0),
+        walletcharges: Number(topupsRes.rows[0]?.cnt || 0),
+        ads: Number(adsRes.rows[0]?.cnt || 0),
+      });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   // ── Wallet Revenue Summary ────────────────────────────────────
   app.get("/api/admin/wallet-stats", isAuthenticated, requireAdmin, async (_req, res) => {
     try {
