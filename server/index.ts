@@ -268,6 +268,22 @@ async function runMigrations() {
             AND a2.target_region <> ''
         )
     `);
+    // Wallet top-up orders table
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS wallet_top_up_orders (
+      id SERIAL PRIMARY KEY,
+      user_id VARCHAR NOT NULL REFERENCES users(id),
+      amount_egp REAL NOT NULL,
+      payment_method TEXT NOT NULL,
+      payment_ref TEXT,
+      screenshot_url TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      admin_note TEXT,
+      order_number TEXT,
+      reviewed_at TIMESTAMP,
+      reviewed_by VARCHAR,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_egp REAL DEFAULT 0`);
     console.log("Migrations applied successfully");
   } catch (e: any) {
     console.error("Migration warning:", e.message);

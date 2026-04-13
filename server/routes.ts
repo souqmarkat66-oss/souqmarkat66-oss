@@ -849,6 +849,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const amount = parseFloat(amountEGP);
     if (isNaN(amount) || amount <= 0) return res.status(400).json({ message: "مبلغ غير صالح" });
 
+    // Sanitize screenshotUrl: only allow http/https URLs pointing to our own /uploads/ path
+    let safeScreenshotUrl: string | null = null;
+    if (screenshotUrl && typeof screenshotUrl === "string") {
+      try {
+        const parsed = new URL(screenshotUrl);
+        if ((parsed.protocol === "http:" || parsed.protocol === "https:") &&
+            (parsed.pathname.startsWith("/uploads/") || parsed.pathname.startsWith("/api/uploads/"))) {
+          safeScreenshotUrl = screenshotUrl;
+        }
+        // Reject javascript:, data:, and external domains silently
+      } catch { /* malformed URL — skip */ }
+    }
+
     const userR = await pool.query(`SELECT first_name, last_name FROM users WHERE id = $1`, [userId]);
     const userName = `${userR.rows[0]?.first_name || ""} ${userR.rows[0]?.last_name || ""}`.trim() || userId;
 
@@ -870,7 +883,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const r = await pool.query(
       `INSERT INTO wallet_top_up_orders (user_id, amount_egp, payment_method, payment_ref, screenshot_url, status, order_number)
        VALUES ($1, $2, $3, $4, $5, 'pending', $6) RETURNING *`,
-      [userId, amount, paymentMethod, effectivePaymentRef, screenshotUrl || null, orderNumber]
+      [userId, amount, paymentMethod, effectivePaymentRef, safeScreenshotUrl, orderNumber]
     );
 
     // Notify both admins

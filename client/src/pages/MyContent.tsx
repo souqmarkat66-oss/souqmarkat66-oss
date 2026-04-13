@@ -191,7 +191,16 @@ function AuthenticatedContent({ user }: { user: any }) {
         body: JSON.stringify({}),
       });
       const data = await res.json();
-      if (res.status === 402 && data.requiresPayment) {
+      if (res.status === 402 && data.requiresWalletTopup) {
+        // Insufficient wallet balance — redirect to wallet top-up
+        toast({
+          variant: "destructive",
+          title: "رصيد غير كافٍ",
+          description: data.message,
+        });
+        window.location.href = "/wallet";
+        return;
+      } else if (res.status === 402) {
         setBoostPayRef("");
         setBoostPayDialog({ adId, msg: data.message });
       } else if (res.status === 429) {
