@@ -881,27 +881,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const userId = req.user.claims.sub;
     const { amountEGP, paymentMethod, paymentRef, screenshotUrl } = req.body || {};
     if (!amountEGP || !paymentMethod) return res.status(400).json({ message: "المبلغ وطريقة الدفع مطلوبان" });
+    // Whitelist allowed payment methods
+    const ALLOWED_PAYMENT_METHODS = ["vodafone", "instapay", "souq"];
+    if (!ALLOWED_PAYMENT_METHODS.includes(paymentMethod)) {
+      return res.status(400).json({ message: "طريقة دفع غير مدعومة" });
+    }
     const amount = parseFloat(amountEGP);
     if (isNaN(amount) || amount <= 0) return res.status(400).json({ message: "مبلغ غير صالح" });
 
-    // Sanitize screenshotUrl: accept safe relative /uploads/ paths and http/https absolute URLs pointing to /uploads/
+    // Sanitize screenshotUrl: only accept relative /uploads/ paths from our own upload handler
     let safeScreenshotUrl: string | null = null;
     if (screenshotUrl && typeof screenshotUrl === "string") {
       const trimmed = screenshotUrl.trim();
       if (/^\/uploads\/[^\s<>"]+$/.test(trimmed) || /^\/api\/uploads\/[^\s<>"]+$/.test(trimmed)) {
-        // Safe relative path from our own upload handler
         safeScreenshotUrl = trimmed;
-      } else {
-        // Try to parse as absolute URL and only accept http/https pointing to /uploads/
-        try {
-          const parsed = new URL(trimmed);
-          if ((parsed.protocol === "http:" || parsed.protocol === "https:") &&
-              (parsed.pathname.startsWith("/uploads/") || parsed.pathname.startsWith("/api/uploads/"))) {
-            safeScreenshotUrl = trimmed;
-          }
-          // Reject javascript:, data:, and external domains silently
-        } catch { /* malformed URL — skip */ }
       }
+      // Reject javascript:, data:, absolute external URLs — only same-origin upload paths allowed
     }
 
     // Require proof of payment: at least a screenshot or a payment reference
