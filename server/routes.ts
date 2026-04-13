@@ -1800,29 +1800,51 @@ Sitemap: ${BASE}/sitemap-pages.xml
         }
       }
 
-      // If paid boost required, check wallet balance
+      // If paid boost required, atomically check+deduct wallet balance
       if (requiresPaid && boostPrice > 0) {
-        const walletR = await pool.query(`SELECT balance_egp FROM users WHERE id = $1`, [userId]);
-        const balance = parseFloat(walletR.rows[0]?.balance_egp || "0");
-        if (balance < boostPrice) {
-          return res.status(402).json({
-            requiresWalletTopup: true,
-            price: boostPrice,
-            balance,
-            message: `رصيد محفظتك غير كافٍ (${balance} ج.م). التعزيز يكلف ${boostPrice} ج.م — اشحن محفظتك أولاً`,
-          });
+        const boostClient = await pool.connect();
+        try {
+          await boostClient.query("BEGIN");
+          // Lock user row to prevent concurrent overdraft
+          const walletR = await boostClient.query(`SELECT balance_egp FROM users WHERE id = $1 FOR UPDATE`, [userId]);
+          const balance = parseFloat(walletR.rows[0]?.balance_egp || "0");
+          if (balance < boostPrice) {
+            await boostClient.query("ROLLBACK");
+            return res.status(402).json({
+              requiresWalletTopup: true,
+              price: boostPrice,
+              balance,
+              message: `رصيد محفظتك غير كافٍ (${balance} ج.م). التعزيز يكلف ${boostPrice} ج.م — اشحن محفظتك أولاً`,
+            });
+          }
+          // Use conditional deduction: only deduct if balance is still sufficient (extra safety)
+          const deductR = await boostClient.query(
+            `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) - $1
+             WHERE id = $2 AND COALESCE(balance_egp, 0) >= $1
+             RETURNING balance_egp`,
+            [boostPrice, userId]
+          );
+          if (deductR.rowCount === 0) {
+            await boostClient.query("ROLLBACK");
+            return res.status(402).json({
+              requiresWalletTopup: true,
+              price: boostPrice,
+              message: `رصيد محفظتك غير كافٍ. التعزيز يكلف ${boostPrice} ج.م — اشحن محفظتك أولاً`,
+            });
+          }
+          // Log transaction inside same transaction
+          await boostClient.query(
+            `INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description)
+             VALUES ($1, 'spending', $2, $2, $3)`,
+            [userId, boostPrice, `تعزيز إعلان #${adId}`]
+          );
+          await boostClient.query("COMMIT");
+        } catch (txErr) {
+          await boostClient.query("ROLLBACK");
+          throw txErr;
+        } finally {
+          boostClient.release();
         }
-        // Deduct from wallet
-        await pool.query(
-          `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) - $1 WHERE id = $2`,
-          [boostPrice, userId]
-        );
-        // Log transaction
-        await pool.query(
-          `INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description)
-           VALUES ($1, 'spending', $2, $2, $3)`,
-          [userId, boostPrice, `تعزيز إعلان #${adId}`]
-        );
       }
 
       const publisherName = req.user.claims?.first_name || "معلن";
