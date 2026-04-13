@@ -117,12 +117,8 @@ async function deductAiCharge(userId: string, amountEGP: number, description: st
       await client.query("ROLLBACK");
       throw new Error("رصيد غير كافٍ");
     }
-    // Log to revenue_transactions as audit trail
-    await client.query(
-      `INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description)
-       VALUES ($1, 'ai_charge', $2, $2, $3)`,
-      [userId, amountEGP, description]
-    );
+    // NOTE: AI charges are NOT logged to revenue_transactions — only users.balance_egp is updated.
+    // revenue_transactions is reserved for publisher earnings/withdrawals only.
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");
@@ -1002,19 +998,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       if (action === "approve") {
         // Atomically add balance + mark approved in same transaction
+        // Update users.balance_egp (canonical wallet balance)
         await client.query(
           `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) + $1 WHERE id = $2`,
           [order.amount_egp, order.user_id]
         );
-        await client.query(
-          `INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description)
-           VALUES ($1, 'earning', $2, $2, $3)`,
-          [order.user_id, order.amount_egp, `شحن محفظة — ${order.payment_method} — ${order.order_number}`]
-        );
+        // Mark the top-up order as approved
         await client.query(
           `UPDATE wallet_top_up_orders SET status = 'approved', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
           [adminNote || null, req.user.claims.sub, orderId]
         );
+        // NOTE: wallet top-ups are NOT logged to revenue_transactions — that table is for
+        // publisher earnings/withdrawals only. users.balance_egp is the wallet ledger.
         await client.query("COMMIT");
 
         // Notify user (outside transaction — non-critical)
@@ -1894,12 +1889,8 @@ Sitemap: ${BASE}/sitemap-pages.xml
               message: `رصيد محفظتك غير كافٍ. التعزيز يكلف ${boostPrice} ج.م — اشحن محفظتك أولاً`,
             });
           }
-          // Log transaction inside same transaction
-          await boostClient.query(
-            `INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description)
-             VALUES ($1, 'spending', $2, $2, $3)`,
-            [userId, boostPrice, `تعزيز إعلان #${adId}`]
-          );
+          // NOTE: Boost spending only updates users.balance_egp (no revenue_transactions insert)
+          // revenue_transactions is reserved for publisher earnings/withdrawals only.
           await boostClient.query("COMMIT");
         } catch (txErr) {
           await boostClient.query("ROLLBACK");
@@ -5274,12 +5265,8 @@ Sitemap: ${BASE}/sitemap-pages.xml
            WHERE id = $2`,
           [durationDays, adId]
         );
-        // Log spending
-        await client.query(
-          `INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description)
-           VALUES ($1, 'spending', $2, $2, $3)`,
-          [userId, price, `تجديد إعلان #${adId} لمدة ${durationDays} يوم`]
-        );
+        // NOTE: Renewal spending only updates users.balance_egp (no revenue_transactions insert)
+        // revenue_transactions is reserved for publisher earnings/withdrawals only.
         await client.query("COMMIT");
       } catch (err) {
         await client.query("ROLLBACK");
