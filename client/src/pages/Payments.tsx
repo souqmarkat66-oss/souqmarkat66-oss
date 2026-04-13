@@ -98,6 +98,8 @@ export default function Payments() {
 
   const { data: pricing = {} } = useQuery<Record<string, string>>({
     queryKey: ["/api/pricing"],
+    staleTime: 0,
+    refetchInterval: 60000,
   });
 
   const serviceList = buildServiceTypes(pricing)[formData.type === "top_up" ? "top_up" : "withdrawal"];

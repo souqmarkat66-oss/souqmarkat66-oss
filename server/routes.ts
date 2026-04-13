@@ -921,7 +921,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const { amountEGP, paymentMethod, paymentRef, screenshotUrl } = req.body || {};
     if (!amountEGP || !paymentMethod) return res.status(400).json({ message: "المبلغ وطريقة الدفع مطلوبان" });
     // Whitelist allowed payment methods
-    const ALLOWED_PAYMENT_METHODS = ["vodafone", "instapay", "souq"];
+    const ALLOWED_PAYMENT_METHODS = ["vodafone", "etisalat", "instapay", "souq"];
     if (!ALLOWED_PAYMENT_METHODS.includes(paymentMethod)) {
       return res.status(400).json({ message: "طريقة دفع غير مدعومة" });
     }
@@ -3095,6 +3095,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.post("/api/payments", isAuthenticated, async (req: any, res) => {
     try {
       const { insertPaymentRequestSchema } = await import("@shared/schema");
+      const userId = req.user.claims.sub;
       // Generate unique order number: ORD-YYYYMMDD-XXXX
       const now = new Date();
       const datePart = now.toISOString().slice(0,10).replace(/-/g,"");
@@ -3102,10 +3103,30 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const orderNumber = `ORD-${datePart}-${rand}`;
       const input = insertPaymentRequestSchema.parse({
         ...req.body,
-        userId: req.user.claims.sub,
+        userId,
         orderNumber,
       });
       const payment = await storage.createPaymentRequest(input);
+
+      // ── Notify both admins about new payment request ──
+      try {
+        const userR = await pool.query(`SELECT first_name, last_name FROM users WHERE id = $1`, [userId]);
+        const userName = `${userR.rows[0]?.first_name || ""} ${userR.rows[0]?.last_name || ""}`.trim() || userId;
+        const methodLabels: Record<string, string> = {
+          vodafone: "فودافون كاش", etisalat: "اتصالات e& كاش",
+          instapay: "InstaPay", souq: "سوق ماركات", visa_bank: "تحويل بنكي",
+        };
+        const methodLabel = methodLabels[input.method] || input.method;
+        const svcLabel = input.serviceType ? ` — ${input.serviceType}` : "";
+        for (const adminId of [ADMIN_USER_ID, ADMIN_USER_ID2]) {
+          await createNotification(adminId, "payment",
+            `💳 طلب دفع جديد`,
+            `${userName} — ${input.amountEGP} ج.م عبر ${methodLabel}${svcLabel}`,
+            "/admin"
+          );
+        }
+      } catch (_) {}
+
       res.status(201).json(payment);
     } catch (err: any) {
       res.status(400).json({ message: err.message });

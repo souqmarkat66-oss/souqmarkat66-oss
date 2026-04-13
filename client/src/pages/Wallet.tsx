@@ -27,6 +27,15 @@ const PAYMENT_METHODS = [
     instructions: "حوّل المبلغ على رقم فودافون كاش",
   },
   {
+    value: "etisalat",
+    label: "اتصالات e& كاش",
+    emoji: "📲",
+    number: "01126665741",
+    color: "bg-orange-50 dark:bg-orange-950/20 border-orange-200 dark:border-orange-900",
+    textColor: "text-orange-700 dark:text-orange-400",
+    instructions: "حوّل المبلغ على رقم اتصالات e& كاش",
+  },
+  {
     value: "instapay",
     label: "InstaPay",
     emoji: "💳",
