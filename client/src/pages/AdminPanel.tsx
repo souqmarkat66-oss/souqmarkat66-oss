@@ -1744,7 +1744,7 @@ function SettingsSection({ logAction }: { logAction: any }) {
     { key: "feature_registration",  label: "التسجيل",         desc: "السماح بإنشاء حسابات جديدة",            icon: UserCheck },
     { key: "feature_ads",           label: "الإعلانات",        desc: "عرض ونشر الإعلانات على المنصة",        icon: Megaphone },
     { key: "feature_campaigns",     label: "الحملات الإعلانية", desc: "إنشاء وتشغيل الحملات المدفوعة",      icon: BarChart2 },
-    { key: "boost_enabled",         label: "تعزيز الإعلانات 🚀", desc: "السماح لأصحاب الإعلانات بتعزيز إعلاناتهم (مرة كل 30 يوم)", icon: Zap },
+    { key: "boost_enabled",         label: "تعزيز الإعلانات 🚀", desc: "السماح لأصحاب الإعلانات بتعزيز إعلاناتهم بالمدة المحددة في الإعدادات", icon: Zap },
   ];
 
   const numFields = [
@@ -2801,6 +2801,7 @@ function PricingSection() {
         </h3>
         <PriceCard icon={Zap} color="bg-orange-500" label="إعدادات التعزيز" desc="سعر وتفعيل خاصية تعزيز الإعلانات">
           <NumInput k="boost_price_egp" label="سعر التعزيز الإجمالي" unit="ج.م" def="200" step="5" />
+          <NumInput k="boost_duration_days" label="مدة التعزيز" unit="يوم" def="30" step="1" />
           <NumInput k="boost_share_reward_egp" label="مكافأة المشاركة (للشخص الذي يشارك الإعلان)" unit="ج.م" def="50" step="5" />
           <div className="mt-1 p-2 bg-amber-50 dark:bg-amber-950/20 rounded-lg text-xs text-amber-700 dark:text-amber-400">
             💡 صافي المنصة = سعر التعزيز − مكافأة المشاركة

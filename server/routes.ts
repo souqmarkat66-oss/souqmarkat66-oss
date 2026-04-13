@@ -1736,11 +1736,13 @@ Sitemap: ${BASE}/sitemap-pages.xml
       await db.execute(sql`UPDATE boost_orders SET status = ${status} WHERE id = ${req.params.id}`);
 
       if (status === 'confirmed') {
-        // ✅ ACTIVATE: mark ad as boosted for 30 days
-        await db.execute(sql`
-          UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '30 days'
-          WHERE id = ${order.ad_id}
-        `);
+        // ✅ ACTIVATE: mark ad as boosted using duration from platform_settings
+        const durRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_duration_days' LIMIT 1`);
+        const durDays = parseInt((durRow.rows[0] as any)?.value || "30");
+        await pool.query(
+          `UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '1 day' * $1 WHERE id = $2`,
+          [durDays, order.ad_id]
+        );
         // Actually run the boost
         const ad = await storage.getAd(order.ad_id);
         if (ad) {
@@ -1830,9 +1832,11 @@ Sitemap: ${BASE}/sitemap-pages.xml
         return res.status(403).json({ message: "خاصية التعزيز معطّلة حالياً من قِبل الإدارة" });
       }
 
-      // Check boost price
+      // Check boost price and duration
       const boostPriceRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_price_egp' LIMIT 1`);
       const boostPrice = parseFloat((boostPriceRow.rows[0] as any)?.value || "0");
+      const boostDurRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_duration_days' LIMIT 1`);
+      const boostDays = parseInt((boostDurRow.rows[0] as any)?.value || "30");
 
       // Rate limit: check last boost time — max once per 30 days if boost is free
       // If boostPrice > 0, ALL boosts require wallet deduction (no free limit)
@@ -1843,12 +1847,12 @@ Sitemap: ${BASE}/sitemap-pages.xml
       );
 
       if (boostPrice <= 0 && lastBoost.rows.length > 0) {
-        // Free boost: enforce 30-day rate limit
+        // Free boost: enforce rate limit equal to boost duration
         const last = new Date((lastBoost.rows[0] as any).created_at);
         const daysAgo = (Date.now() - last.getTime()) / 86_400_000;
-        if (daysAgo < 30) {
-          const daysLeft = Math.ceil(30 - daysAgo);
-          return res.status(429).json({ message: `يمكنك تعزيز هذا الإعلان مرة واحدة كل 30 يوم. الأيام المتبقية: ${daysLeft} يوم` });
+        if (daysAgo < boostDays) {
+          const daysLeft = Math.ceil(boostDays - daysAgo);
+          return res.status(429).json({ message: `يمكنك تعزيز هذا الإعلان مرة واحدة كل ${boostDays} يوم. الأيام المتبقية: ${daysLeft} يوم` });
         }
       }
 
@@ -1898,6 +1902,12 @@ Sitemap: ${BASE}/sitemap-pages.xml
           boostClient.release();
         }
       }
+
+      // ✅ Activate boost on the ad using duration from platform_settings
+      await pool.query(
+        `UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '1 day' * $1 WHERE id = $2`,
+        [boostDays, adId]
+      );
 
       const publisherName = req.user.claims?.first_name || "معلن";
       const adLink = `/ads/${adId}`;
@@ -3072,9 +3082,11 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
     try {
       if (svcType === 'ad_boost' && adId) {
+        const durR = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_duration_days' LIMIT 1`);
+        const durDays = parseInt((durR.rows[0] as any)?.value || "30");
         await pool.query(
-          `UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '30 days' WHERE id = $1`,
-          [adId]
+          `UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '1 day' * $1 WHERE id = $2`,
+          [durDays, adId]
         );
         await createNotification(userId, 'system', '⚡ تم تعزيز إعلانك!',
           `إعلانك #${adId} أصبح مميزاً في الصدارة لمدة 30 يوماً`, `/ads/${adId}`);

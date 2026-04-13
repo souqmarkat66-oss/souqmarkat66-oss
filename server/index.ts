@@ -221,6 +221,8 @@ async function runMigrations() {
       status VARCHAR NOT NULL DEFAULT 'pending',
       created_at TIMESTAMP DEFAULT NOW()
     )`);
+    // Default platform settings
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('boost_duration_days', '30') ON CONFLICT (key) DO NOTHING`);
     // Generate VAPID keys for push notifications if not present
     const vapidCheck = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'vapid_public_key' LIMIT 1`);
     if (vapidCheck.rows.length === 0) {
