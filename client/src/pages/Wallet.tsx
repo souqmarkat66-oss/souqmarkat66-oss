@@ -247,6 +247,27 @@ export default function WalletPage() {
         <p className="text-xs opacity-70 mt-3">يُستخدم تلقائياً عند تعزيز الإعلانات والخدمات المدفوعة</p>
       </div>
 
+      {/* ── شرط السحب — تنبيه مهم ── */}
+      <div className="rounded-2xl border-2 border-amber-400/60 bg-amber-50 dark:bg-amber-950/20 p-4 mb-5 space-y-2">
+        <p className="font-extrabold text-sm text-amber-800 dark:text-amber-300 flex items-center gap-2">
+          <span className="text-xl">⚠️</span> شرط أساسي لطلب السحب
+        </p>
+        <p className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
+          لتتمكن من سحب أموالك يجب أن يكون رقم محفظتك
+          <strong className="text-amber-900 dark:text-amber-200"> (فودافون كاش / InstaPay / حساب بنكي) </strong>
+          فعالاً ومسجلاً <strong className="text-amber-900 dark:text-amber-200">باسمك أنت</strong>.
+        </p>
+        <div className="rounded-xl bg-white dark:bg-black/30 border border-amber-300 dark:border-amber-700 px-3 py-2 space-y-1">
+          <p className="text-[11px] font-bold text-amber-800 dark:text-amber-300">✅ شروط قبول طلب السحب:</p>
+          <ul className="text-[11px] text-amber-700 dark:text-amber-400 space-y-0.5 list-none">
+            <li>📱 الرقم يجب أن يكون <strong>فعال</strong> ومتصل بالخدمة</li>
+            <li>🪪 الرقم مسجل <strong>باسمك</strong> في الشبكة أو البنك</li>
+            <li>💰 الحد الأدنى للسحب <strong>100 ج.م</strong></li>
+            <li>🔐 طلبات حسابات الغير لن تُقبل وسيتم رفضها</li>
+          </ul>
+        </div>
+      </div>
+
       {/* Quick Stats */}
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="border rounded-2xl p-4 bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-900">

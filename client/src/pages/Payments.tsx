@@ -574,6 +574,21 @@ export default function Payments() {
                   </div>
                 </div>
 
+                {/* ── تحذير شرط السحب ── */}
+                <div className="rounded-xl border-2 border-red-400/60 bg-red-50 dark:bg-red-950/20 px-3 py-3 space-y-1">
+                  <p className="text-[11px] font-extrabold text-red-700 dark:text-red-400 flex items-center gap-1">
+                    🚨 شرط إلزامي — يجب الالتزام به:
+                  </p>
+                  <p className="text-[11px] text-red-600 dark:text-red-400 leading-relaxed">
+                    يجب أن يكون رقم محفظتك أو حسابك البنكي
+                    <strong> فعالاً </strong>
+                    و<strong>مسجلاً باسمك أنت</strong> في الشبكة أو البنك.
+                  </p>
+                  <p className="text-[10px] text-red-500 dark:text-red-400 font-bold">
+                    ❌ أي طلب بحساب مسجل باسم شخص آخر سيتم رفضه تلقائياً.
+                  </p>
+                </div>
+
                 {/* اسم صاحب الحساب */}
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-blue-900 dark:text-blue-200">
