@@ -75,10 +75,12 @@ async function checkAiCredits(req: any, res: any, next: any) {
   const usageCount = await storage.getAiUsageCount(userId);
   if (usageCount >= freeCredits && !isAdminUser(req)) {
     const pricePerCredit = parseFloat(await storage.getSetting('ai_price_per_credit_egp') || '5');
+    // Use canonical users.balance_egp — single source of truth
     const balance = await storage.getUserBalanceEGP(userId);
     if (balance < pricePerCredit) {
       return res.status(402).json({
         message: "insufficient_credits",
+        requiresWalletTopup: true,
         usageCount,
         freeCredits,
         pricePerCredit,
@@ -90,6 +92,44 @@ async function checkAiCredits(req: any, res: any, next: any) {
   req.aiUsageCount = usageCount;
   req.aiFreeCredits = freeCredits;
   next();
+}
+
+// Atomically deduct AI charge from users.balance_egp and log to revenue_transactions
+async function deductAiCharge(userId: string, amountEGP: number, description: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Lock user row and verify sufficient balance before deducting
+    const userR = await client.query(`SELECT balance_egp FROM users WHERE id = $1 FOR UPDATE`, [userId]);
+    const balance = parseFloat(userR.rows[0]?.balance_egp || "0");
+    if (balance < amountEGP) {
+      await client.query("ROLLBACK");
+      throw new Error("رصيد غير كافٍ لإتمام عملية الذكاء الاصطناعي");
+    }
+    // Conditional deduct to prevent overdraft under concurrency
+    const deductR = await client.query(
+      `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) - $1
+       WHERE id = $2 AND COALESCE(balance_egp, 0) >= $1
+       RETURNING balance_egp`,
+      [amountEGP, userId]
+    );
+    if (deductR.rowCount === 0) {
+      await client.query("ROLLBACK");
+      throw new Error("رصيد غير كافٍ");
+    }
+    // Log to revenue_transactions as audit trail
+    await client.query(
+      `INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description)
+       VALUES ($1, 'ai_charge', $2, $2, $3)`,
+      [userId, amountEGP, description]
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
@@ -3720,7 +3760,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
       await storage.recordAiUsage(userId, 'copy');
       if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد نص بالذكاء الاصطناعي', channelId: null, campaignId: null });
+        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم توليد نص بالذكاء الاصطناعي');
       }
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
@@ -3753,7 +3793,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
       await storage.recordAiUsage(userId, 'article');
       if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد مقالة بالذكاء الاصطناعي', channelId: null, campaignId: null });
+        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم توليد مقالة بالذكاء الاصطناعي');
       }
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
@@ -3789,7 +3829,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
       await storage.recordAiUsage(userId, 'video_script');
       if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد سكريبت فيديو', channelId: null, campaignId: null });
+        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم توليد سكريبت فيديو');
       }
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
@@ -3825,7 +3865,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const finalUrl = `/uploads/${filename}`;
       await storage.recordAiUsage(userId, 'image');
       if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد صورة بالذكاء الاصطناعي', channelId: null, campaignId: null });
+        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم توليد صورة بالذكاء الاصطناعي');
       }
       res.json({ url: finalUrl, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
@@ -3870,7 +3910,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const result = JSON.parse(response.choices[0].message.content || "{}");
       await storage.recordAiUsage(userId, 'text');
       if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم تحليل صورة بالذكاء الاصطناعي', channelId: null, campaignId: null });
+        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم تحليل صورة بالذكاء الاصطناعي');
       }
       res.json({ title: result.title || "", description: result.description || "" });
     } catch (error: any) {
@@ -3901,7 +3941,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
       await storage.recordAiUsage(userId, 'tts');
       if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد صوت بالذكاء الاصطناعي', channelId: null, campaignId: null });
+        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم توليد صوت بالذكاء الاصطناعي');
       }
       res.json({ audioUrl });
     } catch (error: any) {
@@ -3970,7 +4010,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
       await storage.recordAiUsage(userId, 'talking_photo');
       if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم صورة ناطقة بالذكاء الاصطناعي', channelId: null, campaignId: null });
+        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم صورة ناطقة بالذكاء الاصطناعي');
       }
       res.json({ videoUrl: localUrl });
     } catch (error: any) {
@@ -4004,7 +4044,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const result = JSON.parse(response.choices[0].message.content || "{}");
       await storage.recordAiUsage(userId, 'text');
       if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم ترجمة بالذكاء الاصطناعي', channelId: null, campaignId: null });
+        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم ترجمة بالذكاء الاصطناعي');
       }
       res.json({ title: result.title || "", description: result.description || "" });
     } catch (error: any) {
