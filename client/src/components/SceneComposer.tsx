@@ -194,7 +194,7 @@ export default function SceneComposer({ onExport, onClose }: SceneComposerProps)
       const r = await fetch("/api/ai/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: `Professional advertising background (NO PEOPLE, wide shot, 16:9): ${bgPrompt}. Photorealistic, high quality, cinematic lighting, Arabic market style`, size: "1792x1024" }),
+        body: JSON.stringify({ prompt: `Professional advertising background (NO PEOPLE, wide shot, 16:9): ${bgPrompt}. Photorealistic, high quality, cinematic lighting, Arabic market style`, size: "1536x1024" }),
         credentials: "include"
       });
       const data = await r.json();

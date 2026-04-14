@@ -3981,7 +3981,8 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.post("/api/ai/generate-image", isAuthenticated, checkAiCredits, async (req: any, res) => {
     const userId = req.user.claims.sub;
     const { prompt, size } = req.body;
-    const validSizes = ["1024x1024", "1024x1792", "1792x1024", "512x512", "256x256"];
+    // gpt-image-1 valid sizes only (DALL-E 3 sizes like 1792x1024 are NOT supported)
+    const validSizes = ["1024x1024", "1024x1536", "1536x1024", "auto"];
     const safeSize = validSizes.includes(size) ? size : "1024x1024";
 
     let lastError: any = null;
