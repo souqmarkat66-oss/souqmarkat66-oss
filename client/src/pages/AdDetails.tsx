@@ -21,6 +21,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
 import { AdCard } from "@/components/AdCard";
 import { QRCodeSVG } from "qrcode.react";
+import { SiFacebook, SiWhatsapp, SiTelegram } from "react-icons/si";
 
 const PLATFORM_PAYMENTS = [
   { label: "فودافون كاش", number: "01098553911", color: "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900 text-red-700 dark:text-red-400", emoji: "📱" },
@@ -1008,6 +1009,65 @@ export default function AdDetails() {
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {similarAds.map((sad, i) => <AdCard key={sad.id} ad={sad} index={i} />)}
           </div>
+        </div>
+      )}
+
+      {/* ── 📢 SHARE BAR ── */}
+      {ad && (
+        <div className="mt-8 rounded-2xl overflow-hidden border border-blue-200 dark:border-blue-900 bg-gradient-to-l from-blue-600 to-blue-700 dark:from-blue-800 dark:to-blue-900 p-5 text-white">
+          <div className="flex items-center gap-3 mb-4">
+            <Share2 className="w-6 h-6 text-white opacity-90" />
+            <div>
+              <p className="font-bold text-lg leading-tight">شارك الإعلان وساعد صاحبه!</p>
+              <p className="text-blue-100 text-sm">كل مشاركة بتزيد فرصة ظهور الإعلان على Google 🚀</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <a
+              href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(`https://ads-as.com/ads/${ad.id}`)}&quote=${encodeURIComponent(`شوف الإعلان ده: "${ad.title}" على شبكة سوق للإعلانات`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-col items-center justify-center gap-2 bg-white/20 hover:bg-white/30 active:bg-white/40 rounded-xl py-3 px-2 transition-all font-bold text-sm"
+              data-testid="btn-share-facebook"
+            >
+              <SiFacebook className="w-7 h-7" />
+              <span>فيسبوك</span>
+            </a>
+            <a
+              href={`https://wa.me/?text=${encodeURIComponent(`شوف الإعلان ده: "${ad.title}" على شبكة سوق للإعلانات 🛒\nhttps://ads-as.com/ads/${ad.id}`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-col items-center justify-center gap-2 bg-white/20 hover:bg-white/30 active:bg-white/40 rounded-xl py-3 px-2 transition-all font-bold text-sm"
+              data-testid="btn-share-whatsapp"
+            >
+              <SiWhatsapp className="w-7 h-7" />
+              <span>واتساب</span>
+            </a>
+            <a
+              href={`https://t.me/share/url?url=${encodeURIComponent(`https://ads-as.com/ads/${ad.id}`)}&text=${encodeURIComponent(`شوف الإعلان ده: "${ad.title}" على شبكة سوق للإعلانات`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-col items-center justify-center gap-2 bg-white/20 hover:bg-white/30 active:bg-white/40 rounded-xl py-3 px-2 transition-all font-bold text-sm"
+              data-testid="btn-share-telegram"
+            >
+              <SiTelegram className="w-7 h-7" />
+              <span>تيليجرام</span>
+            </a>
+          </div>
+          <button
+            onClick={() => {
+              const url = `https://ads-as.com/ads/${ad.id}`;
+              navigator.clipboard.writeText(url).then(() => {
+                const btn = document.getElementById("copy-share-btn");
+                if (btn) { btn.textContent = "✅ تم النسخ!"; setTimeout(() => { btn.textContent = "📋 نسخ الرابط"; }, 2000); }
+              });
+            }}
+            id="copy-share-btn"
+            className="mt-3 w-full bg-white/15 hover:bg-white/25 rounded-xl py-2.5 text-sm font-bold transition-all"
+            data-testid="btn-share-copy-link"
+          >
+            📋 نسخ الرابط
+          </button>
         </div>
       )}
 
