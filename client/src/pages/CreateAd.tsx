@@ -22,6 +22,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { EgyptTargetingMap } from "@/components/EgyptTargetingMap";
 import LocationPickerMap from "@/components/LocationPickerMap";
 import { useTTS } from "@/hooks/use-tts";
+import SceneComposer from "@/components/SceneComposer";
 
 const formSchema = insertAdSchema.extend({
   title: z.string().min(2, "العنوان مطلوب (2 أحرف على الأقل)"),
@@ -93,6 +94,7 @@ export default function CreateAd() {
   const [talkingPhotoFaceUrl, setTalkingPhotoFaceUrl] = useState("/uploads/avatar-male-1.jpg");
   const [showTalkingPhotoPanel, setShowTalkingPhotoPanel] = useState(false);
   const [generatingMascot, setGeneratingMascot] = useState(false);
+  const [showSceneComposer, setShowSceneComposer] = useState(false);
   const [showPresenterPanel, setShowPresenterPanel] = useState(false);
   const [presenters, setPresenters] = useState<any[]>([]);
   const [selectedPresenter, setSelectedPresenter] = useState<any>(null);
@@ -1198,6 +1200,9 @@ export default function CreateAd() {
                         {generatingScript ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
                         سكريبت فيديو سينمائي
                       </Button>
+                      <Button type="button" onClick={() => setShowSceneComposer(p => !p)} size="sm" variant="outline" className="gap-2 border-amber-500 text-amber-700 hover:bg-amber-50 font-bold" data-testid="btn-scene-composer-open">
+                        🎭 مركّب مشاهد
+                      </Button>
                       <Button type="button" onClick={async () => {
                         setShowPresenterPanel(p => !p);
                         setPresenterText(t => t || form.getValues("description") || form.getValues("title") || "");
@@ -1310,6 +1315,40 @@ export default function CreateAd() {
                           </div>
                         )}
                       </div>
+                    )}
+
+                    {/* ── SCENE COMPOSER ── */}
+                    {showSceneComposer && (
+                      <SceneComposer
+                        onClose={() => setShowSceneComposer(false)}
+                        onExport={(dataUrl: string) => {
+                          const byteStr = atob(dataUrl.split(",")[1]);
+                          const mimeStr = dataUrl.split(",")[0].split(":")[1].split(";")[0];
+                          const ab = new ArrayBuffer(byteStr.length);
+                          const ia = new Uint8Array(ab);
+                          for (let i = 0; i < byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
+                          const blob = new Blob([ab], { type: mimeStr });
+                          const file = new File([blob], `scene-${Date.now()}.png`, { type: mimeStr });
+                          const formData = new FormData();
+                          formData.append("file", file);
+                          fetch("/api/upload", { method: "POST", body: formData, credentials: "include" })
+                            .then(r => r.json())
+                            .then(data => {
+                              const url = data.url || data.path;
+                              if (url) {
+                                form.setValue("mediaUrl", url);
+                                form.setValue("mediaType", "image");
+                                toast({ title: "✅ تم حفظ مشهدك وتعيينه للإعلان!" });
+                              }
+                            })
+                            .catch(() => {
+                              form.setValue("mediaUrl", dataUrl);
+                              form.setValue("mediaType", "image");
+                              toast({ title: "✅ تم تعيين المشهد للإعلان!" });
+                            });
+                          setShowSceneComposer(false);
+                        }}
+                      />
                     )}
 
                     {/* ── AI PRESENTER PANEL (HeyGen-style) ── */}
