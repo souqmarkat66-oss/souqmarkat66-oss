@@ -292,7 +292,11 @@ function AppFooter() {
           </div>
         </div>
         <div className="text-center text-sm text-muted-foreground border-t pt-6">
-          <p className="font-bold text-base text-foreground mb-1">{platformName}</p>
+          <p className="font-bold text-base text-foreground mb-0.5">{platformName}</p>
+          <p className="text-xs text-muted-foreground/70 mb-2 flex items-center justify-center gap-1">
+            <span>🛒</span>
+            وهى إحدى منصات تطبيق <span className="font-bold text-primary">سوق ماركات</span>
+          </p>
           <p>© {new Date().getFullYear()} Souq Ads Network. جميع الحقوق محفوظة. جميع التعاملات بالجنيه المصري.</p>
         </div>
       </div>

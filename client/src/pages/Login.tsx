@@ -181,6 +181,10 @@ export default function Login() {
             <span className="text-lg">🇪🇬</span>
             المنصة الإعلانية الأولى في مصر
           </p>
+          <p className="text-xs text-muted-foreground/70 mt-1 flex items-center justify-center gap-1">
+            <span>🛒</span>
+            وهى إحدى منصات تطبيق <span className="font-bold text-primary">سوق ماركات</span>
+          </p>
           <div className="flex items-center justify-center gap-6 mt-3">
             {[{ label: "معلن نشط", value: "2.4K+" }, { label: "بث يومي", value: "150+" }, { label: "إعلان منشور", value: "18K+" }].map(s => (
               <div key={s.label} className="text-center">
