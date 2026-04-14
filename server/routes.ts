@@ -4065,14 +4065,9 @@ Sitemap: ${BASE}/sitemap-pages.xml
       if (!text) return res.status(400).json({ message: "النص مطلوب" });
       if (text.length > 4096) return res.status(400).json({ message: "النص طويل جداً (الحد الأقصى 4096 حرف)" });
 
-      const mp3 = await openai.audio.speech.create({
-        model: "tts-1-hd",
-        voice: voice as any,
-        input: text,
-        speed: Math.min(Math.max(speed, 0.25), 4.0),
-      });
-
-      const buffer = Buffer.from(await mp3.arrayBuffer());
+      const validVoices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
+      const safeVoice = validVoices.includes(voice) ? voice : "nova";
+      const buffer = await textToSpeech(text, safeVoice as any, "mp3");
       const filename = `tts-${Date.now()}.mp3`;
       const savePath = path.join(process.cwd(), 'uploads', filename);
       fs.writeFileSync(savePath, buffer);

@@ -345,16 +345,16 @@ export default function CreateAd() {
   };
 
   const MASCOT_CATEGORIES = [
-    { emoji: "🍅", label: "خضار", prompt: "cute cartoon tomato vegetable character mascot with big friendly eyes and a wide smiling mouth, simple clean white background, professional product mascot illustration style, high quality" },
-    { emoji: "🍌", label: "فاكهة", prompt: "cute cartoon mango fruit character mascot with big friendly eyes and a wide smiling mouth, simple clean white background, professional product mascot illustration style, high quality" },
-    { emoji: "🍔", label: "أكل", prompt: "cute cartoon burger food character mascot with big friendly eyes and a wide smiling mouth, simple clean white background, professional product mascot illustration style, high quality" },
-    { emoji: "📱", label: "موبايل", prompt: "cute cartoon smartphone character mascot with a big smiling face on the screen, big friendly eyes, simple clean white background, professional product mascot illustration style, high quality" },
-    { emoji: "👕", label: "ملابس", prompt: "cute cartoon t-shirt clothing character mascot with big friendly eyes and a wide smiling mouth, simple clean white background, professional product mascot illustration style, high quality" },
-    { emoji: "🚗", label: "سيارة", prompt: "cute cartoon car vehicle character mascot with big friendly headlight eyes and a wide bumper smile, simple clean white background, professional product mascot illustration style, high quality" },
-    { emoji: "🏠", label: "عقارات", prompt: "cute cartoon house real estate character mascot with big friendly window eyes and a door smile, simple clean white background, professional product mascot illustration style, high quality" },
-    { emoji: "☕", label: "مشروبات", prompt: "cute cartoon coffee cup drinks character mascot with big friendly eyes and a wide smiling mouth, simple clean white background, professional product mascot illustration style, high quality" },
-    { emoji: "💻", label: "إلكترونيات", prompt: "cute cartoon laptop computer character mascot with a big smiling face on the screen, big friendly eyes, simple clean white background, professional product mascot illustration style, high quality" },
-    { emoji: "💊", label: "صيدلية", prompt: "cute cartoon medicine pill pharmacy character mascot with big friendly eyes and a wide smiling mouth, simple clean white background, professional product mascot illustration style, high quality" },
+    { emoji: "🍅", label: "خضار", prompt: "professional headshot portrait photo of a friendly smiling Egyptian man wearing a white apron holding fresh vegetables, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
+    { emoji: "🍌", label: "فاكهة", prompt: "professional headshot portrait photo of a friendly smiling Egyptian woman holding fresh fruit, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
+    { emoji: "🍔", label: "أكل", prompt: "professional headshot portrait photo of a friendly smiling Egyptian chef wearing white chef hat and uniform, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
+    { emoji: "📱", label: "موبايل", prompt: "professional headshot portrait photo of a friendly smiling young Egyptian man holding a smartphone, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
+    { emoji: "👕", label: "ملابس", prompt: "professional headshot portrait photo of a friendly smiling young Egyptian fashion model wearing modern clothes, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
+    { emoji: "🚗", label: "سيارة", prompt: "professional headshot portrait photo of a friendly smiling Egyptian car salesman in a suit, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
+    { emoji: "🏠", label: "عقارات", prompt: "professional headshot portrait photo of a friendly smiling Egyptian real estate agent in a suit, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
+    { emoji: "☕", label: "مشروبات", prompt: "professional headshot portrait photo of a friendly smiling Egyptian barista holding a coffee cup, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
+    { emoji: "💻", label: "إلكترونيات", prompt: "professional headshot portrait photo of a friendly smiling young Egyptian tech person holding a laptop, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
+    { emoji: "💊", label: "صيدلية", prompt: "professional headshot portrait photo of a friendly smiling Egyptian pharmacist in white coat, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
   ];
 
   const handleGenerateMascot = async (prompt: string) => {
@@ -1363,7 +1363,7 @@ export default function CreateAd() {
 
                           {/* ── Mascot Generator ── */}
                           <div className="space-y-2 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800/40 rounded-xl p-3">
-                            <p className="text-xs font-bold text-orange-700 dark:text-orange-400">🎨 ماسكوت منتجك — اختر نوع منتجك وولّد شخصية كارتون ناطقة:</p>
+                            <p className="text-xs font-bold text-orange-700 dark:text-orange-400">🎨 مقدّم إعلانك — اختر نوع منتجك وولّد وجه مصري احترافي بالذكاء الاصطناعي:</p>
                             <div className="grid grid-cols-5 gap-1.5">
                               {MASCOT_CATEGORIES.map((cat) => (
                                 <button
