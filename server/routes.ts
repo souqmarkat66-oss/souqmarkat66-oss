@@ -6140,6 +6140,7 @@ ${reelTags}
   <meta name="twitter:image" content="${imageUrl}"/>
 
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"${adTitle.replace(/"/g,'\\"')}","description":"${desc.replace(/"/g,'\\"')}","url":"${pageUrl}","image":"${imageUrl}"${schemaPrice},"brand":{"@type":"Organization","name":"شبكة سوق للإعلانات","url":"${SEO_BASE}"}}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"الرئيسية","item":"${SEO_BASE}/"},{"@type":"ListItem","position":2,"name":"الإعلانات","item":"${SEO_BASE}/ads"},{"@type":"ListItem","position":3,"name":"${adTitle.replace(/"/g,'\\"')}","item":"${pageUrl}"}]}</script>
   <link rel="icon" type="image/png" href="/favicon.png"/>
 </head>
 <body style="font-family:Arial,sans-serif;direction:rtl;padding:20px;max-width:800px;margin:auto;color:#222">

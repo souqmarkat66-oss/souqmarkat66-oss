@@ -654,7 +654,16 @@ export default function AdDetails() {
     let ogUrl = document.querySelector('meta[property="og:url"]') as HTMLMetaElement | null;
     if (!ogUrl) { ogUrl = document.createElement("meta"); ogUrl.setAttribute("property","og:url"); document.head.appendChild(ogUrl); }
     ogUrl.content = `https://ads-as.com${window.location.pathname}`;
-    return () => { document.title = "شبكة سوق للإعلانات"; };
+
+    let canonical = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+    if (!canonical) { canonical = document.createElement("link"); canonical.rel = "canonical"; document.head.appendChild(canonical); }
+    canonical.href = `https://ads-as.com/ads/${id}`;
+
+    return () => {
+      document.title = "شبكة سوق للإعلانات";
+      const can = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+      if (can) can.href = "https://ads-as.com/";
+    };
   }, [ad]);
 
   // Fetch boost settings when ad owner is viewing
