@@ -872,6 +872,34 @@ export default function AdDetails() {
               <h1 className="text-2xl md:text-3xl font-bold mb-4 leading-tight">{ad.title}</h1>
               <p className="text-muted-foreground whitespace-pre-wrap leading-relaxed">{ad.description}</p>
 
+              {/* ── Google Maps ── */}
+              {ad.targetLat && ad.targetLng && (
+                <div className="mt-5 rounded-2xl overflow-hidden border border-border/50">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border/40">
+                    <span className="text-sm font-semibold text-foreground">📍 موقع الإعلان</span>
+                    <a
+                      href={`https://www.google.com/maps?q=${ad.targetLat},${ad.targetLng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mr-auto text-xs text-primary hover:underline flex items-center gap-1"
+                      data-testid="link-open-maps"
+                    >
+                      <ExternalLink className="w-3 h-3" /> فتح في خرائط Google
+                    </a>
+                  </div>
+                  <iframe
+                    title="موقع الإعلان على الخريطة"
+                    src={`https://www.google.com/maps?q=${ad.targetLat},${ad.targetLng}&z=15&output=embed`}
+                    width="100%"
+                    height="220"
+                    style={{ border: 0, display: "block" }}
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                    data-testid="iframe-google-map"
+                  />
+                </div>
+              )}
+
               {/* Like/Comment */}
               <div className="mt-6">
                 <LikeCommentBar targetType="ad" targetId={ad.id} initialLikes={ad.likesCount || 0} ownerId={ad.userId} />
