@@ -169,6 +169,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     next();
   });
 
+
   // ── Initialize webpush VAPID keys from DB ──
   try {
     const pubRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'vapid_public_key' LIMIT 1`);
@@ -6073,70 +6074,156 @@ ${reelTags}
   });
 
   // ================================================================
-  // DYNAMIC OG META TAGS — for WhatsApp / Facebook / Telegram bots
-  // When a bot scrapes /ads/:id, serve HTML with ad-specific OG tags
+  // SEO — Server-Side Meta Injection for bots & crawlers
+  // Googlebot, WhatsApp, Facebook, Telegram, Bing, etc.
   // Regular users pass through to the SPA normally
   // ================================================================
-  const BOT_UA = /whatsapp|facebookexternalhit|facebot|twitterbot|telegrambot|linkedinbot|discordbot|slackbot|pinterest|snapchat|googlebot|bingbot|applebot|line-poker|viber|iframely/i;
+  const BOT_UA = /whatsapp|facebookexternalhit|facebot|twitterbot|telegrambot|linkedinbot|discordbot|slackbot|pinterest|snapchat|googlebot|bingbot|applebot|line-poker|viber|iframely|semrushbot|ahrefsbot|mj12bot|dotbot|rogerbot|yandexbot|baiduspider|duckduckbot|petalbot/i;
 
-  const escHtml = (s: string) => s.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const escH = (s: string) => (s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const SEO_BASE = "https://ads-as.com";
 
   app.get("/ads/:id", async (req, res, next) => {
     const ua = req.headers["user-agent"] || "";
-    if (!BOT_UA.test(ua)) return next(); // real user → SPA handles it
+    if (!BOT_UA.test(ua)) return next();
 
     const adId = parseInt(req.params.id);
     if (isNaN(adId)) return next();
 
     try {
       const adR = await db.execute(
-        sql`SELECT title, description, media_url, media_type, price_egp, user_id FROM ads WHERE id = ${adId} AND status = 'active' LIMIT 1`
+        sql`SELECT id, title, description, media_url, media_type, price_egp, target_region, status FROM ads WHERE id = ${adId} AND status = 'active' LIMIT 1`
       );
       if (!adR.rows.length) return next();
       const ad: any = adR.rows[0];
 
-      const BASE   = "https://ads-as.com";
-      const pageUrl = `${BASE}/ads/${adId}`;
+      const pageUrl  = `${SEO_BASE}/ads/${adId}`;
       const rawMedia = ad.media_url || "";
-      const imageUrl = rawMedia.startsWith("http") ? rawMedia : `${BASE}${rawMedia}`;
-      const priceStr = ad.price_egp && Number(ad.price_egp) > 0 ? ` — السعر: ${Number(ad.price_egp).toLocaleString("ar-EG")} ج.م` : "";
-      const title   = escHtml(`${ad.title || "إعلان"} | ads-as.com`);
-      const desc    = escHtml(`${(ad.description || "").slice(0, 200)}${priceStr} | شبكة سوق للإعلانات ads-as.com`);
-      const siteName = "شبكة سوق للإعلانات | ads-as.com";
+      const imageUrl = rawMedia.startsWith("http") ? rawMedia : rawMedia ? `${SEO_BASE}${rawMedia}` : `${SEO_BASE}/icons/icon-512.png`;
+      const price    = ad.price_egp && Number(ad.price_egp) > 0 ? `${Number(ad.price_egp).toLocaleString("ar-EG")} جنيه` : "";
+      const region   = ad.target_region ? `في ${escH(ad.target_region)}` : "في مصر";
+      const category = "";
+      const adTitle  = escH(ad.title || "إعلان");
+      const fullTitle = `${adTitle}${price ? ` — ${price}` : ""} | شبكة سوق للإعلانات`;
+      const rawDesc  = ad.description ? String(ad.description).slice(0, 300) : `${ad.title || "إعلان"}${price ? ` — ${price}` : ""} ${region}`;
+      const desc     = escH(rawDesc);
+      const metaDesc = escH(`${rawDesc}${price ? ` | السعر: ${price}` : ""} ${region} — شبكة سوق للإعلانات ads-as.com`);
+
+      const schemaPrice = price ? `,"offers":{"@type":"Offer","price":"${ad.price_egp}","priceCurrency":"EGP","availability":"https://schema.org/InStock","areaServed":"EG"}` : "";
 
       res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=300");
       res.send(`<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8"/>
-  <meta http-equiv="refresh" content="0; url=${pageUrl}"/>
-  <title>${title}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>${fullTitle}</title>
+  <meta name="description" content="${metaDesc}"/>
+  <meta name="robots" content="index, follow, max-image-preview:large"/>
+  <link rel="canonical" href="${pageUrl}"/>
 
-  <meta property="og:type" content="website"/>
+  <meta property="og:type" content="product"/>
   <meta property="og:url" content="${pageUrl}"/>
-  <meta property="og:title" content="${title}"/>
+  <meta property="og:title" content="${adTitle}${price ? ` — ${price}` : ""}"/>
   <meta property="og:description" content="${desc}"/>
   <meta property="og:image" content="${imageUrl}"/>
   <meta property="og:image:width" content="800"/>
-  <meta property="og:image:height" content="800"/>
-  <meta property="og:site_name" content="${siteName}"/>
+  <meta property="og:image:height" content="600"/>
+  <meta property="og:site_name" content="شبكة سوق للإعلانات"/>
   <meta property="og:locale" content="ar_EG"/>
+  ${price ? `<meta property="product:price:amount" content="${escH(String(ad.price_egp))}"/><meta property="product:price:currency" content="EGP"/>` : ""}
 
   <meta name="twitter:card" content="summary_large_image"/>
-  <meta name="twitter:title" content="${title}"/>
+  <meta name="twitter:title" content="${adTitle}${price ? ` — ${price}` : ""}"/>
   <meta name="twitter:description" content="${desc}"/>
   <meta name="twitter:image" content="${imageUrl}"/>
-  <meta name="twitter:site" content="@souqads"/>
 
-  <link rel="canonical" href="${pageUrl}"/>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"${adTitle.replace(/"/g,'\\"')}","description":"${desc.replace(/"/g,'\\"')}","url":"${pageUrl}","image":"${imageUrl}"${schemaPrice},"brand":{"@type":"Organization","name":"شبكة سوق للإعلانات","url":"${SEO_BASE}"}}</script>
+  <link rel="icon" type="image/png" href="/favicon.png"/>
 </head>
-<body>
-  <p>جارٍ تحميل الإعلان... <a href="${pageUrl}">اضغط هنا إذا لم يتم التحميل تلقائياً</a></p>
+<body style="font-family:Arial,sans-serif;direction:rtl;padding:20px;max-width:800px;margin:auto;color:#222">
+  <header style="border-bottom:2px solid #c0392b;padding-bottom:12px;margin-bottom:20px">
+    <a href="${SEO_BASE}" style="text-decoration:none;color:#c0392b;font-weight:bold;font-size:20px">🛒 شبكة سوق للإعلانات</a>
+    ${category ? `<span style="color:#888;margin-right:12px;font-size:14px">← ${category}</span>` : ""}
+  </header>
+  <main>
+    <h1 style="font-size:26px;margin:0 0 10px">${adTitle}</h1>
+    ${price ? `<p style="font-size:22px;font-weight:bold;color:#c0392b;margin:8px 0">💰 ${price}</p>` : ""}
+    <p style="color:#666;margin:6px 0;font-size:15px">📍 ${region}</p>
+    ${ad.media_type === "image" && rawMedia ? `<img src="${imageUrl}" alt="${adTitle}" style="max-width:100%;border-radius:10px;margin:16px 0;display:block" loading="lazy"/>` : ""}
+    ${ad.description ? `<div style="margin-top:16px;line-height:1.8;font-size:16px;white-space:pre-wrap;background:#f9f9f9;padding:16px;border-radius:8px">${escH(ad.description)}</div>` : ""}
+    <a href="${pageUrl}" style="display:inline-block;margin-top:24px;padding:14px 28px;background:#c0392b;color:white;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px">
+      📱 عرض الإعلان كاملاً
+    </a>
+  </main>
+  <footer style="margin-top:40px;padding-top:16px;border-top:1px solid #eee;color:#999;font-size:13px">
+    <a href="${SEO_BASE}/ads" style="color:#c0392b;text-decoration:none">تصفح جميع الإعلانات</a> |
+    <a href="${SEO_BASE}" style="color:#c0392b;text-decoration:none;margin-right:8px">الرئيسية</a>
+  </footer>
 </body>
 </html>`);
-    } catch {
-      next();
-    }
+    } catch { next(); }
+  });
+
+  app.get("/channels/:id", async (req, res, next) => {
+    const ua = req.headers["user-agent"] || "";
+    if (!BOT_UA.test(ua)) return next();
+
+    const chId = parseInt(req.params.id);
+    if (isNaN(chId)) return next();
+
+    try {
+      const chR = await db.execute(
+        sql`SELECT id, name, description, avatar_url, cover_url FROM channels WHERE id = ${chId} LIMIT 1`
+      );
+      if (!chR.rows.length) return next();
+      const ch: any = chR.rows[0];
+
+      const pageUrl  = `${SEO_BASE}/channels/${chId}`;
+      const rawAvatar = ch.avatar_url || ch.cover_url || "";
+      const imageUrl = rawAvatar.startsWith("http") ? rawAvatar : rawAvatar ? `${SEO_BASE}${rawAvatar}` : `${SEO_BASE}/icons/icon-512.png`;
+      const chName   = escH(ch.name || "قناة");
+      const chDesc   = escH(ch.description || `تابع قناة ${ch.name} على شبكة سوق للإعلانات`);
+
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=300");
+      res.send(`<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>${chName} | قنوات شبكة سوق للإعلانات</title>
+  <meta name="description" content="${chDesc} — قناة رقمية على شبكة سوق للإعلانات ads-as.com"/>
+  <meta name="robots" content="index, follow"/>
+  <link rel="canonical" href="${pageUrl}"/>
+  <meta property="og:type" content="website"/>
+  <meta property="og:url" content="${pageUrl}"/>
+  <meta property="og:title" content="${chName}"/>
+  <meta property="og:description" content="${chDesc}"/>
+  <meta property="og:image" content="${imageUrl}"/>
+  <meta property="og:site_name" content="شبكة سوق للإعلانات"/>
+  <meta property="og:locale" content="ar_EG"/>
+  <meta name="twitter:card" content="summary_large_image"/>
+  <meta name="twitter:title" content="${chName}"/>
+  <meta name="twitter:description" content="${chDesc}"/>
+  <meta name="twitter:image" content="${imageUrl}"/>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"${chName.replace(/"/g,'\\"')}","description":"${chDesc.replace(/"/g,'\\"')}","url":"${pageUrl}","logo":"${imageUrl}"}</script>
+  <link rel="icon" type="image/png" href="/favicon.png"/>
+</head>
+<body style="font-family:Arial,sans-serif;direction:rtl;padding:20px;max-width:800px;margin:auto;text-align:center">
+  <header style="border-bottom:2px solid #c0392b;padding-bottom:12px;margin-bottom:20px;text-align:right">
+    <a href="${SEO_BASE}" style="text-decoration:none;color:#c0392b;font-weight:bold;font-size:20px">🛒 شبكة سوق للإعلانات</a>
+  </header>
+  ${rawAvatar ? `<img src="${imageUrl}" alt="${chName}" style="width:120px;height:120px;border-radius:50%;object-fit:cover;margin:16px auto;display:block"/>` : ""}
+  <h1 style="font-size:26px;margin:10px 0">${chName}</h1>
+  ${ch.description ? `<p style="color:#555;line-height:1.8;max-width:500px;margin:10px auto;font-size:16px">${chDesc}</p>` : ""}
+  <a href="${pageUrl}" style="display:inline-block;margin-top:20px;padding:14px 28px;background:#c0392b;color:white;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px">
+    📺 زيارة القناة
+  </a>
+</body>
+</html>`);
+    } catch { next(); }
   });
 
   return httpServer;
