@@ -92,6 +92,7 @@ export default function CreateAd() {
   const [talkingPhotoVideoUrl, setTalkingPhotoVideoUrl] = useState("");
   const [talkingPhotoFaceUrl, setTalkingPhotoFaceUrl] = useState("/uploads/avatar-male-1.jpg");
   const [showTalkingPhotoPanel, setShowTalkingPhotoPanel] = useState(false);
+  const [generatingMascot, setGeneratingMascot] = useState(false);
   const [showTTS, setShowTTS] = useState(false);
   const [ttsText, setTtsText] = useState("");
   const [ttsVoice, setTtsVoice] = useState("nova");
@@ -341,6 +342,43 @@ export default function CreateAd() {
     } catch (e: any) {
       toast({ variant: "destructive", title: "فشل توليد الصورة", description: e.message });
     } finally { setGeneratingImage(false); }
+  };
+
+  const MASCOT_CATEGORIES = [
+    { emoji: "🍅", label: "خضار", prompt: "cute cartoon tomato vegetable character mascot with big friendly eyes and a wide smiling mouth, simple clean white background, professional product mascot illustration style, high quality" },
+    { emoji: "🍌", label: "فاكهة", prompt: "cute cartoon mango fruit character mascot with big friendly eyes and a wide smiling mouth, simple clean white background, professional product mascot illustration style, high quality" },
+    { emoji: "🍔", label: "أكل", prompt: "cute cartoon burger food character mascot with big friendly eyes and a wide smiling mouth, simple clean white background, professional product mascot illustration style, high quality" },
+    { emoji: "📱", label: "موبايل", prompt: "cute cartoon smartphone character mascot with a big smiling face on the screen, big friendly eyes, simple clean white background, professional product mascot illustration style, high quality" },
+    { emoji: "👕", label: "ملابس", prompt: "cute cartoon t-shirt clothing character mascot with big friendly eyes and a wide smiling mouth, simple clean white background, professional product mascot illustration style, high quality" },
+    { emoji: "🚗", label: "سيارة", prompt: "cute cartoon car vehicle character mascot with big friendly headlight eyes and a wide bumper smile, simple clean white background, professional product mascot illustration style, high quality" },
+    { emoji: "🏠", label: "عقارات", prompt: "cute cartoon house real estate character mascot with big friendly window eyes and a door smile, simple clean white background, professional product mascot illustration style, high quality" },
+    { emoji: "☕", label: "مشروبات", prompt: "cute cartoon coffee cup drinks character mascot with big friendly eyes and a wide smiling mouth, simple clean white background, professional product mascot illustration style, high quality" },
+    { emoji: "💻", label: "إلكترونيات", prompt: "cute cartoon laptop computer character mascot with a big smiling face on the screen, big friendly eyes, simple clean white background, professional product mascot illustration style, high quality" },
+    { emoji: "💊", label: "صيدلية", prompt: "cute cartoon medicine pill pharmacy character mascot with big friendly eyes and a wide smiling mouth, simple clean white background, professional product mascot illustration style, high quality" },
+  ];
+
+  const handleGenerateMascot = async (prompt: string) => {
+    setGeneratingMascot(true);
+    try {
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, size: "1024x1024" }),
+        credentials: "include"
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.message === 'insufficient_credits') {
+          toast({ variant: "destructive", title: "رصيدك غير كافٍ", description: "اشحن رصيدك من صفحة المحفظة" });
+          return;
+        }
+        throw new Error(data.message);
+      }
+      setTalkingPhotoFaceUrl(data.url);
+      toast({ title: "🎨 تم توليد الماسكوت! جاهز للكلام 🎭", className: "bg-green-600 text-white border-none" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "فشل توليد الماسكوت", description: e.message });
+    } finally { setGeneratingMascot(false); }
   };
 
   const handleGenerateVideoScript = async () => {
@@ -1323,9 +1361,35 @@ export default function CreateAd() {
                             />
                           </label>
 
+                          {/* ── Mascot Generator ── */}
+                          <div className="space-y-2 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800/40 rounded-xl p-3">
+                            <p className="text-xs font-bold text-orange-700 dark:text-orange-400">🎨 ماسكوت منتجك — اختر نوع منتجك وولّد شخصية كارتون ناطقة:</p>
+                            <div className="grid grid-cols-5 gap-1.5">
+                              {MASCOT_CATEGORIES.map((cat) => (
+                                <button
+                                  key={cat.label}
+                                  type="button"
+                                  disabled={generatingMascot}
+                                  onClick={() => handleGenerateMascot(cat.prompt)}
+                                  className="flex flex-col items-center gap-1 p-2 rounded-xl border border-orange-200 bg-white dark:bg-orange-950/30 hover:border-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                  data-testid={`btn-mascot-${cat.label}`}
+                                >
+                                  <span className="text-xl">{cat.emoji}</span>
+                                  <span className="text-[10px] font-medium text-orange-700 dark:text-orange-400">{cat.label}</span>
+                                </button>
+                              ))}
+                            </div>
+                            {generatingMascot && (
+                              <div className="flex items-center gap-2 text-xs text-orange-600">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                جاري توليد الماسكوت بالذكاء الاصطناعي...
+                              </div>
+                            )}
+                          </div>
+
                           {/* Or choose built-in avatar */}
                           <div className="space-y-1.5">
-                            <p className="text-xs text-muted-foreground text-center">— أو اختر شخصية جاهزة —</p>
+                            <p className="text-xs text-muted-foreground text-center">— أو اختر شخصية بشرية جاهزة —</p>
                             <div className="grid grid-cols-4 gap-2">
                               {[
                                 { url: "/uploads/avatar-male-1.jpg", label: "رجل ١" },
