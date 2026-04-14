@@ -93,6 +93,13 @@ export default function CreateAd() {
   const [talkingPhotoFaceUrl, setTalkingPhotoFaceUrl] = useState("/uploads/avatar-male-1.jpg");
   const [showTalkingPhotoPanel, setShowTalkingPhotoPanel] = useState(false);
   const [generatingMascot, setGeneratingMascot] = useState(false);
+  const [showPresenterPanel, setShowPresenterPanel] = useState(false);
+  const [presenters, setPresenters] = useState<any[]>([]);
+  const [selectedPresenter, setSelectedPresenter] = useState<any>(null);
+  const [presenterText, setPresenterText] = useState("");
+  const [presenterVoice, setPresenterVoice] = useState("ar-EG-SalmaNeural");
+  const [generatingClip, setGeneratingClip] = useState(false);
+  const [clipVideoUrl, setClipVideoUrl] = useState("");
   const [showTTS, setShowTTS] = useState(false);
   const [ttsText, setTtsText] = useState("");
   const [ttsVoice, setTtsVoice] = useState("nova");
@@ -1191,6 +1198,17 @@ export default function CreateAd() {
                         {generatingScript ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
                         سكريبت فيديو سينمائي
                       </Button>
+                      <Button type="button" onClick={async () => {
+                        setShowPresenterPanel(p => !p);
+                        setPresenterText(t => t || form.getValues("description") || form.getValues("title") || "");
+                        if (presenters.length === 0) {
+                          const r = await fetch("/api/ai/presenters", { credentials: "include" });
+                          const data = await r.json();
+                          if (Array.isArray(data)) setPresenters(data);
+                        }
+                      }} size="sm" variant="outline" className="gap-2 border-indigo-500 text-indigo-600 hover:bg-indigo-50 font-bold" data-testid="btn-presenter-open">
+                        🎬 مذيع AI
+                      </Button>
                       <Button type="button" onClick={() => { setShowTalkingPhotoPanel(true); setTalkingPhotoText(t => t || form.getValues("description") || ""); }} size="sm" variant="outline" className="gap-2 border-purple-400 text-purple-600 hover:bg-purple-50" data-testid="btn-talking-photo-open">
                         <Camera className="w-4 h-4" />
                         صورة ناطقة 🎭
@@ -1289,6 +1307,127 @@ export default function CreateAd() {
                             >
                               <Download className="w-3 h-3" /> تحميل ملف الصوت MP3
                             </a>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ── AI PRESENTER PANEL (HeyGen-style) ── */}
+                    {showPresenterPanel && (
+                      <div className="border-2 border-indigo-400 rounded-xl p-4 bg-indigo-50 dark:bg-indigo-950/20 space-y-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">🎬</span>
+                          <p className="text-sm font-bold text-indigo-700 dark:text-indigo-300">مذيع AI احترافي — اختر مذيعك وولّد فيديو سينمائي</p>
+                          <Button type="button" size="sm" variant="ghost" className="mr-auto h-6 w-6 p-0" onClick={() => setShowPresenterPanel(false)}>
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+
+                        {/* Presenter Grid */}
+                        <div>
+                          <p className="text-xs font-bold text-indigo-800 dark:text-indigo-300 mb-2">① اختر المذيع:</p>
+                          {presenters.length === 0 ? (
+                            <div className="flex items-center gap-2 text-xs text-indigo-600 py-4 justify-center">
+                              <Loader2 className="w-4 h-4 animate-spin" /> جاري تحميل المذيعين...
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-4 gap-2 max-h-52 overflow-y-auto pr-1">
+                              {presenters.slice(0, 40).map((p: any) => (
+                                <button
+                                  key={p.presenter_id}
+                                  type="button"
+                                  onClick={() => setSelectedPresenter(p)}
+                                  className={`relative rounded-xl overflow-hidden border-2 transition-all group ${selectedPresenter?.presenter_id === p.presenter_id ? "border-indigo-600 ring-2 ring-indigo-400 scale-105" : "border-gray-200 hover:border-indigo-400"}`}
+                                  data-testid={`btn-presenter-${p.presenter_id}`}
+                                >
+                                  <img src={p.thumbnail_url} alt={p.name} className="w-full aspect-square object-cover" />
+                                  {selectedPresenter?.presenter_id === p.presenter_id && (
+                                    <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center">
+                                      <div className="bg-indigo-600 rounded-full p-1"><CheckCircle2 className="w-4 h-4 text-white" /></div>
+                                    </div>
+                                  )}
+                                  <p className="text-center text-[10px] py-0.5 font-medium bg-white dark:bg-gray-800 truncate px-1">{p.name}</p>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Script */}
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-bold text-indigo-800 dark:text-indigo-300">② اكتب ما سيقوله المذيع:</p>
+                          <Textarea
+                            value={presenterText}
+                            onChange={e => setPresenterText(e.target.value)}
+                            placeholder="مثال: أهلاً وسهلاً! عندنا أحسن العروض على الإلكترونيات — أجهزة أصلية بأسعار لا تصدق..."
+                            className="text-sm min-h-[80px] border-indigo-300 focus:border-indigo-500"
+                            data-testid="textarea-presenter-text"
+                          />
+                          <p className="text-[11px] text-muted-foreground">💡 الحد الأقصى 2000 حرف — يُنصح بنص 30-60 ثانية</p>
+                        </div>
+
+                        {/* Voice */}
+                        <div className="space-y-1">
+                          <p className="text-xs font-bold text-indigo-800 dark:text-indigo-300">③ اختر الصوت:</p>
+                          <Select value={presenterVoice} onValueChange={setPresenterVoice}>
+                            <SelectTrigger className="h-8 text-xs border-indigo-300" data-testid="select-presenter-voice">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="ar-EG-SalmaNeural">🎙️ سلمى — صوت نسائي مصري</SelectItem>
+                              <SelectItem value="ar-EG-ShakirNeural">🎙️ شاكر — صوت رجالي مصري</SelectItem>
+                              <SelectItem value="ar-SA-ZariyahNeural">🎙️ زارية — صوت نسائي خليجي</SelectItem>
+                              <SelectItem value="ar-SA-HamedNeural">🎙️ حامد — صوت رجالي خليجي</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* Generate Button */}
+                        <Button
+                          type="button"
+                          disabled={generatingClip || !selectedPresenter || !presenterText.trim()}
+                          onClick={async () => {
+                            if (!selectedPresenter || !presenterText.trim()) {
+                              toast({ variant: "destructive", title: "اختر مذيع واكتب النص أولاً" });
+                              return;
+                            }
+                            setGeneratingClip(true);
+                            try {
+                              const res = await fetch("/api/ai/presenter-clip", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ presenterId: selectedPresenter.presenter_id, text: presenterText, voiceId: presenterVoice }),
+                                credentials: "include"
+                              });
+                              const data = await res.json();
+                              if (!res.ok) throw new Error(data.message);
+                              setClipVideoUrl(data.videoUrl);
+                              toast({ title: "🎬 تم توليد الفيديو بنجاح!", className: "bg-indigo-600 text-white border-none" });
+                            } catch (e: any) {
+                              toast({ variant: "destructive", title: "فشل توليد الفيديو", description: e.message });
+                            } finally { setGeneratingClip(false); }
+                          }}
+                          className="w-full gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+                          data-testid="btn-gen-presenter-clip"
+                        >
+                          {generatingClip ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري توليد الفيديو... (30-90 ثانية)</> : <><span>🎬</span> ④ ولّد الفيديو الاحترافي</>}
+                        </Button>
+
+                        {/* Result Video */}
+                        {clipVideoUrl && (
+                          <div className="space-y-2">
+                            <video src={clipVideoUrl} controls className="w-full rounded-xl border-2 border-indigo-400 shadow-lg" data-testid="video-presenter-clip" />
+                            <div className="flex gap-2">
+                              <Button type="button" size="sm" variant="outline" className="gap-1.5 border-indigo-400 text-indigo-600 flex-1"
+                                onClick={() => { form.setValue("mediaUrl", clipVideoUrl); form.setValue("mediaType", "video"); toast({ title: "✅ تم تعيين الفيديو للإعلان" }); }}>
+                                ✅ استخدم في الإعلان
+                              </Button>
+                              <a href={clipVideoUrl} download className="flex-1">
+                                <Button type="button" size="sm" variant="outline" className="w-full gap-1.5 border-indigo-400 text-indigo-600">
+                                  ⬇️ تحميل
+                                </Button>
+                              </a>
+                            </div>
                           </div>
                         )}
                       </div>

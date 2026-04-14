@@ -4160,6 +4160,84 @@ Sitemap: ${BASE}/sitemap-pages.xml
     res.json({ available: hasKey });
   });
 
+  // ─── D-ID PRESENTERS LIST ───────────────────────────────────────
+  app.get("/api/ai/presenters", isAuthenticated, async (req: any, res) => {
+    try {
+      const didKey = process.env.DID_API_KEY;
+      if (!didKey) return res.status(503).json({ message: "D-ID غير متاح" });
+      const r = await fetch("https://api.d-id.com/clips/presenters?limit=100", {
+        headers: { "Authorization": `Basic ${Buffer.from(didKey).toString("base64")}`, "Content-Type": "application/json" }
+      });
+      const data = await r.json() as any;
+      res.json(data.presenters || []);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ─── D-ID PRESENTER CLIP (HeyGen-style) ─────────────────────────
+  app.post("/api/ai/presenter-clip", isAuthenticated, checkTalkingPhotoCredits, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { presenterId, text, voiceId = "ar-EG-SalmaNeural" } = req.body;
+      if (!presenterId || !text) return res.status(400).json({ message: "اختر مذيع واكتب النص" });
+      if (text.length > 2000) return res.status(400).json({ message: "النص طويل جداً (الحد 2000 حرف)" });
+
+      const didKey = process.env.DID_API_KEY;
+      if (!didKey) return res.status(503).json({ message: "D-ID غير متاح" });
+      const authHeader = `Basic ${Buffer.from(didKey).toString("base64")}`;
+
+      // Charge wallet
+      if (req.talkingPhotoChargeEGP) {
+        await deductAiCharge(userId, req.talkingPhotoChargeEGP, `رسوم مذيع AI (D-ID Clips) — ${req.talkingPhotoChargeEGP} ج.م`);
+      }
+
+      // Create clip
+      const createRes = await fetch("https://api.d-id.com/clips", {
+        method: "POST",
+        headers: { "Authorization": authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          presenter_id: presenterId,
+          script: {
+            type: "text",
+            input: text,
+            provider: { type: "microsoft", voice_id: voiceId }
+          },
+          config: { result_format: "mp4" }
+        })
+      });
+      const createData = await createRes.json() as any;
+      if (!createRes.ok) throw new Error(createData.description || createData.message || "فشل إنشاء الكليب");
+      const clipId = createData.id;
+
+      // Poll until done (max 90 sec)
+      let videoUrl = "";
+      for (let i = 0; i < 18; i++) {
+        await new Promise(r => setTimeout(r, 5000));
+        const statusRes = await fetch(`https://api.d-id.com/clips/${clipId}`, {
+          headers: { "Authorization": authHeader }
+        });
+        const statusData = await statusRes.json() as any;
+        if (statusData.status === "done") { videoUrl = statusData.result_url; break; }
+        if (statusData.status === "error") throw new Error("فشل D-ID في معالجة الكليب");
+      }
+      if (!videoUrl) throw new Error("انتهت المهلة — حاول مرة أخرى");
+
+      // Download & save locally
+      const vidRes = await fetch(videoUrl);
+      const vidBuf = Buffer.from(await vidRes.arrayBuffer());
+      const filename = `clip-${Date.now()}.mp4`;
+      const savePath = path.join(process.cwd(), "uploads", filename);
+      fs.writeFileSync(savePath, vidBuf);
+      const localUrl = `/uploads/${filename}`;
+
+      await storage.recordAiUsage(userId, "presenter_clip");
+      res.json({ videoUrl: localUrl, charged: req.talkingPhotoChargeEGP || 0 });
+    } catch (e: any) {
+      res.status(500).json({ message: "فشل توليد الفيديو: " + e.message });
+    }
+  });
+
   // ─── AI TRANSLATE ─────────────────────────────────────────────
   app.post("/api/ai/translate", isAuthenticated, checkAiCredits, async (req: any, res) => {
     try {
