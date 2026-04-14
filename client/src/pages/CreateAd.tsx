@@ -1436,14 +1436,43 @@ export default function CreateAd() {
                               {generatingProScript ? "جاري التحسين..." : "✨ سكريبت احترافي"}
                             </Button>
                           </div>
+                          {/* ── Ready Templates ── */}
+                          <div className="space-y-1.5">
+                            <p className="text-xs font-bold text-purple-700 dark:text-purple-300">⚡ قوالب جاهزة — اضغط واكتب اسم منتجك فقط:</p>
+                            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                              {[
+                                { emoji: "🍅", cat: "خضار وفاكهة", color: "bg-green-50 border-green-300 hover:bg-green-100", text: "السلام عليكم! عندنا أحسن خضار وفاكهة طازة النهارده!\nالبضاعة جاية مباشرة من المزرعة لحد بيتك!\nأسعار مش هتلاقيها في أي حتة تانية!\nاتصل دلوقتي والتوصيل مجاناً للطلبات فوق 100 جنيه!" },
+                                { emoji: "🍔", cat: "مطعم وأكل", color: "bg-orange-50 border-orange-300 hover:bg-orange-100", text: "أهلاً وسهلاً بيكم في مطعمنا!\nعندنا أشهى الأكلات المصرية الأصيلة بأيدي أمهر الطهاة!\nالطعم اللي بتدور عليه من زمان موجود هنا!\nاطلب دلوقتي والتوصيل في 30 دقيقة لحد بيتك!" },
+                                { emoji: "📱", cat: "موبايل وإلكترونيات", color: "bg-blue-50 border-blue-300 hover:bg-blue-100", text: "أحسن العروض على الموبايلات والإلكترونيات!\nأجهزة أصلية بضمان سنة كاملة!\nأسعار تبدأ من 2000 جنيه بس!\nأقساط ميسرة بدون فوائد!\nتعالوا زوروا معرضنا أو اطلبوا أونلاين!" },
+                                { emoji: "👗", cat: "ملابس وفاشيون", color: "bg-pink-50 border-pink-300 hover:bg-pink-100", text: "مجموعة الموسم الجديدة وصلت!\nأحدث صيحات الموضة بأسعار مناسبة للجميع!\nتشكيلة واسعة من المقاسات والألوان!\nالتوصيل لجميع محافظات مصر في يومين بس!\nاطلبوا دلوقتي والكمية محدودة!" },
+                                { emoji: "🏠", cat: "عقارات", color: "bg-yellow-50 border-yellow-300 hover:bg-yellow-100", text: "فرصة العمر في عقارات!\nشقق وفيلات بأفضل الأسعار في المنطقة!\nتشطيب سوبر لوكس وموقع مميز!\nأقساط مريحة على 10 سنين!\nتواصلوا معنا النهارده وشوفوا الوحدات المتاحة!" },
+                                { emoji: "🚗", cat: "سيارات", color: "bg-slate-50 border-slate-300 hover:bg-slate-100", text: "أفضل عروض السيارات دلوقتي!\nسيارات مستعملة بحالة ممتازة وأسعار معقولة!\nفحص كامل وضمان 6 شهور!\nتمويل بنكي ميسر!\nتعالوا جربوا وهتحبوا الصفقة!" },
+                                { emoji: "💊", cat: "صيدلية وصحة", color: "bg-teal-50 border-teal-300 hover:bg-teal-100", text: "صحتك في الأول!\nعندنا كل أنواع الأدوية والمكملات الغذائية!\nأسعار أقل من أي صيدلية تانية!\nتوصيل سريع لحد بيتك!\nاستشارة صيدلاني مجاناً مع كل طلب!" },
+                                { emoji: "☕", cat: "كافيه ومشروبات", color: "bg-amber-50 border-amber-300 hover:bg-amber-100", text: "مرحبا بيكم في كافيهنا!\nأحلى القهوة والمشروبات الطازة!\nأجواء هادية ومريحة للعيلة والأصحاب!\nعندنا عروض خاصة كل يوم!\nاحجزوا طولتكم دلوقتي!" },
+                              ].map((tmpl) => (
+                                <button
+                                  key={tmpl.cat}
+                                  type="button"
+                                  onClick={() => setTalkingPhotoText(tmpl.text)}
+                                  className={`flex-shrink-0 flex flex-col items-start gap-1 p-2.5 rounded-xl border ${tmpl.color} transition-all text-right w-36`}
+                                  data-testid={`btn-template-${tmpl.cat}`}
+                                >
+                                  <span className="text-2xl">{tmpl.emoji}</span>
+                                  <span className="text-[11px] font-bold text-gray-700 leading-tight">{tmpl.cat}</span>
+                                  <span className="text-[10px] text-gray-500 leading-tight line-clamp-2">{tmpl.text.split('\n')[0]}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
                           <Textarea
                             value={talkingPhotoText}
                             onChange={e => setTalkingPhotoText(e.target.value)}
-                            placeholder="اكتب أي كلام عن منتجك أو اضغط ✨ لتحسينه تلقائياً... مثال: عندي هواتف بأسعار ممتازة للبيع"
+                            placeholder="اضغط على قالب فوق أو اكتب نصك هنا... مثال: عندي هواتف بأسعار ممتازة للبيع"
                             className="text-sm min-h-[80px] border-purple-300 focus:border-purple-500"
                             data-testid="textarea-talking-photo-text"
                           />
-                          <p className="text-xs text-muted-foreground">💡 اكتب أي كلام عادي → اضغط ✨ → الذكاء الاصطناعي يحوّله لسكريبت احترافي</p>
+                          <p className="text-xs text-muted-foreground">💡 اختر قالب جاهز أو اكتب نصك → اضغط ✨ لتحسينه بالذكاء الاصطناعي</p>
                         </div>
 
                         {/* ── Step 3: Voice ── */}
