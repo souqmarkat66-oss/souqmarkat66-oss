@@ -2,18 +2,17 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Upload, X, Download, ZoomIn, ZoomOut, Move, RotateCcw, RefreshCw, Wand2 } from "lucide-react";
-import { removeBackground } from "@imgly/background-removal";
+import { Loader2, Upload, X, Download, ZoomIn, ZoomOut, RotateCcw, Wand2, Eraser, RefreshCw } from "lucide-react";
 
 const PRESET_BACKGROUNDS = [
-  { id: "news-ar", label: "ستوديو أخبار عربي", color: "#1a237e", gradient: "linear-gradient(135deg,#0d1b6e 0%,#1565c0 50%,#0d47a1 100%)", pattern: "news" },
-  { id: "office-gold", label: "مكتب ذهبي فاخر", color: "#bf8700", gradient: "linear-gradient(135deg,#3e2723 0%,#6d4c41 40%,#bf8700 100%)", pattern: "office" },
-  { id: "market-egypt", label: "سوق مصري شعبي", color: "#e65100", gradient: "linear-gradient(135deg,#bf360c 0%,#e64a19 50%,#ff6d00 100%)", pattern: "market" },
-  { id: "tech-dark", label: "خلفية تقنية داكنة", color: "#00838f", gradient: "linear-gradient(135deg,#006064 0%,#0097a7 50%,#26c6da 100%)", pattern: "tech" },
-  { id: "luxury-white", label: "فاخر أبيض", color: "#e0e0e0", gradient: "linear-gradient(135deg,#fafafa 0%,#eeeeee 50%,#bdbdbd 100%)", pattern: "luxury" },
-  { id: "green", label: "شاشة خضراء", color: "#00c853", gradient: "linear-gradient(135deg,#00c853 0%,#69f0ae 100%)", pattern: "green" },
-  { id: "store", label: "واجهة متجر", color: "#6a1b9a", gradient: "linear-gradient(135deg,#4a148c 0%,#7b1fa2 50%,#ab47bc 100%)", pattern: "store" },
-  { id: "outdoor", label: "خارجي طبيعي", color: "#2e7d32", gradient: "linear-gradient(135deg,#1b5e20 0%,#388e3c 50%,#81c784 100%)", pattern: "outdoor" },
+  { id: "news-ar", label: "ستوديو أخبار", gradient: "linear-gradient(135deg,#0d1b6e 0%,#1565c0 50%,#0d47a1 100%)", pattern: "news" },
+  { id: "office-gold", label: "مكتب ذهبي", gradient: "linear-gradient(135deg,#3e2723 0%,#6d4c41 40%,#bf8700 100%)", pattern: "office" },
+  { id: "market-egypt", label: "سوق مصري", gradient: "linear-gradient(135deg,#bf360c 0%,#e64a19 50%,#ff6d00 100%)", pattern: "market" },
+  { id: "tech-dark", label: "تقنية داكنة", gradient: "linear-gradient(135deg,#006064 0%,#0097a7 50%,#26c6da 100%)", pattern: "tech" },
+  { id: "luxury-white", label: "فاخر أبيض", gradient: "linear-gradient(135deg,#fafafa 0%,#eeeeee 50%,#bdbdbd 100%)", pattern: "luxury" },
+  { id: "green-screen", label: "شاشة خضراء", gradient: "linear-gradient(135deg,#00c853 0%,#69f0ae 100%)", pattern: "green" },
+  { id: "purple-store", label: "متجر بنفسجي", gradient: "linear-gradient(135deg,#4a148c 0%,#7b1fa2 50%,#ab47bc 100%)", pattern: "store" },
+  { id: "outdoor", label: "خارجي طبيعي", gradient: "linear-gradient(135deg,#1b5e20 0%,#388e3c 50%,#81c784 100%)", pattern: "outdoor" },
 ];
 
 interface SceneComposerProps {
@@ -24,27 +23,60 @@ interface SceneComposerProps {
 export default function SceneComposer({ onExport, onClose }: SceneComposerProps) {
   const { toast } = useToast();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bgFileInputRef = useRef<HTMLInputElement>(null);
 
+  const [personBlobUrl, setPersonBlobUrl] = useState<string>("");
   const [personImg, setPersonImg] = useState<HTMLImageElement | null>(null);
   const [bgImg, setBgImg] = useState<HTMLImageElement | null>(null);
-  const [selectedBg, setSelectedBg] = useState<typeof PRESET_BACKGROUNDS[0] | null>(null);
-  const [customBgUrl, setCustomBgUrl] = useState<string>("");
+  const [bgBlobUrl, setBgBlobUrl] = useState<string>("");
+  const [selectedBg, setSelectedBg] = useState<typeof PRESET_BACKGROUNDS[0] | null>(PRESET_BACKGROUNDS[0]);
+
   const [removingBg, setRemovingBg] = useState(false);
+  const [removeBgStatus, setRemoveBgStatus] = useState("");
   const [personReady, setPersonReady] = useState(false);
+  const [generatingAiBg, setGeneratingAiBg] = useState(false);
+  const [bgPrompt, setBgPrompt] = useState("");
 
   const [scale, setScale] = useState(0.65);
   const [posX, setPosX] = useState(0.5);
-  const [posY, setPosY] = useState(0.85);
+  const [posY, setPosY] = useState(0.88);
   const [dragging, setDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0, px: 0, py: 0 });
-  const [generatingAiBg, setGeneratingAiBg] = useState(false);
-  const [bgText, setBgText] = useState("");
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0, px: 0.5, py: 0.88 });
+  const [tolerance, setTolerance] = useState(45);
+  const [origPersonFile, setOrigPersonFile] = useState<File | null>(null);
 
   const CANVAS_W = 1280;
   const CANVAS_H = 720;
+
+  function drawBgPattern(ctx: CanvasRenderingContext2D, pattern: string) {
+    ctx.save();
+    ctx.globalAlpha = 0.18;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1;
+    switch (pattern) {
+      case "news":
+        for (let y = CANVAS_H - 40; y > 0; y -= 90) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_W, y); ctx.stroke(); }
+        ctx.globalAlpha = 0.55;
+        ctx.fillStyle = "#ffd700";
+        ctx.font = "bold 42px sans-serif";
+        ctx.fillText("● LIVE", 36, 52);
+        break;
+      case "tech":
+        for (let x = 0; x < CANVAS_W; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke(); }
+        for (let y = 0; y < CANVAS_H; y += 80) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_W, y); ctx.stroke(); }
+        break;
+      case "luxury":
+        for (let i = 0; i < 20; i++) { ctx.fillStyle = "#c9a227"; ctx.globalAlpha = 0.1; ctx.fillRect(i * 64, 0, 32, CANVAS_H); }
+        break;
+      case "office":
+        ctx.fillStyle = "#ffffff"; ctx.globalAlpha = 0.12;
+        ctx.fillRect(0, CANVAS_H - 4, CANVAS_W, 4);
+        ctx.fillRect(0, CANVAS_H - 50, CANVAS_W, 2);
+        break;
+    }
+    ctx.restore();
+  }
 
   const drawScene = useCallback(() => {
     const canvas = canvasRef.current;
@@ -57,171 +89,165 @@ export default function SceneComposer({ onExport, onClose }: SceneComposerProps)
     if (bgImg) {
       ctx.drawImage(bgImg, 0, 0, CANVAS_W, CANVAS_H);
     } else if (selectedBg) {
+      const colors = selectedBg.gradient.match(/#[0-9a-fA-F]{3,8}/g) || ["#1a237e", "#0d47a1"];
       const grad = ctx.createLinearGradient(0, 0, CANVAS_W, CANVAS_H);
-      const stops = selectedBg.gradient.match(/#[0-9a-f]{3,8}/gi) || ["#1a237e", "#0d47a1"];
-      grad.addColorStop(0, stops[0]);
-      grad.addColorStop(0.5, stops[1] || stops[0]);
-      grad.addColorStop(1, stops[2] || stops[1] || stops[0]);
+      grad.addColorStop(0, colors[0]);
+      grad.addColorStop(0.5, colors[1] || colors[0]);
+      grad.addColorStop(1, colors[2] || colors[1] || colors[0]);
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
       drawBgPattern(ctx, selectedBg.pattern);
     } else {
-      const grad = ctx.createLinearGradient(0, 0, CANVAS_W, CANVAS_H);
-      grad.addColorStop(0, "#1a1a2e");
-      grad.addColorStop(1, "#16213e");
-      ctx.fillStyle = grad;
+      ctx.fillStyle = "#1a1a2e";
       ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
     }
 
     if (personImg && personReady) {
-      const pw = personImg.naturalWidth;
-      const ph = personImg.naturalHeight;
-      const drawH = CANVAS_H * scale;
-      const drawW = (pw / ph) * drawH;
-      const x = posX * CANVAS_W - drawW / 2;
-      const y = posY * CANVAS_H - drawH;
-      ctx.drawImage(personImg, x, y, drawW, drawH);
+      const ph = CANVAS_H * scale;
+      const pw = (personImg.naturalWidth / personImg.naturalHeight) * ph;
+      const x = posX * CANVAS_W - pw / 2;
+      const y = posY * CANVAS_H - ph;
+      ctx.drawImage(personImg, x, y, pw, ph);
     }
   }, [bgImg, selectedBg, personImg, personReady, scale, posX, posY]);
 
   useEffect(() => { drawScene(); }, [drawScene]);
 
-  function drawBgPattern(ctx: CanvasRenderingContext2D, pattern: string) {
-    ctx.save();
-    ctx.globalAlpha = 0.15;
-    switch (pattern) {
-      case "news":
-        ctx.fillStyle = "#ffffff";
-        for (let i = 0; i < 8; i++) {
-          ctx.fillRect(0, CANVAS_H - 60 - i * 80, CANVAS_W, 2);
-        }
-        ctx.font = "bold 48px sans-serif";
-        ctx.fillStyle = "#ffd700";
-        ctx.fillText("● LIVE", 40, 60);
-        break;
-      case "tech":
-        ctx.strokeStyle = "#00ffff";
-        ctx.lineWidth = 1;
-        for (let x = 0; x < CANVAS_W; x += 80) {
-          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke();
-        }
-        for (let y = 0; y < CANVAS_H; y += 80) {
-          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_W, y); ctx.stroke();
-        }
-        break;
-      case "luxury":
-        ctx.fillStyle = "#c9a227";
-        for (let i = 0; i < 20; i++) {
-          ctx.fillRect(i * 64, 0, 32, CANVAS_H);
-        }
-        break;
-      case "office":
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, CANVAS_H - 4, CANVAS_W, 4);
-        ctx.fillRect(0, CANVAS_H - 40, CANVAS_W, 2);
-        break;
+  async function removeBackgroundServer(file: File, tol = 45): Promise<string> {
+    setRemoveBgStatus("جاري تحليل الصورة...");
+    const formData = new FormData();
+    formData.append("image", file);
+    const res = await fetch(`/api/ai/remove-bg?tolerance=${tol}`, {
+      method: "POST",
+      body: formData,
+      credentials: "include"
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.message || "فشل حذف الخلفية");
     }
-    ctx.restore();
+    const data = await res.json();
+    setRemoveBgStatus("جاري تحميل الصورة...");
+    const imgRes = await fetch(data.url);
+    const blob = await imgRes.blob();
+    return URL.createObjectURL(blob);
   }
 
   async function handlePersonUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    setOrigPersonFile(file);
     setRemovingBg(true);
     setPersonReady(false);
+    setRemoveBgStatus("جاري حذف الخلفية...");
     try {
-      const blob = await removeBackground(file, {
-        output: { format: "image/png", quality: 0.95 },
-        progress: (key: string, current: number, total: number) => {
-          if (key === "compute:inference") {
-          }
-        }
-      } as any);
-      const url = URL.createObjectURL(blob);
-      const img = new Image();
-      img.onload = () => { setPersonImg(img); setPersonReady(true); };
-      img.src = url;
-      toast({ title: "✅ تم حذف الخلفية بنجاح!", className: "bg-green-600 text-white border-none" });
-    } catch {
-      const url = URL.createObjectURL(file);
-      const img = new Image();
-      img.onload = () => { setPersonImg(img); setPersonReady(true); };
-      img.src = url;
-      toast({ title: "📷 تم تحميل الصورة (بدون حذف خلفية)", description: "تأكد إن الصورة PNG بخلفية شفافة" });
+      const blobUrl = await removeBackgroundServer(file, tolerance);
+      loadPersonFromBlobUrl(blobUrl);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "فشل حذف الخلفية", description: err.message });
+      const originalUrl = URL.createObjectURL(file);
+      loadPersonFromBlobUrl(originalUrl);
     } finally {
       setRemovingBg(false);
+      setRemoveBgStatus("");
     }
+  }
+
+  function loadPersonFromBlobUrl(blobUrl: string) {
+    if (personBlobUrl) URL.revokeObjectURL(personBlobUrl);
+    setPersonBlobUrl(blobUrl);
+    const img = new Image();
+    img.onload = () => { setPersonImg(img); setPersonReady(true); };
+    img.onerror = () => toast({ variant: "destructive", title: "تعذّر تحميل الصورة" });
+    img.src = blobUrl;
+  }
+
+  async function handleRetryWithTolerance() {
+    if (!origPersonFile) return;
+    setRemovingBg(true);
+    setPersonReady(false);
+    setRemoveBgStatus("جاري إعادة المحاولة...");
+    try {
+      const blobUrl = await removeBackgroundServer(origPersonFile, tolerance);
+      loadPersonFromBlobUrl(blobUrl);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "فشل", description: err.message });
+    } finally { setRemovingBg(false); setRemoveBgStatus(""); }
   }
 
   function handleBgUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (bgBlobUrl) URL.revokeObjectURL(bgBlobUrl);
     const url = URL.createObjectURL(file);
+    setBgBlobUrl(url);
     const img = new Image();
-    img.onload = () => { setBgImg(img); setSelectedBg(null); setCustomBgUrl(url); };
+    img.onload = () => { setBgImg(img); setSelectedBg(null); };
+    img.onerror = () => toast({ variant: "destructive", title: "تعذّر تحميل الخلفية" });
     img.src = url;
   }
 
   async function handleGenerateAiBg() {
-    if (!bgText.trim()) { toast({ variant: "destructive", title: "اكتب وصف الخلفية المطلوبة" }); return; }
+    if (!bgPrompt.trim()) { toast({ variant: "destructive", title: "اكتب وصف الخلفية" }); return; }
     setGeneratingAiBg(true);
     try {
       const r = await fetch("/api/ai/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: `Professional advertising background scene: ${bgText}. Wide 16:9 format, no people, photorealistic, high quality, Arabic market aesthetic`, quality: "hd", size: "1792x1024" }),
+        body: JSON.stringify({ prompt: `Professional advertising background (NO PEOPLE, wide shot, 16:9): ${bgPrompt}. Photorealistic, high quality, cinematic lighting, Arabic market style`, size: "1792x1024" }),
         credentials: "include"
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.message);
       const imgUrl = data.url || data.imageUrl;
-      if (!imgUrl) throw new Error("لم يُرسل رابط الصورة");
+      if (!imgUrl) throw new Error("لم يُرجع الرابط");
+      if (bgBlobUrl) URL.revokeObjectURL(bgBlobUrl);
+      const imgRes = await fetch(imgUrl);
+      const blob = await imgRes.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      setBgBlobUrl(blobUrl);
       const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => { setBgImg(img); setSelectedBg(null); setCustomBgUrl(imgUrl); };
-      img.onerror = () => {
-        fetch(imgUrl).then(r => r.blob()).then(blob => {
-          const url = URL.createObjectURL(blob);
-          const img2 = new Image();
-          img2.onload = () => { setBgImg(img2); setSelectedBg(null); };
-          img2.src = url;
-        });
-      };
-      img.src = imgUrl;
-      toast({ title: "🎨 تم توليد الخلفية!" });
+      img.onload = () => { setBgImg(img); setSelectedBg(null); };
+      img.src = blobUrl;
+      toast({ title: "🎨 تم توليد الخلفية!", className: "bg-amber-600 text-white border-none" });
     } catch (e: any) {
       toast({ variant: "destructive", title: "فشل توليد الخلفية", description: e.message });
     } finally { setGeneratingAiBg(false); }
   }
 
-  function handleExport() {
+  function handleExportCanvas() {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const dataUrl = canvas.toDataURL("image/png");
-    if (onExport) { onExport(dataUrl); toast({ title: "✅ تم استخدام المشهد في الإعلان!" }); }
-    else {
-      const a = document.createElement("a");
-      a.href = dataUrl; a.download = `scene-${Date.now()}.png`; a.click();
+    try {
+      const dataUrl = canvas.toDataURL("image/png");
+      if (onExport) onExport(dataUrl);
+      else {
+        const a = document.createElement("a");
+        a.href = dataUrl; a.download = `scene-${Date.now()}.png`; a.click();
+      }
+    } catch (err: any) {
+      if (err?.name === "SecurityError") {
+        toast({ variant: "destructive", title: "خطأ CORS", description: "تأكد إن جميع الصور من نفس الموقع" });
+      } else {
+        toast({ variant: "destructive", title: "فشل التصدير", description: err?.message });
+      }
     }
   }
 
   function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
-    if (!personReady) return;
+    if (!personReady || !personImg) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const scaleX = CANVAS_W / rect.width;
-    const scaleY = CANVAS_H / rect.height;
-    const cx = (e.clientX - rect.left) * scaleX;
-    const cy = (e.clientY - rect.top) * scaleY;
-
-    if (personImg) {
-      const ph = CANVAS_H * scale;
-      const pw = (personImg.naturalWidth / personImg.naturalHeight) * ph;
-      const px = posX * CANVAS_W;
-      const py = posY * CANVAS_H;
-      if (Math.abs(cx - px) < pw / 2 + 30 && cy > py - ph - 30 && cy < py + 30) {
-        setDragging(true);
-        setDragStart({ x: e.clientX, y: e.clientY, px: posX, py: posY });
-      }
+    const sx = CANVAS_W / rect.width;
+    const sy = CANVAS_H / rect.height;
+    const cx = (e.clientX - rect.left) * sx;
+    const cy = (e.clientY - rect.top) * sy;
+    const ph = CANVAS_H * scale;
+    const pw = (personImg.naturalWidth / personImg.naturalHeight) * ph;
+    const px = posX * CANVAS_W;
+    const py = posY * CANVAS_H;
+    if (Math.abs(cx - px) < pw / 2 + 40 && cy > py - ph - 40 && cy < py + 40) {
+      setDragging(true);
+      setDragStart({ x: e.clientX, y: e.clientY, px: posX, py: posY });
     }
   }
 
@@ -231,18 +257,17 @@ export default function SceneComposer({ onExport, onClose }: SceneComposerProps)
     const dx = (e.clientX - dragStart.x) / rect.width;
     const dy = (e.clientY - dragStart.y) / rect.height;
     setPosX(Math.max(0.05, Math.min(0.95, dragStart.px + dx)));
-    setPosY(Math.max(0.2, Math.min(1.0, dragStart.py + dy)));
+    setPosY(Math.max(0.15, Math.min(1.0, dragStart.py + dy)));
   }
 
   function handleMouseUp() { setDragging(false); }
 
-  function resetPerson() { setPersonImg(null); setPersonReady(false); }
-
   return (
     <div className="border-2 border-amber-400 rounded-xl p-4 bg-amber-50 dark:bg-amber-950/20 space-y-4" dir="rtl">
+      {/* Header */}
       <div className="flex items-center gap-2">
         <span className="text-lg">🎭</span>
-        <p className="text-sm font-bold text-amber-800 dark:text-amber-300">مركّب المشاهد — صمّم مشهدك الإعلاني الاحترافي</p>
+        <p className="text-sm font-bold text-amber-800 dark:text-amber-300">مركّب المشاهد — ضع شخصك على خلفية احترافية</p>
         {onClose && (
           <Button type="button" size="sm" variant="ghost" className="mr-auto h-6 w-6 p-0" onClick={onClose}>
             <X className="w-3 h-3" />
@@ -251,125 +276,114 @@ export default function SceneComposer({ onExport, onClose }: SceneComposerProps)
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Left: Controls */}
+        {/* ── Controls ── */}
         <div className="space-y-3">
+
           {/* Person Upload */}
-          <div>
-            <p className="text-xs font-bold text-amber-800 dark:text-amber-300 mb-1.5">① رفع صورة الشخص (تُحذف الخلفية تلقائياً):</p>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-3 border border-amber-200 space-y-2">
+            <p className="text-xs font-bold text-amber-800 dark:text-amber-300">① صورة الشخص (تُحذف الخلفية تلقائياً):</p>
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePersonUpload} data-testid="input-scene-person" />
             <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={removingBg}
+              <Button type="button" size="sm" variant="outline" disabled={removingBg}
                 onClick={() => fileInputRef.current?.click()}
                 className="gap-2 border-amber-400 text-amber-700 hover:bg-amber-100 flex-1"
-                data-testid="btn-scene-upload-person"
-              >
-                {removingBg ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> جاري حذف الخلفية...</> : <><Upload className="w-3.5 h-3.5" /> رفع صورة الشخص</>}
+                data-testid="btn-scene-upload-person">
+                {removingBg
+                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {removeBgStatus || "جاري المعالجة..."}</>
+                  : <><Upload className="w-3.5 h-3.5" /> {personReady ? "تغيير الصورة" : "رفع صورة الشخص"}</>}
               </Button>
-              {personImg && (
-                <Button type="button" size="sm" variant="ghost" onClick={resetPerson} className="px-2" data-testid="btn-scene-reset-person">
+              {personReady && (
+                <Button type="button" size="sm" variant="ghost" onClick={() => { setPersonImg(null); setPersonReady(false); setPersonBlobUrl(""); setOrigPersonFile(null); }} className="px-2" data-testid="btn-scene-reset-person">
                   <X className="w-3.5 h-3.5 text-red-500" />
                 </Button>
               )}
             </div>
-            {personImg && personReady && (
-              <p className="text-[11px] text-green-600 mt-1">✅ الشخص جاهز — اسحبه على الكانفس لتغيير موضعه</p>
+            {personReady && <p className="text-[11px] text-green-600 flex gap-1">✅ الشخص جاهز — اسحبه على الكانفس لتغيير موضعه</p>}
+            {origPersonFile && (
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-amber-700 w-20">دقة الحذف:</span>
+                  <Slider value={[tolerance]} onValueChange={([v]) => setTolerance(v)} min={10} max={90} step={5} className="flex-1" data-testid="slider-scene-tolerance" />
+                  <span className="text-[11px] w-8 text-amber-700">{tolerance}</span>
+                </div>
+                <Button type="button" size="sm" variant="outline" disabled={removingBg} onClick={handleRetryWithTolerance}
+                  className="w-full gap-1.5 text-[11px] border-amber-300 text-amber-700" data-testid="btn-scene-retry-rembg">
+                  <RefreshCw className="w-3 h-3" /> إعادة حذف الخلفية بهذه الدقة
+                </Button>
+                <p className="text-[10px] text-muted-foreground">زوّد الدقة إذا بقي من الخلفية، نقّصها إذا اختفى من الشخص</p>
+              </div>
             )}
           </div>
 
           {/* Background Selection */}
-          <div>
-            <p className="text-xs font-bold text-amber-800 dark:text-amber-300 mb-1.5">② اختر الخلفية:</p>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-3 border border-amber-200 space-y-2">
+            <p className="text-xs font-bold text-amber-800 dark:text-amber-300">② الخلفية:</p>
             <div className="grid grid-cols-4 gap-1.5">
               {PRESET_BACKGROUNDS.map(bg => (
-                <button
-                  key={bg.id}
-                  type="button"
-                  onClick={() => { setSelectedBg(bg); setBgImg(null); setCustomBgUrl(""); }}
-                  className={`rounded-lg overflow-hidden border-2 transition-all ${selectedBg?.id === bg.id && !bgImg ? "border-amber-500 ring-2 ring-amber-400 scale-105" : "border-transparent hover:border-amber-400"}`}
-                  title={bg.label}
-                  data-testid={`btn-scene-bg-${bg.id}`}
-                >
-                  <div className="h-9 w-full" style={{ background: bg.gradient }} />
-                  <p className="text-[9px] text-center py-0.5 bg-white dark:bg-gray-800 leading-tight px-0.5 truncate">{bg.label}</p>
+                <button key={bg.id} type="button"
+                  onClick={() => { setSelectedBg(bg); setBgImg(null); setBgBlobUrl(""); }}
+                  className={`rounded-lg overflow-hidden border-2 transition-all ${selectedBg?.id === bg.id && !bgImg ? "border-amber-500 ring-2 ring-amber-300 scale-105" : "border-transparent hover:border-amber-400"}`}
+                  title={bg.label} data-testid={`btn-scene-bg-${bg.id}`}>
+                  <div className="h-8 w-full" style={{ background: bg.gradient }} />
+                  <p className="text-[9px] text-center py-0.5 bg-white dark:bg-gray-700 leading-tight px-0.5 truncate">{bg.label}</p>
                 </button>
               ))}
             </div>
 
-            <div className="flex gap-2 mt-2">
-              <input ref={bgFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleBgUpload} />
-              <Button type="button" size="sm" variant="outline" onClick={() => bgFileInputRef.current?.click()} className="gap-1.5 text-xs border-amber-400 text-amber-700 flex-1" data-testid="btn-scene-upload-bg">
-                <Upload className="w-3 h-3" /> خلفية من جهازك
-              </Button>
-            </div>
+            <input ref={bgFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleBgUpload} />
+            <Button type="button" size="sm" variant="outline" onClick={() => bgFileInputRef.current?.click()}
+              className="w-full gap-1.5 text-xs border-amber-300 text-amber-600" data-testid="btn-scene-upload-bg">
+              <Upload className="w-3 h-3" /> رفع خلفية من جهازك
+            </Button>
 
-            {/* AI Background Generation */}
-            <div className="mt-2 space-y-1.5">
-              <input
-                type="text"
-                value={bgText}
-                onChange={e => setBgText(e.target.value)}
-                placeholder="مثال: ستوديو تلفزيوني فاخر، سوق مصري ملوّن..."
-                className="w-full text-xs border border-amber-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-amber-500 bg-white dark:bg-gray-800"
-                data-testid="input-scene-bg-prompt"
-              />
-              <Button
-                type="button"
-                size="sm"
-                disabled={generatingAiBg || !bgText.trim()}
-                onClick={handleGenerateAiBg}
-                className="w-full gap-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white"
-                data-testid="btn-scene-gen-ai-bg"
-              >
-                {generatingAiBg ? <><Loader2 className="w-3 h-3 animate-spin" /> جاري التوليد...</> : <><Wand2 className="w-3 h-3" /> توليد خلفية AI</>}
+            <div className="flex gap-2">
+              <input type="text" value={bgPrompt} onChange={e => setBgPrompt(e.target.value)}
+                placeholder="مثال: ستوديو تلفزيوني فاخر بألوان ذهبية..."
+                className="flex-1 text-xs border border-amber-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-amber-500 bg-white dark:bg-gray-800"
+                data-testid="input-scene-bg-prompt" />
+              <Button type="button" size="sm" disabled={generatingAiBg || !bgPrompt.trim()} onClick={handleGenerateAiBg}
+                className="gap-1 bg-amber-600 hover:bg-amber-700 text-white text-xs px-3 shrink-0" data-testid="btn-scene-gen-ai-bg">
+                {generatingAiBg ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+                AI
               </Button>
             </div>
           </div>
 
           {/* Position & Scale Controls */}
-          {personImg && personReady && (
-            <div className="space-y-2 bg-white dark:bg-gray-800 rounded-lg p-3 border border-amber-200">
+          {personReady && (
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-3 border border-amber-200 space-y-2">
               <p className="text-xs font-bold text-amber-800 dark:text-amber-300">③ ضبط الحجم والموضع:</p>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <ZoomOut className="w-3.5 h-3.5 text-amber-600" />
-                  <Slider value={[scale]} onValueChange={([v]) => setScale(v)} min={0.1} max={1.2} step={0.01} className="flex-1" data-testid="slider-scene-scale" />
-                  <ZoomIn className="w-3.5 h-3.5 text-amber-600" />
-                  <span className="text-[11px] w-10 text-right text-amber-700">{Math.round(scale * 100)}%</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-amber-600 w-12">أفقي</span>
-                  <Slider value={[posX]} onValueChange={([v]) => setPosX(v)} min={0.05} max={0.95} step={0.01} className="flex-1" data-testid="slider-scene-posx" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-amber-600 w-12">رأسي</span>
-                  <Slider value={[posY]} onValueChange={([v]) => setPosY(v)} min={0.2} max={1.0} step={0.01} className="flex-1" data-testid="slider-scene-posy" />
-                </div>
-                <Button type="button" size="sm" variant="outline" onClick={() => { setScale(0.65); setPosX(0.5); setPosY(0.85); }} className="w-full gap-1.5 text-xs border-amber-300 text-amber-600" data-testid="btn-scene-reset-pos">
-                  <RotateCcw className="w-3 h-3" /> إعادة تعيين الموضع
-                </Button>
+              <div className="flex items-center gap-2">
+                <ZoomOut className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <Slider value={[scale]} onValueChange={([v]) => setScale(v)} min={0.1} max={1.2} step={0.01} className="flex-1" data-testid="slider-scene-scale" />
+                <ZoomIn className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <span className="text-[11px] w-10 text-right text-amber-700 shrink-0">{Math.round(scale * 100)}%</span>
               </div>
-              <p className="text-[11px] text-muted-foreground flex items-center gap-1"><Move className="w-3 h-3" /> أو اسحب الشخص مباشرة على الكانفس</p>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-amber-600 w-10 shrink-0">أفقي</span>
+                <Slider value={[posX]} onValueChange={([v]) => setPosX(v)} min={0.05} max={0.95} step={0.01} className="flex-1" data-testid="slider-scene-posx" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-amber-600 w-10 shrink-0">رأسي</span>
+                <Slider value={[posY]} onValueChange={([v]) => setPosY(v)} min={0.15} max={1.0} step={0.01} className="flex-1" data-testid="slider-scene-posy" />
+              </div>
+              <Button type="button" size="sm" variant="outline" onClick={() => { setScale(0.65); setPosX(0.5); setPosY(0.88); }}
+                className="w-full gap-1.5 text-xs border-amber-200 text-amber-600" data-testid="btn-scene-reset-pos">
+                <RotateCcw className="w-3 h-3" /> إعادة تعيين الموضع
+              </Button>
             </div>
           )}
         </div>
 
-        {/* Right: Canvas Preview */}
+        {/* ── Canvas Preview ── */}
         <div className="space-y-2">
           <p className="text-xs font-bold text-amber-800 dark:text-amber-300">معاينة المشهد (16:9):</p>
-          <div
-            ref={containerRef}
-            className="relative w-full bg-gray-900 rounded-xl overflow-hidden border-2 border-amber-300 shadow-lg"
-            style={{ aspectRatio: "16/9" }}
-          >
+          <div className="relative w-full bg-gray-900 rounded-xl overflow-hidden border-2 border-amber-300 shadow-lg" style={{ aspectRatio: "16/9" }}>
             <canvas
               ref={canvasRef}
               width={CANVAS_W}
               height={CANVAS_H}
-              className="w-full h-full cursor-move"
+              className="w-full h-full"
               style={{ cursor: dragging ? "grabbing" : personReady ? "grab" : "default" }}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
@@ -377,71 +391,43 @@ export default function SceneComposer({ onExport, onClose }: SceneComposerProps)
               onMouseLeave={handleMouseUp}
               data-testid="canvas-scene-preview"
             />
-            {!selectedBg && !bgImg && !personImg && (
+            {!personReady && !selectedBg && !bgImg && (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-white/50 pointer-events-none">
                 <span className="text-4xl mb-2">🎭</span>
                 <p className="text-sm">ارفع صورة الشخص واختر خلفية</p>
               </div>
             )}
             {removingBg && (
-              <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-white">
-                <Loader2 className="w-8 h-8 animate-spin mb-2" />
-                <p className="text-sm font-bold">جاري حذف الخلفية بالذكاء الاصطناعي...</p>
-                <p className="text-xs opacity-75">قد يستغرق 10-30 ثانية</p>
+              <div className="absolute inset-0 bg-black/65 flex flex-col items-center justify-center text-white gap-2">
+                <Loader2 className="w-8 h-8 animate-spin text-amber-400" />
+                <p className="text-sm font-bold">{removeBgStatus || "جاري معالجة الصورة..."}</p>
+                <p className="text-xs opacity-70">من 3 إلى 10 ثوانٍ</p>
+              </div>
+            )}
+            {generatingAiBg && (
+              <div className="absolute inset-0 bg-black/65 flex flex-col items-center justify-center text-white gap-2">
+                <Loader2 className="w-8 h-8 animate-spin text-amber-400" />
+                <p className="text-sm font-bold">جاري توليد الخلفية بالـ AI...</p>
+                <p className="text-xs opacity-70">قد يستغرق 30-60 ثانية</p>
               </div>
             )}
           </div>
 
-          {/* Export Buttons */}
           <div className="flex gap-2">
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleExport}
+            <Button type="button" size="sm" onClick={handleExportCanvas}
               disabled={!personReady && !selectedBg && !bgImg}
               className="flex-1 gap-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold"
-              data-testid="btn-scene-export"
-            >
+              data-testid="btn-scene-export">
               ✅ استخدم في الإعلان
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                const canvas = canvasRef.current;
-                if (!canvas) return;
-                const a = document.createElement("a");
-                a.href = canvas.toDataURL("image/png");
-                a.download = `scene-${Date.now()}.png`;
-                a.click();
-              }}
-              className="gap-1.5 border-amber-400 text-amber-700"
-              data-testid="btn-scene-download"
-            >
+            <Button type="button" size="sm" variant="outline"
+              onClick={() => { const a = document.createElement("a"); const c = canvasRef.current; if (c) { a.href = c.toDataURL("image/png"); a.download = `scene-${Date.now()}.png`; a.click(); } }}
+              className="gap-1.5 border-amber-400 text-amber-700 px-3"
+              data-testid="btn-scene-download">
               <Download className="w-3.5 h-3.5" />
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                if (onExport && personReady) {
-                  const canvas = canvasRef.current;
-                  if (!canvas) return;
-                  const url = canvas.toDataURL("image/png");
-                  toast({ title: "📤 يمكنك استخدام هذه الصورة في مذيع AI أو صورة ناطقة" });
-                  onExport(url);
-                }
-              }}
-              className="gap-1.5 border-purple-400 text-purple-600"
-              title="استخدم في مذيع AI"
-              data-testid="btn-scene-use-presenter"
-            >
-              🎬
-            </Button>
           </div>
-          <p className="text-[11px] text-muted-foreground text-center">الصورة بدقة 1280×720 — مناسبة للـ D-ID ومذيع AI</p>
+          <p className="text-[11px] text-muted-foreground text-center">الصورة 1280×720 — مناسبة للـ D-ID ومذيع AI والإعلانات</p>
         </div>
       </div>
     </div>

@@ -18,6 +18,7 @@ import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
 import express from "express";
 import * as webpushModule from "web-push";
+import sharp from "sharp";
 const webpush: typeof webpushModule = (webpushModule as any).default || webpushModule;
 
 // Admin user IDs — hardcoded superadmins (always admin, cannot be removed)
@@ -3978,38 +3979,45 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // AI Image generation (uses DALL-E via image routes, but track usage here)
   app.post("/api/ai/generate-image", isAuthenticated, checkAiCredits, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { prompt, size } = req.body;
-      const response = await openai.images.generate({
-        model: "gpt-image-1",
-        prompt: prompt,
-        n: 1,
-        size: (size || "1024x1024") as any,
-      });
-      // Always save locally — b64_json or download from URL — so the image persists
-      const b64 = response.data?.[0]?.b64_json;
-      const imageUrl = response.data?.[0]?.url;
-      const filename = `ai-img-${Date.now()}.png`;
-      const savePath = path.join(process.cwd(), 'uploads', filename);
-      if (b64) {
-        fs.writeFileSync(savePath, Buffer.from(b64, 'base64'));
-      } else if (imageUrl) {
-        const imgRes = await fetch(imageUrl);
-        const buf = Buffer.from(await imgRes.arrayBuffer());
-        fs.writeFileSync(savePath, buf);
-      } else {
-        throw new Error("No image generated");
+    const userId = req.user.claims.sub;
+    const { prompt, size } = req.body;
+    const validSizes = ["1024x1024", "1024x1792", "1792x1024", "512x512", "256x256"];
+    const safeSize = validSizes.includes(size) ? size : "1024x1024";
+
+    let lastError: any = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const response = await openai.images.generate({
+          model: "gpt-image-1",
+          prompt,
+          n: 1,
+          size: safeSize as any,
+        });
+        const b64 = response.data?.[0]?.b64_json;
+        const imageUrl = response.data?.[0]?.url;
+        const filename = `ai-img-${Date.now()}.png`;
+        const savePath = path.join(process.cwd(), 'uploads', filename);
+        if (b64) {
+          fs.writeFileSync(savePath, Buffer.from(b64, 'base64'));
+        } else if (imageUrl) {
+          const imgRes = await fetch(imageUrl);
+          const buf = Buffer.from(await imgRes.arrayBuffer());
+          fs.writeFileSync(savePath, buf);
+        } else {
+          throw new Error("No image generated");
+        }
+        const finalUrl = `/uploads/${filename}`;
+        await storage.recordAiUsage(userId, 'image');
+        if (req.aiChargeEGP) {
+          await deductAiCharge(userId, req.aiChargeEGP, 'رسوم توليد صورة بالذكاء الاصطناعي');
+        }
+        return res.json({ url: finalUrl, creditsUsed: (req.aiUsageCount || 0) + 1 });
+      } catch (error: any) {
+        lastError = error;
+        if (attempt < 3) await new Promise(r => setTimeout(r, 2000 * attempt));
       }
-      const finalUrl = `/uploads/${filename}`;
-      await storage.recordAiUsage(userId, 'image');
-      if (req.aiChargeEGP) {
-        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم توليد صورة بالذكاء الاصطناعي');
-      }
-      res.json({ url: finalUrl, creditsUsed: (req.aiUsageCount || 0) + 1 });
-    } catch (error: any) {
-      res.status(500).json({ message: "Failed to generate image: " + error.message });
     }
+    res.status(500).json({ message: "فشل توليد الصورة بعد 3 محاولات: " + lastError?.message });
   });
 
   // ─── AI ANALYZE IMAGE → generate ad copy ─────────────────────
@@ -4151,6 +4159,60 @@ Sitemap: ${BASE}/sitemap-pages.xml
       res.json({ videoUrl: localUrl, charged: req.talkingPhotoChargeEGP || 0 });
     } catch (error: any) {
       res.status(500).json({ message: "فشل توليد الصورة الناطقة: " + error.message });
+    }
+  });
+
+  // ─── SERVER-SIDE BACKGROUND REMOVAL (using sharp + pixel analysis) ──
+  app.post("/api/ai/remove-bg", isAuthenticated, upload.single("image"), async (req: any, res) => {
+    if (!req.file) return res.status(400).json({ message: "لم يُرسل ملف" });
+    try {
+      const imgBuf = fs.readFileSync(req.file.path);
+      const sharpImg = sharp(imgBuf).ensureAlpha();
+      const meta = await sharpImg.metadata();
+      const w = meta.width!, h = meta.height!;
+
+      const { data } = await sharp(imgBuf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const pixels = new Uint8ClampedArray(data);
+
+      // Sample background color from 4 corners (average of 5x5 patches)
+      const sampleCorner = (sx: number, sy: number) => {
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let dy = 0; dy < 5; dy++) for (let dx = 0; dx < 5; dx++) {
+          const idx = ((sy + dy) * w + (sx + dx)) * 4;
+          r += pixels[idx]; g += pixels[idx + 1]; b += pixels[idx + 2]; n++;
+        }
+        return [r / n, g / n, b / n];
+      };
+      const corners = [
+        sampleCorner(0, 0), sampleCorner(w - 5, 0),
+        sampleCorner(0, h - 5), sampleCorner(w - 5, h - 5)
+      ];
+      const bgR = corners.reduce((a, c) => a + c[0], 0) / 4;
+      const bgG = corners.reduce((a, c) => a + c[1], 0) / 4;
+      const bgB = corners.reduce((a, c) => a + c[2], 0) / 4;
+      const tolerance = Math.min(120, Math.max(10, parseInt(req.query.tolerance as string) || 45));
+
+      // Remove background pixels
+      for (let i = 0; i < pixels.length; i += 4) {
+        const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+        const dist = Math.sqrt((r - bgR) ** 2 + (g - bgG) ** 2 + (b - bgB) ** 2);
+        if (dist < tolerance) {
+          pixels[i + 3] = 0;
+        } else if (dist < tolerance * 1.5) {
+          pixels[i + 3] = Math.round(((dist - tolerance) / (tolerance * 0.5)) * 255);
+        }
+      }
+
+      const outBuf = await sharp(Buffer.from(pixels), { raw: { width: w, height: h, channels: 4 } })
+        .png()
+        .toBuffer();
+      const filename = `nobg-${Date.now()}.png`;
+      const outPath = path.join(process.cwd(), "uploads", filename);
+      fs.writeFileSync(outPath, outBuf);
+      try { fs.unlinkSync(req.file.path); } catch {}
+      res.json({ url: `/uploads/${filename}` });
+    } catch (e: any) {
+      res.status(500).json({ message: "فشل حذف الخلفية: " + e.message });
     }
   });
 
