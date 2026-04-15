@@ -89,6 +89,8 @@ export default function LiveStream() {
   interface FlyingGift { id: number; emoji: string; x: number; }
   const [flyingGifts,     setFlyingGifts]     = useState<FlyingGift[]>([]);
   const [myCoins,         setMyCoins]         = useState(0); // loaded from DB
+  interface GiftBanner { id: number; emoji: string; name: string; coins: number; received: number; userName: string; }
+  const [giftBanners,     setGiftBanners]     = useState<GiftBanner[]>([]);
 
   // Hand raise state (viewer)
   const [handRaised,      setHandRaised]      = useState(false);
@@ -545,7 +547,38 @@ export default function LiveStream() {
       setFlyingGifts(prev => [...prev, { id: flyId, emoji: data.giftEmoji, x }]);
       setTimeout(() => setFlyingGifts(prev => prev.filter(g => g.id !== flyId)), 3000);
       if (isBroadcast) {
-        toast({ title: `🎁 هدية من ${data.userName}!`, description: `${data.giftEmoji} ${data.giftName} — ${data.giftCoins} عملة` });
+        const receivedCoins = Math.floor(data.giftCoins * 0.6);
+        const bannerId = Date.now() + Math.random();
+        setGiftBanners(prev => [...prev.slice(-3), { id: bannerId, emoji: data.giftEmoji, name: data.giftName, coins: data.giftCoins, received: receivedCoins, userName: data.userName }]);
+        setTimeout(() => setGiftBanners(prev => prev.filter(b => b.id !== bannerId)), 5000);
+        try {
+          const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = "sine";
+          gain.gain.setValueAtTime(0.3, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+          osc.frequency.setValueAtTime(880, ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.1);
+          osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.2);
+          osc.start(ctx.currentTime);
+          osc.stop(ctx.currentTime + 0.4);
+          setTimeout(() => {
+            const osc2 = ctx.createOscillator();
+            const gain2 = ctx.createGain();
+            osc2.connect(gain2);
+            gain2.connect(ctx.destination);
+            osc2.type = "sine";
+            gain2.gain.setValueAtTime(0.25, ctx.currentTime);
+            gain2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+            osc2.frequency.setValueAtTime(1320, ctx.currentTime);
+            osc2.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.15);
+            osc2.start(ctx.currentTime);
+            osc2.stop(ctx.currentTime + 0.3);
+          }, 200);
+        } catch {}
       }
     });
 
@@ -1891,6 +1924,23 @@ export default function LiveStream() {
             <span className="text-5xl drop-shadow-2xl">{g.emoji}</span>
           </div>
         ))}
+
+        {/* BROADCASTER GIFT BANNER (shows who sent, what, and how much received) */}
+        {isBroadcast && giftBanners.length > 0 && (
+          <div className="absolute top-16 start-3 z-30 pointer-events-none flex flex-col gap-1.5" style={{ maxWidth: "75%" }}>
+            {giftBanners.map(b => (
+              <div key={b.id} className="bg-gradient-to-l from-yellow-600/90 to-orange-600/90 backdrop-blur-xl rounded-2xl px-3 py-2 flex items-center gap-2.5 shadow-2xl border border-yellow-400/40" style={{ animation: "slideInRight 0.4s ease-out" }}>
+                <span className="text-3xl">{b.emoji}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-bold text-sm truncate">{b.userName}</p>
+                  <p className="text-yellow-100 text-[10px]">
+                    أرسل {b.name} — <span className="font-bold text-white">وصلك {b.received} 🪙</span>
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* IN-STREAM AD — mini banner + expanded bottom-sheet (stream stays alive) */}
         {streaming && adVisible && streamAds.length > 0 && stream?.showAds !== false && (() => {
