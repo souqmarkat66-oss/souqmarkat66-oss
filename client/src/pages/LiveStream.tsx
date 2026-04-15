@@ -317,7 +317,7 @@ export default function LiveStream() {
         coHostNamesMap.current.set(data.socketId, data.userName);
         setCoHostRequests(prev => [...prev.filter(r => r.socketId !== data.socketId), data]);
         const mode = data.withCamera === false ? "🎙️ صوت فقط" : "📷 صوت وصورة";
-        toast({ title: "طلب مشاركة", description: `${data.userName} يريد الانضمام (${mode})` });
+        toast({ title: "طلب كاميرا", description: `${data.userName} يريد الانضمام (${mode})` });
       });
 
       socket.on("cohost-auto-joined", (data: { socketId: string; userName: string; withCamera?: boolean }) => {
@@ -368,7 +368,7 @@ export default function LiveStream() {
         coHostStreams.current.delete(socketId);
         coHostVideoRefs.current.delete(socketId);
         coHostNamesMap.current.delete(socketId);
-        toast({ title: "انتهت المشاركة", description: "غادر أحد الضيوف البث" });
+        toast({ title: "انتهى الانضمام", description: "غادر أحد الضيوف البث" });
       });
     }
 
@@ -735,7 +735,7 @@ export default function LiveStream() {
     const newVal = !autoAccept;
     setAutoAccept(newVal);
     socketRef.current?.emit("set-auto-accept", { streamId: id, enabled: newVal });
-    toast({ title: newVal ? "✅ القبول التلقائي مفعّل" : "القبول التلقائي معطّل", description: newVal ? "كل من يطلب سيدخل مباشرة" : "ستراجع طلبات المشاركة يدوياً" });
+    toast({ title: newVal ? "✅ القبول التلقائي مفعّل" : "القبول التلقائي معطّل", description: newVal ? "كل من يطلب سيدخل مباشرة" : "ستراجع طلبات الكاميرا يدوياً" });
   };
 
   /* ─── Hand Raise helpers ─────────────────────────────── */
@@ -1261,7 +1261,7 @@ export default function LiveStream() {
               <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-blue-600/80 backdrop-blur">
                 <Share2 className="w-6 h-6 text-white" />
               </div>
-              <span className="text-white text-[10px] font-bold drop-shadow">مشاركة</span>
+              <span className="text-white text-[10px] font-bold drop-shadow">كاميرا</span>
             </button>
 
             {/* GIFT BUTTON */}
@@ -1339,7 +1339,7 @@ export default function LiveStream() {
                 <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-purple-600/80 backdrop-blur">
                   <UserPlus className="w-6 h-6 text-white" />
                 </div>
-                <span className="text-white text-[10px] font-bold drop-shadow">مشاركة</span>
+                <span className="text-white text-[10px] font-bold drop-shadow">كاميرا</span>
               </button>
             )}
             {user && coHostStatus === "requesting" && (
@@ -1981,7 +1981,7 @@ export default function LiveStream() {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-white font-bold text-lg">
-                  {purchaseStep === "packages" && "شحن العملات 🪙"}
+                  {purchaseStep === "packages" && "شحن المحفظة 🪙"}
                   {purchaseStep === "pay" && "إتمام الدفع 💳"}
                   {purchaseStep === "done" && "تم استلام الطلب ✅"}
                 </h3>
@@ -2029,7 +2029,7 @@ export default function LiveStream() {
                     </button>
                   ))}
                 </div>
-                <p className="text-white/20 text-[10px] text-center">المدفوع لا يُسترد • للمساعدة تواصل معنا</p>
+                <p className="text-white/20 text-[10px] text-center">سيتم إضافة العملات إلى محفظتك بعد مراجعة الدفع • للمساعدة تواصل معنا</p>
               </>
             )}
 
@@ -2202,7 +2202,7 @@ export default function LiveStream() {
               <div className="text-center py-6">
                 <div className="text-6xl mb-4">✅</div>
                 <h4 className="text-white font-bold text-xl mb-2">تم استلام طلبك!</h4>
-                <p className="text-white/60 text-sm mb-1">سيتم مراجعة الدفع وإضافة العملات لمحفظتك</p>
+                <p className="text-white/60 text-sm mb-1">سيتم مراجعة الدفع وإضافة العملات إلى محفظتك</p>
                 <p className="text-yellow-400 text-sm font-bold mb-6">خلال بضع دقائق ⚡</p>
                 <button onClick={() => { setShowRechargeModal(false); setPurchaseStep("packages"); setSelectedPkg(null); setPayRef(""); }}
                   className="px-8 py-3 rounded-2xl bg-yellow-500 text-black font-bold">
