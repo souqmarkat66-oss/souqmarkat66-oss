@@ -995,6 +995,138 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(r.rows);
   });
 
+  // ── Broadcaster Earnings Report ──
+  app.get("/api/broadcaster/earnings", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const wallet = await pool.query(`SELECT * FROM coin_wallets WHERE user_id = $1`, [userId]);
+      const w = wallet.rows[0] || { balance: 0, total_spent: 0, total_earned: 0 };
+      const txs = await pool.query(
+        `SELECT * FROM coin_transactions WHERE user_id = $1 AND type IN ('gift_received','coin_withdrawal','coin_transfer_out','coin_transfer_in') ORDER BY created_at DESC LIMIT 100`,
+        [userId]
+      );
+      const totalGiftCoins = txs.rows.filter((t: any) => t.type === 'gift_received').reduce((s: number, t: any) => s + Math.abs(t.coins), 0);
+      const totalWithdrawn = txs.rows.filter((t: any) => t.type === 'coin_withdrawal').reduce((s: number, t: any) => s + Math.abs(t.coins), 0);
+      const totalTransferredOut = txs.rows.filter((t: any) => t.type === 'coin_transfer_out').reduce((s: number, t: any) => s + Math.abs(t.coins), 0);
+      const totalTransferredIn = txs.rows.filter((t: any) => t.type === 'coin_transfer_in').reduce((s: number, t: any) => s + Math.abs(t.coins), 0);
+      res.json({
+        coinBalance: w.balance,
+        totalEarnedCoins: w.total_earned,
+        totalGiftCoins,
+        totalWithdrawnCoins: totalWithdrawn,
+        totalTransferredOut,
+        totalTransferredIn,
+        totalEarnedEGP: parseFloat((w.total_earned * 0.05).toFixed(2)),
+        currentBalanceEGP: parseFloat((w.balance * 0.05).toFixed(2)),
+        transactions: txs.rows,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ── Coin Withdrawal (convert coins to EGP with 1% fee) — transactional ──
+  app.post("/api/coins/withdraw", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const { coins, method, phoneNumber, cardNumber, nationalId } = req.body || {};
+    if (!coins || coins < 100) return res.status(400).json({ message: "الحد الأدنى للسحب 100 عملة" });
+    if (!method) return res.status(400).json({ message: "طريقة الاستلام مطلوبة" });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const wallet = await client.query(`SELECT balance FROM coin_wallets WHERE user_id = $1 FOR UPDATE`, [userId]);
+      if (!wallet.rows.length || wallet.rows[0].balance < coins) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: "رصيد غير كافٍ" });
+      }
+      const fee = Math.floor(coins * 0.01);
+      const netCoins = coins - fee;
+      const netEGP = parseFloat((netCoins * 0.05).toFixed(2));
+      const upd = await client.query(
+        `UPDATE coin_wallets SET balance = balance - $2, updated_at = NOW() WHERE user_id = $1 AND balance >= $2 RETURNING balance`,
+        [userId, coins]
+      );
+      if (!upd.rows.length) { await client.query('ROLLBACK'); return res.status(400).json({ message: "رصيد غير كافٍ" }); }
+      await client.query(
+        `INSERT INTO coin_transactions (user_id, type, coins, description) VALUES ($1, 'coin_withdrawal', $2, $3)`,
+        [userId, -coins, `سحب ${coins} عملة (رسوم ${fee} عملة) — ${netEGP} ج.م عبر ${method}`]
+      );
+      const now = new Date();
+      const datePart = now.toISOString().slice(0,10).replace(/-/g,"");
+      const rand = Math.floor(1000 + Math.random() * 9000);
+      const orderNumber = `CW-${datePart}-${rand}`;
+      await client.query(
+        `INSERT INTO payment_requests (user_id, type, amount_egp, method, phone_number, national_id, card_number, status, order_number, admin_note)
+         VALUES ($1, 'withdrawal', $2, $3, $4, $5, $6, 'pending', $7, $8)`,
+        [userId, netEGP, method, phoneNumber || null, nationalId || null, cardNumber || null, orderNumber, `إجمالي: ${coins} عملة — رسوم 1%: ${fee} عملة — صافي: ${netCoins} عملة`]
+      );
+      await client.query('COMMIT');
+      const userR = await pool.query(`SELECT first_name, last_name FROM users WHERE id = $1`, [userId]);
+      const userName = `${userR.rows[0]?.first_name || ""} ${userR.rows[0]?.last_name || ""}`.trim() || userId;
+      for (const adminId of [ADMIN_USER_ID, ADMIN_USER_ID2]) {
+        await createNotification(adminId, "payment",
+          `🪙 طلب سحب عملات`,
+          `${userName} — ${coins} عملة (${netEGP} ج.م بعد رسوم 1%) عبر ${method}`,
+          "/admin"
+        );
+      }
+      res.json({ success: true, coins, fee, netCoins, netEGP, orderNumber, message: `تم إرسال طلب سحب ${netEGP} ج.م — رسوم 1% = ${fee} عملة` });
+    } catch (e: any) {
+      await client.query('ROLLBACK').catch(() => {});
+      res.status(500).json({ message: e.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  // ── Transfer Coins to Another User — transactional ──
+  app.post("/api/coins/transfer", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const { recipientUsername, coins, message: msg } = req.body || {};
+    if (!coins || coins < 1) return res.status(400).json({ message: "عدد العملات مطلوب" });
+    if (!recipientUsername) return res.status(400).json({ message: "اسم المستخدم المستلم مطلوب" });
+    const recipient = await pool.query(
+      `SELECT id, first_name, last_name, username FROM users WHERE username = $1 OR id = $1 LIMIT 1`,
+      [recipientUsername.trim()]
+    );
+    if (!recipient.rows.length) return res.status(404).json({ message: "المستخدم غير موجود" });
+    const recipientId = recipient.rows[0].id;
+    if (recipientId === userId) return res.status(400).json({ message: "لا يمكنك التحويل لنفسك" });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const upd = await client.query(
+        `UPDATE coin_wallets SET balance = balance - $2, total_spent = total_spent + $2, updated_at = NOW() WHERE user_id = $1 AND balance >= $2 RETURNING balance`,
+        [userId, coins]
+      );
+      if (!upd.rows.length) { await client.query('ROLLBACK'); return res.status(400).json({ message: "رصيد غير كافٍ" }); }
+      await client.query(
+        `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned) VALUES ($1, $2, 0, $2)
+         ON CONFLICT (user_id) DO UPDATE SET balance = coin_wallets.balance + $2, total_earned = coin_wallets.total_earned + $2, updated_at = NOW()`,
+        [recipientId, coins]
+      );
+      await client.query(
+        `INSERT INTO coin_transactions (user_id, type, coins, description, related_user_id) VALUES ($1, 'coin_transfer_out', $2, $3, $4)`,
+        [userId, -coins, `تحويل ${coins} عملة إلى ${recipient.rows[0].first_name || recipientUsername}`, recipientId]
+      );
+      await client.query(
+        `INSERT INTO coin_transactions (user_id, type, coins, description, related_user_id) VALUES ($1, 'coin_transfer_in', $2, $3, $4)`,
+        [recipientId, coins, `استلام ${coins} عملة${msg ? ` — ${msg}` : ''}`, userId]
+      );
+      await client.query('COMMIT');
+      const senderR = await pool.query(`SELECT first_name FROM users WHERE id = $1`, [userId]);
+      const senderName = senderR.rows[0]?.first_name || 'مستخدم';
+      await createNotification(recipientId, 'system', `🪙 وصلك ${coins} عملة!`,
+        `${senderName} حوّل لك ${coins} عملة${msg ? ` — "${msg}"` : ''}`, '/revenue');
+      res.json({ success: true, coins, recipientName: recipient.rows[0].first_name || recipientUsername });
+    } catch (e: any) {
+      await client.query('ROLLBACK').catch(() => {});
+      res.status(500).json({ message: e.message });
+    } finally {
+      client.release();
+    }
+  });
+
   // ADMIN: List purchase orders
   app.get("/api/admin/coins/purchase-orders", isAuthenticated, async (req: any, res) => {
     if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
@@ -3363,13 +3495,20 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const { insertPaymentRequestSchema } = await import("@shared/schema");
       const userId = req.user.claims.sub;
-      // Generate unique order number: ORD-YYYYMMDD-XXXX
       const now = new Date();
       const datePart = now.toISOString().slice(0,10).replace(/-/g,"");
       const rand = Math.floor(1000 + Math.random() * 9000);
       const orderNumber = `ORD-${datePart}-${rand}`;
+      let bodyData = { ...req.body };
+      if (bodyData.type === 'withdrawal' && bodyData.amountEGP) {
+        const gross = parseFloat(bodyData.amountEGP);
+        const fee = parseFloat((gross * 0.01).toFixed(2));
+        const net = parseFloat((gross - fee).toFixed(2));
+        bodyData.amountEGP = net;
+        bodyData.adminNote = `${bodyData.adminNote || ''} | رسوم سحب 1%: ${fee} ج.م (إجمالي: ${gross} ج.م)`.trim().replace(/^\| /, '');
+      }
       const input = insertPaymentRequestSchema.parse({
-        ...req.body,
+        ...bodyData,
         userId,
         orderNumber,
       });

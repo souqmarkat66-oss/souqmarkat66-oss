@@ -519,7 +519,7 @@ export type CoinRechargeCode = typeof coinRechargeCodes.$inferSelect;
 export const coinTransactions = pgTable("coin_transactions", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").references(() => users.id).notNull(),
-  type: text("type", { enum: ["recharge", "gift_sent", "gift_received", "purchase", "refund", "admin_grant"] }).notNull(),
+  type: text("type", { enum: ["recharge", "gift_sent", "gift_received", "purchase", "refund", "admin_grant", "coin_withdrawal", "coin_transfer_out", "coin_transfer_in"] }).notNull(),
   coins: integer("coins").notNull(),
   description: text("description"),
   relatedStreamId: integer("related_stream_id"),
