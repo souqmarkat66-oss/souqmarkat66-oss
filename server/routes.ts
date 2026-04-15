@@ -984,6 +984,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           `${userName} — ${amount} ج.م عبر ${paymentMethod}`,
           "/admin"
         );
+        emitAdminEvent("admin:wallet-topup-request", {
+          userName,
+          amount,
+          paymentMethod,
+          orderNumber,
+          at: new Date().toISOString(),
+        });
       } catch (_) {}
     }
 

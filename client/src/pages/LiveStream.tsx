@@ -1237,6 +1237,10 @@ export default function LiveStream() {
         {/* VIEWER ACTIONS */}
         {!isBroadcast && streaming && !ended && (
           <div className="absolute end-3 z-10 flex flex-col items-center gap-4" style={{ bottom: "88px" }}>
+            <div className="rounded-2xl bg-black/70 backdrop-blur px-3 py-2 border border-white/10 text-center max-w-[160px]">
+              <p className="text-white text-[11px] font-bold">لو الشاشة سوداء</p>
+              <p className="text-white/60 text-[10px] mt-0.5">اطلب من المذيع يرسلك دعوة كاميرا</p>
+            </div>
             <button onClick={handleLike} className="flex flex-col items-center gap-0.5" data-testid="btn-stream-like">
               <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all ${liked ? "bg-red-500 scale-110" : "bg-black/60"}`}>
                 <Heart className={`w-6 h-6 ${liked ? "text-white fill-white" : "text-white"}`} />
@@ -1254,6 +1258,29 @@ export default function LiveStream() {
               <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-black/60">
                 <Volume2 className="w-6 h-6 text-white" />
               </div>
+            </button>
+            <button
+              onClick={() => {
+                const v = videoRef.current;
+                if (v) { v.muted = false; v.volume = 1; v.play().catch(() => {}); }
+              }}
+              className="flex flex-col items-center gap-0.5"
+              data-testid="btn-viewer-play-video"
+            >
+              <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-blue-600/80 backdrop-blur">
+                <Video className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-white text-[10px] font-bold drop-shadow">شغّل</span>
+            </button>
+            <button
+              onClick={() => setShowShare(true)}
+              className="flex flex-col items-center gap-0.5"
+              data-testid="btn-request-camera"
+            >
+              <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-purple-600/80 backdrop-blur">
+                <UserPlus className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-white text-[10px] font-bold drop-shadow">اطلب كاميرا</span>
             </button>
 
             {/* SHARE BUTTON */}
