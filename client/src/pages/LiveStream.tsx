@@ -2080,7 +2080,7 @@ export default function LiveStream() {
                 <div className="grid grid-cols-2 gap-2 mb-4">
                   {[
                     { key: "vodafone",     label: "فودافون كاش",   sub: "01126665741",      emoji: "📱", color: "border-red-500/50 bg-red-500/10" },
-                    { key: "vodafone2",    label: "فودافون كاش",   sub: "01098553911",      emoji: "📱", color: "border-red-400/50 bg-red-400/10" },
+                    { key: "etisalat",     label: "اتصالات كاش",    sub: "01098553911",      emoji: "📱", color: "border-emerald-500/50 bg-emerald-500/10" },
                     { key: "instapay",     label: "إنستاباي",       sub: "01285558567",      emoji: "💳", color: "border-blue-500/50 bg-blue-500/10" },
                     { key: "bank",         label: "تحويل بنكي",     sub: "البنك الأهلي",     emoji: "🏦", color: "border-green-500/50 bg-green-500/10" },
                     { key: "souq",         label: "سوق ماركات",     sub: "تطبيق الدفع",      emoji: "🛍️", color: "border-purple-500/50 bg-purple-500/10" },
@@ -2107,9 +2107,9 @@ export default function LiveStream() {
                       <p className="text-white/40 text-xs mt-1">سوق ماركات للإعلانات</p>
                     </>
                   )}
-                  {payMethod === "vodafone2" && (
+                  {payMethod === "etisalat" && (
                     <>
-                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ لفودافون كاش:</p>
+                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ لاتصالات كاش:</p>
                       <p className="text-white font-bold text-2xl tracking-widest" dir="ltr">01098553911</p>
                       <p className="text-white/40 text-xs mt-1">سوق ماركات للإعلانات</p>
                     </>
