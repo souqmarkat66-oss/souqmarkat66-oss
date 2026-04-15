@@ -795,7 +795,14 @@ export default function LiveStream() {
         packageId: selectedPkg.id,
         coins: selectedPkg.coins + (selectedPkg.bonus_coins || 0),
         amountEGP: selectedPkg.price_egp,
-        paymentMethod: payMethod === "vodafone" ? "فودافون كاش" : payMethod === "instapay" ? "إنستاباي" : "تحويل بنكي",
+        paymentMethod:
+          payMethod === "vodafone"
+            ? "فودافون كاش"
+            : payMethod === "etisalat"
+              ? "اتصالات كاش"
+              : payMethod === "instapay"
+                ? "إنستاباي"
+                : "تحويل بنكي",
         paymentRef: payRef.trim(),
         userName,
       });
