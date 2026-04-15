@@ -329,6 +329,11 @@ function DashboardSection({ liveEvents = [], onClearEvents }: { liveEvents?: Liv
     queryFn: () => fetch("/api/admin/wallet-stats", { credentials: "include" }).then(r => r.json()),
     refetchInterval: 30000,
   });
+  const { data: bcEarnings } = useQuery<any>({
+    queryKey: ["/api/admin/broadcaster-earnings"],
+    queryFn: () => fetch("/api/admin/broadcaster-earnings", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 30000,
+  });
   const { data: settings, refetch: refetchSettings } = useQuery<Record<string, string>>({
     queryKey: ["/api/settings"],
     queryFn: () => fetch("/api/settings").then(r => r.json()),
@@ -529,6 +534,101 @@ function DashboardSection({ liveEvents = [], onClearEvents }: { liveEvents?: Liv
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-xs text-emerald-600">+{Number(r.amount_egp).toFixed(2)} ج.م</span>
                         <span className="text-[10px] text-muted-foreground">{r.created_at ? format(new Date(r.created_at), "dd/MM HH:mm", { locale: ar }) : ""}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* Broadcaster Gift Earnings Panel */}
+      {bcEarnings && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Gift className="w-5 h-5 text-pink-500" />
+            <h3 className="font-bold text-base">تقرير هدايا البث المباشر</h3>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Card className="rounded-2xl border border-pink-200 dark:border-pink-800 bg-gradient-to-br from-pink-500/10 to-transparent">
+              <CardContent className="p-4">
+                <div className="text-xs text-muted-foreground mb-1">🎁 إجمالي الهدايا</div>
+                <div className="text-xl font-bold text-pink-600">{bcEarnings.totalCoinsGifted?.toLocaleString()} 🪙</div>
+                <div className="text-xs text-muted-foreground">{bcEarnings.totalCoinsGiftedEGP} ج.م — {bcEarnings.totalGiftsSent} هدية</div>
+              </CardContent>
+            </Card>
+            <Card className="rounded-2xl border border-yellow-200 dark:border-yellow-800 bg-gradient-to-br from-yellow-500/10 to-transparent">
+              <CardContent className="p-4">
+                <div className="text-xs text-muted-foreground mb-1">💰 حصة المنصة (40%)</div>
+                <div className="text-xl font-bold text-yellow-600">{bcEarnings.platformCutCoins?.toLocaleString()} 🪙</div>
+                <div className="text-xs text-muted-foreground">{bcEarnings.platformCutEGP} ج.م إيراد صافي</div>
+              </CardContent>
+            </Card>
+            <Card className="rounded-2xl border border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-500/10 to-transparent">
+              <CardContent className="p-4">
+                <div className="text-xs text-muted-foreground mb-1">💸 مسحوبات المذيعين</div>
+                <div className="text-xl font-bold text-blue-600">{bcEarnings.totalWithdrawnCoins?.toLocaleString()} 🪙</div>
+                <div className="text-xs text-muted-foreground">{bcEarnings.totalWithdrawnEGP} ج.م — {bcEarnings.withdrawalCount} طلب</div>
+              </CardContent>
+            </Card>
+            <Card className="rounded-2xl border border-purple-200 dark:border-purple-800 bg-gradient-to-br from-purple-500/10 to-transparent">
+              <CardContent className="p-4">
+                <div className="text-xs text-muted-foreground mb-1">🔄 تحويلات بين المستخدمين</div>
+                <div className="text-xl font-bold text-purple-600">{bcEarnings.totalTransferredCoins?.toLocaleString()} 🪙</div>
+                <div className="text-xs text-muted-foreground">{bcEarnings.transferCount} عملية تحويل</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {bcEarnings.topBroadcasters?.length > 0 && (
+            <Card className="rounded-2xl">
+              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2">🏆 أعلى المذيعين ربحاً</CardTitle></CardHeader>
+              <CardContent className="pt-0">
+                <div className="space-y-1.5 max-h-60 overflow-y-auto">
+                  {bcEarnings.topBroadcasters.map((b: any, i: number) => (
+                    <div key={b.userId} className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-muted/30 text-sm" data-testid={`top-bc-${i}`}>
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-sm font-bold text-muted-foreground w-5">{i + 1}</span>
+                        {b.profileImage ? (
+                          <img src={b.profileImage} alt="" className="w-8 h-8 rounded-full object-cover" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-pink-400 to-purple-500 flex items-center justify-center text-white text-xs font-bold">{(b.name || '?')[0]}</div>
+                        )}
+                        <div>
+                          <div className="font-medium text-xs">{b.name}</div>
+                          <div className="text-[10px] text-muted-foreground">رصيد حالي: {b.currentBalance?.toLocaleString()} 🪙</div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-bold text-xs text-pink-600">{b.totalEarned?.toLocaleString()} 🪙</div>
+                        <div className="text-[10px] text-muted-foreground">{b.totalEarnedEGP} ج.م</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {bcEarnings.recentGifts?.length > 0 && (
+            <Card className="rounded-2xl">
+              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2">🎁 آخر الهدايا المُستلمة</CardTitle></CardHeader>
+              <CardContent className="pt-0">
+                <div className="space-y-1 max-h-52 overflow-y-auto">
+                  {bcEarnings.recentGifts.map((g: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between px-3 py-1.5 rounded-xl hover:bg-muted/30 text-sm">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-pink-500/10 flex items-center justify-center text-xs">🎁</div>
+                        <div>
+                          <span className="font-medium text-xs">{g.receiver_name || '—'}</span>
+                          <span className="text-[10px] text-muted-foreground mr-1"> ← {g.sender_name || '—'}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs text-green-600">+{g.coins} 🪙</span>
+                        <span className="text-[10px] text-muted-foreground">{g.created_at ? format(new Date(g.created_at), "dd/MM HH:mm", { locale: ar }) : ""}</span>
                       </div>
                     </div>
                   ))}

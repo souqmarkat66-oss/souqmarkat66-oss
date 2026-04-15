@@ -3839,6 +3839,77 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
+  app.get("/api/admin/broadcaster-earnings", isAuthenticated, requireAdmin, async (_req, res) => {
+    try {
+      const [totalGifts, topBroadcasters, platformRevenue, withdrawals, transfers, recentGifts] = await Promise.all([
+        pool.query(`
+          SELECT COUNT(*) as total_gifts,
+                 COALESCE(SUM(ABS(coins)),0) as total_coins_gifted
+          FROM coin_transactions WHERE type = 'gift_sent'
+        `),
+        pool.query(`
+          SELECT ct.user_id, COALESCE(SUM(ct.coins),0) as total_earned,
+                 u.first_name, u.last_name, u.username, u.profile_image_url,
+                 cw.balance as current_balance
+          FROM coin_transactions ct
+          LEFT JOIN users u ON u.id = ct.user_id
+          LEFT JOIN coin_wallets cw ON cw.user_id = ct.user_id
+          WHERE ct.type = 'gift_received'
+          GROUP BY ct.user_id, u.first_name, u.last_name, u.username, u.profile_image_url, cw.balance
+          ORDER BY total_earned DESC LIMIT 20
+        `),
+        pool.query(`
+          SELECT COALESCE(SUM(ABS(coins)),0) as total_sent,
+                 COALESCE(SUM(ABS(coins)),0) - COALESCE((SELECT SUM(coins) FROM coin_transactions WHERE type='gift_received'),0) as platform_cut
+          FROM coin_transactions WHERE type = 'gift_sent'
+        `),
+        pool.query(`
+          SELECT COUNT(*) as count, COALESCE(SUM(ABS(coins)),0) as total_coins
+          FROM coin_transactions WHERE type = 'coin_withdrawal'
+        `),
+        pool.query(`
+          SELECT COUNT(*) as count, COALESCE(SUM(ABS(coins)),0) as total_coins
+          FROM coin_transactions WHERE type = 'coin_transfer_out'
+        `),
+        pool.query(`
+          SELECT ct.*, u.first_name as sender_name, u2.first_name as receiver_name
+          FROM coin_transactions ct
+          LEFT JOIN users u ON u.id = ct.related_user_id
+          LEFT JOIN users u2 ON u2.id = ct.user_id
+          WHERE ct.type = 'gift_received'
+          ORDER BY ct.created_at DESC LIMIT 30
+        `),
+      ]);
+      const g = totalGifts.rows[0] as any;
+      const p = platformRevenue.rows[0] as any;
+      const w = withdrawals.rows[0] as any;
+      const t = transfers.rows[0] as any;
+      res.json({
+        totalGiftsSent: Number(g.total_gifts),
+        totalCoinsGifted: Number(g.total_coins_gifted),
+        totalCoinsGiftedEGP: parseFloat((Number(g.total_coins_gifted) * 0.05).toFixed(2)),
+        platformCutCoins: Number(p.platform_cut),
+        platformCutEGP: parseFloat((Number(p.platform_cut) * 0.05).toFixed(2)),
+        totalWithdrawnCoins: Number(w.total_coins),
+        totalWithdrawnEGP: parseFloat((Number(w.total_coins) * 0.05).toFixed(2)),
+        withdrawalCount: Number(w.count),
+        totalTransferredCoins: Number(t.total_coins),
+        transferCount: Number(t.count),
+        topBroadcasters: topBroadcasters.rows.map((r: any) => ({
+          userId: r.user_id,
+          name: `${r.first_name || ''} ${r.last_name || ''}`.trim() || r.username || r.user_id,
+          profileImage: r.profile_image_url,
+          totalEarned: Number(r.total_earned),
+          totalEarnedEGP: parseFloat((Number(r.total_earned) * 0.05).toFixed(2)),
+          currentBalance: Number(r.current_balance || 0),
+        })),
+        recentGifts: recentGifts.rows,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   app.get("/api/admin/reports", isAuthenticated, requireAdmin, async (req: any, res) => {
     const reps = await storage.getReports(req.query.status as string);
     res.json(reps);
