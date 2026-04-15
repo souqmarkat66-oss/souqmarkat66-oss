@@ -1882,6 +1882,15 @@ export default function LiveStream() {
                 <FlipHorizontal className="w-6 h-6 text-white" />
               </button>
             )}
+            {/* SHARE button for broadcaster */}
+            <button
+              onClick={() => setShowShare(true)}
+              data-testid="btn-broadcast-share"
+              className="w-14 h-14 rounded-full flex items-center justify-center shadow-xl bg-blue-600 border-2 border-blue-400"
+              title="شارك البث"
+            >
+              <Share2 className="w-6 h-6 text-white" />
+            </button>
             <button
               onClick={endStream}
               data-testid="btn-end-stream"
@@ -1889,6 +1898,22 @@ export default function LiveStream() {
             >
               <PhoneOff className="w-5 h-5" />
               إنهاء البث
+            </button>
+          </div>
+        )}
+
+        {/* BROADCASTER SHARE FLOATING BUTTON (right side, always visible while streaming) */}
+        {isBroadcast && streaming && (
+          <div className="absolute end-3 z-10 flex flex-col items-center gap-3" style={{ bottom: "160px" }}>
+            <button
+              onClick={() => setShowShare(true)}
+              data-testid="btn-broadcast-share-float"
+              className="flex flex-col items-center gap-0.5"
+            >
+              <div className="w-12 h-12 rounded-full bg-blue-600/90 backdrop-blur flex items-center justify-center shadow-lg border-2 border-blue-400/50 animate-pulse">
+                <Share2 className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-white text-[10px] font-bold drop-shadow">شارك</span>
             </button>
           </div>
         )}
