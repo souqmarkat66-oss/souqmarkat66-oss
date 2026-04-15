@@ -658,74 +658,149 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       socket.emit("viewer-list", list);
     });
 
-    // ── Battle / Challenge system ────────────────────────
-    socket.on("battle-start", (data: { streamId: string; mode: "1v1"|"2v2"|"3v3"|"4v4" }) => {
-      const room = streamRooms.get(data.streamId);
-      if (!room || room.broadcasterId !== socket.id) return;
-      if ((room as any).battle) return;
-      const perTeam = parseInt(data.mode.split("v")[0]) || 1;
-      const cohosts = [...room.cohostIds];
-      const teamA: { socketId: string; name: string; score: number }[] = [];
-      const teamB: { socketId: string; name: string; score: number }[] = [];
-      // Broadcaster always on team A
-      teamA.push({ socketId: socket.id, name: room.cohostNames.get(socket.id) || "المذيع", score: 0 });
-      // Distribute cohosts between teams
-      cohosts.forEach((cId, i) => {
-        const entry = { socketId: cId, name: room.cohostNames.get(cId) || "ضيف", score: 0 };
-        if (teamA.length < perTeam) teamA.push(entry);
-        else if (teamB.length < perTeam) teamB.push(entry);
+    // ── Cross-Stream Battle / Challenge system ────────────────────────
+    // Global battle state (shared across all sockets via closure)
+    interface CrossBattle {
+      id: string;
+      streamIdA: string;
+      streamIdB: string;
+      broadcasterSocketA: string;
+      broadcasterSocketB: string;
+      broadcasterUserIdA: string;
+      broadcasterUserIdB: string;
+      broadcasterNameA: string;
+      broadcasterNameB: string;
+      totalA: number;
+      totalB: number;
+      startedAt: number;
+      timerId: any;
+    }
+    if (!(io as any)._battleLinks) (io as any)._battleLinks = new Map<string, CrossBattle>();
+    if (!(io as any)._streamToBattle) (io as any)._streamToBattle = new Map<string, string>();
+    if (!(io as any)._pendingInvites) (io as any)._pendingInvites = new Map<string, any>();
+    const battleLinks: Map<string, CrossBattle> = (io as any)._battleLinks;
+    const streamToBattle: Map<string, string> = (io as any)._streamToBattle;
+    const pendingInvites: Map<string, any> = (io as any)._pendingInvites;
+
+    socket.on("battle-invite", (data: { fromStreamId: string; toStreamId: string; fromName: string; fromUserId: string }) => {
+      const fromRoom = streamRooms.get(data.fromStreamId);
+      if (!fromRoom || fromRoom.broadcasterId !== socket.id) return;
+      if (streamToBattle.has(data.fromStreamId) || streamToBattle.has(data.toStreamId)) return;
+      const toRoom = streamRooms.get(data.toStreamId);
+      if (!toRoom || !toRoom.broadcasterId) return;
+      const inviteId = `inv_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+      pendingInvites.set(inviteId, {
+        fromStreamId: data.fromStreamId, toStreamId: data.toStreamId,
+        fromSocketId: socket.id, fromName: data.fromName, fromUserId: data.fromUserId,
+        createdAt: Date.now(),
       });
-      // If team B is empty for solo battle, add placeholder
-      if (teamB.length === 0 && cohosts.length > 0) {
-        const last = teamA.pop();
-        if (last) teamB.push(last);
-      }
-      const battle = { mode: data.mode, teams: { teamA, teamB }, totalA: 0, totalB: 0, duration: 300, startedAt: Date.now(), timerId: null as any };
-      (room as any).battle = battle;
-      io.to(`stream:${data.streamId}`).emit("battle-started", { mode: data.mode, teams: { teamA, teamB }, duration: 300 });
-      // Start countdown timer
+      io.to(toRoom.broadcasterId).emit("battle-invite-received", {
+        inviteId, fromStreamId: data.fromStreamId, fromName: data.fromName,
+      });
+      socket.emit("battle-invite-sent", { inviteId, toStreamId: data.toStreamId });
+      setTimeout(() => {
+        if (pendingInvites.has(inviteId)) {
+          pendingInvites.delete(inviteId);
+          socket.emit("battle-invite-expired", { inviteId });
+        }
+      }, 30000);
+    });
+
+    socket.on("battle-accept", (data: { inviteId: string; myName: string; myUserId: string }) => {
+      const invite = pendingInvites.get(data.inviteId);
+      if (!invite) return;
+      pendingInvites.delete(data.inviteId);
+      const roomA = streamRooms.get(invite.fromStreamId);
+      const roomB = streamRooms.get(invite.toStreamId);
+      if (!roomA?.broadcasterId || !roomB?.broadcasterId) return;
+      if (streamToBattle.has(invite.fromStreamId) || streamToBattle.has(invite.toStreamId)) return;
+
+      const battleId = `battle_${Date.now()}`;
+      const battle: CrossBattle = {
+        id: battleId,
+        streamIdA: invite.fromStreamId, streamIdB: invite.toStreamId,
+        broadcasterSocketA: roomA.broadcasterId, broadcasterSocketB: roomB.broadcasterId,
+        broadcasterUserIdA: invite.fromUserId, broadcasterUserIdB: data.myUserId,
+        broadcasterNameA: invite.fromName, broadcasterNameB: data.myName,
+        totalA: 0, totalB: 0, startedAt: Date.now(), timerId: null,
+      };
+      battleLinks.set(battleId, battle);
+      streamToBattle.set(invite.fromStreamId, battleId);
+      streamToBattle.set(invite.toStreamId, battleId);
+
+      const battleInfo = {
+        battleId, streamIdA: battle.streamIdA, streamIdB: battle.streamIdB,
+        nameA: battle.broadcasterNameA, nameB: battle.broadcasterNameB,
+        duration: 300,
+      };
+      io.to(`stream:${battle.streamIdA}`).emit("battle-started", battleInfo);
+      io.to(`stream:${battle.streamIdB}`).emit("battle-started", battleInfo);
+
       battle.timerId = setInterval(() => {
         const elapsed = Math.floor((Date.now() - battle.startedAt) / 1000);
         const timeLeft = Math.max(0, 300 - elapsed);
-        io.to(`stream:${data.streamId}`).emit("battle-timer", { timeLeft });
+        const timerData = { battleId, timeLeft };
+        io.to(`stream:${battle.streamIdA}`).emit("battle-timer", timerData);
+        io.to(`stream:${battle.streamIdB}`).emit("battle-timer", timerData);
         if (timeLeft <= 0) {
           clearInterval(battle.timerId);
           const winner = battle.totalA > battle.totalB ? "A" : battle.totalB > battle.totalA ? "B" : "draw";
-          io.to(`stream:${data.streamId}`).emit("battle-ended", { winner, totalA: battle.totalA, totalB: battle.totalB, teams: battle.teams });
-          (room as any).battle = null;
+          const endData = { battleId, winner, totalA: battle.totalA, totalB: battle.totalB, nameA: battle.broadcasterNameA, nameB: battle.broadcasterNameB };
+          io.to(`stream:${battle.streamIdA}`).emit("battle-ended", endData);
+          io.to(`stream:${battle.streamIdB}`).emit("battle-ended", endData);
+          streamToBattle.delete(battle.streamIdA);
+          streamToBattle.delete(battle.streamIdB);
+          battleLinks.delete(battleId);
         }
       }, 1000);
     });
 
-    socket.on("battle-end-early", (data: { streamId: string }) => {
-      const room = streamRooms.get(data.streamId);
-      if (!room || room.broadcasterId !== socket.id) return;
-      const battle = (room as any).battle;
-      if (!battle) return;
-      clearInterval(battle.timerId);
-      const winner = battle.totalA > battle.totalB ? "A" : battle.totalB > battle.totalA ? "B" : "draw";
-      io.to(`stream:${data.streamId}`).emit("battle-ended", { winner, totalA: battle.totalA, totalB: battle.totalB, teams: battle.teams });
-      (room as any).battle = null;
+    socket.on("battle-decline", (data: { inviteId: string }) => {
+      const invite = pendingInvites.get(data.inviteId);
+      if (!invite) return;
+      pendingInvites.delete(data.inviteId);
+      io.to(invite.fromSocketId).emit("battle-invite-declined", { inviteId: data.inviteId });
     });
 
-    socket.on("battle-gift", async (data: { streamId: string; giftType: string; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId: string; broadcasterUserId?: string; multiplier: number; targetTeam: "A"|"B" }) => {
-      const room = streamRooms.get(data.streamId);
-      if (!room) return;
-      const battle = (room as any).battle;
+    socket.on("battle-end-early", (data: { streamId: string }) => {
+      const battleId = streamToBattle.get(data.streamId);
+      if (!battleId) return;
+      const battle = battleLinks.get(battleId);
+      if (!battle) return;
+      if (battle.broadcasterSocketA !== socket.id && battle.broadcasterSocketB !== socket.id) return;
+      clearInterval(battle.timerId);
+      const winner = battle.totalA > battle.totalB ? "A" : battle.totalB > battle.totalA ? "B" : "draw";
+      const endData = { battleId, winner, totalA: battle.totalA, totalB: battle.totalB, nameA: battle.broadcasterNameA, nameB: battle.broadcasterNameB };
+      io.to(`stream:${battle.streamIdA}`).emit("battle-ended", endData);
+      io.to(`stream:${battle.streamIdB}`).emit("battle-ended", endData);
+      streamToBattle.delete(battle.streamIdA);
+      streamToBattle.delete(battle.streamIdB);
+      battleLinks.delete(battleId);
+    });
+
+    socket.on("battle-watch-opponent", (data: { myStreamId: string; opponentStreamId: string }) => {
+      const opponentRoom = streamRooms.get(data.opponentStreamId);
+      if (!opponentRoom?.broadcasterId) return;
+      socket.join(`stream:${data.opponentStreamId}`);
+      io.to(opponentRoom.broadcasterId).emit("battle-watcher", socket.id);
+    });
+
+    socket.on("battle-offer", (targetId: string, sdp: any) => socket.to(targetId).emit("battle-offer", socket.id, sdp));
+    socket.on("battle-answer", (targetId: string, sdp: any) => socket.to(targetId).emit("battle-answer", socket.id, sdp));
+    socket.on("battle-candidate", (targetId: string, candidate: any) => socket.to(targetId).emit("battle-candidate", socket.id, candidate));
+
+    socket.on("battle-gift", async (data: { streamId: string; giftType: string; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId: string; multiplier: number }) => {
+      const battleId = streamToBattle.get(data.streamId);
+      if (!battleId) return;
+      const battle = battleLinks.get(battleId);
       if (!battle) return;
       const validMultipliers = [2, 3, 5];
       const mult = validMultipliers.includes(data.multiplier) ? data.multiplier : 1;
       const bgCoins = Math.max(1, Math.min(Math.floor(data.giftCoins || 0), 1000));
       const scoreValue = bgCoins * mult;
-      if (data.targetTeam === "A") {
-        battle.totalA += scoreValue;
-        const member = battle.teams.teamA[0];
-        if (member) member.score += scoreValue;
-      } else {
-        battle.totalB += scoreValue;
-        const member = battle.teams.teamB[0];
-        if (member) member.score += scoreValue;
-      }
+      const isTeamA = data.streamId === battle.streamIdA;
+      const broadcasterUserId = isTeamA ? battle.broadcasterUserIdA : battle.broadcasterUserIdB;
+      if (isTeamA) { battle.totalA += scoreValue; } else { battle.totalB += scoreValue; }
       try {
         if (data.userId && bgCoins > 0) {
           const balCheck = await pool.query(`SELECT balance FROM coin_wallets WHERE user_id = $1`, [data.userId]);
@@ -739,35 +814,34 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
              VALUES ($1, 'gift_sent', $2, $3, $4)`,
             [data.userId, -bgCoins, `هدية تحدي ${data.giftName} (${mult}x سكور)`, data.streamId ? parseInt(data.streamId) : null]
           );
-          if (data.broadcasterUserId) {
-            const broadcasterCoins = Math.floor(bgCoins * 0.6);
-            await pool.query(
-              `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
-               VALUES ($1, $2::int, 0, $2::int)
-               ON CONFLICT (user_id) DO UPDATE
-               SET balance = coin_wallets.balance + $2::int,
-                   total_earned = coin_wallets.total_earned + $2::int,
-                   updated_at = NOW()`,
-              [data.broadcasterUserId, broadcasterCoins]
-            );
-            await pool.query(
-              `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id)
-               VALUES ($1, 'gift_received', $2, $3, $4)`,
-              [data.broadcasterUserId, broadcasterCoins, `هدية تحدي ${data.giftName} من ${data.userName}`, data.streamId ? parseInt(data.streamId) : null]
-            );
-            const egpAmount = parseFloat((broadcasterCoins * 0.05).toFixed(2));
-            await pool.query(
-              `INSERT INTO revenue_transactions (user_id, type, amount_egp, description, channel_id)
-               SELECT $1, 'earning', $2, $3, id FROM channels WHERE user_id = $1 LIMIT 1`,
-              [data.broadcasterUserId, egpAmount, `هدايا تحدي - ${data.giftName}`]
-            );
-          }
+          const broadcasterCoins = Math.floor(bgCoins * 0.6);
+          await pool.query(
+            `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
+             VALUES ($1, $2::int, 0, $2::int)
+             ON CONFLICT (user_id) DO UPDATE
+             SET balance = coin_wallets.balance + $2::int,
+                 total_earned = coin_wallets.total_earned + $2::int,
+                 updated_at = NOW()`,
+            [broadcasterUserId, broadcasterCoins]
+          );
+          await pool.query(
+            `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id)
+             VALUES ($1, 'gift_received', $2, $3, $4)`,
+            [broadcasterUserId, broadcasterCoins, `هدية تحدي ${data.giftName} من ${data.userName}`, data.streamId ? parseInt(data.streamId) : null]
+          );
+          const egpAmount = parseFloat((broadcasterCoins * 0.05).toFixed(2));
+          await pool.query(
+            `INSERT INTO revenue_transactions (user_id, type, amount_egp, description, channel_id)
+             SELECT $1, 'earning', $2, $3, id FROM channels WHERE user_id = $1 LIMIT 1`,
+            [broadcasterUserId, egpAmount, `هدايا تحدي - ${data.giftName}`]
+          );
         }
       } catch (err) {
         console.error("Battle gift error:", err);
       }
-      // Emit score update + gift animation
-      io.to(`stream:${data.streamId}`).emit("battle-score-update", { totalA: battle.totalA, totalB: battle.totalB, teams: battle.teams });
+      const scoreData = { battleId, totalA: battle.totalA, totalB: battle.totalB };
+      io.to(`stream:${battle.streamIdA}`).emit("battle-score-update", scoreData);
+      io.to(`stream:${battle.streamIdB}`).emit("battle-score-update", scoreData);
       io.to(`stream:${data.streamId}`).emit("stream-gift", { id: Date.now() + Math.random(), ...data, timestamp: new Date().toISOString() });
     });
 
@@ -776,8 +850,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (room.broadcasterId === socket.id) {
           room.broadcasterId = null;
           io.to(`stream:${streamId}`).emit("broadcaster-disconnected");
-          const battle = (room as any).battle;
-          if (battle?.timerId) { clearInterval(battle.timerId); (room as any).battle = null; }
+          const bId = streamToBattle.get(streamId);
+          if (bId) {
+            const bt = battleLinks.get(bId);
+            if (bt) {
+              clearInterval(bt.timerId);
+              const winner = bt.totalA > bt.totalB ? "A" : bt.totalB > bt.totalA ? "B" : "draw";
+              const endData = { battleId: bId, winner, totalA: bt.totalA, totalB: bt.totalB, nameA: bt.broadcasterNameA, nameB: bt.broadcasterNameB, disconnected: true };
+              io.to(`stream:${bt.streamIdA}`).emit("battle-ended", endData);
+              io.to(`stream:${bt.streamIdB}`).emit("battle-ended", endData);
+              streamToBattle.delete(bt.streamIdA);
+              streamToBattle.delete(bt.streamIdB);
+              battleLinks.delete(bId);
+            }
+          }
         }
         if (room.cohostIds.includes(socket.id)) {
           room.cohostIds = room.cohostIds.filter(id => id !== socket.id);

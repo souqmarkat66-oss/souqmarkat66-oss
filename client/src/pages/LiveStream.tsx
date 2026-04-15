@@ -97,11 +97,14 @@ export default function LiveStream() {
   const [raisedHands,     setRaisedHands]     = useState<{socketId:string; userName:string; userId:string}[]>([]);
   const [showHandsList,   setShowHandsList]   = useState(false);
 
-  // Battle / Challenge game state
+  // Cross-stream Battle state
   interface BattleState {
     active: boolean;
-    mode: "1v1"|"2v2"|"3v3"|"4v4";
-    teams: { teamA: { socketId: string; name: string; score: number }[]; teamB: { socketId: string; name: string; score: number }[] };
+    battleId: string;
+    streamIdA: string;
+    streamIdB: string;
+    nameA: string;
+    nameB: string;
     timeLeft: number;
     totalA: number;
     totalB: number;
@@ -110,8 +113,11 @@ export default function LiveStream() {
   }
   const [battle, setBattle] = useState<BattleState|null>(null);
   const [showBattleSetup, setShowBattleSetup] = useState(false);
-  const [battleMode, setBattleMode] = useState<"1v1"|"2v2"|"3v3"|"4v4">("1v1");
-  const battleTimerRef = useRef<any>(null);
+  const [battleInvite, setBattleInvite] = useState<{inviteId:string; fromStreamId:string; fromName:string}|null>(null);
+  const [battleInviteSent, setBattleInviteSent] = useState(false);
+  const [liveStreamsForBattle, setLiveStreamsForBattle] = useState<any[]>([]);
+  const opponentVideoRef = useRef<HTMLVideoElement>(null);
+  const battlePeer = useRef<RTCPeerConnection|null>(null);
 
   // Kicked state
   const [kicked, setKicked] = useState(false);
@@ -566,21 +572,94 @@ export default function LiveStream() {
       setViewersList(list);
     });
 
-    socket.on("battle-started", (data: any) => {
-      setBattle({ active: true, mode: data.mode, teams: data.teams, timeLeft: data.duration || 300, totalA: 0, totalB: 0, winner: null, ended: false });
+    socket.on("battle-invite-received", (data: { inviteId: string; fromStreamId: string; fromName: string }) => {
+      setBattleInvite(data);
     });
 
-    socket.on("battle-score-update", (data: { totalA: number; totalB: number; teams: any }) => {
-      setBattle(prev => prev ? { ...prev, totalA: data.totalA, totalB: data.totalB, teams: data.teams } : prev);
+    socket.on("battle-invite-sent", () => {
+      setBattleInviteSent(true);
+    });
+
+    socket.on("battle-invite-expired", () => {
+      setBattleInviteSent(false);
+      toast({ title: "انتهت مهلة الدعوة", description: "لم يرد المذيع الآخر في الوقت المحدد", variant: "destructive" });
+    });
+
+    socket.on("battle-invite-declined", () => {
+      setBattleInviteSent(false);
+      toast({ title: "تم رفض التحدي", description: "المذيع الآخر رفض الجولة", variant: "destructive" });
+    });
+
+    socket.on("battle-started", (data: any) => {
+      setBattleInvite(null);
+      setBattleInviteSent(false);
+      setShowBattleSetup(false);
+      setBattle({
+        active: true, battleId: data.battleId,
+        streamIdA: data.streamIdA, streamIdB: data.streamIdB,
+        nameA: data.nameA, nameB: data.nameB,
+        timeLeft: data.duration || 300, totalA: 0, totalB: 0,
+        winner: null, ended: false,
+      });
+      const opponentStreamId = data.streamIdA === id ? data.streamIdB : data.streamIdA;
+      socket.emit("battle-watch-opponent", { myStreamId: id, opponentStreamId });
+    });
+
+    socket.on("battle-score-update", (data: { totalA: number; totalB: number }) => {
+      setBattle(prev => prev ? { ...prev, totalA: data.totalA, totalB: data.totalB } : prev);
     });
 
     socket.on("battle-timer", (data: { timeLeft: number }) => {
       setBattle(prev => prev ? { ...prev, timeLeft: data.timeLeft } : prev);
     });
 
-    socket.on("battle-ended", (data: { winner: string; totalA: number; totalB: number; teams: any }) => {
-      setBattle(prev => prev ? { ...prev, active: false, ended: true, winner: data.winner, totalA: data.totalA, totalB: data.totalB, teams: data.teams } : prev);
+    socket.on("battle-ended", (data: { winner: string; totalA: number; totalB: number; nameA: string; nameB: string }) => {
+      setBattle(prev => prev ? { ...prev, active: false, ended: true, winner: data.winner, totalA: data.totalA, totalB: data.totalB } : prev);
+      if (battlePeer.current) { battlePeer.current.close(); battlePeer.current = null; }
       setTimeout(() => setBattle(null), 10000);
+    });
+
+    socket.on("battle-watcher", async (watcherId: string) => {
+      if (!localStream.current) return;
+      const pc = new RTCPeerConnection({ iceServers: ICE });
+      peers.current.set(`battle_${watcherId}`, pc);
+      pc.onicecandidate = e => { if (e.candidate) socket.emit("battle-candidate", watcherId, e.candidate); };
+      localStream.current.getTracks().forEach(t => pc.addTrack(t, localStream.current!));
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit("battle-offer", watcherId, pc.localDescription);
+      } catch {}
+    });
+
+    socket.on("battle-offer", async (fromId: string, offer: RTCSessionDescriptionInit) => {
+      if (battlePeer.current) battlePeer.current.close();
+      const pc = new RTCPeerConnection({ iceServers: ICE });
+      battlePeer.current = pc;
+      pc.onicecandidate = e => { if (e.candidate) socket.emit("battle-candidate", fromId, e.candidate); };
+      pc.ontrack = e => {
+        if (opponentVideoRef.current && e.streams[0]) {
+          opponentVideoRef.current.srcObject = e.streams[0];
+          opponentVideoRef.current.play().catch(() => {});
+        }
+      };
+      await pc.setRemoteDescription(offer).catch(() => {});
+      const answer = await pc.createAnswer().catch(() => null);
+      if (!answer) return;
+      await pc.setLocalDescription(answer);
+      socket.emit("battle-answer", fromId, pc.localDescription);
+    });
+
+    socket.on("battle-answer", async (fromId: string, answer: RTCSessionDescriptionInit) => {
+      const pc = peers.current.get(`battle_${fromId}`) || battlePeer.current;
+      if (pc && pc.signalingState === "have-local-offer") {
+        await pc.setRemoteDescription(answer).catch(() => {});
+      }
+    });
+
+    socket.on("battle-candidate", async (fromId: string, candidate: RTCIceCandidateInit) => {
+      const pc = peers.current.get(`battle_${fromId}`) || battlePeer.current;
+      if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
     });
 
     return () => {
@@ -595,6 +674,7 @@ export default function LiveStream() {
       coHostStreams.current.clear();
       peers.current.forEach(pc => pc.close());
       peers.current.clear();
+      if (battlePeer.current) { battlePeer.current.close(); battlePeer.current = null; }
       if (hlsInstance.current) { hlsInstance.current.destroy(); hlsInstance.current = null; }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -822,12 +902,39 @@ export default function LiveStream() {
     setShowViewerList(true);
   };
 
-  /* ─── Battle / Challenge helpers ──────────────────── */
+  /* ─── Cross-Stream Battle helpers ──────────────────── */
   const MAX_COHOSTS = 8;
 
-  const startBattle = () => {
-    socketRef.current?.emit("battle-start", { streamId: id, mode: battleMode });
-    setShowBattleSetup(false);
+  const fetchLiveStreamsForBattle = async () => {
+    try {
+      const res = await fetch("/api/streams?status=live", { credentials: "include" });
+      const streams = await res.json();
+      setLiveStreamsForBattle((streams || []).filter((s: any) => String(s.id) !== String(id)));
+    } catch { setLiveStreamsForBattle([]); }
+  };
+
+  const sendBattleInvite = (targetStreamId: string) => {
+    if (!user) return;
+    const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "المذيع";
+    socketRef.current?.emit("battle-invite", {
+      fromStreamId: id, toStreamId: String(targetStreamId),
+      fromName: userName, fromUserId: (user as any).id,
+    });
+  };
+
+  const acceptBattleInvite = () => {
+    if (!battleInvite || !user) return;
+    const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "المذيع";
+    socketRef.current?.emit("battle-accept", {
+      inviteId: battleInvite.inviteId, myName: userName, myUserId: (user as any).id,
+    });
+    setBattleInvite(null);
+  };
+
+  const declineBattleInvite = () => {
+    if (!battleInvite) return;
+    socketRef.current?.emit("battle-decline", { inviteId: battleInvite.inviteId });
+    setBattleInvite(null);
   };
 
   const endBattleEarly = () => {
@@ -840,7 +947,7 @@ export default function LiveStream() {
     { label: "x5", value: 5, color: "bg-yellow-500", emoji: "💥" },
   ];
 
-  const sendBattleGift = (gift: typeof GIFTS[0], multiplier: number, targetTeam: "A"|"B") => {
+  const sendBattleGift = (gift: typeof GIFTS[0], multiplier: number) => {
     if (!user) return;
     if (myCoins < gift.coins) {
       toast({ title: "عملاتك غير كافية", description: `تحتاج ${gift.coins} عملة — رصيدك ${myCoins}`, variant: "destructive" });
@@ -850,8 +957,7 @@ export default function LiveStream() {
     socketRef.current?.emit("battle-gift", {
       streamId: id, giftType: gift.type, giftEmoji: gift.emoji,
       giftName: gift.name, giftCoins: gift.coins, userName, userId: (user as any).id,
-      broadcasterUserId: stream?.userId,
-      multiplier, targetTeam,
+      multiplier,
     });
     setMyCoins(prev => prev - gift.coins);
     setTimeout(() => refetchWallet(), 1500);
@@ -1988,17 +2094,53 @@ export default function LiveStream() {
           </div>
         )}
 
-        {/* ── BATTLE OVERLAY (during active battle) ── */}
-        {battle && (
-          <div className="absolute top-14 inset-x-2 z-30 pointer-events-auto">
-            <div className="bg-black/80 backdrop-blur-xl rounded-2xl border border-yellow-500/40 p-3 shadow-2xl">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">⚔️</span>
-                  <span className="text-yellow-400 font-bold text-sm">{battle.ended ? "انتهت الجولة!" : `جولة تحدي ${battle.mode}`}</span>
+        {/* ── BATTLE INVITE POPUP (broadcaster receives invite) ── */}
+        {battleInvite && isBroadcast && (
+          <div className="absolute top-20 inset-x-4 z-40 pointer-events-auto">
+            <div className="bg-black/90 backdrop-blur-xl rounded-2xl border-2 border-yellow-500/60 p-4 shadow-2xl animate-pulse">
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-3xl">⚔️</span>
+                <div>
+                  <p className="text-yellow-400 font-bold text-base">دعوة تحدي!</p>
+                  <p className="text-white/70 text-sm">{battleInvite.fromName} يتحداك في جولة</p>
                 </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={acceptBattleInvite} className="flex-1 py-2.5 rounded-xl bg-green-600 text-white font-bold text-sm" data-testid="btn-accept-battle">
+                  ✅ قبول التحدي
+                </button>
+                <button onClick={declineBattleInvite} className="flex-1 py-2.5 rounded-xl bg-red-600/50 text-white font-bold text-sm" data-testid="btn-decline-battle">
+                  ❌ رفض
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── CROSS-STREAM BATTLE OVERLAY ── */}
+        {battle && (
+          <div className="absolute inset-0 z-30 pointer-events-none flex flex-col">
+            {/* Opponent video (top half during battle) */}
+            <div className="relative w-full" style={{ height: "40%" }}>
+              <video ref={opponentVideoRef} autoPlay playsInline className="w-full h-full object-cover bg-black" />
+              <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent p-2">
+                <p className="text-white/80 text-xs font-bold">
+                  {battle.streamIdA === id ? battle.nameB : battle.nameA}
+                </p>
+              </div>
+            </div>
+
+            {/* Score bar between the two halves */}
+            <div className="pointer-events-auto bg-black/90 backdrop-blur-xl border-y border-yellow-500/40 px-3 py-2 flex items-center justify-between gap-2">
+              <div className={`flex-1 rounded-lg p-1.5 text-center border ${battle.ended && battle.winner === "A" ? "bg-red-600/40 border-yellow-400" : "bg-red-600/20 border-red-500/30"}`}>
+                <p className="text-red-400 text-[10px] font-bold truncate">🔴 {battle.nameA}</p>
+                <p className="text-white font-bold text-lg">{battle.totalA.toLocaleString()}</p>
+              </div>
+
+              <div className="flex flex-col items-center gap-0.5 min-w-[60px]">
+                <span className="text-lg">⚔️</span>
                 {battle.active && (
-                  <div className="flex items-center gap-1.5 bg-red-600/30 border border-red-500/40 rounded-full px-2.5 py-1">
+                  <div className="flex items-center gap-1 bg-red-600/30 border border-red-500/40 rounded-full px-2 py-0.5">
                     <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
                     <span className="text-red-400 font-bold text-xs font-mono">
                       {Math.floor(battle.timeLeft / 60)}:{(battle.timeLeft % 60).toString().padStart(2, "0")}
@@ -2006,69 +2148,49 @@ export default function LiveStream() {
                   </div>
                 )}
                 {battle.ended && battle.winner && (
-                  <span className="text-yellow-400 text-xs font-bold bg-yellow-500/20 rounded-full px-2 py-1">
-                    🏆 الفائز: {battle.winner === "A" ? "فريق 🔴" : battle.winner === "B" ? "فريق 🔵" : "تعادل!"}
+                  <span className="text-yellow-400 text-[10px] font-bold">
+                    🏆 {battle.winner === "A" ? battle.nameA : battle.winner === "B" ? battle.nameB : "تعادل!"}
                   </span>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className={`rounded-xl p-2 border ${battle.ended && battle.winner === "A" ? "bg-red-600/30 border-yellow-400" : "bg-red-600/20 border-red-500/30"}`}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-red-400 font-bold text-xs">🔴 فريق A</span>
-                    <span className="text-white font-bold text-lg">{battle.totalA.toLocaleString()}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {battle.teams.teamA.map((p, i) => (
-                      <span key={i} className="text-[9px] text-white/70 bg-white/10 rounded-full px-1.5 py-0.5">{p.name}: {p.score}</span>
-                    ))}
-                  </div>
-                </div>
-                <div className={`rounded-xl p-2 border ${battle.ended && battle.winner === "B" ? "bg-blue-600/30 border-yellow-400" : "bg-blue-600/20 border-blue-500/30"}`}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-blue-400 font-bold text-xs">🔵 فريق B</span>
-                    <span className="text-white font-bold text-lg">{battle.totalB.toLocaleString()}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {battle.teams.teamB.map((p, i) => (
-                      <span key={i} className="text-[9px] text-white/70 bg-white/10 rounded-full px-1.5 py-0.5">{p.name}: {p.score}</span>
-                    ))}
-                  </div>
-                </div>
+
+              <div className={`flex-1 rounded-lg p-1.5 text-center border ${battle.ended && battle.winner === "B" ? "bg-blue-600/40 border-yellow-400" : "bg-blue-600/20 border-blue-500/30"}`}>
+                <p className="text-blue-400 text-[10px] font-bold truncate">🔵 {battle.nameB}</p>
+                <p className="text-white font-bold text-lg">{battle.totalB.toLocaleString()}</p>
               </div>
-              {isBroadcast && battle.active && (
-                <button onClick={endBattleEarly} className="mt-2 w-full py-1.5 rounded-xl bg-red-600/50 border border-red-500/30 text-red-300 text-xs font-bold" data-testid="btn-end-battle-early">
+            </div>
+
+            {/* Battle controls for broadcaster */}
+            {isBroadcast && battle.active && (
+              <div className="pointer-events-auto px-3 py-1">
+                <button onClick={endBattleEarly} className="w-full py-1.5 rounded-xl bg-red-600/50 border border-red-500/30 text-red-300 text-xs font-bold" data-testid="btn-end-battle-early">
                   إنهاء الجولة مبكراً
                 </button>
-              )}
-              <p className="text-white/30 text-[9px] text-center mt-1">المضاعفات للسكور فقط — المذيع يحصل على القيمة الحقيقية</p>
-            </div>
-            {/* Battle gift sending (viewers only during active battle) */}
+              </div>
+            )}
+
+            {/* Battle gift panel (viewers only) */}
             {!isBroadcast && battle.active && user && (
-              <div className="mt-2 bg-black/80 backdrop-blur-xl rounded-2xl border border-white/10 p-3">
-                <p className="text-white/60 text-xs font-bold mb-2">أرسل هدية مضاعفة ⚡</p>
-                <div className="flex gap-1.5 mb-2 overflow-x-auto">
-                  {GIFTS.slice(0, 6).map(gift => (
-                    <div key={gift.type} className="flex flex-col items-center gap-1 min-w-[4rem]">
-                      <span className="text-2xl">{gift.emoji}</span>
-                      <span className="text-[9px] text-yellow-400 font-bold">{gift.coins}🪙</span>
-                      <div className="flex gap-1">
-                        {BATTLE_MULTIPLIERS.map(m => (
-                          <button key={m.value} onClick={() => sendBattleGift(gift, m.value, "A")}
-                            className={`${m.color} text-white text-[8px] font-bold px-1 py-0.5 rounded`}>
-                            🔴{m.label}
-                          </button>
-                        ))}
+              <div className="pointer-events-auto mt-auto mb-24 mx-2">
+                <div className="bg-black/80 backdrop-blur-xl rounded-2xl border border-white/10 p-2.5">
+                  <p className="text-white/60 text-[10px] font-bold mb-1.5">🎁 أرسل هدية لمذيعك — المضاعفات للسكور فقط</p>
+                  <div className="flex gap-1.5 overflow-x-auto pb-1">
+                    {GIFTS.slice(0, 6).map(gift => (
+                      <div key={gift.type} className="flex flex-col items-center gap-0.5 min-w-[3.5rem]">
+                        <span className="text-xl">{gift.emoji}</span>
+                        <span className="text-[8px] text-yellow-400 font-bold">{gift.coins}🪙</span>
+                        <div className="flex gap-0.5">
+                          {BATTLE_MULTIPLIERS.map(m => (
+                            <button key={m.value} onClick={() => sendBattleGift(gift, m.value)}
+                              className={`${m.color} text-white text-[7px] font-bold px-1 py-0.5 rounded`}
+                              data-testid={`battle-gift-${gift.type}-${m.value}`}>
+                              {m.emoji}{m.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                      <div className="flex gap-1">
-                        {BATTLE_MULTIPLIERS.map(m => (
-                          <button key={m.value} onClick={() => sendBattleGift(gift, m.value, "B")}
-                            className={`${m.color} text-white text-[8px] font-bold px-1 py-0.5 rounded`}>
-                            🔵{m.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -2156,7 +2278,7 @@ export default function LiveStream() {
               </div>
               <span className="text-white text-[9px] font-bold drop-shadow">الجمهور</span>
             </button>
-            <button onClick={() => setShowBattleSetup(true)} data-testid="btn-battle-setup" className="flex flex-col items-center gap-0.5">
+            <button onClick={() => { fetchLiveStreamsForBattle(); setShowBattleSetup(true); }} data-testid="btn-battle-setup" className="flex flex-col items-center gap-0.5">
               <div className="w-11 h-11 rounded-full bg-yellow-600/90 backdrop-blur flex items-center justify-center shadow-lg border-2 border-yellow-400/50">
                 <span className="text-lg">⚔️</span>
               </div>
@@ -2501,7 +2623,7 @@ export default function LiveStream() {
         </div>
       )}
 
-      {/* BATTLE SETUP MODAL (broadcaster) */}
+      {/* BATTLE SETUP MODAL (broadcaster — invite another live stream) */}
       {showBattleSetup && isBroadcast && (
         <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowBattleSetup(false)}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
@@ -2510,47 +2632,69 @@ export default function LiveStream() {
               <div className="flex items-center gap-2">
                 <span className="text-2xl">⚔️</span>
                 <div>
-                  <h3 className="text-white font-bold text-lg">جولة التحدي</h3>
-                  <p className="text-white/50 text-xs">اختر نوع المعركة وابدأ!</p>
+                  <h3 className="text-white font-bold text-lg">تحدي مذيع آخر</h3>
+                  <p className="text-white/50 text-xs">اختر مذيعاً مباشراً لتحديه!</p>
                 </div>
               </div>
               <button onClick={() => setShowBattleSetup(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
                 <X className="w-4 h-4 text-white" />
               </button>
             </div>
-            <p className="text-white/60 text-xs mb-3">نوع المعركة</p>
-            <div className="grid grid-cols-4 gap-2 mb-5">
-              {(["1v1","2v2","3v3","4v4"] as const).map(mode => (
-                <button key={mode}
-                  onClick={() => setBattleMode(mode)}
-                  className={`rounded-xl py-3 text-center font-bold text-sm transition-all border-2 ${
-                    battleMode === mode
-                      ? "bg-yellow-500/20 border-yellow-400 text-yellow-400"
-                      : "bg-white/5 border-white/10 text-white/60"
-                  }`}
-                  data-testid={`btn-battle-mode-${mode}`}
-                >
-                  {mode}
-                </button>
-              ))}
-            </div>
-            <div className="bg-white/5 border border-white/10 rounded-xl p-3 mb-4 space-y-1.5">
-              <div className="flex items-center gap-2 text-white/60 text-xs">
-                <span>⏱️</span><span>مدة الجولة: <span className="text-white font-bold">5 دقائق</span></span>
+
+            {battleInviteSent ? (
+              <div className="text-center py-8">
+                <Loader2 className="w-8 h-8 text-yellow-400 animate-spin mx-auto mb-3" />
+                <p className="text-white font-bold">في انتظار رد المذيع...</p>
+                <p className="text-white/50 text-xs mt-1">ينتهي الطلب خلال 30 ثانية</p>
               </div>
-              <div className="flex items-center gap-2 text-white/60 text-xs">
-                <span>⚡</span><span>مضاعفات: <span className="text-blue-400 font-bold">x2</span> <span className="text-purple-400 font-bold">x3</span> <span className="text-yellow-400 font-bold">x5</span> — للسكور فقط</span>
-              </div>
-              <div className="flex items-center gap-2 text-white/60 text-xs">
-                <span>🪙</span><span>المذيع يحصل على <span className="text-green-400 font-bold">القيمة الحقيقية</span> فقط</span>
-              </div>
-              <div className="flex items-center gap-2 text-white/60 text-xs">
-                <span>👥</span><span>البث الجماعي يدعم حتى <span className="text-purple-400 font-bold">8 أشخاص</span></span>
-              </div>
-            </div>
-            <button onClick={startBattle} className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-yellow-500 to-orange-500 text-black font-bold text-base shadow-xl" data-testid="btn-start-battle">
-              ⚔️ ابدأ الجولة
-            </button>
+            ) : (
+              <>
+                <div className="bg-white/5 border border-white/10 rounded-xl p-3 mb-4 space-y-1.5">
+                  <div className="flex items-center gap-2 text-white/60 text-xs">
+                    <span>⏱️</span><span>مدة الجولة: <span className="text-white font-bold">5 دقائق</span></span>
+                  </div>
+                  <div className="flex items-center gap-2 text-white/60 text-xs">
+                    <span>📺</span><span>شاشة مقسومة: <span className="text-white font-bold">بثك + بث الخصم</span></span>
+                  </div>
+                  <div className="flex items-center gap-2 text-white/60 text-xs">
+                    <span>🎁</span><span>جمهور كل مذيع يرسل هدايا لمذيعه</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-white/60 text-xs">
+                    <span>⚡</span><span>مضاعفات: <span className="text-blue-400 font-bold">x2</span> <span className="text-purple-400 font-bold">x3</span> <span className="text-yellow-400 font-bold">x5</span> — للسكور فقط</span>
+                  </div>
+                </div>
+
+                <p className="text-white/60 text-xs font-bold mb-2">البثوث المباشرة الآن:</p>
+                {liveStreamsForBattle.length === 0 ? (
+                  <div className="text-center py-6">
+                    <p className="text-white/40 text-sm">لا يوجد بثوث مباشرة أخرى حالياً</p>
+                    <button onClick={fetchLiveStreamsForBattle} className="mt-2 text-yellow-400 text-xs underline" data-testid="btn-refresh-streams">
+                      تحديث القائمة
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
+                    {liveStreamsForBattle.map((s: any) => (
+                      <button
+                        key={s.id}
+                        onClick={() => sendBattleInvite(String(s.id))}
+                        className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-yellow-500/10 hover:border-yellow-500/30 transition-all"
+                        data-testid={`btn-invite-stream-${s.id}`}
+                      >
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-red-500 to-pink-600 flex items-center justify-center">
+                          <Radio className="w-5 h-5 text-white" />
+                        </div>
+                        <div className="flex-1 text-start">
+                          <p className="text-white font-bold text-sm truncate">{s.title || `بث #${s.id}`}</p>
+                          <p className="text-white/50 text-[10px]">{s.viewerCount || 0} مشاهد</p>
+                        </div>
+                        <span className="text-yellow-400 text-xs font-bold">⚔️ تحدي</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}
