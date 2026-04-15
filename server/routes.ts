@@ -251,7 +251,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('app_play_store', 'https://play.google.com/store/apps/details?id=com.apmo.souqmarket') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('app_app_store', 'https://apps.apple.com/eg/app/as-souqmarket/id6740153334') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('app_huawei', 'https://app.as-souqmarkat.com/?from-splash=false') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_vodafone_cash', '01098553911') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_vodafone_cash', '01098559311') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_instapay', '01285558567') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_whatsapp', '') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_ads', '1') ON CONFLICT (key) DO NOTHING`);

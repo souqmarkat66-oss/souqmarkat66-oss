@@ -19,7 +19,7 @@ import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 
 const PAYMENT_METHODS = [
-  { value: "vodafone", label: "فودافون كاش", number: "01098553911", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
+  { value: "vodafone", label: "فودافون كاش", number: "01098559311", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
   { value: "etisalat", label: "اتصالات e& كاش", number: "01126665741", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
   { value: "instapay", label: "InstaPay", number: "01285558567", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
   { value: "visa_bank", label: "فيزا / بنك (عبر سوق ماركات)", number: "", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
@@ -411,7 +411,7 @@ function AdvertiserTab() {
           <div className="px-5 pb-4">
             <p className="text-xs text-muted-foreground mb-3">تواصل معنا بعد الدفع لتفعيل رصيدك فوراً</p>
             <div className="flex flex-wrap gap-2 text-xs">
-              <span className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-3 py-1.5 rounded-full font-bold">📱 Vodafone Cash: 01098553911</span>
+              <span className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-3 py-1.5 rounded-full font-bold">📱 Vodafone Cash: 01098559311</span>
               <span className="bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 px-3 py-1.5 rounded-full font-bold">📱 Etisalat: 01126665741</span>
               <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-3 py-1.5 rounded-full font-bold">💳 InstaPay: 01285558567</span>
 

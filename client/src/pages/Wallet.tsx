@@ -21,7 +21,7 @@ const PAYMENT_METHODS = [
     value: "vodafone",
     label: "فودافون كاش",
     emoji: "📱",
-    number: "01098553911",
+    number: "01098559311",
     color: "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900",
     textColor: "text-red-700 dark:text-red-400",
     instructions: "حوّل المبلغ على رقم فودافون كاش",

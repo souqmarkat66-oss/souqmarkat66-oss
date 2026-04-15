@@ -173,7 +173,7 @@ function AppFooter() {
   const playStoreUrl  = g("app_play_store", "https://play.google.com/store/apps/details?id=com.apmo.souqmarket");
   const appStoreUrl   = g("app_app_store",  "https://apps.apple.com/eg/app/as-souqmarket/id6740153334");
   const huaweiUrl     = g("app_huawei",     "https://app.as-souqmarkat.com/?from-splash=false");
-  const vodafoneCash  = g("contact_vodafone_cash", "01098553911");
+  const vodafoneCash  = g("contact_vodafone_cash", "01098559311");
   const instaPay      = g("contact_instapay",      "01285558567");
   const platformName  = g("platform_name",  "شبكة سوق للإعلانات");
 

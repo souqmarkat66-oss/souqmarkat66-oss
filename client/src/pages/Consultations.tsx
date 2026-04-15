@@ -54,7 +54,7 @@ const PACKAGES = [
 ];
 
 const PAYMENT_METHODS = [
-  { value: "vodafone",  label: "📱 فودافون كاش",    number: "01098553911" },
+  { value: "vodafone",  label: "📱 فودافون كاش",    number: "01098559311" },
   { value: "etisalat",  label: "📲 اتصالات e& كاش", number: "01126665741" },
   { value: "instapay",  label: "💳 InstaPay",        number: "01285558567" },
 ];

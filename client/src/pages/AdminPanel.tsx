@@ -2133,7 +2133,7 @@ function SettingsSection({ logAction }: { logAction: any }) {
             </div>
             <div>
               <label className="text-xs font-medium block mb-1">رقم فودافون كاش</label>
-              <Input dir="ltr" value={get("contact_vodafone_cash", "01098553911")} onChange={e => set("contact_vodafone_cash", e.target.value)} placeholder="01xxxxxxxxx" data-testid="setting-contact-vodafone" />
+              <Input dir="ltr" value={get("contact_vodafone_cash", "01098559311")} onChange={e => set("contact_vodafone_cash", e.target.value)} placeholder="01xxxxxxxxx" data-testid="setting-contact-vodafone" />
             </div>
             <div>
               <label className="text-xs font-medium block mb-1">رقم إنستاباي</label>
