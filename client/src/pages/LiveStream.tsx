@@ -1480,6 +1480,10 @@ export default function LiveStream() {
         {/* CO-HOST REQUESTS PANEL (broadcaster) */}
         {isBroadcast && coHostRequests.length > 0 && (
           <div className="absolute top-32 inset-x-4 z-20 flex flex-col gap-2">
+            <div className="rounded-2xl bg-black/70 backdrop-blur px-3 py-2 border border-white/10">
+              <p className="text-white text-xs font-bold">طلبات الضيوف</p>
+              <p className="text-white/50 text-[10px] mt-0.5">هذه الطلبات تظهر للمذيع فقط، والجمهور يقدر يرسل طلب من زر الانضمام.</p>
+            </div>
             {coHostRequests.map(req => (
               <div key={req.socketId} className="flex items-center gap-2 bg-black/80 backdrop-blur rounded-2xl px-3 py-2.5 border border-purple-500/40">
                 <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center flex-shrink-0">
