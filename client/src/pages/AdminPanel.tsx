@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { io, type Socket } from "socket.io-client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
@@ -95,6 +96,15 @@ function StatCard({ icon: Icon, label, value, color, sub }: any) {
 }
 
 // ── Main Component ─────────────────────────────────────────────
+type LiveEvent = {
+  id: string;
+  type: "stream" | "user";
+  title: string;
+  sub: string;
+  link?: string;
+  at: string;
+};
+
 export default function AdminPanel() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -102,6 +112,9 @@ export default function AdminPanel() {
   const [pinUnlocked, setPinUnlocked] = useState(false);
   const [section, setSection] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
+  const [newEventCount, setNewEventCount] = useState(0);
+  const socketRef = useRef<Socket | null>(null);
 
   const isAdmin = user?.id === ADMIN_ID || user?.email === ADMIN_EMAIL;
 
@@ -113,6 +126,46 @@ export default function AdminPanel() {
       body: JSON.stringify({ action, target, details }),
     }).catch(() => {});
   }, []);
+
+  // ── Socket.io — real-time admin events ──
+  useEffect(() => {
+    if (!pinUnlocked) return;
+    const socket = io({ path: "/socket.io", transports: ["websocket", "polling"] });
+    socketRef.current = socket;
+    socket.emit("admin-join");
+
+    const addEvent = (ev: Omit<LiveEvent, "id">) => {
+      const eventWithId: LiveEvent = { ...ev, id: Math.random().toString(36).slice(2) };
+      setLiveEvents(prev => [eventWithId, ...prev].slice(0, 50));
+      setNewEventCount(c => c + 1);
+      toast({
+        title: ev.title,
+        description: ev.sub,
+        duration: 5000,
+      });
+    };
+
+    socket.on("admin:user-registered", (data: any) => {
+      addEvent({
+        type: "user",
+        title: `👤 تسجيل جديد`,
+        sub: data.name || data.email || "مستخدم",
+        at: data.at,
+      });
+    });
+
+    socket.on("admin:stream-started", (data: any) => {
+      addEvent({
+        type: "stream",
+        title: `📡 بث مباشر جديد`,
+        sub: `${data.broadcasterName} — ${data.title}`,
+        link: data.link,
+        at: data.at,
+      });
+    });
+
+    return () => { socket.disconnect(); };
+  }, [pinUnlocked]);
 
   // Must be called before any conditional returns (Rules of Hooks)
   const { data: pendingCounts = { payments: 0, walletcharges: 0, ads: 0, boostorders: 0, renewalorders: 0 } } = useQuery<any>({
@@ -204,7 +257,21 @@ export default function AdminPanel() {
             <h1 className="font-bold text-lg">{NAV.find(n => n.key === section)?.label}</h1>
             <p className="text-xs text-muted-foreground">شبكة سوق للإعلانات — لوحة الإدارة</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {/* Live events notification bell */}
+            <button
+              onClick={() => { setSection("dashboard"); setNewEventCount(0); }}
+              className="relative p-2 rounded-xl bg-muted hover:bg-muted/80 transition-colors"
+              title="النشاط المباشر"
+              data-testid="btn-admin-live-events"
+            >
+              <Activity className="w-4 h-4 text-muted-foreground" />
+              {newEventCount > 0 && (
+                <span className="absolute -top-1 -end-1 min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center px-1 animate-bounce">
+                  {newEventCount > 9 ? "9+" : newEventCount}
+                </span>
+              )}
+            </button>
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             <span className="text-xs text-muted-foreground">متصل</span>
           </div>
@@ -212,7 +279,7 @@ export default function AdminPanel() {
 
         {/* Sections */}
         <div className="p-6">
-          {section === "dashboard"  && <DashboardSection />}
+          {section === "dashboard"  && <DashboardSection liveEvents={liveEvents} onClearEvents={() => setNewEventCount(0)} />}
           {section === "users"      && <UsersSection logAction={logAction} />}
           {section === "ads"        && <AdsSection logAction={logAction} />}
           {section === "reels"      && <ReelsSection logAction={logAction} />}
@@ -246,7 +313,7 @@ export default function AdminPanel() {
 // ═══════════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════════
-function DashboardSection() {
+function DashboardSection({ liveEvents = [], onClearEvents }: { liveEvents?: LiveEvent[]; onClearEvents?: () => void }) {
   const { toast } = useToast();
   const { data: stats } = useQuery<any>({
     queryKey: ["/api/admin/stats"],
@@ -304,6 +371,66 @@ function DashboardSection() {
             ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري النشر...</>
             : <><Zap className="w-4 h-4" /> نشر الآن</>}
         </Button>
+      </div>
+
+      {/* ── LIVE ACTIVITY FEED ─────────────────────────────────── */}
+      <div className="rounded-2xl border border-border bg-card p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            <span className="font-bold text-sm">النشاط المباشر</span>
+          </div>
+          {liveEvents.length > 0 && (
+            <button
+              onClick={onClearEvents}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              data-testid="btn-clear-live-events"
+            >
+              مسح العداد
+            </button>
+          )}
+        </div>
+        {liveEvents.length === 0 ? (
+          <div className="flex items-center gap-2 py-3 text-muted-foreground text-sm">
+            <Activity className="w-4 h-4 opacity-40" />
+            <span>في انتظار الأحداث... ستظهر هنا تسجيلات المستخدمين والبثوث الجديدة</span>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {liveEvents.map(ev => (
+              <div
+                key={ev.id}
+                className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm ${
+                  ev.type === "stream"
+                    ? "bg-red-500/10 border border-red-500/20"
+                    : "bg-purple-500/10 border border-purple-500/20"
+                }`}
+              >
+                <span className="text-base flex-shrink-0">
+                  {ev.type === "stream" ? "📡" : "👤"}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-xs">{ev.title}</p>
+                  <p className="text-muted-foreground text-[11px] truncate">{ev.sub}</p>
+                </div>
+                {ev.link && (
+                  <a
+                    href={ev.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] text-primary hover:underline flex-shrink-0"
+                    data-testid={`link-live-event-${ev.id}`}
+                  >
+                    مشاهدة
+                  </a>
+                )}
+                <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                  {new Date(ev.at).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Primary stats */}

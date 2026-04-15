@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
+import { emitAdminEvent } from "./adminEvents";
 
 // ── Extend session ────────────────────────────────────────────────
 declare module "express-session" {
@@ -171,6 +172,13 @@ export function registerCustomAuthRoutes(app: Express) {
 
       req.session.save((err) => {
         if (err) return res.status(500).json({ message: "خطأ في حفظ الجلسة" });
+        emitAdminEvent("admin:user-registered", {
+          userId: newId,
+          name: [firstName, lastName].filter(Boolean).join(" ") || "مستخدم",
+          email: email || null,
+          phone: phone || null,
+          at: new Date().toISOString(),
+        });
         res.status(201).json({ success: true, user: { id: newId, email, firstName, lastName } });
       });
     } catch (e: any) {

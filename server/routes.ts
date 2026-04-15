@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { Server as SocketServer } from "socket.io";
 import { storage } from "./storage";
+import { setAdminIo, emitAdminEvent } from "./adminEvents";
 import { z } from "zod";
 import { setupAuth } from "./replit_integrations/auth";
 import { isAuthenticated, registerCustomAuthRoutes } from "./customAuth";
@@ -309,6 +310,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     cors: { origin: "*", methods: ["GET", "POST"] },
   });
 
+  setAdminIo(io);
+
   const streamRooms: Map<string, {
     broadcasterId: string | null;
     cohostIds: string[];
@@ -350,6 +353,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   }
 
   io.on("connection", (socket) => {
+    socket.on("admin-join", () => {
+      socket.join("admin_room");
+    });
+
     socket.on("join-stream", (streamId: string) => {
       socket.join(`stream:${streamId}`);
       const room = getOrCreateRoom(streamId);
@@ -2148,6 +2155,18 @@ Sitemap: ${BASE}/sitemap-pages.xml
         console.error('[AI Moderation] Error:', e);
       }
     })();
+
+    // ── Notify admin panel in real-time ──
+    emitAdminEvent("admin:stream-started", {
+      streamId: stream.id,
+      title: stream.title || "بث بدون عنوان",
+      broadcasterName: req.user.claims?.first_name
+        ? `${req.user.claims.first_name} ${req.user.claims.last_name || ""}`.trim()
+        : "مستخدم",
+      link: `/streams/${stream.id}`,
+      at: new Date().toISOString(),
+    });
+
     res.json(updated);
   });
 
