@@ -83,7 +83,7 @@ export default function LiveStream() {
   // Purchase flow states
   const [purchaseStep,    setPurchaseStep]    = useState<"packages"|"pay"|"done">("packages");
   const [selectedPkg,     setSelectedPkg]     = useState<any>(null);
-  const [payMethod,       setPayMethod]       = useState<"vodafone"|"instapay"|"bank">("vodafone");
+  const [payMethod,       setPayMethod]       = useState<"vodafone"|"etisalat"|"instapay"|"bank"|"souq"|"installment">("vodafone");
   const [payRef,          setPayRef]          = useState("");
   const [payLoading,      setPayLoading]      = useState(false);
   interface FlyingGift { id: number; emoji: string; x: number; }
@@ -96,6 +96,29 @@ export default function LiveStream() {
   // Hand raise state (broadcaster — list of raised hands)
   const [raisedHands,     setRaisedHands]     = useState<{socketId:string; userName:string; userId:string}[]>([]);
   const [showHandsList,   setShowHandsList]   = useState(false);
+
+  // Battle / Challenge game state
+  interface BattleState {
+    active: boolean;
+    mode: "1v1"|"2v2"|"3v3"|"4v4";
+    teams: { teamA: { socketId: string; name: string; score: number }[]; teamB: { socketId: string; name: string; score: number }[] };
+    timeLeft: number;
+    totalA: number;
+    totalB: number;
+    winner: string|null;
+    ended: boolean;
+  }
+  const [battle, setBattle] = useState<BattleState|null>(null);
+  const [showBattleSetup, setShowBattleSetup] = useState(false);
+  const [battleMode, setBattleMode] = useState<"1v1"|"2v2"|"3v3"|"4v4">("1v1");
+  const battleTimerRef = useRef<any>(null);
+
+  // Kicked state
+  const [kicked, setKicked] = useState(false);
+
+  // Viewer list (broadcaster)
+  const [showViewerList, setShowViewerList] = useState(false);
+  const [viewersList, setViewersList] = useState<{socketId:string; userName:string; userId:string}[]>([]);
 
   // Content moderation (viewer report + broadcaster warning)
   const [showReportDialog, setShowReportDialog] = useState(false);
@@ -529,8 +552,35 @@ export default function LiveStream() {
 
     socket.on("stream-force-ended", (data: { reason: string }) => {
       setForceEndReason(data.reason);
-      // Stop local stream tracks if broadcaster
       localStream.current?.getTracks().forEach(t => t.stop());
+    });
+
+    socket.on("kicked-from-stream", () => {
+      setKicked(true);
+      localStream.current?.getTracks().forEach(t => t.stop());
+      coHostStream.current?.getTracks().forEach(t => t.stop());
+      if (coHostPeer.current) { coHostPeer.current.close(); coHostPeer.current = null; }
+    });
+
+    socket.on("viewer-list", (list: {socketId:string; userName:string; userId:string}[]) => {
+      setViewersList(list);
+    });
+
+    socket.on("battle-started", (data: any) => {
+      setBattle({ active: true, mode: data.mode, teams: data.teams, timeLeft: data.duration || 300, totalA: 0, totalB: 0, winner: null, ended: false });
+    });
+
+    socket.on("battle-score-update", (data: { totalA: number; totalB: number; teams: any }) => {
+      setBattle(prev => prev ? { ...prev, totalA: data.totalA, totalB: data.totalB, teams: data.teams } : prev);
+    });
+
+    socket.on("battle-timer", (data: { timeLeft: number }) => {
+      setBattle(prev => prev ? { ...prev, timeLeft: data.timeLeft } : prev);
+    });
+
+    socket.on("battle-ended", (data: { winner: string; totalA: number; totalB: number; teams: any }) => {
+      setBattle(prev => prev ? { ...prev, active: false, ended: true, winner: data.winner, totalA: data.totalA, totalB: data.totalB, teams: data.teams } : prev);
+      setTimeout(() => setBattle(null), 10000);
     });
 
     return () => {
@@ -760,6 +810,53 @@ export default function LiveStream() {
     setRaisedHands(prev => prev.filter(h => h.socketId !== socketId));
   };
 
+  /* ─── Kick viewer helper (broadcaster) ──────────────── */
+  const kickViewer = (socketId: string) => {
+    socketRef.current?.emit("kick-viewer", { streamId: id, viewerSocketId: socketId });
+    setViewersList(prev => prev.filter(v => v.socketId !== socketId));
+    toast({ title: "تم طرد المشاهد" });
+  };
+
+  const requestViewerList = () => {
+    socketRef.current?.emit("get-viewer-list", { streamId: id });
+    setShowViewerList(true);
+  };
+
+  /* ─── Battle / Challenge helpers ──────────────────── */
+  const MAX_COHOSTS = 8;
+
+  const startBattle = () => {
+    socketRef.current?.emit("battle-start", { streamId: id, mode: battleMode });
+    setShowBattleSetup(false);
+  };
+
+  const endBattleEarly = () => {
+    socketRef.current?.emit("battle-end-early", { streamId: id });
+  };
+
+  const BATTLE_MULTIPLIERS = [
+    { label: "x2", value: 2, color: "bg-blue-500", emoji: "⚡" },
+    { label: "x3", value: 3, color: "bg-purple-500", emoji: "🔥" },
+    { label: "x5", value: 5, color: "bg-yellow-500", emoji: "💥" },
+  ];
+
+  const sendBattleGift = (gift: typeof GIFTS[0], multiplier: number, targetTeam: "A"|"B") => {
+    if (!user) return;
+    if (myCoins < gift.coins) {
+      toast({ title: "عملاتك غير كافية", description: `تحتاج ${gift.coins} عملة — رصيدك ${myCoins}`, variant: "destructive" });
+      return;
+    }
+    const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مستخدم";
+    socketRef.current?.emit("battle-gift", {
+      streamId: id, giftType: gift.type, giftEmoji: gift.emoji,
+      giftName: gift.name, giftCoins: gift.coins, userName, userId: (user as any).id,
+      broadcasterUserId: stream?.userId,
+      multiplier, targetTeam,
+    });
+    setMyCoins(prev => prev - gift.coins);
+    setTimeout(() => refetchWallet(), 1500);
+  };
+
   /* ─── Coin recharge helper ────────────────────────────── */
   const redeemCoinCode = async () => {
     if (!rechargeCode.trim()) return;
@@ -796,13 +893,12 @@ export default function LiveStream() {
         coins: selectedPkg.coins + (selectedPkg.bonus_coins || 0),
         amountEGP: selectedPkg.price_egp,
         paymentMethod:
-          payMethod === "vodafone"
-            ? "فودافون كاش"
-            : payMethod === "etisalat"
-              ? "اتصالات كاش"
-              : payMethod === "instapay"
-                ? "إنستاباي"
-                : "تحويل بنكي",
+          payMethod === "vodafone" ? "فودافون كاش"
+          : payMethod === "etisalat" ? "اتصالات كاش"
+          : payMethod === "instapay" ? "إنستاباي"
+          : payMethod === "souq" ? "سوق ماركات"
+          : payMethod === "installment" ? "تقسيط فيزا"
+          : "تحويل بنكي",
         paymentRef: payRef.trim(),
         userName,
       });
@@ -1575,6 +1671,8 @@ export default function LiveStream() {
 
             {activeCoHosts.map((ch, idx) => {
               const isSwapped = swappedCohostId === ch.socketId;
+              const col = idx % 2;
+              const row = Math.floor(idx / 2);
               return (
                 <div
                   key={ch.socketId}
@@ -1583,8 +1681,8 @@ export default function LiveStream() {
                     : "absolute z-20"
                   }
                   style={isSwapped ? {} : {
-                    bottom: `${9 + idx * 10}rem`,
-                    [document.documentElement.dir === "rtl" ? "left" : "right"]: "0.75rem",
+                    bottom: `${9 + row * 8}rem`,
+                    [document.documentElement.dir === "rtl" ? "left" : "right"]: `${0.75 + col * 6.5}rem`,
                   }}
                 >
                   {/* Hidden audio element for audio-only guests */}
@@ -1874,6 +1972,109 @@ export default function LiveStream() {
           </div>
         )}
 
+        {/* ── KICKED overlay ── */}
+        {kicked && (
+          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/95 gap-6 text-white px-8 text-center">
+            <div className="w-20 h-20 rounded-full bg-red-600/30 flex items-center justify-center">
+              <ShieldOff className="w-10 h-10 text-red-400" />
+            </div>
+            <div>
+              <p className="font-bold text-xl mb-3">تم طردك من البث</p>
+              <p className="text-white/70 text-sm leading-relaxed">قام المذيع بإخراجك من هذا البث</p>
+            </div>
+            <button onClick={() => setLocation("/livestream")} className="px-8 py-3 rounded-full bg-white text-black font-bold text-sm" data-testid="btn-after-kicked">
+              العودة للبثوث
+            </button>
+          </div>
+        )}
+
+        {/* ── BATTLE OVERLAY (during active battle) ── */}
+        {battle && (
+          <div className="absolute top-14 inset-x-2 z-30 pointer-events-auto">
+            <div className="bg-black/80 backdrop-blur-xl rounded-2xl border border-yellow-500/40 p-3 shadow-2xl">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">⚔️</span>
+                  <span className="text-yellow-400 font-bold text-sm">{battle.ended ? "انتهت الجولة!" : `جولة تحدي ${battle.mode}`}</span>
+                </div>
+                {battle.active && (
+                  <div className="flex items-center gap-1.5 bg-red-600/30 border border-red-500/40 rounded-full px-2.5 py-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                    <span className="text-red-400 font-bold text-xs font-mono">
+                      {Math.floor(battle.timeLeft / 60)}:{(battle.timeLeft % 60).toString().padStart(2, "0")}
+                    </span>
+                  </div>
+                )}
+                {battle.ended && battle.winner && (
+                  <span className="text-yellow-400 text-xs font-bold bg-yellow-500/20 rounded-full px-2 py-1">
+                    🏆 الفائز: {battle.winner === "A" ? "فريق 🔴" : battle.winner === "B" ? "فريق 🔵" : "تعادل!"}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className={`rounded-xl p-2 border ${battle.ended && battle.winner === "A" ? "bg-red-600/30 border-yellow-400" : "bg-red-600/20 border-red-500/30"}`}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-red-400 font-bold text-xs">🔴 فريق A</span>
+                    <span className="text-white font-bold text-lg">{battle.totalA.toLocaleString()}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {battle.teams.teamA.map((p, i) => (
+                      <span key={i} className="text-[9px] text-white/70 bg-white/10 rounded-full px-1.5 py-0.5">{p.name}: {p.score}</span>
+                    ))}
+                  </div>
+                </div>
+                <div className={`rounded-xl p-2 border ${battle.ended && battle.winner === "B" ? "bg-blue-600/30 border-yellow-400" : "bg-blue-600/20 border-blue-500/30"}`}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-blue-400 font-bold text-xs">🔵 فريق B</span>
+                    <span className="text-white font-bold text-lg">{battle.totalB.toLocaleString()}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {battle.teams.teamB.map((p, i) => (
+                      <span key={i} className="text-[9px] text-white/70 bg-white/10 rounded-full px-1.5 py-0.5">{p.name}: {p.score}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              {isBroadcast && battle.active && (
+                <button onClick={endBattleEarly} className="mt-2 w-full py-1.5 rounded-xl bg-red-600/50 border border-red-500/30 text-red-300 text-xs font-bold" data-testid="btn-end-battle-early">
+                  إنهاء الجولة مبكراً
+                </button>
+              )}
+              <p className="text-white/30 text-[9px] text-center mt-1">المضاعفات للسكور فقط — المذيع يحصل على القيمة الحقيقية</p>
+            </div>
+            {/* Battle gift sending (viewers only during active battle) */}
+            {!isBroadcast && battle.active && user && (
+              <div className="mt-2 bg-black/80 backdrop-blur-xl rounded-2xl border border-white/10 p-3">
+                <p className="text-white/60 text-xs font-bold mb-2">أرسل هدية مضاعفة ⚡</p>
+                <div className="flex gap-1.5 mb-2 overflow-x-auto">
+                  {GIFTS.slice(0, 6).map(gift => (
+                    <div key={gift.type} className="flex flex-col items-center gap-1 min-w-[4rem]">
+                      <span className="text-2xl">{gift.emoji}</span>
+                      <span className="text-[9px] text-yellow-400 font-bold">{gift.coins}🪙</span>
+                      <div className="flex gap-1">
+                        {BATTLE_MULTIPLIERS.map(m => (
+                          <button key={m.value} onClick={() => sendBattleGift(gift, m.value, "A")}
+                            className={`${m.color} text-white text-[8px] font-bold px-1 py-0.5 rounded`}>
+                            🔴{m.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex gap-1">
+                        {BATTLE_MULTIPLIERS.map(m => (
+                          <button key={m.value} onClick={() => sendBattleGift(gift, m.value, "B")}
+                            className={`${m.color} text-white text-[8px] font-bold px-1 py-0.5 rounded`}>
+                            🔵{m.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── FORCE-END overlay (stream closed by admin or auto-system) ── */}
         {forceEndReason && (
           <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/95 gap-6 text-white px-8 text-center">
@@ -1940,18 +2141,26 @@ export default function LiveStream() {
           </div>
         )}
 
-        {/* BROADCASTER SHARE FLOATING BUTTON (right side, always visible while streaming) */}
+        {/* BROADCASTER FLOATING BUTTONS (right side) */}
         {isBroadcast && streaming && (
-          <div className="absolute end-3 z-10 flex flex-col items-center gap-3" style={{ bottom: "160px" }}>
-            <button
-              onClick={() => setShowShare(true)}
-              data-testid="btn-broadcast-share-float"
-              className="flex flex-col items-center gap-0.5"
-            >
-              <div className="w-12 h-12 rounded-full bg-blue-600/90 backdrop-blur flex items-center justify-center shadow-lg border-2 border-blue-400/50 animate-pulse">
-                <Share2 className="w-6 h-6 text-white" />
+          <div className="absolute end-3 z-10 flex flex-col items-center gap-2.5" style={{ bottom: "160px" }}>
+            <button onClick={() => setShowShare(true)} data-testid="btn-broadcast-share-float" className="flex flex-col items-center gap-0.5">
+              <div className="w-11 h-11 rounded-full bg-blue-600/90 backdrop-blur flex items-center justify-center shadow-lg border-2 border-blue-400/50">
+                <Share2 className="w-5 h-5 text-white" />
               </div>
-              <span className="text-white text-[10px] font-bold drop-shadow">شارك</span>
+              <span className="text-white text-[9px] font-bold drop-shadow">شارك</span>
+            </button>
+            <button onClick={requestViewerList} data-testid="btn-viewer-list" className="flex flex-col items-center gap-0.5">
+              <div className="w-11 h-11 rounded-full bg-zinc-700/90 backdrop-blur flex items-center justify-center shadow-lg border-2 border-white/20">
+                <Users className="w-5 h-5 text-white" />
+              </div>
+              <span className="text-white text-[9px] font-bold drop-shadow">الجمهور</span>
+            </button>
+            <button onClick={() => setShowBattleSetup(true)} data-testid="btn-battle-setup" className="flex flex-col items-center gap-0.5">
+              <div className="w-11 h-11 rounded-full bg-yellow-600/90 backdrop-blur flex items-center justify-center shadow-lg border-2 border-yellow-400/50">
+                <span className="text-lg">⚔️</span>
+              </div>
+              <span className="text-white text-[9px] font-bold drop-shadow">تحدي</span>
             </button>
           </div>
         )}
@@ -2244,6 +2453,104 @@ export default function LiveStream() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* VIEWER LIST MODAL (broadcaster can kick) */}
+      {showViewerList && isBroadcast && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowViewerList(false)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-safe max-h-[70vh] overflow-y-auto" onClick={e => e.stopPropagation()} dir="rtl">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-white" />
+                <h3 className="text-white font-bold text-lg">الجمهور ({viewersList.length})</h3>
+              </div>
+              <button onClick={() => setShowViewerList(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+            {viewersList.length === 0 ? (
+              <p className="text-white/50 text-sm text-center py-6">لا يوجد مشاهدين حالياً</p>
+            ) : (
+              <div className="space-y-2">
+                {viewersList.map(v => (
+                  <div key={v.socketId} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-xl px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-purple-600/30 flex items-center justify-center">
+                        <span className="text-white text-sm font-bold">{v.userName.charAt(0)}</span>
+                      </div>
+                      <span className="text-white text-sm font-medium">{v.userName}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => kickViewer(v.socketId)}
+                        className="flex items-center gap-1 bg-red-600/20 border border-red-500/30 text-red-400 text-xs font-bold px-2.5 py-1.5 rounded-lg hover:bg-red-600/40 transition-colors"
+                        data-testid={`btn-kick-${v.socketId}`}
+                      >
+                        <ShieldOff className="w-3 h-3" />
+                        طرد
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* BATTLE SETUP MODAL (broadcaster) */}
+      {showBattleSetup && isBroadcast && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowBattleSetup(false)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-safe" onClick={e => e.stopPropagation()} dir="rtl">
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">⚔️</span>
+                <div>
+                  <h3 className="text-white font-bold text-lg">جولة التحدي</h3>
+                  <p className="text-white/50 text-xs">اختر نوع المعركة وابدأ!</p>
+                </div>
+              </div>
+              <button onClick={() => setShowBattleSetup(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+            <p className="text-white/60 text-xs mb-3">نوع المعركة</p>
+            <div className="grid grid-cols-4 gap-2 mb-5">
+              {(["1v1","2v2","3v3","4v4"] as const).map(mode => (
+                <button key={mode}
+                  onClick={() => setBattleMode(mode)}
+                  className={`rounded-xl py-3 text-center font-bold text-sm transition-all border-2 ${
+                    battleMode === mode
+                      ? "bg-yellow-500/20 border-yellow-400 text-yellow-400"
+                      : "bg-white/5 border-white/10 text-white/60"
+                  }`}
+                  data-testid={`btn-battle-mode-${mode}`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+            <div className="bg-white/5 border border-white/10 rounded-xl p-3 mb-4 space-y-1.5">
+              <div className="flex items-center gap-2 text-white/60 text-xs">
+                <span>⏱️</span><span>مدة الجولة: <span className="text-white font-bold">5 دقائق</span></span>
+              </div>
+              <div className="flex items-center gap-2 text-white/60 text-xs">
+                <span>⚡</span><span>مضاعفات: <span className="text-blue-400 font-bold">x2</span> <span className="text-purple-400 font-bold">x3</span> <span className="text-yellow-400 font-bold">x5</span> — للسكور فقط</span>
+              </div>
+              <div className="flex items-center gap-2 text-white/60 text-xs">
+                <span>🪙</span><span>المذيع يحصل على <span className="text-green-400 font-bold">القيمة الحقيقية</span> فقط</span>
+              </div>
+              <div className="flex items-center gap-2 text-white/60 text-xs">
+                <span>👥</span><span>البث الجماعي يدعم حتى <span className="text-purple-400 font-bold">8 أشخاص</span></span>
+              </div>
+            </div>
+            <button onClick={startBattle} className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-yellow-500 to-orange-500 text-black font-bold text-base shadow-xl" data-testid="btn-start-battle">
+              ⚔️ ابدأ الجولة
+            </button>
           </div>
         </div>
       )}

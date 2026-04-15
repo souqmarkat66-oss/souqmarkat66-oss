@@ -358,8 +358,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
 
     socket.on("join-stream", (streamId: string) => {
-      socket.join(`stream:${streamId}`);
       const room = getOrCreateRoom(streamId);
+      if (room.bannedSockets.has(socket.id)) {
+        socket.emit("kicked-from-stream");
+        return;
+      }
+      socket.join(`stream:${streamId}`);
       room.viewers.add(socket.id);
       const count = room.viewers.size;
       if (count > room.peakViewers) room.peakViewers = count;
@@ -388,7 +392,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     socket.on("chat-message", (data: { streamId: string; userId: string; userName: string; message: string; isVoice?: boolean; voiceUrl?: string; isOwner?: boolean }) => {
       const room = streamRooms.get(data.streamId);
-      if (room) room.totalComments++;
+      if (room) {
+        room.totalComments++;
+        if (data.userId && data.userName) room.socketToUser.set(socket.id, { userId: data.userId, userName: data.userName });
+      }
       const msg = { ...data, timestamp: new Date().toISOString(), id: Date.now() };
       io.to(`stream:${data.streamId}`).emit("chat-message", msg);
       storage.createChatMessage({
@@ -432,7 +439,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socket.on("request-cohost", (data: { streamId: string; userId: string; userName: string }) => {
       const room = streamRooms.get(data.streamId);
       if (!room?.broadcasterId) return;
-      if (room.cohostIds.length >= 3) {
+      if (room.cohostIds.length >= 8) {
         socket.emit("cohost-rejected", { reason: "max_cohosts" });
         return;
       }
@@ -461,14 +468,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     socket.on("accept-cohost", (data: { streamId: string; guestSocketId: string; guestName?: string }) => {
       const room = streamRooms.get(data.streamId);
-      if (room && !room.cohostIds.includes(data.guestSocketId)) {
+      if (!room) return;
+      if (room.cohostIds.length >= 8) {
+        io.to(data.guestSocketId).emit("cohost-rejected");
+        return;
+      }
+      if (!room.cohostIds.includes(data.guestSocketId)) {
         room.cohostIds.push(data.guestSocketId);
         if (data.guestName) room.cohostNames.set(data.guestSocketId, data.guestName);
       }
       io.to(data.guestSocketId).emit("cohost-accepted", { broadcasterId: socket.id });
     });
 
-    socket.on("reject-cohost", (data: { guestSocketId: string }) => {
+    socket.on("reject-cohost", (data: { guestSocketId: string; streamId?: string }) => {
       io.to(data.guestSocketId).emit("cohost-rejected");
     });
 
@@ -476,6 +488,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const streamId = typeof data === "string" ? data : data.streamId;
       const name = typeof data === "object" ? data.name : undefined;
       const room = streamRooms.get(streamId);
+      if (!room || room.cohostIds.length >= 8) return;
       if (room && !room.cohostIds.includes(socket.id)) {
         room.cohostIds.push(socket.id);
         if (name) room.cohostNames.set(socket.id, name);
@@ -546,28 +559,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     // ── TikTok-style Live Features ──────────────────────────────────
     socket.on("send-gift", async (data: { streamId: string; giftType: string; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId: string; broadcasterUserId?: string }) => {
-      // Deduct coins from sender & credit broadcaster in DB
+      const giftRoom = streamRooms.get(data.streamId);
+      if (giftRoom && data.userId && data.userName) giftRoom.socketToUser.set(socket.id, { userId: data.userId, userName: data.userName });
+      const giftCoins = Math.max(1, Math.min(Math.floor(data.giftCoins || 0), 1000));
       try {
-        if (data.userId && data.giftCoins > 0) {
-          // Deduct from sender
+        if (data.userId && giftCoins > 0) {
+          const balCheck = await pool.query(`SELECT balance FROM coin_wallets WHERE user_id = $1`, [data.userId]);
+          if (!balCheck.rows.length || balCheck.rows[0].balance < giftCoins) return;
           await pool.query(
-            `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
-             VALUES ($1, GREATEST(0, -$2::int), $2::int, 0)
-             ON CONFLICT (user_id) DO UPDATE
-             SET balance = GREATEST(0, coin_wallets.balance - $2::int),
-                 total_spent = coin_wallets.total_spent + $2::int,
-                 updated_at = NOW()`,
-            [data.userId, data.giftCoins]
+            `UPDATE coin_wallets SET balance = balance - $2::int, total_spent = total_spent + $2::int, updated_at = NOW() WHERE user_id = $1 AND balance >= $2::int`,
+            [data.userId, giftCoins]
           );
           // Log sender transaction
           await pool.query(
             `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id, related_user_id)
              VALUES ($1, 'gift_sent', $2, $3, $4, $5)`,
-            [data.userId, -data.giftCoins, `هدية ${data.giftName} في البث`, data.streamId ? parseInt(data.streamId) : null, data.broadcasterUserId || null]
+            [data.userId, -giftCoins, `هدية ${data.giftName} في البث`, data.streamId ? parseInt(data.streamId) : null, data.broadcasterUserId || null]
           );
-          // Credit broadcaster (60% to broadcaster, platform keeps 40%)
           if (data.broadcasterUserId) {
-            const broadcasterCoins = Math.floor(data.giftCoins * 0.6);
+            const broadcasterCoins = Math.floor(giftCoins * 0.6);
             await pool.query(
               `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
                VALUES ($1, $2::int, 0, $2::int)
@@ -623,11 +633,151 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       socket.to(`stream:${data.streamId}`).emit("new-follower", { userName: data.userName });
     });
 
+    // ── Kick viewer ──────────────────────────────────────
+    socket.on("kick-viewer", (data: { streamId: string; viewerSocketId: string }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room || room.broadcasterId !== socket.id) return;
+      room.bannedSockets.add(data.viewerSocketId);
+      room.viewers.delete(data.viewerSocketId);
+      io.to(data.viewerSocketId).emit("kicked-from-stream");
+      const targetSocket = io.sockets.sockets.get(data.viewerSocketId);
+      if (targetSocket) targetSocket.leave(`stream:${data.streamId}`);
+      io.to(`stream:${data.streamId}`).emit("viewer-count", room.viewers.size);
+    });
+
+    // ── Viewer list ──────────────────────────────────────
+    socket.on("get-viewer-list", (data: { streamId: string }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room || room.broadcasterId !== socket.id) return;
+      const list: { socketId: string; userName: string; userId: string }[] = [];
+      room.viewers.forEach(viewerId => {
+        if (viewerId === socket.id) return;
+        const info = room.socketToUser.get(viewerId);
+        list.push({ socketId: viewerId, userName: info?.userName || "مشاهد", userId: info?.userId || "" });
+      });
+      socket.emit("viewer-list", list);
+    });
+
+    // ── Battle / Challenge system ────────────────────────
+    socket.on("battle-start", (data: { streamId: string; mode: "1v1"|"2v2"|"3v3"|"4v4" }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room || room.broadcasterId !== socket.id) return;
+      if ((room as any).battle) return;
+      const perTeam = parseInt(data.mode.split("v")[0]) || 1;
+      const cohosts = [...room.cohostIds];
+      const teamA: { socketId: string; name: string; score: number }[] = [];
+      const teamB: { socketId: string; name: string; score: number }[] = [];
+      // Broadcaster always on team A
+      teamA.push({ socketId: socket.id, name: room.cohostNames.get(socket.id) || "المذيع", score: 0 });
+      // Distribute cohosts between teams
+      cohosts.forEach((cId, i) => {
+        const entry = { socketId: cId, name: room.cohostNames.get(cId) || "ضيف", score: 0 };
+        if (teamA.length < perTeam) teamA.push(entry);
+        else if (teamB.length < perTeam) teamB.push(entry);
+      });
+      // If team B is empty for solo battle, add placeholder
+      if (teamB.length === 0 && cohosts.length > 0) {
+        const last = teamA.pop();
+        if (last) teamB.push(last);
+      }
+      const battle = { mode: data.mode, teams: { teamA, teamB }, totalA: 0, totalB: 0, duration: 300, startedAt: Date.now(), timerId: null as any };
+      (room as any).battle = battle;
+      io.to(`stream:${data.streamId}`).emit("battle-started", { mode: data.mode, teams: { teamA, teamB }, duration: 300 });
+      // Start countdown timer
+      battle.timerId = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - battle.startedAt) / 1000);
+        const timeLeft = Math.max(0, 300 - elapsed);
+        io.to(`stream:${data.streamId}`).emit("battle-timer", { timeLeft });
+        if (timeLeft <= 0) {
+          clearInterval(battle.timerId);
+          const winner = battle.totalA > battle.totalB ? "A" : battle.totalB > battle.totalA ? "B" : "draw";
+          io.to(`stream:${data.streamId}`).emit("battle-ended", { winner, totalA: battle.totalA, totalB: battle.totalB, teams: battle.teams });
+          (room as any).battle = null;
+        }
+      }, 1000);
+    });
+
+    socket.on("battle-end-early", (data: { streamId: string }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room || room.broadcasterId !== socket.id) return;
+      const battle = (room as any).battle;
+      if (!battle) return;
+      clearInterval(battle.timerId);
+      const winner = battle.totalA > battle.totalB ? "A" : battle.totalB > battle.totalA ? "B" : "draw";
+      io.to(`stream:${data.streamId}`).emit("battle-ended", { winner, totalA: battle.totalA, totalB: battle.totalB, teams: battle.teams });
+      (room as any).battle = null;
+    });
+
+    socket.on("battle-gift", async (data: { streamId: string; giftType: string; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId: string; broadcasterUserId?: string; multiplier: number; targetTeam: "A"|"B" }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room) return;
+      const battle = (room as any).battle;
+      if (!battle) return;
+      const validMultipliers = [2, 3, 5];
+      const mult = validMultipliers.includes(data.multiplier) ? data.multiplier : 1;
+      const bgCoins = Math.max(1, Math.min(Math.floor(data.giftCoins || 0), 1000));
+      const scoreValue = bgCoins * mult;
+      if (data.targetTeam === "A") {
+        battle.totalA += scoreValue;
+        const member = battle.teams.teamA[0];
+        if (member) member.score += scoreValue;
+      } else {
+        battle.totalB += scoreValue;
+        const member = battle.teams.teamB[0];
+        if (member) member.score += scoreValue;
+      }
+      try {
+        if (data.userId && bgCoins > 0) {
+          const balCheck = await pool.query(`SELECT balance FROM coin_wallets WHERE user_id = $1`, [data.userId]);
+          if (!balCheck.rows.length || balCheck.rows[0].balance < bgCoins) return;
+          await pool.query(
+            `UPDATE coin_wallets SET balance = balance - $2::int, total_spent = total_spent + $2::int, updated_at = NOW() WHERE user_id = $1 AND balance >= $2::int`,
+            [data.userId, bgCoins]
+          );
+          await pool.query(
+            `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id)
+             VALUES ($1, 'gift_sent', $2, $3, $4)`,
+            [data.userId, -bgCoins, `هدية تحدي ${data.giftName} (${mult}x سكور)`, data.streamId ? parseInt(data.streamId) : null]
+          );
+          if (data.broadcasterUserId) {
+            const broadcasterCoins = Math.floor(bgCoins * 0.6);
+            await pool.query(
+              `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
+               VALUES ($1, $2::int, 0, $2::int)
+               ON CONFLICT (user_id) DO UPDATE
+               SET balance = coin_wallets.balance + $2::int,
+                   total_earned = coin_wallets.total_earned + $2::int,
+                   updated_at = NOW()`,
+              [data.broadcasterUserId, broadcasterCoins]
+            );
+            await pool.query(
+              `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id)
+               VALUES ($1, 'gift_received', $2, $3, $4)`,
+              [data.broadcasterUserId, broadcasterCoins, `هدية تحدي ${data.giftName} من ${data.userName}`, data.streamId ? parseInt(data.streamId) : null]
+            );
+            const egpAmount = parseFloat((broadcasterCoins * 0.05).toFixed(2));
+            await pool.query(
+              `INSERT INTO revenue_transactions (user_id, type, amount_egp, description, channel_id)
+               SELECT $1, 'earning', $2, $3, id FROM channels WHERE user_id = $1 LIMIT 1`,
+              [data.broadcasterUserId, egpAmount, `هدايا تحدي - ${data.giftName}`]
+            );
+          }
+        }
+      } catch (err) {
+        console.error("Battle gift error:", err);
+      }
+      // Emit score update + gift animation
+      io.to(`stream:${data.streamId}`).emit("battle-score-update", { totalA: battle.totalA, totalB: battle.totalB, teams: battle.teams });
+      io.to(`stream:${data.streamId}`).emit("stream-gift", { id: Date.now() + Math.random(), ...data, timestamp: new Date().toISOString() });
+    });
+
     socket.on("disconnect", () => {
       streamRooms.forEach((room, streamId) => {
         if (room.broadcasterId === socket.id) {
           room.broadcasterId = null;
           io.to(`stream:${streamId}`).emit("broadcaster-disconnected");
+          const battle = (room as any).battle;
+          if (battle?.timerId) { clearInterval(battle.timerId); (room as any).battle = null; }
         }
         if (room.cohostIds.includes(socket.id)) {
           room.cohostIds = room.cohostIds.filter(id => id !== socket.id);
@@ -635,6 +785,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           io.to(`stream:${streamId}`).emit("cohost-left", socket.id);
         }
         room.viewers.delete(socket.id);
+        room.socketToUser.delete(socket.id);
       });
     });
   });

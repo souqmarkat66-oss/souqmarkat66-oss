@@ -74,6 +74,10 @@ Preferred communication style: Arabic/bilingual, everyday language.
 - Like reactions in live stream
 - Viewer count tracking
 - Start/end stream controls with mute/video toggle
+- **Group Broadcast**: Up to 8 cohosts in a single stream (2-column PiP grid layout)
+- **Kick Viewer**: Broadcaster can view audience list and kick/ban viewers from stream
+- **Battle/Challenge System**: TikTok-style 1v1/2v2/3v3/4v4 battles with 5-minute timer, gift multipliers (x2/x3/x5) for score display only — broadcaster receives real coin value
+- **Payment Methods**: فودافون كاش, اتصالات كاش, إنستاباي, تحويل بنكي, سوق ماركات, تقسيط فيزا
 
 ### Social Features  
 - Like/unlike (ads, streams)
