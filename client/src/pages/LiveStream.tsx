@@ -2539,7 +2539,7 @@ export default function LiveStream() {
                           <p className="text-white/60 text-[9px]">متاح على</p>
                           <p className="text-white text-[10px] font-bold">App Store</p>
                         </a>
-                        <a href="https://appgallery.huawei.com/" target="_blank" rel="noreferrer"
+                        <a href="https://app.as-souqmarkat.com/?from-splash=false" target="_blank" rel="noreferrer"
                           className="flex flex-col items-center gap-1 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl px-2 py-2.5 transition-all"
                           data-testid="btn-download-huawei">
                           <span className="text-xl">📱</span>
