@@ -204,6 +204,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS relationship_status text`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender text`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type text`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS smart_menus (
+      id SERIAL PRIMARY KEY,
+      user_id VARCHAR NOT NULL REFERENCES users(id),
+      slug VARCHAR UNIQUE NOT NULL,
+      restaurant_name TEXT,
+      restaurant_slogan TEXT,
+      theme TEXT DEFAULT 'classic',
+      style TEXT DEFAULT 'photo',
+      items JSONB DEFAULT '[]',
+      is_active BOOLEAN DEFAULT true,
+      views_count INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )`);
     await db.execute(sql`CREATE TABLE IF NOT EXISTS stories (
       id SERIAL PRIMARY KEY,
       user_id VARCHAR NOT NULL REFERENCES users(id),
@@ -4995,6 +5009,76 @@ Sitemap: ${BASE}/sitemap-pages.xml
       console.error("menu-card error:", e.message);
       res.status(500).json({ message: e.message });
     }
+  });
+
+  // ─── SMART MENU SAVE/SHARE/QR ────────────────────────────────
+
+  const VALID_THEMES = ["classic", "modern", "elegant", "fresh", "warm"];
+  const VALID_STYLES = ["photo", "elegant", "street", "cartoon"];
+
+  app.post("/api/menus", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const { restaurantName, restaurantSlogan, theme, style, items } = req.body;
+    if (!items || !Array.isArray(items) || items.length === 0) return res.status(400).json({ message: "أضف أطباق أولاً" });
+    if (items.length > 100) return res.status(400).json({ message: "الحد الأقصى 100 طبق" });
+    const safeTheme = VALID_THEMES.includes(theme) ? theme : "classic";
+    const safeStyle = VALID_STYLES.includes(style) ? style : "photo";
+    const slug = `menu-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    try {
+      const r = await pool.query(
+        `INSERT INTO smart_menus (user_id, slug, restaurant_name, restaurant_slogan, theme, style, items) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [userId, slug, (restaurantName || '').slice(0, 200), (restaurantSlogan || '').slice(0, 300), safeTheme, safeStyle, JSON.stringify(items)]
+      );
+      res.json(r.rows[0]);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.put("/api/menus/:id", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const menuId = Number(req.params.id);
+    const { restaurantName, restaurantSlogan, theme, style, items } = req.body;
+    if (!items || !Array.isArray(items) || items.length === 0) return res.status(400).json({ message: "أضف أطباق أولاً" });
+    if (items.length > 100) return res.status(400).json({ message: "الحد الأقصى 100 طبق" });
+    const safeTheme = VALID_THEMES.includes(theme) ? theme : "classic";
+    const safeStyle = VALID_STYLES.includes(style) ? style : "photo";
+    try {
+      const check = await pool.query(`SELECT user_id FROM smart_menus WHERE id = $1`, [menuId]);
+      if (check.rows.length === 0) return res.status(404).json({ message: "المنيو غير موجود" });
+      if (check.rows[0].user_id !== userId) return res.status(403).json({ message: "غير مصرح" });
+      const r = await pool.query(
+        `UPDATE smart_menus SET restaurant_name = $1, restaurant_slogan = $2, theme = $3, style = $4, items = $5, updated_at = NOW() WHERE id = $6 RETURNING *`,
+        [(restaurantName || '').slice(0, 200), (restaurantSlogan || '').slice(0, 300), safeTheme, safeStyle, JSON.stringify(items), menuId]
+      );
+      res.json(r.rows[0]);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/menus/mine", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const r = await pool.query(`SELECT * FROM smart_menus WHERE user_id = $1 ORDER BY updated_at DESC`, [userId]);
+      res.json(r.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/menus/public/:slug", async (req, res) => {
+    try {
+      const r = await pool.query(`SELECT * FROM smart_menus WHERE slug = $1 AND is_active = true`, [req.params.slug]);
+      if (r.rows.length === 0) return res.status(404).json({ message: "المنيو غير موجود" });
+      await pool.query(`UPDATE smart_menus SET views_count = views_count + 1 WHERE slug = $1`, [req.params.slug]);
+      res.json(r.rows[0]);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.delete("/api/menus/:id", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const check = await pool.query(`SELECT user_id FROM smart_menus WHERE id = $1`, [Number(req.params.id)]);
+      if (check.rows.length === 0) return res.status(404).json({ message: "غير موجود" });
+      if (check.rows[0].user_id !== userId && !isAdminUser(req)) return res.status(403).json({ message: "غير مصرح" });
+      await pool.query(`DELETE FROM smart_menus WHERE id = $1`, [Number(req.params.id)]);
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   // ─── AI TEXT-TO-SPEECH (Egyptian Arabic via gpt-audio) ───────

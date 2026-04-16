@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -6,9 +6,11 @@ import { useToast } from "@/hooks/use-toast";
 import {
   ChefHat, Sparkles, Download, Megaphone, Film,
   Loader2, ArrowRight, Star, Utensils, Plus, Trash2,
-  Eye, Share2, X, QrCode, Palette
+  Eye, Share2, X, QrCode, Palette, Save, Copy, Check,
+  ExternalLink, List
 } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { QRCodeSVG } from "qrcode.react";
 
 const CATEGORIES = [
   { key: "grills",   label: "مشويات",          emoji: "🥩" },
@@ -31,7 +33,7 @@ const STYLES = [
 const MENU_THEMES = [
   { key: "classic", label: "كلاسيكي", bg: "from-amber-900 to-amber-800", text: "text-amber-100", accent: "text-yellow-400" },
   { key: "modern", label: "عصري", bg: "from-gray-900 to-gray-800", text: "text-gray-100", accent: "text-blue-400" },
-  { key: "elegant", label: "فاخر", bg: "from-black to-gray-900", text: "text-white", accent: "text-gold" },
+  { key: "elegant", label: "فاخر", bg: "from-black to-gray-900", text: "text-white", accent: "text-yellow-300" },
   { key: "fresh", label: "طازج", bg: "from-green-800 to-emerald-900", text: "text-green-100", accent: "text-lime-400" },
   { key: "warm", label: "دافئ", bg: "from-orange-800 to-red-900", text: "text-orange-100", accent: "text-yellow-300" },
 ];
@@ -45,6 +47,19 @@ interface MenuItem {
   imageUrl?: string;
   caption?: string;
   generating?: boolean;
+}
+
+interface SavedMenu {
+  id: number;
+  slug: string;
+  restaurant_name: string;
+  restaurant_slogan: string;
+  theme: string;
+  style: string;
+  items: MenuItem[];
+  views_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export default function MenuGenerator() {
@@ -62,6 +77,17 @@ export default function MenuGenerator() {
   const [newItem, setNewItem] = useState({ dishName: "", price: "", description: "", category: "grills" });
   const [showPreview, setShowPreview] = useState(false);
   const [generatingAll, setGeneratingAll] = useState(false);
+
+  const [savedMenuId, setSavedMenuId] = useState<number | null>(null);
+  const [savedSlug, setSavedSlug] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [showQR, setShowQR] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [myMenus, setMyMenus] = useState<SavedMenu[]>([]);
+  const [showMyMenus, setShowMyMenus] = useState(false);
+  const [loadingMenus, setLoadingMenus] = useState(false);
+
+  const menuUrl = savedSlug ? `${window.location.origin}/m/${savedSlug}` : null;
 
   const addItem = () => {
     if (!newItem.dishName.trim()) {
@@ -138,6 +164,95 @@ export default function MenuGenerator() {
     }
   };
 
+  const saveMenu = async () => {
+    if (items.length === 0) {
+      toast({ variant: "destructive", title: "أضف أطباق أولاً" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const url = savedMenuId ? `/api/menus/${savedMenuId}` : "/api/menus";
+      const method = savedMenuId ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          restaurantName,
+          restaurantSlogan,
+          theme: menuTheme,
+          style,
+          items: items.map(({ generating, ...rest }) => rest),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "فشل الحفظ");
+      setSavedMenuId(data.id);
+      setSavedSlug(data.slug);
+      toast({ title: "✅ تم حفظ المنيو بنجاح!" });
+      setShowQR(true);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "خطأ", description: e.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const copyLink = () => {
+    if (!menuUrl) return;
+    navigator.clipboard.writeText(menuUrl).then(() => {
+      setCopied(true);
+      toast({ title: "✅ تم نسخ الرابط!" });
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const loadMyMenus = async () => {
+    setLoadingMenus(true);
+    try {
+      const res = await fetch("/api/menus/mine", { credentials: "include" });
+      if (!res.ok) throw new Error("فشل تحميل المنيوهات");
+      const data = await res.json();
+      if (Array.isArray(data)) setMyMenus(data);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "خطأ", description: e.message });
+    }
+    setLoadingMenus(false);
+    setShowMyMenus(true);
+  };
+
+  const loadMenu = (menu: SavedMenu) => {
+    let menuItems: MenuItem[] = [];
+    try { menuItems = typeof menu.items === "string" ? JSON.parse(menu.items as any) : (menu.items || []); } catch { menuItems = []; }
+    setRestaurantName(menu.restaurant_name || "");
+    setRestaurantSlogan(menu.restaurant_slogan || "");
+    setMenuTheme(menu.theme || "classic");
+    setStyle(menu.style || "photo");
+    setItems(menuItems || []);
+    setSavedMenuId(menu.id);
+    setSavedSlug(menu.slug);
+    setShowMyMenus(false);
+    toast({ title: "✅ تم تحميل المنيو" });
+  };
+
+  const deleteMenu = async (id: number) => {
+    try {
+      const res = await fetch(`/api/menus/${id}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || "فشل الحذف");
+      }
+      setMyMenus(prev => prev.filter(m => m.id !== id));
+      if (savedMenuId === id) {
+        setSavedMenuId(null);
+        setSavedSlug(null);
+      }
+      toast({ title: "تم حذف المنيو" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "خطأ في الحذف", description: e.message });
+    }
+  };
+
   const theme = MENU_THEMES.find(t => t.key === menuTheme) || MENU_THEMES[0];
   const catEmoji = (key: string) => CATEGORIES.find(c => c.key === key)?.emoji || "🍽️";
   const catLabel = (key: string) => CATEGORIES.find(c => c.key === key)?.label || "";
@@ -174,8 +289,31 @@ export default function MenuGenerator() {
             منشئ المنيو الذكي
           </h1>
           <p className="text-muted-foreground text-sm">
-            أضف أطباقك والـ AI يولّد منيو رقمي احترافي كامل — وداعاً للطباعة الورقية! 🚀
+            أضف أطباقك والـ AI يولّد منيو رقمي احترافي كامل مع QR Code — وداعاً للطباعة الورقية!
           </p>
+        </div>
+
+        <div className="flex gap-2 mb-5">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadMyMenus}
+            className="gap-1 rounded-xl text-xs flex-1"
+            data-testid="btn-my-menus"
+          >
+            <List className="w-3.5 h-3.5" /> منيوهاتي المحفوظة
+          </Button>
+          {savedSlug && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowQR(true)}
+              className="gap-1 rounded-xl text-xs"
+              data-testid="btn-show-qr"
+            >
+              <QrCode className="w-3.5 h-3.5" /> QR Code
+            </Button>
+          )}
         </div>
 
         <div className="bg-card border border-border/60 rounded-2xl p-5 shadow-sm mb-5">
@@ -331,7 +469,7 @@ export default function MenuGenerator() {
             </div>
 
             <div className="space-y-2 max-h-80 overflow-y-auto">
-              {items.map((item, idx) => (
+              {items.map((item) => (
                 <div key={item.id} className="flex items-center gap-3 border rounded-xl p-3 bg-muted/20 hover:bg-muted/40 transition-all">
                   <span className="text-lg">{catEmoji(item.category)}</span>
                   {item.imageUrl ? (
@@ -388,6 +526,20 @@ export default function MenuGenerator() {
                   : <><Sparkles className="w-5 h-5" /> ولّد صور كل الأطباق ({items.filter(i => !i.imageUrl).length} متبقي)</>
                 }
               </Button>
+
+              <Button
+                onClick={saveMenu}
+                disabled={saving}
+                variant="default"
+                className="w-full h-11 gap-2 rounded-xl bg-green-600 hover:bg-green-700 text-white"
+                data-testid="btn-save-menu"
+              >
+                {saving
+                  ? <><Loader2 className="w-5 h-5 animate-spin" /> جاري الحفظ...</>
+                  : <><Save className="w-5 h-5" /> {savedMenuId ? "تحديث المنيو وتوليد QR" : "احفظ المنيو + QR Code"}</>
+                }
+              </Button>
+
               <Button
                 variant="outline"
                 onClick={() => setShowPreview(true)}
@@ -410,11 +562,11 @@ export default function MenuGenerator() {
               <li className="flex items-center gap-2"><span className="text-green-500 font-bold">1</span> أدخل اسم المطعم واختر الثيم والأسلوب</li>
               <li className="flex items-center gap-2"><span className="text-green-500 font-bold">2</span> أضف كل أطباقك واحد تلو الآخر (اسم + سعر + فئة)</li>
               <li className="flex items-center gap-2"><span className="text-green-500 font-bold">3</span> اضغط "ولّد صور كل الأطباق" — الـ AI يصمم صورة لكل طبق</li>
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">4</span> اضغط "معاينة" لتشوف المنيو الرقمي الكامل</li>
-              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">5</span> شارك رابط المنيو مع عملائك — وداعاً للطباعة! 🎉</li>
+              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">4</span> اضغط "احفظ المنيو" — يتم توليد رابط + QR Code</li>
+              <li className="flex items-center gap-2"><span className="text-green-500 font-bold">5</span> اطبع الـ QR Code وحطّه على الطاولات — الزبون يمسح ويشوف المنيو!</li>
             </ul>
             <div className="mt-4 bg-primary/5 border border-primary/20 rounded-xl p-3 text-center">
-              <p className="text-xs font-bold text-primary">💡 وفّر تكاليف الطباعة — منيو رقمي احترافي بالذكاء الاصطناعي!</p>
+              <p className="text-xs font-bold text-primary">وفّر تكاليف الطباعة — منيو رقمي مع QR بالذكاء الاصطناعي!</p>
             </div>
           </div>
         )}
@@ -477,7 +629,7 @@ export default function MenuGenerator() {
 
             <div className={`text-center py-5 border-t border-white/10 ${theme.text} opacity-40`}>
               <p className="text-[10px]">تم الإنشاء بواسطة منشئ المنيو الذكي · ads-as.com</p>
-              <p className="text-[9px] mt-0.5">شبكة سوق للإعلانات 🇪🇬</p>
+              <p className="text-[9px] mt-0.5">شبكة سوق للإعلانات</p>
             </div>
           </div>
 
@@ -485,6 +637,16 @@ export default function MenuGenerator() {
             <Button variant="outline" className="flex-1 gap-1 rounded-xl text-xs" onClick={() => setShowPreview(false)} data-testid="btn-close-preview">
               <X className="w-3.5 h-3.5" /> إغلاق
             </Button>
+            {menuUrl && (
+              <Button
+                variant="outline"
+                className="flex-1 gap-1 rounded-xl text-xs"
+                onClick={() => window.open(menuUrl, "_blank")}
+                data-testid="btn-open-public"
+              >
+                <ExternalLink className="w-3.5 h-3.5" /> فتح الرابط العام
+              </Button>
+            )}
             <Button
               className="flex-1 gap-1 rounded-xl text-xs"
               onClick={() => {
@@ -494,6 +656,152 @@ export default function MenuGenerator() {
             >
               <Megaphone className="w-3.5 h-3.5" /> نشر كإعلان
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showQR} onOpenChange={setShowQR}>
+        <DialogContent className="max-w-sm w-full rounded-2xl p-0 overflow-hidden border-0">
+          <div className="bg-white p-6 text-center" dir="rtl">
+            <div className="mb-4">
+              <QrCode className="w-8 h-8 text-green-600 mx-auto mb-2" />
+              <h2 className="text-lg font-black text-gray-900">QR Code للمنيو</h2>
+              <p className="text-xs text-gray-500 mt-1">اطبع الكود وحطّه على الطاولات أو عند الباب</p>
+            </div>
+
+            {menuUrl && (
+              <div className="flex flex-col items-center gap-4">
+                <div className="bg-white p-4 rounded-2xl border-2 border-gray-100 shadow-lg inline-block">
+                  <QRCodeSVG
+                    value={menuUrl}
+                    size={200}
+                    level="H"
+                    includeMargin
+                    bgColor="#ffffff"
+                    fgColor="#1a1a1a"
+                  />
+                </div>
+
+                <div className="text-center">
+                  <p className="text-sm font-bold text-gray-800 mb-1">{restaurantName || "المنيو الرقمي"}</p>
+                  {restaurantSlogan && <p className="text-[10px] text-gray-400">{restaurantSlogan}</p>}
+                </div>
+
+                <div className="w-full bg-gray-50 rounded-xl p-3 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={menuUrl}
+                    readOnly
+                    className="flex-1 bg-transparent text-xs text-gray-600 outline-none text-left"
+                    dir="ltr"
+                    data-testid="input-menu-url"
+                  />
+                  <button
+                    onClick={copyLink}
+                    className="flex items-center gap-1 bg-primary text-white rounded-lg px-3 py-1.5 text-xs font-bold hover:bg-primary/90 transition-colors"
+                    data-testid="btn-copy-link"
+                  >
+                    {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copied ? "تم!" : "نسخ"}
+                  </button>
+                </div>
+
+                <div className="w-full space-y-2">
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2 rounded-xl text-xs"
+                    onClick={() => window.open(menuUrl, "_blank")}
+                    data-testid="btn-open-menu-link"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" /> فتح المنيو في تاب جديد
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2 rounded-xl text-xs"
+                    onClick={() => {
+                      if (navigator.share) {
+                        navigator.share({ title: restaurantName + " - منيو", url: menuUrl });
+                      } else {
+                        copyLink();
+                      }
+                    }}
+                    data-testid="btn-share-menu"
+                  >
+                    <Share2 className="w-3.5 h-3.5" /> مشاركة الرابط
+                  </Button>
+                </div>
+
+                <div className="bg-green-50 border border-green-200 rounded-xl p-3 w-full">
+                  <p className="text-[11px] text-green-700 font-bold text-center">
+                    اطبع الـ QR Code وحطّه على طاولات المطعم — الزبون يمسح بموبايله ويشوف المنيو فوراً!
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showMyMenus} onOpenChange={setShowMyMenus}>
+        <DialogContent className="max-w-md w-full rounded-2xl p-0 overflow-hidden border-0 max-h-[80vh] overflow-y-auto">
+          <div className="p-5" dir="rtl">
+            <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+              <List className="w-5 h-5 text-primary" />
+              منيوهاتي المحفوظة
+            </h2>
+
+            {loadingMenus ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              </div>
+            ) : myMenus.length === 0 ? (
+              <div className="text-center py-10 text-muted-foreground">
+                <ChefHat className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">لا يوجد منيوهات محفوظة بعد</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {myMenus.map(menu => {
+                  let menuItems: MenuItem[] = [];
+                  try { menuItems = typeof menu.items === "string" ? JSON.parse(menu.items as any) : (menu.items || []); } catch { menuItems = []; }
+                  return (
+                    <div key={menu.id} className="border rounded-xl p-3 bg-muted/20 hover:bg-muted/40 transition-all">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <h3 className="font-bold text-sm">{menu.restaurant_name || "بدون اسم"}</h3>
+                          <p className="text-[10px] text-muted-foreground">
+                            {menuItems?.length || 0} طبق · {menu.views_count || 0} مشاهدة
+                          </p>
+                        </div>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => loadMenu(menu)}
+                            className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center hover:bg-primary/20"
+                            data-testid={`btn-load-menu-${menu.id}`}
+                          >
+                            <ArrowRight className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => window.open(`/m/${menu.slug}`, "_blank")}
+                            className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-600 flex items-center justify-center hover:bg-green-200"
+                            data-testid={`btn-view-menu-${menu.id}`}
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => deleteMenu(menu.id)}
+                            className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 text-red-600 flex items-center justify-center hover:bg-red-200"
+                            data-testid={`btn-delete-menu-${menu.id}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>

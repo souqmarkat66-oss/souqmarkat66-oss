@@ -35,6 +35,7 @@ import Help from "@/pages/Help";
 import Consultations from "@/pages/Consultations";
 import Coupons from "@/pages/Coupons";
 import MenuGenerator from "@/pages/MenuGenerator";
+import PublicMenu from "@/pages/PublicMenu";
 import WalletPage from "@/pages/Wallet";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import { GlobalAssistant } from "@/components/GlobalAssistant";
@@ -117,6 +118,7 @@ function Router() {
                 <ProtectedRoute component={AdminPanel} />
               </Route>
               <Route path="/login" component={Login} />
+              <Route path="/m/:slug" component={PublicMenu} />
               <Route path="/my-content" component={MyContent} />
               <Route path="/media-library">
                 <ProtectedRoute component={MediaLibrary} />
