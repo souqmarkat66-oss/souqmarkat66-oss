@@ -5023,6 +5023,30 @@ Sitemap: ${BASE}/sitemap-pages.xml
     if (items.length > 100) return res.status(400).json({ message: "الحد الأقصى 100 طبق" });
     const safeTheme = VALID_THEMES.includes(theme) ? theme : "classic";
     const safeStyle = VALID_STYLES.includes(style) ? style : "photo";
+
+    const menuCost = 2;
+    if (!isAdminUser(req)) {
+      const freeCredits = parseInt(await storage.getSetting('ai_free_credits') || '3');
+      const usageCount = await storage.getAiUsageCount(userId);
+      if (usageCount >= freeCredits) {
+        const pricePerCredit = parseFloat(await storage.getSetting('ai_price_per_credit_egp') || '5');
+        const totalCost = pricePerCredit * menuCost;
+        const balance = await storage.getWalletBalanceEGP(userId);
+        if (balance < totalCost) {
+          return res.status(402).json({
+            message: "insufficient_credits",
+            requiresWalletTopup: true,
+            cost: menuCost,
+            pricePerCredit,
+            totalCostEGP: totalCost,
+            balance
+          });
+        }
+        await deductAiCharge(userId, totalCost, `حفظ منيو ذكي (${menuCost} كريدت)`);
+      }
+      for (let i = 0; i < menuCost; i++) { await storage.recordAiUsage(userId, 'menu_save', 0); }
+    }
+
     const slug = `menu-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     try {
       const r = await pool.query(

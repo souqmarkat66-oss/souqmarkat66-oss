@@ -13,14 +13,14 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { QRCodeSVG } from "qrcode.react";
 
 const CATEGORIES = [
-  { key: "grills",   label: "مشويات",          emoji: "🥩" },
-  { key: "seafood",  label: "أسماك وبحريات",   emoji: "🐟" },
-  { key: "oriental", label: "أكلات شرقية",      emoji: "🍲" },
-  { key: "pizza",    label: "بيتزا وباستا",     emoji: "🍕" },
-  { key: "fastfood", label: "وجبات سريعة",      emoji: "🍔" },
-  { key: "sweets",   label: "حلويات",           emoji: "🍰" },
-  { key: "drinks",   label: "مشروبات",          emoji: "🥤" },
-  { key: "salads",   label: "سلطات",            emoji: "🥗" },
+  { key: "grills",   label: "مشويات",          emoji: "🥩", color: "from-red-500 to-orange-500" },
+  { key: "seafood",  label: "أسماك وبحريات",   emoji: "🐟", color: "from-blue-500 to-cyan-500" },
+  { key: "oriental", label: "أكلات شرقية",      emoji: "🍲", color: "from-amber-500 to-yellow-500" },
+  { key: "pizza",    label: "بيتزا وباستا",     emoji: "🍕", color: "from-red-400 to-rose-500" },
+  { key: "fastfood", label: "وجبات سريعة",      emoji: "🍔", color: "from-yellow-500 to-amber-500" },
+  { key: "sweets",   label: "حلويات",           emoji: "🍰", color: "from-pink-400 to-rose-400" },
+  { key: "drinks",   label: "مشروبات",          emoji: "🥤", color: "from-green-400 to-emerald-500" },
+  { key: "salads",   label: "سلطات",            emoji: "🥗", color: "from-lime-400 to-green-500" },
 ];
 
 const STYLES = [
@@ -186,7 +186,17 @@ export default function MenuGenerator() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "فشل الحفظ");
+      if (!res.ok) {
+        if (data.message === "insufficient_credits") {
+          toast({
+            variant: "destructive",
+            title: "رصيد غير كافٍ",
+            description: `حفظ المنيو يتطلب ${data.cost || 2} كريدت (${data.totalCostEGP || 10} ج.م). رصيدك: ${data.balance || 0} ج.م. اشحن المحفظة أولاً.`
+          });
+          return;
+        }
+        throw new Error(data.message || "فشل الحفظ");
+      }
       setSavedMenuId(data.id);
       setSavedSlug(data.slug);
       toast({ title: "✅ تم حفظ المنيو بنجاح!" });
@@ -256,6 +266,7 @@ export default function MenuGenerator() {
   const theme = MENU_THEMES.find(t => t.key === menuTheme) || MENU_THEMES[0];
   const catEmoji = (key: string) => CATEGORIES.find(c => c.key === key)?.emoji || "🍽️";
   const catLabel = (key: string) => CATEGORIES.find(c => c.key === key)?.label || "";
+  const catColor = (key: string) => CATEGORIES.find(c => c.key === key)?.color || "from-gray-400 to-gray-500";
 
   const groupedItems = items.reduce<Record<string, MenuItem[]>>((acc, item) => {
     const cat = item.category;
@@ -536,7 +547,7 @@ export default function MenuGenerator() {
               >
                 {saving
                   ? <><Loader2 className="w-5 h-5 animate-spin" /> جاري الحفظ...</>
-                  : <><Save className="w-5 h-5" /> {savedMenuId ? "تحديث المنيو وتوليد QR" : "احفظ المنيو + QR Code"}</>
+                  : <><Save className="w-5 h-5" /> {savedMenuId ? "تحديث المنيو" : "احفظ المنيو + QR Code (2 كريدت)"}</>
                 }
               </Button>
 
@@ -575,50 +586,74 @@ export default function MenuGenerator() {
 
       <Dialog open={showPreview} onOpenChange={setShowPreview}>
         <DialogContent className="max-w-lg w-full p-0 rounded-2xl overflow-hidden border-0 max-h-[90vh] overflow-y-auto">
-          <div ref={menuRef} className={`bg-gradient-to-b ${theme.bg} min-h-[60vh]`} dir="rtl">
-            <div className="text-center py-8 px-6 border-b border-white/10">
-              <div className="text-3xl mb-1">🍽️</div>
-              <h1 className={`text-2xl font-black ${theme.text} mb-1`}>{restaurantName || "اسم المطعم"}</h1>
-              {restaurantSlogan && <p className={`text-sm ${theme.accent} opacity-80`}>{restaurantSlogan}</p>}
-              <div className={`mt-2 text-[10px] ${theme.text} opacity-50`}>— قائمة الطعام —</div>
+          <div ref={menuRef} className="bg-gradient-to-br from-orange-50/50 via-white to-amber-50/50 min-h-[60vh]" dir="rtl">
+            <div className="relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-br from-orange-500 via-amber-500 to-yellow-500"></div>
+              <div className="absolute inset-0 opacity-10">
+                <div className="absolute top-3 right-6 text-5xl opacity-30">🍽️</div>
+                <div className="absolute bottom-3 left-6 text-3xl opacity-20">✨</div>
+              </div>
+              <div className="relative px-5 py-8 text-center">
+                <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center mx-auto mb-3 border-2 border-white/30">
+                  <span className="text-3xl">🍽️</span>
+                </div>
+                <h1 className="text-2xl font-black text-white mb-1 drop-shadow-lg">{restaurantName || "اسم المطعم"}</h1>
+                {restaurantSlogan && <p className="text-xs text-white/80 font-medium">{restaurantSlogan}</p>}
+                <div className="flex items-center justify-center gap-3 mt-3 text-white/50 text-[10px]">
+                  <span>{items.length} صنف</span>
+                </div>
+              </div>
+              <div className="h-4 bg-gradient-to-br from-orange-50/50 via-white to-amber-50/50 rounded-t-[1.5rem]"></div>
             </div>
 
-            <div className="px-4 py-4 space-y-6">
+            <div className="px-3 pb-4 -mt-1 space-y-4">
               {Object.keys(groupedItems).length === 0 && (
-                <p className={`text-center py-8 text-sm ${theme.text} opacity-50`}>لا توجد أطباق بعد — أضف أطباق من الأعلى</p>
+                <p className="text-center py-8 text-sm text-gray-400">لا توجد أطباق بعد — أضف أطباق من الأعلى</p>
               )}
 
               {Object.entries(groupedItems).map(([cat, catItems]) => (
-                <div key={cat}>
-                  <div className="flex items-center gap-2 mb-3 border-b border-white/10 pb-2">
-                    <span className="text-xl">{catEmoji(cat)}</span>
-                    <h2 className={`text-lg font-extrabold ${theme.accent}`}>{catLabel(cat)}</h2>
-                    <span className={`text-xs ${theme.text} opacity-40`}>({catItems.length})</span>
+                <div key={cat} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                  <div className={`bg-gradient-to-l ${catColor(cat)} px-4 py-2.5 flex items-center gap-2`}>
+                    <div className="w-8 h-8 bg-white/20 backdrop-blur-sm rounded-lg flex items-center justify-center text-lg">
+                      {catEmoji(cat)}
+                    </div>
+                    <div>
+                      <h2 className="text-base font-extrabold text-white">{catLabel(cat)}</h2>
+                      <span className="text-[9px] text-white/70">{catItems.length} صنف</span>
+                    </div>
                   </div>
 
-                  <div className="space-y-3">
-                    {catItems.map(item => (
-                      <div key={item.id} className="flex gap-3 items-start bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
-                        {item.imageUrl ? (
-                          <img src={item.imageUrl} alt={item.dishName} className="w-20 h-20 rounded-xl object-cover flex-shrink-0 shadow-lg" />
-                        ) : (
-                          <div className="w-20 h-20 rounded-xl bg-white/10 flex items-center justify-center flex-shrink-0 text-2xl">
-                            {catEmoji(item.category)}
-                          </div>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <h3 className={`font-bold text-sm ${theme.text}`}>{item.dishName}</h3>
+                  <div className="divide-y divide-gray-50">
+                    {catItems.map((item, idx) => (
+                      <div key={item.id} className="p-3">
+                        <div className="flex gap-3 items-start">
+                          {item.imageUrl ? (
+                            <div className="relative flex-shrink-0">
+                              <img src={item.imageUrl} alt={item.dishName} className="w-20 h-20 rounded-xl object-cover shadow-md" />
+                              <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-gradient-to-br from-orange-400 to-amber-500 flex items-center justify-center text-white text-[8px] font-bold shadow-sm">
+                                {idx + 1}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="w-20 h-20 rounded-xl bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center flex-shrink-0 border border-gray-100 relative">
+                              <span className="text-3xl">{catEmoji(item.category)}</span>
+                              <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-gradient-to-br from-orange-400 to-amber-500 flex items-center justify-center text-white text-[8px] font-bold shadow-sm">
+                                {idx + 1}
+                              </div>
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0 py-0.5">
+                            <h3 className="font-bold text-sm text-gray-900 mb-0.5">{item.dishName}</h3>
+                            {item.description && (
+                              <p className="text-[10px] text-gray-500 leading-relaxed mb-2">{item.description}</p>
+                            )}
                             {item.price && (
-                              <span className={`text-sm font-black ${theme.accent} whitespace-nowrap`}>{item.price} ج.م</span>
+                              <div className="inline-flex items-center gap-1 bg-gradient-to-l from-orange-500 to-amber-500 text-white rounded-full px-3 py-1 shadow-sm">
+                                <span className="text-xs font-black">{item.price}</span>
+                                <span className="text-[9px] opacity-80">ج.م</span>
+                              </div>
                             )}
                           </div>
-                          {item.description && (
-                            <p className={`text-[11px] ${theme.text} opacity-60 mt-0.5 leading-relaxed`}>{item.description}</p>
-                          )}
-                          {item.caption && (
-                            <p className={`text-[10px] ${theme.text} opacity-40 mt-1 italic leading-relaxed line-clamp-2`}>{item.caption}</p>
-                          )}
                         </div>
                       </div>
                     ))}
@@ -627,9 +662,8 @@ export default function MenuGenerator() {
               ))}
             </div>
 
-            <div className={`text-center py-5 border-t border-white/10 ${theme.text} opacity-40`}>
-              <p className="text-[10px]">تم الإنشاء بواسطة منشئ المنيو الذكي · ads-as.com</p>
-              <p className="text-[9px] mt-0.5">شبكة سوق للإعلانات</p>
+            <div className="text-center py-4 border-t border-gray-100">
+              <p className="text-[10px] text-gray-400">تم الإنشاء بواسطة منشئ المنيو الذكي · ads-as.com</p>
             </div>
           </div>
 
