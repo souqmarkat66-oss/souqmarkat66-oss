@@ -12,6 +12,7 @@ import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { AdCard } from "@/components/AdCard";
 import { Skeleton } from "@/components/ui/skeleton";
+import StoriesBar from "@/components/StoriesBar";
 
 function SuggestionThumb({ src }: { src?: string | null }) {
   const [err, setErr] = useState(false);
@@ -99,6 +100,11 @@ export default function Home() {
           </div>
         </a>
       )}
+      {/* Stories */}
+      <div className="container px-4 pt-4">
+        <StoriesBar />
+      </div>
+
       {/* Hero */}
       <section className="relative overflow-hidden py-20 md:py-32">
         <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(circle at 50% 0%, hsl(174 100% 29% / 0.12) 0%, transparent 60%), radial-gradient(circle at 100% 0%, hsl(38 92% 50% / 0.08) 0%, transparent 50%)" }} />

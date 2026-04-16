@@ -79,6 +79,15 @@ Preferred communication style: Arabic/bilingual, everyday language.
 - **Battle/Challenge System**: TikTok-style 1v1/2v2/3v3/4v4 battles with 5-minute timer, gift multipliers (x2/x3/x5) for score display only — broadcaster receives real coin value
 - **Payment Methods**: فودافون كاش, اتصالات كاش, إنستاباي, تحويل بنكي, سوق ماركات, تقسيط فيزا
 
+### Stories (الحالة)
+- 24-hour disappearing stories (image/video)
+- Stories bar on Home page with Instagram-like circular avatars
+- Auto-progress timer (5s images, 15s videos)
+- View tracking + viewer list for story owners
+- Delete own stories
+- Tables: `stories`, `story_views`
+- Component: `client/src/components/StoriesBar.tsx`
+
 ### Social Features  
 - Like/unlike (ads, streams)
 - Comments on ads and streams

@@ -540,3 +540,18 @@ export const coinTransactions = pgTable("coin_transactions", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 export type CoinTransaction = typeof coinTransactions.$inferSelect;
+
+// ============================================================
+// STORIES TABLE — 24-hour disappearing stories
+// ============================================================
+export const stories = pgTable("stories", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  mediaUrl: text("media_url").notNull(),
+  mediaType: text("media_type", { enum: ["image", "video"] }).default("image").notNull(),
+  caption: text("caption"),
+  viewsCount: integer("views_count").default(0),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+export type Story = typeof stories.$inferSelect;

@@ -204,6 +204,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS relationship_status text`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender text`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type text`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS stories (
+      id SERIAL PRIMARY KEY,
+      user_id VARCHAR NOT NULL REFERENCES users(id),
+      media_url TEXT NOT NULL,
+      media_type TEXT NOT NULL DEFAULT 'image',
+      caption TEXT,
+      views_count INTEGER DEFAULT 0,
+      expires_at TIMESTAMP NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS story_views (
+      id SERIAL PRIMARY KEY,
+      story_id INTEGER NOT NULL REFERENCES stories(id),
+      viewer_id VARCHAR NOT NULL REFERENCES users(id),
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(story_id, viewer_id)
+    )`);
   } catch { /* columns may already exist */ }
 
   // ── Auto-cleanup stale live streams (older than 12 hours) ──
@@ -6281,6 +6298,104 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // ================================================================
+  // ================================================================
+  // STORIES — 24-hour disappearing stories
+  // ================================================================
+
+  app.post("/api/stories", isAuthenticated, upload.single("media"), async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const caption = req.body.caption || null;
+    if (!req.file) return res.status(400).json({ message: "الملف مطلوب" });
+    const mediaUrl = `/uploads/${req.file.filename}`;
+    const mediaType = req.file.mimetype?.startsWith("video") ? "video" : "image";
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    try {
+      const r = await pool.query(
+        `INSERT INTO stories (user_id, media_url, media_type, caption, expires_at) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [userId, mediaUrl, mediaType, caption, expiresAt]
+      );
+      res.json(r.rows[0]);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/stories", async (req, res) => {
+    try {
+      const r = await pool.query(`
+        SELECT s.*, u.first_name, u.last_name, u.profile_image_url
+        FROM stories s
+        LEFT JOIN users u ON u.id = s.user_id
+        WHERE s.expires_at > NOW()
+        ORDER BY s.created_at DESC
+      `);
+      const grouped: Record<string, any> = {};
+      for (const story of r.rows) {
+        const uid = story.user_id;
+        if (!grouped[uid]) {
+          grouped[uid] = {
+            userId: uid,
+            userName: `${story.first_name || ''} ${story.last_name || ''}`.trim() || 'مستخدم',
+            profileImage: story.profile_image_url,
+            stories: [],
+          };
+        }
+        grouped[uid].stories.push(story);
+      }
+      res.json(Object.values(grouped));
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/stories/:id", async (req, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT s.*, u.first_name, u.last_name, u.profile_image_url
+         FROM stories s LEFT JOIN users u ON u.id = s.user_id
+         WHERE s.id = $1 AND s.expires_at > NOW()`,
+        [req.params.id]
+      );
+      if (r.rows.length === 0) return res.status(404).json({ message: "الحالة غير موجودة أو انتهت" });
+      res.json(r.rows[0]);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/stories/:id/view", isAuthenticated, async (req: any, res) => {
+    const viewerId = req.user.claims.sub;
+    const storyId = Number(req.params.id);
+    try {
+      await pool.query(
+        `INSERT INTO story_views (story_id, viewer_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [storyId, viewerId]
+      );
+      await pool.query(`UPDATE stories SET views_count = views_count + 1 WHERE id = $1`, [storyId]);
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/stories/:id/viewers", isAuthenticated, async (req: any, res) => {
+    const storyId = Number(req.params.id);
+    try {
+      const r = await pool.query(
+        `SELECT sv.viewer_id, u.first_name, u.last_name, u.profile_image_url, sv.created_at
+         FROM story_views sv LEFT JOIN users u ON u.id = sv.viewer_id
+         WHERE sv.story_id = $1 ORDER BY sv.created_at DESC`,
+        [storyId]
+      );
+      res.json(r.rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.delete("/api/stories/:id", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const storyId = Number(req.params.id);
+    try {
+      const r = await pool.query(`SELECT user_id FROM stories WHERE id = $1`, [storyId]);
+      if (r.rows.length === 0) return res.status(404).json({ message: "غير موجودة" });
+      if (r.rows[0].user_id !== userId && !isAdminUser(req)) return res.status(403).json({ message: "غير مصرح" });
+      await pool.query(`DELETE FROM story_views WHERE story_id = $1`, [storyId]);
+      await pool.query(`DELETE FROM stories WHERE id = $1`, [storyId]);
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   // SOCIAL FEATURES: Memories, Birthdays, Profile Social Info
   // ================================================================
 
