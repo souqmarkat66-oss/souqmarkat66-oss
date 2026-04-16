@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon, Tag, CheckSquare, Square, Calculator, Download, Apple } from "lucide-react";
+import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon, Tag, CheckSquare, Square, Calculator, Download, Apple, Coins, Wallet, ArrowUpCircle, ArrowDownCircle, Copy, Loader2, Gift } from "lucide-react";
 import { SiGoogleplay, SiHuawei } from "react-icons/si";
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {
@@ -71,6 +71,7 @@ const PAYMENT_METHODS = [
 export default function Payments() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [activeTab, setActiveTab] = useState<"payments" | "coins" | "wallet">("payments");
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({ type: "top_up", method: "vodafone", phoneNumber: "", adId: "" });
@@ -101,6 +102,47 @@ export default function Payments() {
     staleTime: 0,
     refetchInterval: 60000,
   });
+
+  const { data: coinWallet } = useQuery<{ balance: number }>({
+    queryKey: ["/api/coins/wallet"],
+    queryFn: () => fetch("/api/coins/wallet", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const { data: walletData } = useQuery<{ balance: number; transactions: any[] }>({
+    queryKey: ["/api/wallet/balance"],
+    queryFn: () => fetch("/api/wallet/balance", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const { data: coinHistory = [] } = useQuery<any[]>({
+    queryKey: ["/api/coins/transactions"],
+    queryFn: () => fetch("/api/coins/transactions", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const [redeemCode, setRedeemCode] = useState("");
+  const [redeemLoading, setRedeemLoading] = useState(false);
+  const redeemCoin = async () => {
+    if (!redeemCode.trim()) return;
+    setRedeemLoading(true);
+    try {
+      const res = await fetch("/api/coins/redeem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ code: redeemCode.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast({ title: `✅ تم شحن ${data.coins || ''} عملة بنجاح!` });
+        setRedeemCode("");
+        queryClient.invalidateQueries({ queryKey: ["/api/coins/wallet"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/coins/transactions"] });
+      } else {
+        toast({ title: "❌ " + (data.message || "كود غير صالح"), variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "❌ خطأ في الشحن", variant: "destructive" });
+    } finally { setRedeemLoading(false); }
+  };
 
   const serviceList = buildServiceTypes(pricing)[formData.type === "top_up" ? "top_up" : "withdrawal"];
 
@@ -211,19 +253,214 @@ export default function Payments() {
   const selectedWithPrices = serviceList.filter(s => selectedServices.has(s.value) && s.amount > 0);
   const hasZeroPriceSelected = serviceList.some(s => selectedServices.has(s.value) && s.amount === 0);
 
+  const COIN_PACKAGES = [
+    { coins: 100, price: 10 },
+    { coins: 500, price: 45 },
+    { coins: 1000, price: 85 },
+    { coins: 5000, price: 400 },
+    { coins: 10000, price: 750 },
+  ];
+
+  const COIN_TX_LABELS: Record<string, { label: string; icon: string; color: string }> = {
+    recharge: { label: "شحن", icon: "🔋", color: "text-green-600" },
+    gift_sent: { label: "هدية مرسلة", icon: "🎁", color: "text-red-500" },
+    gift_received: { label: "هدية مستلمة", icon: "🎁", color: "text-green-600" },
+    purchase: { label: "شراء", icon: "🛒", color: "text-blue-600" },
+    admin_grant: { label: "منحة إدارية", icon: "⭐", color: "text-yellow-600" },
+    coin_withdrawal: { label: "سحب", icon: "🏧", color: "text-red-600" },
+    coin_transfer_out: { label: "تحويل صادر", icon: "📤", color: "text-red-500" },
+    coin_transfer_in: { label: "تحويل وارد", icon: "📥", color: "text-green-500" },
+    refund: { label: "استرداد", icon: "↩️", color: "text-blue-500" },
+  };
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-6" dir="rtl">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-            <Receipt className="w-5 h-5 text-primary" />
+            <CreditCard className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-xl font-extrabold">جدول المدفوعات</h1>
-            <p className="text-xs text-muted-foreground">تتبّع طلبات الدفع والتحميل</p>
+            <h1 className="text-xl font-extrabold">المدفوعات والمحفظة</h1>
+            <p className="text-xs text-muted-foreground">إدارة شاملة للمدفوعات والعملات والمحفظة</p>
           </div>
         </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 mb-5 bg-muted/30 rounded-xl p-1 border">
+        {[
+          { key: "payments" as const, label: "طلبات الدفع", icon: Receipt },
+          { key: "coins" as const, label: "العملات والشحن", icon: Coins },
+          { key: "wallet" as const, label: "المحفظة (ج.م)", icon: Wallet },
+        ].map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-bold transition-all ${
+              activeTab === tab.key
+                ? "bg-background text-primary shadow-sm border border-border/50"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            data-testid={`tab-${tab.key}`}
+          >
+            <tab.icon className="w-4 h-4" />
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ══════════════ TAB: COINS ══════════════ */}
+      {activeTab === "coins" && (
+        <div className="space-y-5">
+          {/* Coin Balance */}
+          <div className="border rounded-2xl p-5 bg-gradient-to-l from-yellow-50 to-amber-50 dark:from-yellow-950/20 dark:to-amber-950/20 text-center">
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <Coins className="w-6 h-6 text-yellow-600" />
+              <span className="text-sm font-bold text-muted-foreground">رصيد العملات</span>
+            </div>
+            <div className="text-4xl font-black text-yellow-700 dark:text-yellow-400">{coinWallet?.balance || 0} <span className="text-lg">عملة</span></div>
+            <p className="text-xs text-muted-foreground mt-1">1 عملة = 0.05 ج.م</p>
+          </div>
+
+          {/* Redeem Code */}
+          <div className="border rounded-xl p-4">
+            <h3 className="font-bold text-sm mb-3 flex items-center gap-2"><Gift className="w-4 h-4 text-primary" /> شحن بكود</h3>
+            <div className="flex gap-2">
+              <Input
+                placeholder="أدخل كود الشحن مثل SOUQ-XXXXX-XXXXX"
+                value={redeemCode}
+                onChange={e => setRedeemCode(e.target.value.toUpperCase())}
+                className="text-sm font-mono"
+                dir="ltr"
+                data-testid="input-redeem-code"
+              />
+              <Button onClick={redeemCoin} disabled={redeemLoading || !redeemCode.trim()} size="sm" className="gap-1 whitespace-nowrap" data-testid="btn-redeem">
+                {redeemLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "شحن"}
+              </Button>
+            </div>
+          </div>
+
+          {/* Coin Packages */}
+          <div className="border rounded-xl p-4">
+            <h3 className="font-bold text-sm mb-3 flex items-center gap-2"><ArrowUpCircle className="w-4 h-4 text-green-600" /> باقات الشحن</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {COIN_PACKAGES.map(pkg => (
+                <button
+                  key={pkg.coins}
+                  onClick={() => {
+                    setActiveTab("payments");
+                    setShowForm(true);
+                    setManualAmount(String(pkg.price));
+                    setAmountOverride(true);
+                  }}
+                  className="border rounded-xl p-3 text-center hover:border-primary hover:bg-primary/5 transition-all group"
+                  data-testid={`coin-pkg-${pkg.coins}`}
+                >
+                  <div className="text-2xl font-black text-yellow-600 group-hover:text-primary">{pkg.coins}</div>
+                  <div className="text-[10px] text-muted-foreground">عملة</div>
+                  <div className="text-sm font-bold mt-1">{pkg.price} ج.م</div>
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-2 text-center">اضغط على الباقة وسيتم تحويلك لصفحة الدفع</p>
+          </div>
+
+          {/* Coin Transaction History */}
+          <div className="border rounded-xl p-4">
+            <h3 className="font-bold text-sm mb-3">سجل حركات العملات</h3>
+            {coinHistory.length === 0 ? (
+              <p className="text-center text-muted-foreground text-xs py-6">لا توجد حركات بعد</p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {coinHistory.slice(0, 30).map((tx: any) => {
+                  const info = COIN_TX_LABELS[tx.type] || { label: tx.type, icon: "💰", color: "text-foreground" };
+                  const isPositive = ["recharge", "gift_received", "coin_transfer_in", "admin_grant", "refund"].includes(tx.type);
+                  return (
+                    <div key={tx.id} className="flex items-center justify-between border-b border-border/30 py-2 last:border-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">{info.icon}</span>
+                        <div>
+                          <span className={`text-xs font-bold ${info.color}`}>{info.label}</span>
+                          {tx.description && <p className="text-[10px] text-muted-foreground truncate max-w-[180px]">{tx.description}</p>}
+                        </div>
+                      </div>
+                      <div className="text-left">
+                        <span className={`font-bold text-sm ${isPositive ? "text-green-600" : "text-red-500"}`}>
+                          {isPositive ? "+" : "-"}{Math.abs(tx.coins)}
+                        </span>
+                        <p className="text-[9px] text-muted-foreground">{tx.created_at ? new Date(tx.created_at).toLocaleDateString("ar-EG") : ""}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ TAB: WALLET ══════════════ */}
+      {activeTab === "wallet" && (
+        <div className="space-y-5">
+          {/* EGP Balance */}
+          <div className="border rounded-2xl p-5 bg-gradient-to-l from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 text-center">
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <Wallet className="w-6 h-6 text-green-600" />
+              <span className="text-sm font-bold text-muted-foreground">رصيد المحفظة</span>
+            </div>
+            <div className="text-4xl font-black text-green-700 dark:text-green-400">{walletData?.balance || 0} <span className="text-lg">ج.م</span></div>
+          </div>
+
+          <div className="flex gap-2">
+            <Button className="flex-1 gap-2" onClick={() => { setActiveTab("payments"); setShowForm(true); setFormData(f => ({ ...f, type: "top_up" })); }} data-testid="btn-wallet-topup">
+              <ArrowUpCircle className="w-4 h-4" /> إيداع رصيد
+            </Button>
+            <Button variant="outline" className="flex-1 gap-2" onClick={() => { setActiveTab("payments"); setShowForm(true); setFormData(f => ({ ...f, type: "withdrawal" })); }} data-testid="btn-wallet-withdraw">
+              <ArrowDownCircle className="w-4 h-4" /> سحب أرباح
+            </Button>
+          </div>
+
+          {/* Wallet Transaction History */}
+          <div className="border rounded-xl p-4">
+            <h3 className="font-bold text-sm mb-3">سجل حركات المحفظة</h3>
+            {(walletData?.transactions || []).length === 0 ? (
+              <p className="text-center text-muted-foreground text-xs py-6">لا توجد حركات بعد</p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {(walletData?.transactions || []).slice(0, 30).map((tx: any, i: number) => (
+                  <div key={tx.id || i} className="flex items-center justify-between border-b border-border/30 py-2 last:border-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">{tx.type === "credit" || tx.amount > 0 ? "📥" : "📤"}</span>
+                      <div>
+                        <span className="text-xs font-bold">{tx.description || tx.type}</span>
+                        {tx.status && (
+                          <Badge variant="outline" className="mr-1 text-[9px]">
+                            {tx.status === "approved" ? "✅" : tx.status === "pending" ? "⏳" : "❌"} {tx.status}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-left">
+                      <span className={`font-bold text-sm ${(tx.type === "credit" || tx.amount > 0) ? "text-green-600" : "text-red-500"}`}>
+                        {tx.amount > 0 ? "+" : ""}{tx.amount} ج.م
+                      </span>
+                      <p className="text-[9px] text-muted-foreground">{tx.created_at ? new Date(tx.created_at).toLocaleDateString("ar-EG") : ""}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ TAB: PAYMENTS ══════════════ */}
+      {activeTab === "payments" && (<>
+      {/* Payment Tab Header */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-bold text-sm">طلبات الدفع والخدمات</h2>
         <Button size="sm" onClick={() => setShowForm(true)} data-testid="btn-new-payment" className="gap-2">
           <Plus className="w-4 h-4" />
           طلب دفع جديد
@@ -944,6 +1181,7 @@ export default function Payments() {
           </div>
         </DialogContent>
       </Dialog>
+      </>)}
     </div>
   );
 }

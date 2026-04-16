@@ -88,6 +88,19 @@ Preferred communication style: Arabic/bilingual, everyday language.
 - Tables: `stories`, `story_views`
 - Component: `client/src/components/StoriesBar.tsx`
 
+### Unified Payments Page
+- Three tabs: طلبات الدفع (Payment Requests) | العملات والشحن (Coins & Recharge) | المحفظة (Wallet EGP)
+- Coins tab: balance display, redeem codes, coin packages, transaction history
+- Wallet tab: EGP balance, deposit/withdraw buttons, transaction history
+- Payments tab: full payment request management (existing)
+
+### Smart AI Assistant (Enhanced)
+- General Q&A: responds to any question (not just platform-related)
+- Idea suggestions: ad ideas, marketing copy, campaign strategies
+- Smart actions: search ads, add to favorites with guided instructions
+- Markdown rendering with bold and link support
+- Quick action buttons for common tasks
+
 ### Social Features  
 - Like/unlike (ads, streams)
 - Comments on ads and streams
