@@ -2415,6 +2415,119 @@ Sitemap: ${BASE}/sitemap-pages.xml
     res.json({ following: !!follow });
   });
 
+  // ── User Follow (user-to-user) ──────────────────────────────
+  app.post("/api/users/:id/follow", isAuthenticated, async (req: any, res) => {
+    const followerId = req.user.claims.sub;
+    const followingId = req.params.id;
+    if (followerId === followingId) return res.status(400).json({ message: "لا يمكنك متابعة نفسك" });
+    try {
+      const existing = await pool.query(
+        `SELECT id FROM user_follows WHERE follower_id = $1 AND following_id = $2`,
+        [followerId, followingId]
+      );
+      if (existing.rows.length > 0) {
+        await pool.query(`DELETE FROM user_follows WHERE follower_id = $1 AND following_id = $2`, [followerId, followingId]);
+        res.json({ following: false });
+      } else {
+        await pool.query(
+          `INSERT INTO user_follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [followerId, followingId]
+        );
+        const followerUser = await storage.getUser(followerId);
+        const followerName = followerUser ? `${followerUser.firstName || ''} ${followerUser.lastName || ''}`.trim() : 'مستخدم';
+        await createNotification(followingId, "system", "متابع جديد", `${followerName} بدأ متابعتك`, `/profile/${followerId}`);
+        res.json({ following: true });
+      }
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/users/:id/follow", isAuthenticated, async (req: any, res) => {
+    const followerId = req.user.claims.sub;
+    const followingId = req.params.id;
+    try {
+      const r = await pool.query(
+        `SELECT id FROM user_follows WHERE follower_id = $1 AND following_id = $2`,
+        [followerId, followingId]
+      );
+      res.json({ following: r.rows.length > 0 });
+    } catch { res.json({ following: false }); }
+  });
+
+  app.get("/api/users/:id/followers", async (req, res) => {
+    const userId = req.params.id;
+    try {
+      const [followersR, followingR] = await Promise.all([
+        pool.query(
+          `SELECT uf.follower_id, u.first_name, u.last_name, u.profile_image_url, uf.created_at
+           FROM user_follows uf LEFT JOIN users u ON u.id = uf.follower_id
+           WHERE uf.following_id = $1 ORDER BY uf.created_at DESC LIMIT 100`, [userId]
+        ),
+        pool.query(
+          `SELECT uf.following_id, u.first_name, u.last_name, u.profile_image_url, uf.created_at
+           FROM user_follows uf LEFT JOIN users u ON u.id = uf.following_id
+           WHERE uf.follower_id = $1 ORDER BY uf.created_at DESC LIMIT 100`, [userId]
+        ),
+      ]);
+      const countFollowers = await pool.query(`SELECT COUNT(*) FROM user_follows WHERE following_id = $1`, [userId]);
+      const countFollowing = await pool.query(`SELECT COUNT(*) FROM user_follows WHERE follower_id = $1`, [userId]);
+      res.json({
+        followersCount: Number(countFollowers.rows[0].count),
+        followingCount: Number(countFollowing.rows[0].count),
+        followers: followersR.rows,
+        following: followingR.rows,
+      });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ── Advertiser Stats (my ads performance) ──────────────────
+  app.get("/api/my-stats", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const [adsR, viewsR, likesR, clicksR, followersR, msgsR] = await Promise.all([
+        pool.query(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status='active') as active FROM ads WHERE user_id = $1`, [userId]),
+        pool.query(`SELECT COALESCE(SUM(views_count),0) as total_views FROM ads WHERE user_id = $1`, [userId]),
+        pool.query(`SELECT COALESCE(SUM(likes_count),0) as total_likes FROM ads WHERE user_id = $1`, [userId]),
+        pool.query(`SELECT COUNT(*) as total_clicks FROM ad_link_clicks WHERE user_id = $1`, [userId]),
+        pool.query(`SELECT COUNT(*) FROM user_follows WHERE following_id = $1`, [userId]),
+        pool.query(
+          `SELECT COUNT(DISTINCT sender_id) as unique_senders FROM messages WHERE receiver_id = $1`,
+          [userId]
+        ),
+      ]);
+      const topAdsR = await pool.query(
+        `SELECT id, title, views_count, likes_count, whatsapp_clicks, media_url, media_type, price_egp, created_at
+         FROM ads WHERE user_id = $1 ORDER BY views_count DESC LIMIT 5`, [userId]
+      );
+      const recentClicksR = await pool.query(
+        `SELECT alc.link_type, alc.created_at, a.title as ad_title
+         FROM ad_link_clicks alc LEFT JOIN ads a ON a.id = alc.ad_id
+         WHERE alc.user_id = $1 OR a.user_id = $1
+         ORDER BY alc.created_at DESC LIMIT 20`, [userId]
+      );
+
+      const a = adsR.rows[0] as any;
+      const v = viewsR.rows[0] as any;
+      const l = likesR.rows[0] as any;
+      const c = clicksR.rows[0] as any;
+      const f = followersR.rows[0] as any;
+      const m = msgsR.rows[0] as any;
+
+      res.json({
+        totalAds: Number(a.total),
+        activeAds: Number(a.active),
+        totalViews: Number(v.total_views),
+        totalLikes: Number(l.total_likes),
+        totalClicks: Number(c.total_clicks),
+        followersCount: Number(f.count),
+        uniqueMessages: Number(m.unique_senders),
+        topAds: topAdsR.rows,
+        recentClicks: recentClicksR.rows,
+      });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   // Channel analytics (only for channel owner or admin)
   app.get("/api/channels/:id/analytics", isAuthenticated, async (req: any, res) => {
     const ch = await storage.getChannel(Number(req.params.id));

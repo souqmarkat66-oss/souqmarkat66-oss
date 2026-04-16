@@ -219,7 +219,7 @@ export type Comment = typeof comments.$inferSelect;
 export type InsertComment = z.infer<typeof insertCommentSchema>;
 
 // ============================================================
-// FOLLOWS TABLE
+// FOLLOWS TABLE (channel follows)
 // ============================================================
 export const follows = pgTable("follows", {
   id: serial("id").primaryKey(),
@@ -229,6 +229,18 @@ export const follows = pgTable("follows", {
 });
 
 export type Follow = typeof follows.$inferSelect;
+
+// ============================================================
+// USER FOLLOWS TABLE (user-to-user follows)
+// ============================================================
+export const userFollows = pgTable("user_follows", {
+  id: serial("id").primaryKey(),
+  followerId: varchar("follower_id").references(() => users.id).notNull(),
+  followingId: varchar("following_id").references(() => users.id).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type UserFollow = typeof userFollows.$inferSelect;
 
 // ============================================================
 // AD CAMPAIGNS TABLE (Meta/AdSense-like)

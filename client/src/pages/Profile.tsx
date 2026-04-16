@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AdCard } from "@/components/AdCard";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MessageCircle, LayoutGrid, Eye, Heart, Tv, Star, Shield, AlertTriangle, Sparkles, Edit2, Camera, Copy, Gift, Check, Users, Cake, Briefcase, MapPin, ExternalLink, ThumbsUp } from "lucide-react";
+import { MessageCircle, LayoutGrid, Eye, Heart, Tv, Star, Shield, AlertTriangle, Sparkles, Edit2, Camera, Copy, Gift, Check, Users, Cake, Briefcase, MapPin, ExternalLink, ThumbsUp, UserPlus, UserCheck, BarChart3 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect, useRef } from "react";
@@ -142,6 +142,33 @@ export default function Profile() {
     queryKey: ["/api/ratings/user", targetUserId],
     queryFn: () => fetch(`/api/ratings/user/${targetUserId}`).then(r => r.json()),
     enabled: !!targetUserId,
+  });
+
+  const { data: followData } = useQuery<any>({
+    queryKey: ["/api/users", targetUserId, "followers"],
+    queryFn: () => fetch(`/api/users/${targetUserId}/followers`).then(r => r.json()),
+    enabled: !!targetUserId,
+  });
+
+  const { data: isFollowingData } = useQuery<any>({
+    queryKey: ["/api/users", targetUserId, "follow"],
+    queryFn: () => fetch(`/api/users/${targetUserId}/follow`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!targetUserId && !isOwn && !!user,
+  });
+
+  const followMutation = useMutation({
+    mutationFn: () => fetch(`/api/users/${targetUserId}/follow`, { method: "POST", credentials: "include" }).then(r => r.json()),
+    onSuccess: (data: any) => {
+      toast({ title: data.following ? "✅ تمت المتابعة" : "تم إلغاء المتابعة" });
+      qc.invalidateQueries({ queryKey: ["/api/users", targetUserId, "follow"] });
+      qc.invalidateQueries({ queryKey: ["/api/users", targetUserId, "followers"] });
+    },
+  });
+
+  const { data: myStats } = useQuery<any>({
+    queryKey: ["/api/my-stats"],
+    queryFn: () => fetch("/api/my-stats", { credentials: "include" }).then(r => r.json()),
+    enabled: !!isOwn && !!user,
   });
 
   const ratingMutation = useMutation({
@@ -393,9 +420,38 @@ export default function Profile() {
             </div>
           </div>
 
+          {/* Follower counts */}
+          {followData && (
+            <div className="flex gap-4 mt-2 justify-center sm:justify-start text-sm">
+              <div className="flex items-center gap-1.5 cursor-pointer hover:text-primary transition-colors" data-testid="followers-count">
+                <Users className="w-4 h-4 text-primary" />
+                <span className="font-bold">{followData.followersCount}</span>
+                <span className="text-muted-foreground text-xs">متابع</span>
+              </div>
+              <div className="flex items-center gap-1.5" data-testid="following-count">
+                <span className="font-bold">{followData.followingCount}</span>
+                <span className="text-muted-foreground text-xs">يتابع</span>
+              </div>
+            </div>
+          )}
+
           {/* Actions */}
           {!isOwn && user && (
             <div className="flex gap-2 flex-shrink-0 flex-wrap justify-center sm:justify-end">
+              <Button
+                size="sm"
+                className={`gap-2 ${isFollowingData?.following ? "bg-muted text-foreground hover:bg-muted/80" : ""}`}
+                variant={isFollowingData?.following ? "outline" : "default"}
+                onClick={() => followMutation.mutate()}
+                disabled={followMutation.isPending}
+                data-testid="btn-follow-user"
+              >
+                {isFollowingData?.following ? (
+                  <><UserCheck className="w-4 h-4" /> متابَع</>
+                ) : (
+                  <><UserPlus className="w-4 h-4" /> تابع</>
+                )}
+              </Button>
               <Button size="sm" className="gap-2" onClick={startChat} data-testid="btn-start-chat">
                 <MessageCircle className="w-4 h-4" /> راسله
               </Button>
@@ -444,6 +500,68 @@ export default function Profile() {
           </div>
         ))}
       </div>
+
+      {/* Advertiser Stats Dashboard */}
+      {isOwn && myStats && (
+        <div className="bg-card border border-border/60 rounded-2xl p-5 mb-6">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart3 className="w-5 h-5 text-primary" />
+            <h2 className="font-bold">إحصائيات إعلاناتك</h2>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            {[
+              { label: "إجمالي الإعلانات", value: myStats.totalAds, sub: `${myStats.activeAds} نشط`, color: "text-blue-500", icon: "📋" },
+              { label: "إجمالي المشاهدات", value: myStats.totalViews?.toLocaleString(), sub: "لجميع إعلاناتك", color: "text-emerald-500", icon: "👀" },
+              { label: "إجمالي الإعجابات", value: myStats.totalLikes?.toLocaleString(), sub: "تفاعل الجمهور", color: "text-pink-500", icon: "❤️" },
+              { label: "المتابعون", value: myStats.followersCount, sub: "يتابعون حسابك", color: "text-purple-500", icon: "👥" },
+            ].map(s => (
+              <div key={s.label} className="bg-muted/40 rounded-xl p-3 text-center">
+                <div className="text-lg mb-1">{s.icon}</div>
+                <div className={`text-xl font-black ${s.color}`}>{s.value}</div>
+                <div className="text-[10px] text-muted-foreground font-medium">{s.label}</div>
+                <div className="text-[9px] text-muted-foreground">{s.sub}</div>
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="bg-muted/40 rounded-xl p-3 text-center">
+              <div className="text-lg mb-1">🔗</div>
+              <div className="text-xl font-black text-amber-500">{myStats.totalClicks}</div>
+              <div className="text-[10px] text-muted-foreground font-medium">نقرات على الروابط</div>
+            </div>
+            <div className="bg-muted/40 rounded-xl p-3 text-center">
+              <div className="text-lg mb-1">💬</div>
+              <div className="text-xl font-black text-cyan-500">{myStats.uniqueMessages}</div>
+              <div className="text-[10px] text-muted-foreground font-medium">تواصلوا معك</div>
+            </div>
+          </div>
+          {myStats.topAds?.length > 0 && (
+            <div>
+              <h3 className="text-sm font-bold mb-2 flex items-center gap-1">🏆 أفضل إعلاناتك أداءً</h3>
+              <div className="space-y-2">
+                {myStats.topAds.map((ad: any, i: number) => (
+                  <a key={ad.id} href={`/ads/${ad.id}`} className="flex items-center gap-3 p-2 rounded-xl hover:bg-muted/50 transition-colors" data-testid={`top-ad-${i}`}>
+                    <span className="text-xs font-bold text-muted-foreground w-4">{i+1}</span>
+                    {ad.media_url && (
+                      <img src={ad.media_url} alt="" className="w-10 h-10 rounded-lg object-cover" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{ad.title}</div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {ad.price_egp ? `${Number(ad.price_egp).toLocaleString()} ج.م` : "بدون سعر"}
+                      </div>
+                    </div>
+                    <div className="flex gap-3 text-[10px] text-muted-foreground">
+                      <span className="flex items-center gap-0.5"><Eye className="w-3 h-3" /> {ad.views_count || 0}</span>
+                      <span className="flex items-center gap-0.5"><Heart className="w-3 h-3" /> {ad.likes_count || 0}</span>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Seller Ratings Section */}
       <div className="bg-card border border-border/60 rounded-2xl p-5 mb-6">
