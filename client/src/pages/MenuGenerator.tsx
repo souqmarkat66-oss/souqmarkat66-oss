@@ -7,7 +7,7 @@ import {
   ChefHat, Sparkles, Download, Megaphone, Film,
   Loader2, ArrowRight, Star, Utensils, Plus, Trash2,
   Eye, Share2, X, QrCode, Palette, Save, Copy, Check,
-  ExternalLink, List
+  ExternalLink, List, Printer
 } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { QRCodeSVG } from "qrcode.react";
@@ -695,7 +695,7 @@ export default function MenuGenerator() {
       </Dialog>
 
       <Dialog open={showQR} onOpenChange={setShowQR}>
-        <DialogContent className="max-w-sm w-full rounded-2xl p-0 overflow-hidden border-0">
+        <DialogContent className="max-w-sm w-full rounded-2xl p-0 overflow-hidden border-0 max-h-[90vh] overflow-y-auto">
           <div className="bg-white p-6 text-center" dir="rtl">
             <div className="mb-4">
               <QrCode className="w-8 h-8 text-green-600 mx-auto mb-2" />
@@ -705,20 +705,20 @@ export default function MenuGenerator() {
 
             {menuUrl && (
               <div className="flex flex-col items-center gap-4">
-                <div className="bg-white p-4 rounded-2xl border-2 border-gray-100 shadow-lg inline-block">
+                <div id="qr-print-area" className="bg-white p-6 rounded-2xl border-2 border-gray-100 shadow-lg inline-block">
+                  <div className="text-center mb-3">
+                    <p className="text-base font-black text-gray-900">{restaurantName || "المنيو الرقمي"}</p>
+                    {restaurantSlogan && <p className="text-[10px] text-gray-400 mt-0.5">{restaurantSlogan}</p>}
+                  </div>
                   <QRCodeSVG
                     value={menuUrl}
-                    size={200}
+                    size={220}
                     level="H"
                     includeMargin
                     bgColor="#ffffff"
                     fgColor="#1a1a1a"
                   />
-                </div>
-
-                <div className="text-center">
-                  <p className="text-sm font-bold text-gray-800 mb-1">{restaurantName || "المنيو الرقمي"}</p>
-                  {restaurantSlogan && <p className="text-[10px] text-gray-400">{restaurantSlogan}</p>}
+                  <p className="text-[9px] text-gray-400 mt-2">امسح الكود بالكاميرا لعرض المنيو</p>
                 </div>
 
                 <div className="w-full bg-gray-50 rounded-xl p-3 flex items-center gap-2">
@@ -738,6 +738,81 @@ export default function MenuGenerator() {
                     {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                     {copied ? "تم!" : "نسخ"}
                   </button>
+                </div>
+
+                <div className="w-full grid grid-cols-2 gap-2">
+                  <Button
+                    className="gap-1.5 rounded-xl text-xs bg-green-600 hover:bg-green-700 text-white"
+                    onClick={() => {
+                      const printArea = document.getElementById("qr-print-area");
+                      if (!printArea) return;
+                      const w = window.open("", "_blank");
+                      if (!w) return;
+                      w.document.write(`<!DOCTYPE html><html dir="rtl"><head><title>QR Code - ${restaurantName}</title><style>
+                        body{margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:white;font-family:Arial,sans-serif}
+                        .card{text-align:center;padding:40px;border:3px solid #e5e7eb;border-radius:20px;max-width:400px}
+                        .name{font-size:28px;font-weight:900;color:#111;margin-bottom:4px}
+                        .slogan{font-size:14px;color:#888;margin-bottom:20px}
+                        .hint{font-size:12px;color:#aaa;margin-top:16px}
+                        .footer{font-size:10px;color:#ccc;margin-top:12px}
+                        svg{display:block;margin:0 auto}
+                        @media print{body{margin:0}.card{border:2px solid #ddd}}
+                      </style></head><body><div class="card">
+                        <div class="name">${restaurantName || "المنيو الرقمي"}</div>
+                        ${restaurantSlogan ? `<div class="slogan">${restaurantSlogan}</div>` : ""}
+                        ${printArea.querySelector("svg")?.outerHTML || ""}
+                        <div class="hint">📱 امسح الكود بكاميرا الموبايل لعرض المنيو</div>
+                        <div class="footer">ads-as.com · شبكة سوق للإعلانات</div>
+                      </div></body></html>`);
+                      w.document.close();
+                      setTimeout(() => { w.print(); }, 500);
+                    }}
+                    data-testid="btn-print-qr"
+                  >
+                    <Printer className="w-4 h-4" /> طباعة QR
+                  </Button>
+                  <Button
+                    className="gap-1.5 rounded-xl text-xs bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={() => {
+                      const svg = document.querySelector("#qr-print-area svg");
+                      if (!svg) return;
+                      const canvas = document.createElement("canvas");
+                      const ctx = canvas.getContext("2d");
+                      if (!ctx) return;
+                      canvas.width = 600;
+                      canvas.height = 750;
+                      ctx.fillStyle = "#ffffff";
+                      ctx.fillRect(0, 0, 600, 750);
+                      ctx.fillStyle = "#111111";
+                      ctx.font = "bold 28px Arial";
+                      ctx.textAlign = "center";
+                      ctx.fillText(restaurantName || "المنيو الرقمي", 300, 50);
+                      if (restaurantSlogan) {
+                        ctx.fillStyle = "#888888";
+                        ctx.font = "14px Arial";
+                        ctx.fillText(restaurantSlogan, 300, 80);
+                      }
+                      const svgData = new XMLSerializer().serializeToString(svg);
+                      const img = new Image();
+                      img.onload = () => {
+                        ctx.drawImage(img, 150, 100, 300, 300);
+                        ctx.fillStyle = "#aaaaaa";
+                        ctx.font = "13px Arial";
+                        ctx.fillText("📱 امسح الكود بكاميرا الموبايل لعرض المنيو", 300, 440);
+                        ctx.fillStyle = "#cccccc";
+                        ctx.font = "11px Arial";
+                        ctx.fillText("ads-as.com · شبكة سوق للإعلانات", 300, 470);
+                        const link = document.createElement("a");
+                        link.download = `qr-menu-${restaurantName || "menu"}.png`;
+                        link.href = canvas.toDataURL("image/png");
+                        link.click();
+                      };
+                      img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgData)));
+                    }}
+                    data-testid="btn-download-qr"
+                  >
+                    <Download className="w-4 h-4" /> تحميل صورة
+                  </Button>
                 </div>
 
                 <div className="w-full space-y-2">
@@ -765,10 +840,15 @@ export default function MenuGenerator() {
                   </Button>
                 </div>
 
-                <div className="bg-green-50 border border-green-200 rounded-xl p-3 w-full">
-                  <p className="text-[11px] text-green-700 font-bold text-center">
-                    اطبع الـ QR Code وحطّه على طاولات المطعم — الزبون يمسح بموبايله ويشوف المنيو فوراً!
-                  </p>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 w-full text-right">
+                  <p className="text-[11px] font-bold text-amber-800 mb-2">📋 طريقة الاستخدام للمطعم:</p>
+                  <ul className="space-y-1 text-[10px] text-amber-700">
+                    <li>1️⃣ اضغط "طباعة QR" أو "تحميل صورة"</li>
+                    <li>2️⃣ اطبع الكود على ورق أو ستيكر</li>
+                    <li>3️⃣ حطّه على كل طاولة أو عند الكاشير أو على الباب</li>
+                    <li>4️⃣ الزبون يمسح بكاميرا الموبايل → يفتح المنيو فوراً</li>
+                    <li>5️⃣ لما تغيّر الأسعار، عدّل من هنا — الـ QR نفسه مبيتغيّرش!</li>
+                  </ul>
                 </div>
               </div>
             )}
