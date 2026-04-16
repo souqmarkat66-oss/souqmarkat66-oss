@@ -5069,6 +5069,30 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const check = await pool.query(`SELECT user_id FROM smart_menus WHERE id = $1`, [menuId]);
       if (check.rows.length === 0) return res.status(404).json({ message: "المنيو غير موجود" });
       if (check.rows[0].user_id !== userId) return res.status(403).json({ message: "غير مصرح" });
+
+      const updateCost = 1;
+      if (!isAdminUser(req)) {
+        const freeCredits = parseInt(await storage.getSetting('ai_free_credits') || '3');
+        const usageCount = await storage.getAiUsageCount(userId);
+        if (usageCount >= freeCredits) {
+          const pricePerCredit = parseFloat(await storage.getSetting('ai_price_per_credit_egp') || '5');
+          const totalCost = pricePerCredit * updateCost;
+          const balance = await storage.getWalletBalanceEGP(userId);
+          if (balance < totalCost) {
+            return res.status(402).json({
+              message: "insufficient_credits",
+              requiresWalletTopup: true,
+              cost: updateCost,
+              pricePerCredit,
+              totalCostEGP: totalCost,
+              balance
+            });
+          }
+          await deductAiCharge(userId, totalCost, `تعديل منيو ذكي (${updateCost} كريدت)`);
+        }
+        await storage.recordAiUsage(userId, 'menu_update', 0);
+      }
+
       const r = await pool.query(
         `UPDATE smart_menus SET restaurant_name = $1, restaurant_slogan = $2, theme = $3, style = $4, items = $5, updated_at = NOW() WHERE id = $6 RETURNING *`,
         [(restaurantName || '').slice(0, 200), (restaurantSlogan || '').slice(0, 300), safeTheme, safeStyle, JSON.stringify(items), menuId]

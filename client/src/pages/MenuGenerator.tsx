@@ -547,7 +547,7 @@ export default function MenuGenerator() {
               >
                 {saving
                   ? <><Loader2 className="w-5 h-5 animate-spin" /> جاري الحفظ...</>
-                  : <><Save className="w-5 h-5" /> {savedMenuId ? "تحديث المنيو" : "احفظ المنيو + QR Code (2 كريدت)"}</>
+                  : <><Save className="w-5 h-5" /> {savedMenuId ? "تحديث المنيو (1 كريدت)" : "احفظ المنيو + QR Code (2 كريدت)"}</>
                 }
               </Button>
 
