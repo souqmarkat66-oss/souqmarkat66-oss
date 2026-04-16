@@ -4955,31 +4955,32 @@ Sitemap: ${BASE}/sitemap-pages.xml
       if (!dishName) return res.status(400).json({ message: "اسم الأكلة مطلوب" });
 
       const styleMap: Record<string, string> = {
-        photo: "ultra-realistic professional food photography, studio lighting, shallow depth of field",
-        elegant: "elegant fine dining presentation, dark moody background, luxury restaurant style",
-        street: "vibrant colorful street food style, warm lighting, appetizing",
-        cartoon: "colorful cartoon illustration style, flat design, playful food art",
+        photo: "Ultra high resolution professional food photography shot with Canon EOS R5 85mm f/1.4 lens, natural soft window lighting from the side, shallow depth of field with creamy bokeh background, the dish is perfectly plated on a clean white ceramic plate on a rustic wooden table",
+        elegant: "Luxury fine dining food photography, dramatic dark moody background with rim lighting, the dish is artfully plated on premium black slate or elegant porcelain, Michelin star restaurant presentation, professional studio lighting with soft shadows",
+        street: "Authentic Egyptian street food photography, warm golden hour natural lighting, the food looks freshly cooked and steaming hot, vibrant saturated colors, served in traditional Egyptian style, close-up overhead angle shot, real food texture visible",
+        cartoon: "Colorful hand-drawn watercolor food illustration, warm pastel tones, cute appetizing style, detailed food textures, white background, menu illustration art",
       };
       const catMap: Record<string, string> = {
-        grills: "grilled meat dish",
-        seafood: "fresh seafood dish",
-        sweets: "dessert and sweets",
-        drinks: "beverage drink",
-        fastfood: "fast food meal",
-        salads: "fresh salad",
-        pizza: "pizza and pasta",
-        oriental: "traditional Egyptian oriental food",
+        grills: "authentic Egyptian grilled meat (kebab, kofta, or grilled chicken), charcoal grill marks visible, served with Egyptian bread and tahini",
+        seafood: "fresh Egyptian seafood dish, perfectly cooked fish or shrimp, golden crispy fried or grilled, served with rice and lemon",
+        sweets: "traditional Egyptian dessert (kunafa, basbousa, or om ali), golden syrupy texture, garnished beautifully",
+        drinks: "refreshing Egyptian beverage, fresh juice or hot drink, condensation drops visible on glass, ice cubes",
+        fastfood: "delicious fast food meal, juicy burger or crispy fried chicken or shawarma, melted cheese, fresh vegetables",
+        salads: "fresh colorful Mediterranean salad, crisp vegetables, olive oil drizzle, herbs garnish, served in a bowl",
+        pizza: "authentic Italian pizza or fresh pasta, melted mozzarella cheese stretching, fresh basil, tomato sauce",
+        oriental: "traditional Egyptian home-cooked dish (molokhia, koshari, or stuffed vegetables), served in authentic Egyptian pottery or traditional plate, steaming hot, rich sauce",
       };
 
       const styleDesc = styleMap[style] || styleMap.photo;
-      const catDesc = catMap[category] || "delicious food";
-      const prompt = `${styleDesc}, ${catDesc}, dish name: "${dishName}", ${description ? `description: ${description},` : ""} served beautifully on a plate, menu photography, high quality, appetizing, no text, no watermark`;
+      const catDesc = catMap[category] || "delicious freshly prepared food dish";
+      const prompt = `${styleDesc}. The dish is: ${catDesc}. The specific dish name is "${dishName}"${description ? `, described as: ${description}` : ""}. The photo must look 100% real and photorealistic like taken by a professional food photographer for a restaurant menu. Show real food textures, steam, sauce drips, and natural imperfections. Shot from a 45-degree angle or top-down. Absolutely NO text, NO watermarks, NO labels, NO writing on the image.`;
 
       const imgResp = await openai.images.generate({
         model: "gpt-image-1",
         prompt,
         n: 1,
         size: "1024x1024",
+        quality: "high",
       });
 
       const b64 = imgResp.data?.[0]?.b64_json;
