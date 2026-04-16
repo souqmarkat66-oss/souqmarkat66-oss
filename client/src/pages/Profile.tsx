@@ -372,6 +372,30 @@ export default function Profile() {
                 عضو منذ {format(new Date(profileUser.created_at), "MMMM yyyy", { locale: ar })}
               </p>
             )}
+            {/* Gender & Account Type badges */}
+            {(profileUser.gender || profileUser.account_type) && (
+              <div className="flex flex-wrap gap-2 mb-2 justify-center sm:justify-start">
+                {profileUser.gender && (
+                  <Badge variant="outline" className="gap-1 text-xs">
+                    {profileUser.gender === "male" ? "🧑 ذكر" : "👩 أنثى"}
+                  </Badge>
+                )}
+                {profileUser.account_type && (
+                  <Badge variant="outline" className={`gap-1 text-xs ${
+                    profileUser.account_type === "business" ? "border-amber-300 text-amber-700" :
+                    profileUser.account_type === "broadcaster" ? "border-purple-300 text-purple-700" :
+                    profileUser.account_type === "freelancer" ? "border-cyan-300 text-cyan-700" :
+                    "border-border"
+                  }`}>
+                    {profileUser.account_type === "personal" ? "👤 شخصي" :
+                     profileUser.account_type === "business" ? "🏪 تجاري" :
+                     profileUser.account_type === "broadcaster" ? "📹 مذيع" :
+                     profileUser.account_type === "freelancer" ? "💼 فريلانسر" :
+                     profileUser.account_type}
+                  </Badge>
+                )}
+              </div>
+            )}
             {/* Social Info */}
             {(profileUser.birthday || profileUser.job_title || profileUser.company || profileUser.city || profileUser.governorate) && (
               <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2 justify-center sm:justify-start">

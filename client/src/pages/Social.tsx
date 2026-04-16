@@ -54,6 +54,8 @@ export default function Social() {
   const [company, setCompany] = useState("");
   const [city, setCity] = useState("");
   const [relationship, setRelationship] = useState("");
+  const [gender, setGender] = useState("");
+  const [accountType, setAccountType] = useState("");
   const [savedProfile, setSavedProfile] = useState(false);
 
   const { data: referralData } = useQuery<any>({
@@ -99,11 +101,13 @@ export default function Social() {
       setCompany(myProfile.user.company || "");
       setCity(myProfile.user.city || myProfile.user.governorate || "");
       setRelationship(myProfile.user.relationship_status || "");
+      setGender(myProfile.user.gender || "");
+      setAccountType(myProfile.user.account_type || "");
     }
   }, [myProfile?.user]);
 
   const socialMutation = useMutation({
-    mutationFn: () => apiRequest("PATCH", "/api/auth/me/social", { birthday, jobTitle, company, city, relationshipStatus: relationship }),
+    mutationFn: () => apiRequest("PATCH", "/api/auth/me/social", { birthday, jobTitle, company, city, relationshipStatus: relationship, gender, accountType }),
     onSuccess: () => {
       toast({ title: "✅ تم حفظ معلوماتك الاجتماعية" });
       qc.invalidateQueries({ queryKey: ["/api/profile", user?.id] });
@@ -631,6 +635,81 @@ export default function Social() {
             </div>
             <p className="text-xs text-muted-foreground -mt-2">تظهر على بروفايلك وتساعد الآخرين يتعرفوا عليك</p>
 
+            {/* Gender */}
+            <div className="space-y-1">
+              <label className="text-xs font-bold flex items-center gap-1">
+                👤 النوع (الجنس)
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setGender("male")}
+                  className={`text-xs py-2.5 px-3 rounded-xl border font-medium transition-all ${
+                    gender === "male"
+                      ? "bg-blue-500 text-white border-blue-500"
+                      : "border-border hover:border-primary/40 hover:bg-primary/5"
+                  }`}
+                  data-testid="btn-gender-male"
+                >
+                  ذكر 🧑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGender("female")}
+                  className={`text-xs py-2.5 px-3 rounded-xl border font-medium transition-all ${
+                    gender === "female"
+                      ? "bg-pink-500 text-white border-pink-500"
+                      : "border-border hover:border-primary/40 hover:bg-primary/5"
+                  }`}
+                  data-testid="btn-gender-female"
+                >
+                  أنثى 👩
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGender("")}
+                  className={`text-xs py-2.5 px-3 rounded-xl border font-medium transition-all ${
+                    gender === ""
+                      ? "bg-gray-500 text-white border-gray-500"
+                      : "border-border hover:border-primary/40 hover:bg-primary/5"
+                  }`}
+                  data-testid="btn-gender-none"
+                >
+                  لا أريد التحديد
+                </button>
+              </div>
+            </div>
+
+            {/* Account Type */}
+            <div className="space-y-1">
+              <label className="text-xs font-bold flex items-center gap-1">
+                🏷️ نوع الحساب
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {[
+                  { value: "personal", label: "شخصي 👤", desc: "حساب فردي للتسوق والبيع" },
+                  { value: "business", label: "تجاري 🏪", desc: "متجر أو شركة أو مؤسسة" },
+                  { value: "broadcaster", label: "مذيع/بث 📹", desc: "بث مباشر وصناعة محتوى" },
+                  { value: "freelancer", label: "فريلانسر 💼", desc: "عمل حر وخدمات" },
+                ].map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setAccountType(opt.value)}
+                    className={`text-xs py-3 px-3 rounded-xl border font-medium transition-all text-right ${
+                      accountType === opt.value
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "border-border hover:border-primary/40 hover:bg-primary/5"
+                    }`}
+                    data-testid={`btn-account-type-${opt.value}`}
+                  >
+                    <div className="font-bold text-sm">{opt.label}</div>
+                    <div className={`text-[10px] mt-0.5 ${accountType === opt.value ? "text-primary-foreground/70" : "text-muted-foreground"}`}>{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Birthday */}
             <div className="space-y-1">
               <label className="text-xs font-bold flex items-center gap-1">
@@ -733,10 +812,27 @@ export default function Social() {
           </div>
 
           {/* Preview card */}
-          {(birthday || jobTitle || company || city) && (
+          {(birthday || jobTitle || company || city || gender || accountType) && (
             <div className="border rounded-2xl p-4 bg-muted/20">
               <p className="text-xs font-bold mb-3 text-muted-foreground">معاينة بروفايلك</p>
               <div className="space-y-1.5">
+                {gender && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span>{gender === "male" ? "🧑" : "👩"}</span>
+                    <span>{gender === "male" ? "ذكر" : "أنثى"}</span>
+                  </div>
+                )}
+                {accountType && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <Tag className="w-4 h-4 text-primary" />
+                    <span>{
+                      accountType === "personal" ? "حساب شخصي" :
+                      accountType === "business" ? "حساب تجاري" :
+                      accountType === "broadcaster" ? "مذيع/صانع محتوى" :
+                      accountType === "freelancer" ? "فريلانسر" : accountType
+                    }</span>
+                  </div>
+                )}
                 {birthday && (
                   <div className="flex items-center gap-2 text-sm">
                     <Cake className="w-4 h-4 text-pink-500" />

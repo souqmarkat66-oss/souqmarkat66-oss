@@ -202,6 +202,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS company text`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS city text`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS relationship_status text`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender text`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type text`);
   } catch { /* columns may already exist */ }
 
   // ── Auto-cleanup stale live streams (older than 12 hours) ──
@@ -5667,7 +5669,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
     const { userId } = req.params;
     try {
       const [userRow, adsRow, channelRow] = await Promise.all([
-        db.execute(sql`SELECT id, first_name, last_name, profile_image_url, bio, governorate, referral_code, created_at, interests, birthday, job_title, company, city, relationship_status FROM users WHERE id = ${userId}`),
+        db.execute(sql`SELECT id, first_name, last_name, profile_image_url, bio, governorate, referral_code, created_at, interests, birthday, job_title, company, city, relationship_status, gender, account_type FROM users WHERE id = ${userId}`),
         db.execute(sql`SELECT COUNT(*) as count, SUM(views_count) as views, SUM(likes_count) as likes FROM ads WHERE user_id = ${userId} AND status = 'active'`),
         db.execute(sql`SELECT * FROM channels WHERE user_id = ${userId} LIMIT 1`),
       ]);
@@ -6282,10 +6284,10 @@ Sitemap: ${BASE}/sitemap-pages.xml
   // SOCIAL FEATURES: Memories, Birthdays, Profile Social Info
   // ================================================================
 
-  // PATCH /api/auth/me/social — update birthday, job, company, city, relationship
+  // PATCH /api/auth/me/social — update birthday, job, company, city, relationship, gender, account_type
   app.patch("/api/auth/me/social", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
-    const { birthday, jobTitle, company, city, relationshipStatus } = req.body;
+    const { birthday, jobTitle, company, city, relationshipStatus, gender, accountType } = req.body;
     try {
       await db.execute(sql`
         UPDATE users SET
@@ -6294,6 +6296,8 @@ Sitemap: ${BASE}/sitemap-pages.xml
           company = ${company || null},
           city = ${city || null},
           relationship_status = ${relationshipStatus || null},
+          gender = ${gender || null},
+          account_type = ${accountType || null},
           updated_at = NOW()
         WHERE id = ${userId}
       `);
