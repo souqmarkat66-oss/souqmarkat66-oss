@@ -1257,6 +1257,68 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ADMIN: List recharge codes
+  // ============ AI CONTROL & USAGE TRACKING ============
+  app.get("/api/admin/ai-settings", isAuthenticated, async (req: any, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
+    const [imgQuality, imgSize, dailyCap, monthlyCap, kill] = await Promise.all([
+      storage.getSetting("ai_image_quality"),
+      storage.getSetting("ai_image_size"),
+      storage.getSetting("ai_daily_cap_usd"),
+      storage.getSetting("ai_monthly_cap_usd"),
+      storage.getSetting("ai_kill_switch"),
+    ]);
+    res.json({
+      imageQuality: imgQuality || "medium",
+      imageSize: imgSize || "1024x1024",
+      dailyCapUsd: parseFloat(dailyCap || "5"),
+      monthlyCapUsd: parseFloat(monthlyCap || "50"),
+      killSwitch: kill === "1",
+    });
+  });
+
+  app.post("/api/admin/ai-settings", isAuthenticated, async (req: any, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
+    const { imageQuality, imageSize, dailyCapUsd, monthlyCapUsd, killSwitch } = req.body || {};
+    const validQ = ["low", "medium", "high"];
+    const validS = ["1024x1024", "1024x1536", "1536x1024", "auto"];
+    if (imageQuality && validQ.includes(imageQuality)) await storage.setSetting("ai_image_quality", imageQuality);
+    if (imageSize && validS.includes(imageSize)) await storage.setSetting("ai_image_size", imageSize);
+    if (dailyCapUsd !== undefined) await storage.setSetting("ai_daily_cap_usd", String(dailyCapUsd));
+    if (monthlyCapUsd !== undefined) await storage.setSetting("ai_monthly_cap_usd", String(monthlyCapUsd));
+    if (killSwitch !== undefined) await storage.setSetting("ai_kill_switch", killSwitch ? "1" : "0");
+    res.json({ ok: true });
+  });
+
+  app.get("/api/admin/ai-usage-stats", isAuthenticated, async (req: any, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
+    try {
+      const today = await pool.query(`
+        SELECT type, COUNT(*)::int AS count, COALESCE(SUM(cost),0)::float AS cost
+        FROM ai_usage WHERE created_at >= CURRENT_DATE GROUP BY type
+      `);
+      const month = await pool.query(`
+        SELECT type, COUNT(*)::int AS count, COALESCE(SUM(cost),0)::float AS cost
+        FROM ai_usage WHERE created_at >= date_trunc('month', CURRENT_DATE) GROUP BY type
+      `);
+      const totalToday = await pool.query(`SELECT COUNT(*)::int AS count, COALESCE(SUM(cost),0)::float AS cost FROM ai_usage WHERE created_at >= CURRENT_DATE`);
+      const totalMonth = await pool.query(`SELECT COUNT(*)::int AS count, COALESCE(SUM(cost),0)::float AS cost FROM ai_usage WHERE created_at >= date_trunc('month', CURRENT_DATE)`);
+      const topUsers = await pool.query(`
+        SELECT au.user_id, u.first_name, u.last_name, COUNT(*)::int AS count, COALESCE(SUM(au.cost),0)::float AS cost
+        FROM ai_usage au LEFT JOIN users u ON u.id::text = au.user_id::text
+        WHERE au.created_at >= date_trunc('month', CURRENT_DATE)
+        GROUP BY au.user_id, u.first_name, u.last_name
+        ORDER BY count DESC LIMIT 10
+      `);
+      res.json({
+        today: { byType: today.rows, total: totalToday.rows[0] },
+        month: { byType: month.rows, total: totalMonth.rows[0] },
+        topUsers: topUsers.rows,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   app.get("/api/admin/coins/codes", isAuthenticated, async (req: any, res) => {
     if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
     const page = parseInt((req.query.page as string) || "1");
@@ -4975,13 +5037,27 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const catDesc = catMap[category] || "delicious freshly prepared food dish";
       const prompt = `${styleDesc}. The dish is: ${catDesc}. The specific dish name is "${dishName}"${description ? `, described as: ${description}` : ""}. The photo must look 100% real and photorealistic like taken by a professional food photographer for a restaurant menu. Show real food textures, steam, sauce drips, and natural imperfections. Shot from a 45-degree angle or top-down. Absolutely NO text, NO watermarks, NO labels, NO writing on the image.`;
 
+      const killSwitch = await storage.getSetting("ai_kill_switch");
+      if (killSwitch === "1") {
+        return res.status(503).json({ message: "تم إيقاف خدمة توليد الصور بالذكاء الاصطناعي مؤقتاً من الإدارة" });
+      }
+      const imgQuality = (await storage.getSetting("ai_image_quality")) || "medium";
+      const imgSize = (await storage.getSetting("ai_image_size")) || "1024x1024";
       const imgResp = await openai.images.generate({
         model: "gpt-image-1",
         prompt,
         n: 1,
-        size: "1536x1024",
-        quality: "high",
+        size: imgSize as any,
+        quality: imgQuality as any,
       });
+      // Estimate cost (USD) for tracking
+      const costMap: Record<string, Record<string, number>> = {
+        "1024x1024": { low: 0.011, medium: 0.042, high: 0.167 },
+        "1024x1536": { low: 0.016, medium: 0.063, high: 0.25 },
+        "1536x1024": { low: 0.016, medium: 0.063, high: 0.25 },
+      };
+      const estCost = costMap[imgSize]?.[imgQuality] || 0.05;
+      try { await storage.recordAiUsage((req.user as any)?.claims?.sub || "unknown", "image", estCost); } catch {}
 
       const b64 = imgResp.data?.[0]?.b64_json;
       const imageUrl = imgResp.data?.[0]?.url;

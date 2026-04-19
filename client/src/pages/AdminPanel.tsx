@@ -27,6 +27,8 @@ import {
   Sparkles, Image, Video, Wand2, FileText, Gift, Check, Globe, Plus
 } from "lucide-react";
 
+import AdminAiControl from "./AdminAiControl";
+
 const ADMIN_ID = "54219806";
 const ADMIN_EMAIL = "souqmarkat66@gmail.com";
 
@@ -52,6 +54,7 @@ const NAV = [
   { key: "broadcast",      label: "إشعارات جماعية",       icon: Bell,            color: "text-cyan-400" },
   { key: "media",          label: "مكتبة الملفات",         icon: FolderOpen,      color: "text-lime-400" },
   { key: "pricing",        label: "إدارة الأسعار",          icon: DollarSign,      color: "text-yellow-400" },
+  { key: "ai_control",     label: "تحكم الذكاء الاصطناعي",  icon: Sparkles,        color: "text-violet-400" },
   { key: "aipricing",      label: "أسعار الذكاء الاصطناعي", icon: Sparkles,       color: "text-violet-400" },
   { key: "coins",          label: "نظام العملات",          icon: Gift,            color: "text-yellow-400" },
   { key: "admins",         label: "إدارة الأدمن",          icon: Shield,          color: "text-red-400" },
@@ -300,6 +303,7 @@ export default function AdminPanel() {
           {section === "media"      && <MediaSection logAction={logAction} />}
           {section === "pricing"    && <PricingSection />}
           {section === "aipricing"  && <AiPricingSection />}
+          {section === "ai_control" && <AdminAiControl />}
           {section === "coins"      && <CoinsSection logAction={logAction} />}
           {section === "admins"     && <AdminsSection />}
           {section === "settings"   && <SettingsSection logAction={logAction} />}

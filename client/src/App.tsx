@@ -20,6 +20,7 @@ import LiveStreamList from "@/pages/LiveStreamList";
 import StartStream from "@/pages/StartStream";
 import Campaigns from "@/pages/Campaigns";
 import AdminPanel from "@/pages/AdminPanel";
+import AdminAiControl from "@/pages/AdminAiControl";
 import Revenue from "@/pages/Revenue";
 import Payments from "@/pages/Payments";
 import Reels from "@/pages/Reels";
@@ -116,6 +117,9 @@ function Router() {
               </Route>
               <Route path="/admin">
                 <ProtectedRoute component={AdminPanel} />
+              </Route>
+              <Route path="/admin/ai">
+                <ProtectedRoute component={AdminAiControl} />
               </Route>
               <Route path="/login" component={Login} />
               <Route path="/m/:slug" component={PublicMenu} />
