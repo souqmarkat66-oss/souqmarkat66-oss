@@ -156,7 +156,11 @@ async function deductAiCharge(userId: string, amountEGP: number, description: st
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
-  await setupAuth(app);
+  try {
+    await setupAuth(app);
+  } catch (err) {
+    console.error("[Auth] setupAuth failed, continuing without auth:", err);
+  }
   registerCustomAuthRoutes(app);
   registerImageRoutes(app);
 
