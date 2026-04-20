@@ -7281,21 +7281,5 @@ ${reelTags}
     } catch { next(); }
   });
 
-  // ── TEMP: VPS file sync endpoints (remove after deploy) ─────────
-  const _fs = await import("fs");
-  const _path = await import("path");
-  app.get("/api/_sync/:file", (req, res) => {
-    const map: Record<string, string> = {
-      "auth":    "server/customAuth.ts",
-      "login":   "client/src/pages/Login.tsx",
-      "useauth": "client/src/hooks/use-auth.ts",
-    };
-    const f = map[req.params.file];
-    if (!f) return res.status(404).send("not found");
-    const content = _fs.readFileSync(_path.join(process.cwd(), f), "utf8");
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.send(content);
-  });
-
   return httpServer;
 }
