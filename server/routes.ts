@@ -7281,17 +7281,5 @@ ${reelTags}
     } catch { next(); }
   });
 
-  // ── TEMP: VPS sync (remove after deploy) ────────────────────────
-  const _fs2 = await import("fs"); const _path2 = await import("path");
-  app.get("/api/_sync2/:file", (req, res) => {
-    const map: Record<string, string> = {
-      "login": "client/src/pages/Login.tsx",
-    };
-    const f = map[req.params.file];
-    if (!f) return res.status(404).send("not found");
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.send(_fs2.readFileSync(_path2.join(process.cwd(), f), "utf8"));
-  });
-
   return httpServer;
 }
