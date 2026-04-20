@@ -164,15 +164,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerCustomAuthRoutes(app);
   registerImageRoutes(app);
 
-  // ── TEMP: serve DB backup for VPS migration ──────────────────────
-  app.get("/api/_dl/db-backup-9x7k.sql", (req, res) => {
-    const f = "/tmp/replit_inserts.sql";
-    if (!fs.existsSync(f)) return res.status(404).send("not found");
-    res.setHeader("Content-Type", "text/plain");
-    res.setHeader("Content-Disposition", "attachment; filename=replit_data.sql");
-    res.sendFile(f);
-  });
-  // ── END TEMP ─────────────────────────────────────────────────────
 
   // ── Redirect www.ads-as.com → ads-as.com (permanent 301) ──
   app.use((req, res, next) => {
