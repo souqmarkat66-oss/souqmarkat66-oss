@@ -16,6 +16,9 @@ declare module "express-session" {
       lastName: string | null;
       profileImageUrl: string | null;
     };
+    resetToken?: string;
+    resetUserId?: string;
+    resetExpiry?: number;
   }
 }
 
@@ -112,6 +115,9 @@ export function registerCustomAuthRoutes(app: Express) {
       if (!user) return res.status(401).json({ message: "البريد الإلكتروني أو رقم الهاتف أو الـ ID غير موجود" });
 
       if (!user.password_hash) {
+        // Store in session so set-password can verify later
+        (req.session as any).firstLoginUserId = user.id;
+        await new Promise<void>((resolve) => req.session.save(() => resolve()));
         return res.status(403).json({ message: "first_login", userId: user.id });
       }
 
@@ -188,9 +194,25 @@ export function registerCustomAuthRoutes(app: Express) {
 
   // ── POST /api/auth/set-password (first-login / forgot-password) ─
   app.post("/api/auth/set-password", async (req: Request, res: Response) => {
-    const { userId, password } = req.body;
+    const { userId, password, resetToken } = req.body;
     if (!userId || !password || password.length < 6)
       return res.status(400).json({ message: "بيانات غير صحيحة" });
+
+    const sess = req.session as any;
+
+    // Security: verify reset token OR first-login token stored in session
+    const validReset =
+      sess.resetUserId === userId &&
+      sess.resetToken === resetToken &&
+      sess.resetExpiry &&
+      Date.now() < sess.resetExpiry;
+
+    const validFirstLogin = sess.firstLoginUserId === userId;
+
+    if (!validReset && !validFirstLogin) {
+      return res.status(403).json({ message: "انتهت صلاحية طلب إعادة التعيين — ابدأ من جديد" });
+    }
+
     try {
       const hash = await bcrypt.hash(password, 10);
       await db.execute(sql`UPDATE users SET password_hash = ${hash} WHERE id = ${userId}`);
@@ -199,7 +221,14 @@ export function registerCustomAuthRoutes(app: Express) {
       );
       const user: any = result.rows[0];
       if (!user) return res.status(404).json({ message: "المستخدم غير موجود" });
-      (req.session as any).customUser = {
+
+      // Clear reset tokens from session
+      delete sess.resetToken;
+      delete sess.resetUserId;
+      delete sess.resetExpiry;
+      delete sess.firstLoginUserId;
+
+      sess.customUser = {
         id:              user.id,
         email:           user.email,
         phone:           user.phone,
@@ -207,7 +236,6 @@ export function registerCustomAuthRoutes(app: Express) {
         lastName:        user.last_name,
         profileImageUrl: user.profile_image_url,
       };
-      // Explicitly save session before responding
       req.session.save((err) => {
         if (err) return res.status(500).json({ message: "خطأ في حفظ الجلسة" });
         res.json({ success: true });
@@ -235,9 +263,19 @@ export function registerCustomAuthRoutes(app: Express) {
       );
       const user: any = result.rows[0];
       if (!user) return res.status(200).json({ message: "not_found", userId: null, notFound: true });
-      // Clear password to force reset
-      await db.execute(sql`UPDATE users SET password_hash = NULL WHERE id = ${user.id}`);
-      return res.json({ message: "ok", userId: user.id, firstName: user.first_name });
+
+      // Generate a secure time-limited reset token (10 minutes)
+      const resetToken = uuidv4();
+      const sess = req.session as any;
+      sess.resetToken   = resetToken;
+      sess.resetUserId  = user.id;
+      sess.resetExpiry  = Date.now() + 10 * 60 * 1000;
+
+      await new Promise<void>((resolve, reject) =>
+        req.session.save((err) => err ? reject(err) : resolve())
+      );
+
+      return res.json({ message: "ok", userId: user.id, firstName: user.first_name, resetToken });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }

@@ -70,6 +70,7 @@ export default function Login() {
   // Forgot password
   const [forgotIdentifier, setForgotIdentifier] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
+  const [resetToken, setResetToken] = useState("");
 
   useEffect(() => {
     if (user) {
@@ -118,9 +119,14 @@ export default function Login() {
     if (newPw1.length < 6) return toast({ variant: "destructive", title: "كلمة المرور 6 أحرف على الأقل" });
     if (newPw1 !== newPw2) return toast({ variant: "destructive", title: "كلمتا المرور غير متطابقتين" });
     try {
-      await setPassword.mutateAsync({ userId: firstLoginUserId, password: newPw1 });
+      await setPassword.mutateAsync({ userId: firstLoginUserId, password: newPw1, resetToken });
     } catch (err: any) {
-      toast({ variant: "destructive", title: err?.message || "فشل تعيين كلمة المرور" });
+      if (err?.message?.includes("انتهت صلاحية")) {
+        toast({ variant: "destructive", title: "انتهت صلاحية الطلب", description: "ابدأ من 'نسيت كلمة المرور' من جديد" });
+        setScreen("forgot");
+      } else {
+        toast({ variant: "destructive", title: err?.message || "فشل تعيين كلمة المرور" });
+      }
     }
   };
 
@@ -150,6 +156,7 @@ export default function Login() {
         return;
       }
       setFirstLoginUserId(json.userId);
+      setResetToken(json.resetToken || "");
       setScreen("set-password");
       toast({ title: `مرحباً ${json.firstName || ""}، عيّن كلمة مرور جديدة` });
     } catch {
