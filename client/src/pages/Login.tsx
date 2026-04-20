@@ -121,6 +121,12 @@ export default function Login() {
     if (newPw1 !== newPw2) return toast({ variant: "destructive", title: "كلمتا المرور غير متطابقتين" });
     try {
       await setPassword.mutateAsync({ userId: firstLoginUserId, password: newPw1, resetToken });
+      toast({ title: "✅ تم تغيير كلمة المرور بنجاح", description: "يمكنك الآن تسجيل الدخول بكلمة المرور الجديدة" });
+      setNewPw1("");
+      setNewPw2("");
+      setResetToken("");
+      setFirstLoginUserId("");
+      setScreen("login");
     } catch (err: any) {
       if (err?.message?.includes("انتهت صلاحية")) {
         toast({ variant: "destructive", title: "انتهت صلاحية الطلب", description: "ابدأ من 'نسيت كلمة المرور' من جديد" });
