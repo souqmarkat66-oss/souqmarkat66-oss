@@ -1,6 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { v4 as uuidv4 } from "uuid";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { emitAdminEvent } from "./adminEvents";
