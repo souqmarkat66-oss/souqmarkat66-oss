@@ -146,6 +146,7 @@ export function registerCustomAuthRoutes(app: Express) {
       }
 
       const match = await bcrypt.compare(password, user.password_hash);
+      console.log(`[LOGIN] id=${user.id} hash_len=${user.password_hash?.length} match=${match}`);
       if (!match) return res.status(401).json({ message: "كلمة المرور غير صحيحة" });
 
       (req.session as any).customUser = {
@@ -222,13 +223,16 @@ export function registerCustomAuthRoutes(app: Express) {
     if (!userId || !password || password.length < 6)
       return res.status(400).json({ message: "بيانات غير صحيحة" });
 
-    if (!resetToken || !verifyResetToken(String(resetToken), String(userId))) {
+    const tokenOk = !!resetToken && verifyResetToken(String(resetToken), String(userId));
+    console.log(`[SET-PW] userId=${userId} tokenOk=${tokenOk} hasToken=${!!resetToken}`);
+    if (!tokenOk) {
       return res.status(403).json({ message: "انتهت صلاحية طلب إعادة التعيين — ابدأ من جديد" });
     }
 
     try {
       const hash = await bcrypt.hash(password, 10);
-      await db.execute(sql`UPDATE users SET password_hash = ${hash} WHERE id = ${userId}`);
+      const upd = await db.execute(sql`UPDATE users SET password_hash = ${hash} WHERE id = ${userId}`);
+      console.log(`[SET-PW] DB update rowCount=${(upd as any).rowCount} userId=${userId}`);
       const result = await db.execute(
         sql`SELECT id, email, phone, first_name, last_name, profile_image_url FROM users WHERE id = ${userId} LIMIT 1`
       );
