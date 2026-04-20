@@ -89,6 +89,7 @@ export default function Login() {
     } catch (err: any) {
       if (err?.message === "first_login" || err?.status === 403) {
         setFirstLoginUserId(err.userId || "");
+        setResetToken(err.resetToken || "");
         setScreen("set-password");
       } else {
         toast({ variant: "destructive", title: err?.message || "فشل تسجيل الدخول" });

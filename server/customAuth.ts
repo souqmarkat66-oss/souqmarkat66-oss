@@ -1,8 +1,8 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { v4 as uuidv4 } from "uuid";
 import { emitAdminEvent } from "./adminEvents";
 
 // ── Extend session ────────────────────────────────────────────────
@@ -16,9 +16,35 @@ declare module "express-session" {
       lastName: string | null;
       profileImageUrl: string | null;
     };
-    resetToken?: string;
-    resetUserId?: string;
-    resetExpiry?: number;
+  }
+}
+
+// ── Signed reset tokens (stateless, no session needed) ───────────
+function createResetToken(userId: string): string {
+  const secret = process.env.SESSION_SECRET || "ads-as-default-secret-change-in-prod";
+  const expiry = Date.now() + 10 * 60 * 1000; // 10 minutes
+  const payload = `${userId}|${expiry}`;
+  const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+  return Buffer.from(`${payload}|${sig}`).toString("base64url");
+}
+
+function verifyResetToken(token: string, userId: string): boolean {
+  try {
+    const secret = process.env.SESSION_SECRET || "ads-as-default-secret-change-in-prod";
+    const decoded = Buffer.from(token, "base64url").toString("utf8");
+    const parts = decoded.split("|");
+    if (parts.length !== 3) return false;
+    const [tokenUserId, expiryStr, sig] = parts;
+    if (tokenUserId !== userId) return false;
+    if (Date.now() > parseInt(expiryStr)) return false;
+    const payload = `${tokenUserId}|${expiryStr}`;
+    const expectedSig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+    const sigBuf = Buffer.from(sig, "hex");
+    const expBuf = Buffer.from(expectedSig, "hex");
+    if (sigBuf.length !== expBuf.length) return false;
+    return crypto.timingSafeEqual(sigBuf, expBuf);
+  } catch {
+    return false;
   }
 }
 
@@ -115,10 +141,8 @@ export function registerCustomAuthRoutes(app: Express) {
       if (!user) return res.status(401).json({ message: "البريد الإلكتروني أو رقم الهاتف أو الـ ID غير موجود" });
 
       if (!user.password_hash) {
-        // Store in session so set-password can verify later
-        (req.session as any).firstLoginUserId = user.id;
-        await new Promise<void>((resolve) => req.session.save(() => resolve()));
-        return res.status(403).json({ message: "first_login", userId: user.id });
+        const resetToken = createResetToken(String(user.id));
+        return res.status(403).json({ message: "first_login", userId: user.id, resetToken });
       }
 
       const match = await bcrypt.compare(password, user.password_hash);
@@ -198,18 +222,7 @@ export function registerCustomAuthRoutes(app: Express) {
     if (!userId || !password || password.length < 6)
       return res.status(400).json({ message: "بيانات غير صحيحة" });
 
-    const sess = req.session as any;
-
-    // Security: verify reset token OR first-login token stored in session
-    const validReset =
-      sess.resetUserId === userId &&
-      sess.resetToken === resetToken &&
-      sess.resetExpiry &&
-      Date.now() < sess.resetExpiry;
-
-    const validFirstLogin = sess.firstLoginUserId === userId;
-
-    if (!validReset && !validFirstLogin) {
+    if (!resetToken || !verifyResetToken(String(resetToken), String(userId))) {
       return res.status(403).json({ message: "انتهت صلاحية طلب إعادة التعيين — ابدأ من جديد" });
     }
 
@@ -222,13 +235,7 @@ export function registerCustomAuthRoutes(app: Express) {
       const user: any = result.rows[0];
       if (!user) return res.status(404).json({ message: "المستخدم غير موجود" });
 
-      // Clear reset tokens from session
-      delete sess.resetToken;
-      delete sess.resetUserId;
-      delete sess.resetExpiry;
-      delete sess.firstLoginUserId;
-
-      sess.customUser = {
+      (req.session as any).customUser = {
         id:              user.id,
         email:           user.email,
         phone:           user.phone,
@@ -264,17 +271,7 @@ export function registerCustomAuthRoutes(app: Express) {
       const user: any = result.rows[0];
       if (!user) return res.status(200).json({ message: "not_found", userId: null, notFound: true });
 
-      // Generate a secure time-limited reset token (10 minutes)
-      const resetToken = uuidv4();
-      const sess = req.session as any;
-      sess.resetToken   = resetToken;
-      sess.resetUserId  = user.id;
-      sess.resetExpiry  = Date.now() + 10 * 60 * 1000;
-
-      await new Promise<void>((resolve, reject) =>
-        req.session.save((err) => err ? reject(err) : resolve())
-      );
-
+      const resetToken = createResetToken(String(user.id));
       return res.json({ message: "ok", userId: user.id, firstName: user.first_name, resetToken });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
