@@ -224,7 +224,6 @@ export function registerCustomAuthRoutes(app: Express) {
       return res.status(400).json({ message: "بيانات غير صحيحة" });
 
     const tokenOk = !!resetToken && verifyResetToken(String(resetToken), String(userId));
-    console.log(`[SET-PW] userId=${userId} tokenOk=${tokenOk} hasToken=${!!resetToken}`);
     if (!tokenOk) {
       return res.status(403).json({ message: "انتهت صلاحية طلب إعادة التعيين — ابدأ من جديد" });
     }
@@ -232,7 +231,6 @@ export function registerCustomAuthRoutes(app: Express) {
     try {
       const hash = await bcrypt.hash(password, 10);
       const upd = await db.execute(sql`UPDATE users SET password_hash = ${hash} WHERE id = ${userId}`);
-      console.log(`[SET-PW] DB update rowCount=${(upd as any).rowCount} userId=${userId}`);
       const result = await db.execute(
         sql`SELECT id, email, phone, first_name, last_name, profile_image_url FROM users WHERE id = ${userId} LIMIT 1`
       );
