@@ -164,6 +164,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerCustomAuthRoutes(app);
   registerImageRoutes(app);
 
+  // ── TEMP: DB migration download ───────────────────────────────────
+  app.get("/api/_dl/full-9x7k.sql", (req, res) => {
+    const f = "/tmp/replit_full.sql";
+    if (!fs.existsSync(f)) return res.status(404).send("not found");
+    res.setHeader("Content-Type", "text/plain");
+    res.sendFile(f);
+  });
+  // ── END TEMP ─────────────────────────────────────────────────────
 
   // ── Redirect www.ads-as.com → ads-as.com (permanent 301) ──
   app.use((req, res, next) => {
