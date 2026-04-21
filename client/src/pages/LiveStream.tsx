@@ -270,8 +270,12 @@ export default function LiveStream() {
       return ms;
     } catch (err: any) {
       const msg = err.name === "NotAllowedError"
-        ? "الرجاء السماح للمتصفح بالوصول للكاميرا والميكروفون"
-        : "تعذّر فتح الكاميرا — تأكد من عدم استخدامها في تطبيق آخر";
+        ? "PERMISSION_DENIED"
+        : err.name === "NotFoundError"
+          ? "NO_DEVICE"
+          : err.name === "NotReadableError"
+            ? "DEVICE_BUSY"
+            : "GENERIC";
       setCameraError(msg);
       return null;
     }
@@ -1367,21 +1371,89 @@ export default function LiveStream() {
         />
 
         {/* Camera error */}
-        {isBroadcast && cameraError && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-6 gap-5 z-20">
-            <div className="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center">
-              <VideoOff className="w-10 h-10 text-red-400" />
+        {isBroadcast && cameraError && (() => {
+          const ua = navigator.userAgent;
+          const isIOS = /iPad|iPhone|iPod/.test(ua);
+          const isAndroid = /Android/.test(ua);
+          const isSafari = /^((?!chrome|android).)*safari/i.test(ua);
+          const isChrome = /Chrome/.test(ua) && !/Edg/.test(ua);
+
+          const titles: Record<string, string> = {
+            PERMISSION_DENIED: "محتاجين إذن الكاميرا والميكروفون",
+            NO_DEVICE: "مفيش كاميرا متوصلة",
+            DEVICE_BUSY: "الكاميرا مشغولة في تطبيق تاني",
+            GENERIC: "تعذّر فتح الكاميرا",
+          };
+          const subtitles: Record<string, string> = {
+            PERMISSION_DENIED: "علشان تبدأ البث المباشر، لازم نستخدم الكاميرا والمايك بتاع جهازك",
+            NO_DEVICE: "تأكد إن جهازك فيه كاميرا وإنها شغالة",
+            DEVICE_BUSY: "اقفل أي تطبيق تاني بيستخدم الكاميرا (Zoom, WhatsApp, إلخ) وحاول تاني",
+            GENERIC: "حاول تعيد فتح الصفحة أو استخدم متصفح تاني",
+          };
+
+          const steps = cameraError === "PERMISSION_DENIED" ? (
+            isIOS && isSafari ? [
+              "افتح إعدادات iPhone",
+              "اختار: Safari ← الكاميرا والميكروفون",
+              "اختار: السماح",
+              "ارجع للموقع واضغط حاول مجدداً",
+            ] : isAndroid && isChrome ? [
+              "اضغط على القفل 🔒 جنب اسم الموقع فوق",
+              "اختار: أذونات الموقع",
+              "فعّل: الكاميرا والميكروفون",
+              "ارجع واضغط حاول مجدداً",
+            ] : [
+              "اضغط على أيقونة 🔒 أو 🎥 فوق جنب اسم الموقع",
+              "اختار: السماح للكاميرا والميكروفون",
+              "حدّث الصفحة وحاول تاني",
+            ]
+          ) : null;
+
+          return (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-black via-zinc-900 to-black text-center px-6 gap-4 z-20 overflow-y-auto py-8">
+              <div className="w-24 h-24 rounded-full bg-red-500/20 flex items-center justify-center ring-4 ring-red-500/30">
+                <VideoOff className="w-12 h-12 text-red-400" />
+              </div>
+              <h2 className="text-white font-bold text-xl">{titles[cameraError] || titles.GENERIC}</h2>
+              <p className="text-white/70 text-sm max-w-md leading-relaxed">{subtitles[cameraError] || subtitles.GENERIC}</p>
+
+              {steps && (
+                <div className="bg-white/10 rounded-2xl p-4 max-w-sm w-full text-right border border-white/10">
+                  <p className="text-yellow-300 font-bold text-sm mb-3 flex items-center gap-2 justify-end">
+                    خطوات الحل
+                    <AlertTriangle className="w-4 h-4" />
+                  </p>
+                  <ol className="space-y-2 text-white/90 text-sm">
+                    {steps.map((s, i) => (
+                      <li key={i} className="flex items-start gap-2 justify-end">
+                        <span className="flex-1">{s}</span>
+                        <span className="w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center flex-shrink-0 font-bold">{i + 1}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
+              <button
+                onClick={() => startCamera(camFacing)}
+                className="flex items-center gap-2 px-8 py-3 rounded-full bg-white text-black font-bold text-sm shadow-xl hover:scale-105 transition"
+                data-testid="btn-retry-camera"
+              >
+                <RotateCcw className="w-4 h-4" /> حاول مجدداً
+              </button>
+
+              {cameraError === "PERMISSION_DENIED" && (
+                <button
+                  onClick={() => window.location.reload()}
+                  className="text-white/60 text-xs underline"
+                  data-testid="btn-reload-page"
+                >
+                  أو حدّث الصفحة بالكامل
+                </button>
+              )}
             </div>
-            <p className="text-white font-bold text-base">{cameraError}</p>
-            <button
-              onClick={() => startCamera(camFacing)}
-              className="flex items-center gap-2 px-6 py-3 rounded-full bg-white text-black font-bold text-sm"
-              data-testid="btn-retry-camera"
-            >
-              <RotateCcw className="w-4 h-4" /> حاول مجدداً
-            </button>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Waiting overlay */}
         {!streaming && !cameraError && !ended && (
