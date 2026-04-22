@@ -761,7 +761,19 @@ export default function LiveStream() {
   }, [adVisible, streamAds]);
 
   /* ─── auto-start WebRTC camera ──────────────────────── */
-  // Camera must be started via user gesture (tap) for mobile browsers to allow permission
+  useEffect(() => {
+    if (!isBroadcast || broadcastMode !== "webrtc" || streamStarted.current) return;
+    streamStarted.current = true;
+    (async () => {
+      const ms = await startCamera(camFacing);
+      if (!ms) return;
+      setStreaming(true);
+      socketRef.current?.emit("broadcaster", id);
+      await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
+      toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [broadcastMode]);
 
   /* ─── controls ───────────────────────────────────────── */
   const flipCamera = async () => {
@@ -1293,41 +1305,6 @@ export default function LiveStream() {
     );
   }
 
-  /* ═══ START SCREEN — single tap to begin ═══════════════════════ */
-  if (isBroadcast && !streamStarted.current && !streaming && !cameraError && broadcastMode === "webrtc") {
-    return (
-      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-50 p-6 gap-6" dir="rtl">
-        <div className="w-24 h-24 rounded-full bg-red-600 flex items-center justify-center shadow-2xl shadow-red-900">
-          <Video className="w-12 h-12 text-white" />
-        </div>
-        <h2 className="text-white text-2xl font-bold">ابدأ البث المباشر</h2>
-        <button
-          onClick={() => {
-            streamStarted.current = true;
-            (async () => {
-              const ms = await startCamera(camFacing);
-              if (!ms) return;
-              setStreaming(true);
-              socketRef.current?.emit("broadcaster", id);
-              await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
-              toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
-            })();
-          }}
-          className="w-full max-w-xs py-5 rounded-3xl bg-red-600 text-white font-bold text-xl flex items-center justify-center gap-3 shadow-2xl active:scale-95 transition-transform"
-          data-testid="btn-start-webrtc"
-        >
-          🔴 ابدأ الآن
-        </button>
-        <button
-          onClick={() => setLocation("/livestream")}
-          className="text-white/40 text-sm"
-          data-testid="btn-cancel-broadcast"
-        >
-          إلغاء
-        </button>
-      </div>
-    );
-  }
 
   /* ═══ MAIN STREAM VIEW (WebRTC or HLS viewer) ════════════ */
   return (
