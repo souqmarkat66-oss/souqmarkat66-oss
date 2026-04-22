@@ -1345,79 +1345,116 @@ export default function LiveStream() {
           const isSafari = /^((?!chrome|android).)*safari/i.test(ua);
           const isChrome = /Chrome/.test(ua) && !/Edg/.test(ua);
 
-          const titles: Record<string, string> = {
-            PERMISSION_DENIED: "محتاجين إذن الكاميرا والميكروفون",
-            NO_DEVICE: "مفيش كاميرا متوصلة",
-            DEVICE_BUSY: "الكاميرا مشغولة في تطبيق تاني",
-            GENERIC: "تعذّر فتح الكاميرا",
-          };
-          const subtitles: Record<string, string> = {
-            PERMISSION_DENIED: "علشان تبدأ البث المباشر، لازم نستخدم الكاميرا والمايك بتاع جهازك",
-            NO_DEVICE: "تأكد إن جهازك فيه كاميرا وإنها شغالة",
-            DEVICE_BUSY: "اقفل أي تطبيق تاني بيستخدم الكاميرا (Zoom, WhatsApp, إلخ) وحاول تاني",
-            GENERIC: "حاول تعيد فتح الصفحة أو استخدم متصفح تاني",
-          };
-
-          const steps = cameraError === "PERMISSION_DENIED" ? (
-            isIOS && isSafari ? [
-              "افتح إعدادات iPhone",
-              "اختار: Safari ← الكاميرا والميكروفون",
-              "اختار: السماح",
-              "ارجع للموقع واضغط حاول مجدداً",
-            ] : isAndroid && isChrome ? [
-              "اضغط على القفل 🔒 جنب اسم الموقع فوق",
-              "اختار: أذونات الموقع",
-              "فعّل: الكاميرا والميكروفون",
-              "ارجع واضغط حاول مجدداً",
-            ] : [
-              "اضغط على أيقونة 🔒 أو 🎥 فوق جنب اسم الموقع",
-              "اختار: السماح للكاميرا والميكروفون",
-              "حدّث الصفحة وحاول تاني",
-            ]
-          ) : null;
-
-          return (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-black via-zinc-900 to-black text-center px-6 gap-4 z-20 overflow-y-auto py-8">
-              <div className="w-24 h-24 rounded-full bg-red-500/20 flex items-center justify-center ring-4 ring-red-500/30">
-                <VideoOff className="w-12 h-12 text-red-400" />
-              </div>
-              <h2 className="text-white font-bold text-xl">{titles[cameraError] || titles.GENERIC}</h2>
-              <p className="text-white/70 text-sm max-w-md leading-relaxed">{subtitles[cameraError] || subtitles.GENERIC}</p>
-
-              {steps && (
-                <div className="bg-white/10 rounded-2xl p-4 max-w-sm w-full text-right border border-white/10">
-                  <p className="text-yellow-300 font-bold text-sm mb-3 flex items-center gap-2 justify-end">
-                    خطوات الحل
-                    <AlertTriangle className="w-4 h-4" />
-                  </p>
-                  <ol className="space-y-2 text-white/90 text-sm">
-                    {steps.map((s, i) => (
-                      <li key={i} className="flex items-start gap-2 justify-end">
-                        <span className="flex-1">{s}</span>
-                        <span className="w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center flex-shrink-0 font-bold">{i + 1}</span>
-                      </li>
-                    ))}
-                  </ol>
+          if (cameraError === "PERMISSION_DENIED") {
+            return (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-5 gap-5 z-20 overflow-y-auto py-8" dir="rtl">
+                {/* Icon */}
+                <div className="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center ring-4 ring-red-500/30">
+                  <VideoOff className="w-10 h-10 text-red-400" />
                 </div>
-              )}
 
-              <button
-                onClick={() => { setCameraError(""); streamStarted.current = false; startBroadcast(); }}
-                className="flex items-center gap-2 px-8 py-3 rounded-full bg-white text-black font-bold text-sm shadow-xl hover:scale-105 transition"
-                data-testid="btn-retry-camera"
-              >
-                <RotateCcw className="w-4 h-4" /> حاول مجدداً
-              </button>
+                <div>
+                  <h2 className="text-white font-bold text-xl mb-1">الكاميرا محظورة في المتصفح</h2>
+                  <p className="text-white/60 text-sm">لازم تسمح لـ ads-as.com باستخدام الكاميرا من إعدادات المتصفح</p>
+                </div>
 
-              {cameraError === "PERMISSION_DENIED" && (
+                {/* Visual steps */}
+                {isIOS && isSafari ? (
+                  <div className="w-full max-w-sm space-y-3">
+                    {[
+                      { icon: "⚙️", text: "افتح إعدادات الجهاز (Settings)" },
+                      { icon: "🌐", text: "اختار Safari" },
+                      { icon: "📷", text: "اختار \"الكاميرا\" → السماح" },
+                      { icon: "🎙️", text: "اختار \"الميكروفون\" → السماح" },
+                      { icon: "🔄", text: "ارجع هنا واضغط \"تم، حاول تاني\"" },
+                    ].map((s, i) => (
+                      <div key={i} className="flex items-center gap-3 bg-white/8 rounded-xl px-4 py-3 text-right">
+                        <span className="text-xl flex-shrink-0">{s.icon}</span>
+                        <span className="text-white text-sm flex-1">{s.text}</span>
+                        <span className="w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center flex-shrink-0 font-bold">{i + 1}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="w-full max-w-sm space-y-3">
+                    {/* Browser bar illustration */}
+                    <div className="bg-zinc-800 rounded-xl overflow-hidden border border-white/10">
+                      <div className="bg-zinc-700 px-3 py-2 flex items-center gap-2 text-xs">
+                        <span className="text-yellow-300 font-bold text-base">🔒</span>
+                        <span className="flex-1 bg-zinc-600 rounded px-2 py-1 text-white/70 text-xs text-left">ads-as.com</span>
+                      </div>
+                      <div className="px-4 py-2 text-white/50 text-xs text-right">← اضغط على القفل 🔒 هنا</div>
+                    </div>
+
+                    {[
+                      { icon: "🔒", text: "اضغط على القفل بجانب اسم الموقع في الأعلى" },
+                      { icon: "📋", text: "اختار: \"أذونات الموقع\" أو \"Permissions\"" },
+                      { icon: "📷", text: "اضغط على الكاميرا → اختار السماح" },
+                      { icon: "🎙️", text: "اضغط على الميكروفون → اختار السماح" },
+                      { icon: "🔄", text: "بعدين اضغط الزرار اللي تحت ⬇️" },
+                    ].map((s, i) => (
+                      <div key={i} className="flex items-center gap-3 bg-white/8 rounded-xl px-4 py-3 text-right">
+                        <span className="text-xl flex-shrink-0">{s.icon}</span>
+                        <span className="text-white text-sm flex-1">{s.text}</span>
+                        <span className="w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center flex-shrink-0 font-bold">{i + 1}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* After fixing permissions, reload */}
                 <button
                   onClick={() => window.location.reload()}
-                  className="text-white/60 text-xs underline"
-                  data-testid="btn-reload-page"
+                  className="flex items-center gap-2 px-8 py-4 rounded-full bg-green-500 text-white font-bold text-base shadow-xl active:scale-95 transition"
+                  data-testid="btn-retry-camera"
                 >
-                  أو حدّث الصفحة بالكامل
+                  <RotateCcw className="w-5 h-5" /> تم، حاول تاني
                 </button>
-              )}
+                <p className="text-white/30 text-xs">اضغط الزرار بعد تفعيل الإذن فوق</p>
+              </div>
+            );
+          }
+
+          if (cameraError === "NO_DEVICE") {
+            return (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-6 gap-4 z-20">
+                <div className="w-20 h-20 rounded-full bg-orange-500/20 flex items-center justify-center">
+                  <VideoOff className="w-10 h-10 text-orange-400" />
+                </div>
+                <h2 className="text-white font-bold text-xl">مفيش كاميرا متوصلة</h2>
+                <p className="text-white/60 text-sm">تأكد إن جهازك فيه كاميرا وإنها شغالة</p>
+                <button onClick={() => { setCameraError(""); streamStarted.current = false; setNeedsPermTap(true); }} className="flex items-center gap-2 px-8 py-3 rounded-full bg-white text-black font-bold text-sm" data-testid="btn-retry-camera">
+                  <RotateCcw className="w-4 h-4" /> حاول مجدداً
+                </button>
+              </div>
+            );
+          }
+
+          if (cameraError === "DEVICE_BUSY") {
+            return (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-6 gap-4 z-20">
+                <div className="w-20 h-20 rounded-full bg-yellow-500/20 flex items-center justify-center">
+                  <VideoOff className="w-10 h-10 text-yellow-400" />
+                </div>
+                <h2 className="text-white font-bold text-xl">الكاميرا مشغولة</h2>
+                <p className="text-white/60 text-sm">اقفل أي تطبيق تاني بيستخدم الكاميرا (Zoom, WhatsApp, إلخ) وحاول تاني</p>
+                <button onClick={() => { setCameraError(""); streamStarted.current = false; setNeedsPermTap(true); }} className="flex items-center gap-2 px-8 py-3 rounded-full bg-white text-black font-bold text-sm" data-testid="btn-retry-camera">
+                  <RotateCcw className="w-4 h-4" /> حاول مجدداً
+                </button>
+              </div>
+            );
+          }
+
+          return (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-6 gap-4 z-20">
+              <div className="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center">
+                <VideoOff className="w-10 h-10 text-red-400" />
+              </div>
+              <h2 className="text-white font-bold text-xl">تعذّر فتح الكاميرا</h2>
+              <p className="text-white/60 text-sm">حاول تعيد فتح الصفحة أو استخدم متصفح تاني</p>
+              <button onClick={() => window.location.reload()} className="flex items-center gap-2 px-8 py-3 rounded-full bg-white text-black font-bold text-sm" data-testid="btn-retry-camera">
+                <RotateCcw className="w-4 h-4" /> حدّث الصفحة
+              </button>
             </div>
           );
         })()}
