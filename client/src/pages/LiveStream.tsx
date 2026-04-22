@@ -760,20 +760,17 @@ export default function LiveStream() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adVisible, streamAds]);
 
-  /* ─── auto-start WebRTC camera ──────────────────────── */
-  useEffect(() => {
-    if (!isBroadcast || broadcastMode !== "webrtc" || streamStarted.current) return;
+  /* ─── start broadcast — must be called from a user gesture ─── */
+  const startBroadcast = async () => {
+    if (streamStarted.current) return;
     streamStarted.current = true;
-    (async () => {
-      const ms = await startCamera(camFacing);
-      if (!ms) return;
-      setStreaming(true);
-      socketRef.current?.emit("broadcaster", id);
-      await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
-      toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
-    })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [broadcastMode]);
+    const ms = await startCamera(camFacing);
+    if (!ms) { streamStarted.current = false; return; }
+    setStreaming(true);
+    socketRef.current?.emit("broadcaster", id);
+    await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
+    toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
+  };
 
   /* ─── controls ───────────────────────────────────────── */
   const flipCamera = async () => {
@@ -1387,16 +1384,7 @@ export default function LiveStream() {
               )}
 
               <button
-                onClick={async () => {
-                  const ms = await startCamera(camFacing);
-                  if (!ms) return;
-                  if (!streaming) {
-                    setStreaming(true);
-                    socketRef.current?.emit("broadcaster", id);
-                    await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
-                    toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
-                  }
-                }}
+                onClick={() => { setCameraError(""); streamStarted.current = false; startBroadcast(); }}
                 className="flex items-center gap-2 px-8 py-3 rounded-full bg-white text-black font-bold text-sm shadow-xl hover:scale-105 transition"
                 data-testid="btn-retry-camera"
               >
@@ -1422,11 +1410,24 @@ export default function LiveStream() {
             <div className="w-20 h-20 rounded-full border-4 border-red-500/30 flex items-center justify-center animate-pulse">
               <Video className="w-10 h-10 text-red-400" />
             </div>
-            <p className="text-white font-semibold text-lg opacity-80">
-              {isBroadcast ? "جاري تشغيل الكاميرا..." : "في انتظار البث المباشر..."}
-            </p>
-            {!isBroadcast && (
-              <p className="text-white/40 text-sm">سيبدأ الفيديو تلقائياً عندما يبدأ المضيف البث</p>
+            {isBroadcast ? (
+              <>
+                <p className="text-white font-semibold text-lg opacity-80">جاهز للبث؟</p>
+                <button
+                  data-testid="btn-start-broadcast"
+                  onClick={startBroadcast}
+                  className="flex items-center gap-3 px-10 py-4 rounded-full bg-red-600 hover:bg-red-500 text-white font-bold text-lg shadow-2xl active:scale-95 transition-all"
+                >
+                  <span className="w-3 h-3 rounded-full bg-white animate-pulse" />
+                  ابدأ البث الآن
+                </button>
+                <p className="text-white/40 text-xs">اضغط لتفتح الكاميرا وتبدأ البث</p>
+              </>
+            ) : (
+              <>
+                <p className="text-white font-semibold text-lg opacity-80">في انتظار البث المباشر...</p>
+                <p className="text-white/40 text-sm">سيبدأ الفيديو تلقائياً عندما يبدأ المضيف البث</p>
+              </>
             )}
           </div>
         )}
