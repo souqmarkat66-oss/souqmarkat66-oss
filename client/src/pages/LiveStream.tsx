@@ -761,7 +761,19 @@ export default function LiveStream() {
   }, [adVisible, streamAds]);
 
   /* ─── auto-start WebRTC camera ──────────────────────── */
-  // Camera is started manually by the user via button click, not automatically
+  useEffect(() => {
+    if (!isBroadcast || broadcastMode !== "webrtc" || streamStarted.current) return;
+    streamStarted.current = true;
+    (async () => {
+      const ms = await startCamera(camFacing);
+      if (!ms) return;
+      setStreaming(true);
+      socketRef.current?.emit("broadcaster", id);
+      await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
+      toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [broadcastMode]);
 
   /* ─── controls ───────────────────────────────────────── */
   const flipCamera = async () => {
@@ -1293,53 +1305,24 @@ export default function LiveStream() {
     );
   }
 
-  /* ═══ MODE PICKER for broadcaster ═══════════════════════ */
-  if (isBroadcast && !streamStarted.current && broadcastMode === "webrtc" && !streaming) {
+  /* ═══ LOADING SCREEN while camera starts ═══════════════════════ */
+  if (isBroadcast && !streaming && !cameraError && broadcastMode === "webrtc") {
     return (
-      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-50 p-6 gap-4" dir="rtl">
-        <div className="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center ring-4 ring-red-500/30">
+      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-50 p-6 gap-5" dir="rtl">
+        <div className="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center ring-4 ring-red-500/30 animate-pulse">
           <Video className="w-10 h-10 text-red-400" />
         </div>
-        <h2 className="text-white text-2xl font-bold">ابدأ البث المباشر</h2>
-        <p className="text-white/60 text-sm text-center max-w-xs leading-relaxed">
-          اختر طريقة البث. عند الضغط على "بث بالكاميرا"، سيطلب منك المتصفح إذن الكاميرا والميكروفون — اضغط <span className="text-green-400 font-bold">السماح</span> للمتابعة.
+        <h2 className="text-white text-xl font-bold">جاري تشغيل الكاميرا...</h2>
+        <p className="text-white/50 text-sm text-center max-w-xs">
+          لو ظهر لك طلب إذن من المتصفح، اضغط <span className="text-green-400 font-bold">السماح</span>
         </p>
-        <div className="flex flex-col gap-3 w-full max-w-xs mt-2">
-          <button
-            onClick={() => {
-              streamStarted.current = true;
-              setBroadcastMode("webrtc");
-              (async () => {
-                const ms = await startCamera(camFacing);
-                if (!ms) return;
-                setStreaming(true);
-                socketRef.current?.emit("broadcaster", id);
-                await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
-                toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
-              })();
-            }}
-            className="w-full py-4 rounded-2xl bg-white text-black font-bold text-base flex items-center justify-center gap-2 shadow-xl"
-            data-testid="btn-start-webrtc"
-          >
-            <Video className="w-5 h-5" />
-            📷 بث بالكاميرا (اضغط وامنح الإذن)
-          </button>
-          <button
-            onClick={() => setBroadcastMode("rtmp")}
-            className="w-full py-4 rounded-2xl bg-red-600 text-white font-bold text-base flex items-center justify-center gap-2"
-            data-testid="btn-start-rtmp"
-          >
-            <Radio className="w-5 h-5" />
-            بث من OBS / برنامج خارجي
-          </button>
-          <button
-            onClick={() => setLocation("/livestream")}
-            className="w-full py-3 rounded-2xl bg-white/5 text-white/60 text-sm"
-            data-testid="btn-cancel-mode"
-          >
-            إلغاء
-          </button>
-        </div>
+        <button
+          onClick={() => setBroadcastMode("rtmp")}
+          className="mt-4 text-white/40 text-xs underline"
+          data-testid="btn-switch-rtmp"
+        >
+          بث من OBS بدلاً من ذلك
+        </button>
       </div>
     );
   }
