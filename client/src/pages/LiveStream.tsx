@@ -2378,7 +2378,7 @@ export default function LiveStream() {
           </div>
         )}
 
-        {/* ── CROSS-STREAM BATTLE OVERLAY ── Full Screen ── */}
+        {/* ── CROSS-STREAM BATTLE OVERLAY ── TikTok Split Screen ── */}
         {battle && (() => {
           const iAmA    = battle.streamIdA === id;
           const myScore = iAmA ? battle.totalA : battle.totalB;
@@ -2394,112 +2394,132 @@ export default function LiveStream() {
           return (
             <div className="absolute inset-0 z-30 pointer-events-none flex flex-col">
 
-              {/* ── SCORE BAR overlaid at top of full-screen video ── */}
-              <div className="pointer-events-none px-3 pt-3 flex items-start gap-2">
-                {/* LEFT: opponent score */}
-                <div className="flex flex-col items-start gap-0.5 flex-1">
-                  <div className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 shadow-xl ${oppWin && battle.ended ? "bg-yellow-400" : "bg-rose-500/85 backdrop-blur-md"}`}>
-                    <span className="text-white font-black text-base leading-none">{oppScore.toLocaleString()}</span>
+              {/* ── TOP BAR: scores + timer ── */}
+              <div className="flex items-start px-2 pt-2 gap-2">
+                {/* LEFT score (opponent) */}
+                <div className="flex-1 flex flex-col items-start gap-0.5">
+                  <div className={`flex items-center gap-1 rounded-full px-2.5 py-1 shadow-lg ${oppWin && battle.ended ? "bg-yellow-400" : "bg-rose-500/90 backdrop-blur-md"}`}>
+                    <span className="text-white font-black text-sm leading-none">{oppScore.toLocaleString()}</span>
                   </div>
-                  <div className={`rounded-md px-2 py-0.5 text-[9px] font-black tracking-wide ${oppWin ? "bg-rose-600/90 text-white" : "bg-black/50 text-white/50"}`}>
+                  <div className={`rounded px-1.5 py-0.5 text-[9px] font-black ${oppWin ? "bg-rose-600/90 text-white" : "bg-black/50 text-white/50"}`}>
                     WIN ×{oppWin ? oppMult : 0}
-                  </div>
-                  <div className="bg-black/50 backdrop-blur-sm rounded-full px-2 py-0.5 flex items-center gap-1 max-w-[90px]">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse flex-shrink-0" />
-                    <span className="text-white text-[9px] font-bold truncate">{oppName}</span>
                   </div>
                 </div>
 
                 {/* CENTER: timer */}
-                <div className="flex flex-col items-center gap-1 pt-0.5">
+                <div className="flex flex-col items-center">
                   {battle.active ? (
-                    <div className="bg-black/70 backdrop-blur-md border border-white/20 rounded-2xl px-3 py-2 flex flex-col items-center gap-0.5 shadow-xl">
-                      <span className="text-yellow-400 text-base">⚔️</span>
-                      <span className="text-white font-black text-base font-mono leading-none">
+                    <div className="bg-black/75 backdrop-blur-md rounded-xl px-2.5 py-1.5 flex flex-col items-center border border-white/20">
+                      <span className="text-yellow-400 text-xs">⚔️</span>
+                      <span className="text-white font-black text-sm font-mono leading-none">
                         {Math.floor(battle.timeLeft / 60)}:{(battle.timeLeft % 60).toString().padStart(2, "0")}
                       </span>
                     </div>
                   ) : battle.ended ? (
-                    <div className="bg-black/80 rounded-xl px-3 py-1.5 text-center">
-                      {battle.winner === "draw"
-                        ? <span className="text-yellow-400 text-sm font-black">🤝 تعادل</span>
-                        : <span className="text-yellow-400 text-sm font-black">🏆 انتهى</span>
-                      }
+                    <div className="bg-black/80 rounded-xl px-2 py-1">
+                      <span className="text-yellow-400 text-xs font-black">{battle.winner === "draw" ? "🤝 تعادل" : "🏆 انتهى"}</span>
                     </div>
                   ) : null}
                 </div>
 
-                {/* RIGHT: my score */}
-                <div className="flex flex-col items-end gap-0.5 flex-1">
-                  <div className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 shadow-xl ${myWin && battle.ended ? "bg-yellow-400" : "bg-cyan-500/85 backdrop-blur-md"}`}>
-                    <span className="text-white font-black text-base leading-none">{myScore.toLocaleString()}</span>
+                {/* RIGHT score (me) */}
+                <div className="flex-1 flex flex-col items-end gap-0.5">
+                  <div className={`flex items-center gap-1 rounded-full px-2.5 py-1 shadow-lg ${myWin && battle.ended ? "bg-yellow-400" : "bg-cyan-500/90 backdrop-blur-md"}`}>
+                    <span className="text-white font-black text-sm leading-none">{myScore.toLocaleString()}</span>
                   </div>
-                  <div className={`rounded-md px-2 py-0.5 text-[9px] font-black tracking-wide ${myWin ? "bg-cyan-600/90 text-white" : "bg-black/50 text-white/50"}`}>
+                  <div className={`rounded px-1.5 py-0.5 text-[9px] font-black ${myWin ? "bg-cyan-600/90 text-white" : "bg-black/50 text-white/50"}`}>
                     WIN ×{myWin ? myMult : 0}
-                  </div>
-                  <div className="bg-black/50 backdrop-blur-sm rounded-full px-2 py-0.5 flex items-center gap-1 max-w-[90px]">
-                    <span className="text-white text-[9px] font-bold truncate">{myName}</span>
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse flex-shrink-0" />
                   </div>
                 </div>
               </div>
 
-              {/* ── PROGRESS BAR (below score bar) ── */}
+              {/* ── PROGRESS BAR ── */}
               {total > 0 && (
-                <div className="mx-3 mt-1.5 h-1.5 rounded-full overflow-hidden bg-white/10 flex">
-                  <div className="bg-rose-500 transition-all duration-700 rounded-full"
+                <div className="mx-2 mt-1 h-1 rounded-full overflow-hidden bg-white/10 flex">
+                  <div className="bg-rose-500 transition-all duration-700"
                     style={{ width: `${100 * oppScore / total}%` }} />
-                  <div className="bg-cyan-500 flex-1 transition-all duration-700 rounded-full" />
+                  <div className="bg-cyan-500 flex-1 transition-all duration-700" />
                 </div>
               )}
 
-              {/* ── WINNER announcement center of screen ── */}
-              {battle.ended && (myWin || oppWin) && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className={`rounded-3xl px-8 py-4 text-center shadow-2xl border-2 ${myWin ? "bg-cyan-500/90 border-cyan-300" : "bg-rose-500/90 border-rose-300"}`}>
-                    <p className="text-white font-black text-3xl">🏆</p>
-                    <p className="text-white font-black text-xl">{myWin ? myName : oppName}</p>
-                    <p className="text-white/80 text-sm">فاز بالتحدي!</p>
+              {/* ── SPLIT VIDEO AREA ── */}
+              <div className="relative flex-1 flex overflow-hidden mt-1">
+
+                {/* LEFT: opponent video */}
+                <div className="relative w-1/2 h-full overflow-hidden">
+                  <video ref={opponentVideoRef} autoPlay playsInline
+                    className="w-full h-full object-cover bg-black" />
+
+                  {/* Opponent name */}
+                  <div className="absolute bottom-2 left-1.5 bg-black/60 rounded-full px-2 py-0.5 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                    <span className="text-white text-[9px] font-bold truncate max-w-[60px]">{oppName}</span>
+                  </div>
+
+                  {battle.ended && oppWin && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                      <div className="bg-yellow-400/95 rounded-2xl px-5 py-3 text-center shadow-xl">
+                        <p className="text-2xl">🏆</p>
+                        <p className="text-black font-black text-sm">فاز!</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* CENTER divider */}
+                <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 bg-white/20 z-10" />
+
+                {/* RIGHT: my video (broadcaster video fills here) */}
+                <div className="relative w-1/2 h-full overflow-hidden">
+                  {/* My name */}
+                  <div className="absolute bottom-2 right-1.5 bg-black/60 rounded-full px-2 py-0.5 flex items-center gap-1">
+                    <span className="text-white text-[9px] font-bold truncate max-w-[60px]">{myName}</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                  </div>
+
+                  {battle.ended && myWin && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                      <div className="bg-yellow-400/95 rounded-2xl px-5 py-3 text-center shadow-xl">
+                        <p className="text-2xl">🏆</p>
+                        <p className="text-black font-black text-sm">فاز!</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ── BOTTOM: gift panel (viewers) ── */}
+              {!isBroadcast && battle.active && user && (
+                <div className="pointer-events-auto bg-black/90 backdrop-blur-xl border-t border-white/10 px-2 py-2">
+                  <p className="text-white/40 text-[8px] text-center mb-1.5">🎁 ادعم مذيعك في التحدي</p>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {GIFTS.slice(0, 6).map(gift => (
+                      <div key={gift.type} className="flex flex-col items-center gap-0.5 min-w-[3rem]">
+                        <span className="text-xl">{gift.emoji}</span>
+                        <span className="text-[8px] text-yellow-400 font-bold">{gift.coins}🪙</span>
+                        <div className="flex gap-0.5">
+                          {BATTLE_MULTIPLIERS.map(m => (
+                            <button key={m.value} onClick={() => sendBattleGift(gift, m.value)}
+                              className={`${m.color} text-white text-[7px] font-bold px-1 py-0.5 rounded active:scale-90`}
+                              data-testid={`battle-gift-${gift.type}-${m.value}`}>
+                              {m.emoji}{m.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
 
-              {/* ── END BATTLE button (broadcaster) ── */}
+              {/* ── End battle (broadcaster only) ── */}
               {isBroadcast && battle.active && (
-                <div className="pointer-events-auto absolute bottom-32 left-3 right-3">
+                <div className="pointer-events-auto bg-black/90 px-3 py-1.5">
                   <button onClick={endBattleEarly}
-                    className="w-full py-2 rounded-xl bg-red-600/60 border border-red-500/40 text-red-200 text-xs font-bold backdrop-blur-sm"
+                    className="w-full py-1.5 rounded-xl bg-red-600/50 border border-red-500/30 text-red-300 text-xs font-bold"
                     data-testid="btn-end-battle-early">
                     ⏹ إنهاء الجولة مبكراً
                   </button>
-                </div>
-              )}
-
-              {/* ── GIFT PANEL for viewers (floats above bottom chat) ── */}
-              {!isBroadcast && battle.active && user && (
-                <div className="pointer-events-auto absolute bottom-28 left-2 right-2">
-                  <div className="bg-black/80 backdrop-blur-xl rounded-2xl border border-white/10 p-2.5">
-                    <p className="text-white/50 text-[9px] font-bold mb-1.5 text-center">
-                      🎁 أرسل هدية لتدعم مذيعك في التحدي
-                    </p>
-                    <div className="flex gap-2 overflow-x-auto pb-1">
-                      {GIFTS.slice(0, 6).map(gift => (
-                        <div key={gift.type} className="flex flex-col items-center gap-0.5 min-w-[3.2rem]">
-                          <span className="text-2xl">{gift.emoji}</span>
-                          <span className="text-[8px] text-yellow-400 font-bold">{gift.coins}🪙</span>
-                          <div className="flex gap-0.5 flex-wrap justify-center">
-                            {BATTLE_MULTIPLIERS.map(m => (
-                              <button key={m.value} onClick={() => sendBattleGift(gift, m.value)}
-                                className={`${m.color} text-white text-[7px] font-bold px-1 py-0.5 rounded active:scale-90 transition-transform`}
-                                data-testid={`battle-gift-${gift.type}-${m.value}`}>
-                                {m.emoji}{m.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               )}
             </div>
