@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -114,6 +114,9 @@ function Router() {
               </Route>
               <Route path="/payments">
                 <ProtectedRoute component={Payments} />
+              </Route>
+              <Route path="/settings">
+                <Redirect to="/admin" />
               </Route>
               <Route path="/admin">
                 <ProtectedRoute component={AdminPanel} />
