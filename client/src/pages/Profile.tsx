@@ -80,6 +80,9 @@ export default function Profile() {
   const [myRating, setMyRating] = useState(0);
   const [myReview, setMyReview] = useState("");
   const [showRatingForm, setShowRatingForm] = useState(false);
+  const [myCoins, setMyCoins] = useState(0);
+  const [giftPanelOpen, setGiftPanelOpen] = useState(false);
+  const [sentGift, setSentGift] = useState<string | null>(null);
 
   const targetUserId = params?.userId || user?.id;
   const isOwn = user?.id === targetUserId;
@@ -246,6 +249,46 @@ export default function Profile() {
         : "حدث خطأ";
       toast({ title: "❌ " + msg, variant: "destructive" });
     },
+  });
+
+  const PROFILE_GIFTS = [
+    { type: "rose",    emoji: "🌹", name: "وردة",      coins: 5   },
+    { type: "heart",   emoji: "❤️", name: "قلب",       coins: 10  },
+    { type: "clap",    emoji: "👏", name: "تصفيق",     coins: 5   },
+    { type: "star",    emoji: "⭐", name: "نجمة",      coins: 20  },
+    { type: "fire",    emoji: "🔥", name: "نار",       coins: 30  },
+    { type: "crown",   emoji: "👑", name: "تاج",       coins: 50  },
+    { type: "rocket",  emoji: "🚀", name: "صاروخ",     coins: 75  },
+    { type: "diamond", emoji: "💎", name: "ألماسة",    coins: 100 },
+    { type: "trophy",  emoji: "🏆", name: "كأس",       coins: 150 },
+    { type: "castle",  emoji: "🏰", name: "قصر",       coins: 500 },
+  ];
+
+  // Fetch my coin balance
+  useEffect(() => {
+    if (!user || isOwn) return;
+    fetch("/api/coins/wallet", { credentials: "include" })
+      .then(r => r.json())
+      .then(d => setMyCoins(d.coins || 0))
+      .catch(() => {});
+  }, [user, isOwn]);
+
+  const sendProfileGiftMutation = useMutation({
+    mutationFn: async (gift: typeof PROFILE_GIFTS[0]) => {
+      const res = await apiRequest("POST", "/api/coins/transfer", {
+        toUserId: targetUserId,
+        coins: gift.coins,
+        message: `هدية ${gift.emoji} ${gift.name}`,
+      });
+      return { ...res, gift };
+    },
+    onSuccess: (data: any) => {
+      setMyCoins(prev => prev - data.gift.coins);
+      setSentGift(data.gift.emoji);
+      toast({ title: `${data.gift.emoji} تم إرسال ${data.gift.name}!`, description: `خصم ${data.gift.coins} عملة من رصيدك` });
+      setTimeout(() => setSentGift(null), 3000);
+    },
+    onError: (e: any) => toast({ title: "❌ فشل الإرسال — تأكد من رصيدك", variant: "destructive" }),
   });
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -786,6 +829,65 @@ export default function Profile() {
           >
             {interestsMutation.isPending ? "جاري الحفظ..." : "حفظ الاهتمامات"}
           </Button>
+        </div>
+      )}
+
+      {/* ── GIFT GALLERY — visible only when viewing someone else's profile ── */}
+      {!isOwn && user && (
+        <div className="bg-gradient-to-br from-pink-50 to-rose-50 dark:from-pink-950/20 dark:to-rose-950/10 border border-rose-200/60 dark:border-rose-800/40 rounded-2xl p-5 mb-6" dir="rtl">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Gift className="w-5 h-5 text-rose-500" />
+              <h2 className="font-bold text-rose-900 dark:text-rose-400">أرسل هدية لـ {fullName}</h2>
+            </div>
+            <div className="flex items-center gap-1.5 bg-white/70 dark:bg-white/10 rounded-full px-3 py-1 border border-rose-200/60">
+              <span className="text-amber-500 text-sm">🪙</span>
+              <span className="font-black text-sm text-foreground">{myCoins.toLocaleString()}</span>
+              <span className="text-muted-foreground text-xs">عملة</span>
+            </div>
+          </div>
+
+          {/* Sent gift animation */}
+          {sentGift && (
+            <div className="flex justify-center mb-3">
+              <div className="bg-white/80 dark:bg-white/10 rounded-2xl px-6 py-3 text-center shadow-lg border border-rose-200">
+                <p className="text-4xl mb-1 animate-bounce">{sentGift}</p>
+                <p className="text-rose-600 text-xs font-bold">تم الإرسال!</p>
+              </div>
+            </div>
+          )}
+
+          {/* Gift grid */}
+          <div className="grid grid-cols-5 gap-2 mb-3">
+            {PROFILE_GIFTS.map(gift => {
+              const canAfford = myCoins >= gift.coins;
+              return (
+                <button
+                  key={gift.type}
+                  onClick={() => canAfford && sendProfileGiftMutation.mutate(gift)}
+                  disabled={!canAfford || sendProfileGiftMutation.isPending}
+                  data-testid={`profile-gift-${gift.type}`}
+                  className={`flex flex-col items-center gap-1 p-2 rounded-xl border transition-all active:scale-90
+                    ${canAfford
+                      ? "bg-white/80 dark:bg-white/10 border-rose-200/60 hover:border-rose-400 hover:shadow-md cursor-pointer"
+                      : "bg-white/40 dark:bg-white/5 border-gray-200/40 opacity-50 cursor-not-allowed"
+                    }`}
+                >
+                  <span className="text-2xl leading-none">{gift.emoji}</span>
+                  <span className="text-[9px] text-muted-foreground font-medium leading-none">{gift.name}</span>
+                  <div className="flex items-center gap-0.5">
+                    <span className="text-[8px] text-amber-500">🪙</span>
+                    <span className="text-[9px] font-black text-amber-600">{gift.coins}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="text-center text-xs text-muted-foreground">
+            💝 هداياك تظهر في محفظة {fullName} مباشرة
+          </p>
         </div>
       )}
 

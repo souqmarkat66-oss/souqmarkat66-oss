@@ -66,6 +66,9 @@ export default function LiveStream() {
   const [forceMuted,        setForceMuted]         = useState(false);
   const [guestHasCamera,    setGuestHasCamera]     = useState(true);
 
+  // Viewer-side co-host display (names/avatars of active guests visible to all)
+  const [viewerCohostBadges, setViewerCohostBadges] = useState<{id: string; name: string}[]>([]);
+
   // In-stream ads state
   const [streamAds,       setStreamAds]       = useState<any[]>([]);
   const [currentAdIdx,    setCurrentAdIdx]    = useState(0);
@@ -503,6 +506,17 @@ export default function LiveStream() {
         setStreaming(false);
         setEnded(true);
         if (hlsInstance.current) { hlsInstance.current.destroy(); hlsInstance.current = null; }
+      });
+
+      // ── Viewer: track active co-hosts by name ──
+      socket.on("cohost-active", (socketId: string, name: string) => {
+        setViewerCohostBadges(prev => {
+          if (prev.find(b => b.id === socketId)) return prev;
+          return [...prev, { id: socketId, name: name || "ضيف" }];
+        });
+      });
+      socket.on("cohost-left", (socketId: string) => {
+        setViewerCohostBadges(prev => prev.filter(b => b.id !== socketId));
       });
 
       // ── Co-host events (viewer/guest side) ──
@@ -1846,6 +1860,20 @@ export default function LiveStream() {
               </div>
             )}
           </>
+        )}
+
+        {/* ── VIEWER: Active co-hosts badge strip (bottom-left) ── */}
+        {!isBroadcast && viewerCohostBadges.length > 0 && (
+          <div className="absolute bottom-32 start-2 z-20 flex flex-col gap-1 pointer-events-none">
+            <span className="text-[8px] text-white/50 px-1">على الهواء الآن</span>
+            {viewerCohostBadges.map((b, i) => (
+              <div key={b.id} className="flex items-center gap-1.5 bg-black/70 backdrop-blur-sm rounded-full px-2 py-1 border border-purple-500/40">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+                <span className="text-white text-[9px] font-bold max-w-[70px] truncate">{b.name}</span>
+                <span className="text-purple-300 text-[7px]">ضيف</span>
+              </div>
+            ))}
+          </div>
         )}
 
         {/* RAISED HANDS PANEL (broadcaster) */}
