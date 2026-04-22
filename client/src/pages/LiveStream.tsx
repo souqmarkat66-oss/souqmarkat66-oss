@@ -761,19 +761,7 @@ export default function LiveStream() {
   }, [adVisible, streamAds]);
 
   /* ─── auto-start WebRTC camera ──────────────────────── */
-  useEffect(() => {
-    if (!isBroadcast || broadcastMode !== "webrtc" || streamStarted.current) return;
-    streamStarted.current = true;
-    (async () => {
-      const ms = await startCamera(camFacing);
-      if (!ms) return;
-      setStreaming(true);
-      socketRef.current?.emit("broadcaster", id);
-      await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
-      toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
-    })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [broadcastMode]);
+  // Camera is started manually by the user via button click, not automatically
 
   /* ─── controls ───────────────────────────────────────── */
   const flipCamera = async () => {
@@ -1308,31 +1296,33 @@ export default function LiveStream() {
   /* ═══ MODE PICKER for broadcaster ═══════════════════════ */
   if (isBroadcast && !streamStarted.current && broadcastMode === "webrtc" && !streaming) {
     return (
-      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-50 p-6 gap-5" dir="rtl">
-        <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mb-2">
-          <Video className="w-8 h-8 text-red-400" />
+      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-50 p-6 gap-4" dir="rtl">
+        <div className="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center ring-4 ring-red-500/30">
+          <Video className="w-10 h-10 text-red-400" />
         </div>
-        <h2 className="text-white text-xl font-bold">اختر طريقة البث</h2>
-        <div className="flex flex-col gap-3 w-full max-w-xs">
+        <h2 className="text-white text-2xl font-bold">ابدأ البث المباشر</h2>
+        <p className="text-white/60 text-sm text-center max-w-xs leading-relaxed">
+          اختر طريقة البث. عند الضغط على "بث بالكاميرا"، سيطلب منك المتصفح إذن الكاميرا والميكروفون — اضغط <span className="text-green-400 font-bold">السماح</span> للمتابعة.
+        </p>
+        <div className="flex flex-col gap-3 w-full max-w-xs mt-2">
           <button
             onClick={() => {
               streamStarted.current = true;
               setBroadcastMode("webrtc");
-              // trigger camera start
               (async () => {
                 const ms = await startCamera(camFacing);
                 if (!ms) return;
                 setStreaming(true);
                 socketRef.current?.emit("broadcaster", id);
                 await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
-                toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء الآن" });
+                toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
               })();
             }}
-            className="w-full py-4 rounded-2xl bg-white text-black font-bold text-base flex items-center justify-center gap-2"
+            className="w-full py-4 rounded-2xl bg-white text-black font-bold text-base flex items-center justify-center gap-2 shadow-xl"
             data-testid="btn-start-webrtc"
           >
-            <Monitor className="w-5 h-5" />
-            بث من المتصفح (كاميرا)
+            <Video className="w-5 h-5" />
+            📷 بث بالكاميرا (اضغط وامنح الإذن)
           </button>
           <button
             onClick={() => setBroadcastMode("rtmp")}
