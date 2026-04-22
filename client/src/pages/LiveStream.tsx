@@ -10,6 +10,7 @@ import {
   Copy, Check, Radio, Monitor, UserPlus, Users,
   Loader2, X, CheckCircle, XCircle,
   Share2, Gift, Flag, AlertTriangle, ShieldOff,
+  Camera, Sparkles,
 } from "lucide-react";
 import { SiWhatsapp, SiFacebook, SiX, SiTelegram, SiInstagram, SiTiktok, SiSnapchat } from "react-icons/si";
 import { Button } from "@/components/ui/button";
@@ -99,6 +100,56 @@ export default function LiveStream() {
   // Hand raise state (broadcaster — list of raised hands)
   const [raisedHands,     setRaisedHands]     = useState<{socketId:string; userName:string; userId:string}[]>([]);
   const [showHandsList,   setShowHandsList]   = useState(false);
+
+  // Confetti state
+  interface ConfettiParticle { id: number; x: number; color: string; emoji: string; delay: number; }
+  const [confettiParticles, setConfettiParticles] = useState<ConfettiParticle[]>([]);
+  const confettiIdRef = useRef(0);
+
+  // Beauty filter state
+  const BEAUTY_FILTERS = [
+    { name: "عادي", filter: "none", icon: "🎥" },
+    { name: "جمال", filter: "brightness(1.1) contrast(0.9) saturate(0.85)", icon: "✨" },
+    { name: "دافئ", filter: "sepia(0.3) saturate(1.2) brightness(1.05)", icon: "🌅" },
+    { name: "بارد", filter: "hue-rotate(200deg) saturate(0.8) brightness(1.05)", icon: "❄️" },
+    { name: "خمور", filter: "sepia(0.5) saturate(0.9) brightness(0.9)", icon: "🎞️" },
+  ];
+  const [filterIdx, setFilterIdx] = useState(0);
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
+
+  // Screenshot
+  const videoRef2 = useRef<HTMLVideoElement | null>(null);
+
+  const triggerConfetti = useCallback((count = 20) => {
+    const colors = ["#ff6b6b","#ffd93d","#6bcb77","#4d96ff","#c77dff","#ff9f43"];
+    const emojis = ["🌹","💐","⭐","✨","🎉","💫","🔥","💎"];
+    const particles: ConfettiParticle[] = Array.from({ length: count }, (_, i) => ({
+      id: ++confettiIdRef.current,
+      x: Math.random() * 90 + 5,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      emoji: emojis[Math.floor(Math.random() * emojis.length)],
+      delay: Math.random() * 0.5,
+    }));
+    setConfettiParticles(prev => [...prev, ...particles]);
+    setTimeout(() => {
+      setConfettiParticles(prev => prev.filter(p => !particles.find(n => n.id === p.id)));
+    }, 3000);
+  }, []);
+
+  const takeScreenshot = useCallback(() => {
+    const video = document.querySelector("video[data-testid='video-stream']") as HTMLVideoElement;
+    if (!video) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0);
+    const link = document.createElement("a");
+    link.download = `souqads-live-${Date.now()}.jpg`;
+    link.href = canvas.toDataURL("image/jpeg", 0.9);
+    link.click();
+  }, []);
 
   // Cross-stream Battle state
   interface BattleState {
@@ -653,6 +704,7 @@ export default function LiveStream() {
 
     socket.on("battle-ended", (data: { winner: string; totalA: number; totalB: number; nameA: string; nameB: string }) => {
       setBattle(prev => prev ? { ...prev, active: false, ended: true, winner: data.winner, totalA: data.totalA, totalB: data.totalB } : prev);
+      triggerConfetti(60);
       if (battlePeer.current) { battlePeer.current.close(); battlePeer.current = null; }
       setTimeout(() => setBattle(null), 10000);
     });
@@ -1013,6 +1065,7 @@ export default function LiveStream() {
     });
     setMyCoins(prev => prev - gift.coins);
     setTimeout(() => refetchWallet(), 1500);
+    triggerConfetti(gift.coins >= 50 ? 35 : 15);
   };
 
   /* ─── Coin recharge helper ────────────────────────────── */
@@ -1097,8 +1150,8 @@ export default function LiveStream() {
       broadcasterUserId: stream?.userId,
     });
     setMyCoins(prev => prev - gift.coins);
-    // Sync wallet from server after a short delay
     setTimeout(() => refetchWallet(), 1500);
+    if (gift.coins >= 20) triggerConfetti(gift.coins >= 100 ? 40 : 20);
   };
 
   /* ─── Share helpers ───────────────────────────────────── */
@@ -1334,7 +1387,11 @@ export default function LiveStream() {
           muted={isBroadcast}
           data-testid="video-stream"
           className="absolute inset-0 w-full h-full object-cover"
-          style={{ backgroundColor: "#000", transform: (isBroadcast && camFacing === "user") ? "scaleX(-1)" : "none" }}
+          style={{
+            backgroundColor: "#000",
+            transform: (isBroadcast && camFacing === "user") ? "scaleX(-1)" : "none",
+            filter: isBroadcast ? BEAUTY_FILTERS[filterIdx].filter : "none",
+          }}
         />
 
         {/* Camera error */}
@@ -2018,6 +2075,39 @@ export default function LiveStream() {
           </div>
         ))}
 
+        {/* CONFETTI PARTICLES */}
+        {confettiParticles.map(p => (
+          <div
+            key={p.id}
+            className="absolute top-0 z-50 pointer-events-none text-2xl"
+            style={{
+              left: `${p.x}%`,
+              animationDelay: `${p.delay}s`,
+              animation: "confettiFall 2.8s ease-in forwards",
+            }}
+          >
+            {p.emoji}
+          </div>
+        ))}
+
+        {/* FILTER MENU (broadcaster only) */}
+        {isBroadcast && showFilterMenu && (
+          <div className="absolute top-20 left-2 z-40 bg-black/90 backdrop-blur-xl rounded-2xl border border-white/10 p-2 flex flex-col gap-1">
+            {BEAUTY_FILTERS.map((f, i) => (
+              <button
+                key={i}
+                onClick={() => { setFilterIdx(i); setShowFilterMenu(false); }}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-bold text-white transition-all ${i === filterIdx ? "bg-white/20 ring-1 ring-white/40" : "hover:bg-white/10"}`}
+                data-testid={`filter-${f.name}`}
+              >
+                <span>{f.icon}</span>
+                <span>{f.name}</span>
+                {i === filterIdx && <Check className="w-3 h-3 text-green-400 mr-auto" />}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* BROADCASTER GIFT BANNER (shows who sent, what, and how much received) */}
         {isBroadcast && giftBanners.length > 0 && (
           <div className="absolute top-16 start-3 z-30 pointer-events-none flex flex-col gap-1.5" style={{ maxWidth: "75%" }}>
@@ -2260,80 +2350,123 @@ export default function LiveStream() {
           </div>
         )}
 
-        {/* ── CROSS-STREAM BATTLE OVERLAY ── */}
+        {/* ── CROSS-STREAM BATTLE OVERLAY (TikTok side-by-side) ── */}
         {battle && (
           <div className="absolute inset-0 z-30 pointer-events-none flex flex-col">
-            {/* Opponent video (top half during battle) */}
-            <div className="relative w-full" style={{ height: "40%" }}>
-              <video ref={opponentVideoRef} autoPlay playsInline className="w-full h-full object-cover bg-black" />
-              <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent p-2">
-                <p className="text-white/80 text-xs font-bold">
-                  {battle.streamIdA === id ? battle.nameB : battle.nameA}
-                </p>
-              </div>
-            </div>
 
-            {/* Score bar between the two halves */}
-            <div className="pointer-events-auto bg-black/90 backdrop-blur-xl border-y border-yellow-500/40 px-3 py-2 flex items-center justify-between gap-2">
-              <div className={`flex-1 rounded-lg p-1.5 text-center border ${battle.ended && battle.winner === "A" ? "bg-red-600/40 border-yellow-400" : "bg-red-600/20 border-red-500/30"}`}>
-                <p className="text-red-400 text-[10px] font-bold truncate">🔴 {battle.nameA}</p>
-                <p className="text-white font-bold text-lg">{battle.totalA.toLocaleString()}</p>
+            {/* ── TOP: Score bar full width ── */}
+            <div className="pointer-events-auto bg-black/95 backdrop-blur-xl border-b border-yellow-500/50 px-2 py-1.5 flex items-center gap-1.5">
+              {/* Left (A) */}
+              <div className={`flex-1 rounded-lg px-2 py-1 text-center ${battle.ended && battle.winner === "A" ? "bg-red-600/50 ring-1 ring-yellow-400" : "bg-red-600/20"}`}>
+                <p className="text-red-300 text-[9px] font-bold truncate">🔴 {battle.nameA}</p>
+                <p className="text-white font-black text-base leading-none">{battle.totalA.toLocaleString()}</p>
+                {battle.ended && battle.winner === "A" && <p className="text-yellow-400 text-[8px] font-bold">🏆 فاز!</p>}
               </div>
 
-              <div className="flex flex-col items-center gap-0.5 min-w-[60px]">
-                <span className="text-lg">⚔️</span>
-                {battle.active && (
-                  <div className="flex items-center gap-1 bg-red-600/30 border border-red-500/40 rounded-full px-2 py-0.5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                    <span className="text-red-400 font-bold text-xs font-mono">
+              {/* Center: timer + sword */}
+              <div className="flex flex-col items-center gap-0.5 min-w-[52px]">
+                <span className="text-base">⚔️</span>
+                {battle.active ? (
+                  <div className="flex items-center gap-0.5 bg-red-900/60 rounded-full px-1.5 py-0.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+                    <span className="text-red-300 font-bold text-[10px] font-mono">
                       {Math.floor(battle.timeLeft / 60)}:{(battle.timeLeft % 60).toString().padStart(2, "0")}
                     </span>
                   </div>
-                )}
-                {battle.ended && battle.winner && (
-                  <span className="text-yellow-400 text-[10px] font-bold">
-                    🏆 {battle.winner === "A" ? battle.nameA : battle.winner === "B" ? battle.nameB : "تعادل!"}
+                ) : (
+                  <span className="text-yellow-400 text-[9px] font-bold">
+                    {battle.ended ? (battle.winner === "draw" ? "تعادل" : "انتهى") : ""}
                   </span>
                 )}
               </div>
 
-              <div className={`flex-1 rounded-lg p-1.5 text-center border ${battle.ended && battle.winner === "B" ? "bg-blue-600/40 border-yellow-400" : "bg-blue-600/20 border-blue-500/30"}`}>
-                <p className="text-blue-400 text-[10px] font-bold truncate">🔵 {battle.nameB}</p>
-                <p className="text-white font-bold text-lg">{battle.totalB.toLocaleString()}</p>
+              {/* Right (B) */}
+              <div className={`flex-1 rounded-lg px-2 py-1 text-center ${battle.ended && battle.winner === "B" ? "bg-blue-600/50 ring-1 ring-yellow-400" : "bg-blue-600/20"}`}>
+                <p className="text-blue-300 text-[9px] font-bold truncate">🔵 {battle.nameB}</p>
+                <p className="text-white font-black text-base leading-none">{battle.totalB.toLocaleString()}</p>
+                {battle.ended && battle.winner === "B" && <p className="text-yellow-400 text-[8px] font-bold">🏆 فاز!</p>}
               </div>
             </div>
 
-            {/* Battle controls for broadcaster */}
+            {/* ── PROGRESS BAR ── */}
+            {(battle.totalA > 0 || battle.totalB > 0) && (
+              <div className="h-1.5 flex w-full overflow-hidden">
+                <div className="bg-red-500 transition-all duration-500" style={{ width: `${100 * battle.totalA / Math.max(battle.totalA + battle.totalB, 1)}%` }} />
+                <div className="bg-blue-500 transition-all duration-500 flex-1" />
+              </div>
+            )}
+
+            {/* ── SIDE-BY-SIDE VIDEOS ── */}
+            <div className="flex flex-1 overflow-hidden relative">
+              {/* LEFT: opponent */}
+              <div className="relative w-1/2 h-full border-r border-white/20">
+                <video ref={opponentVideoRef} autoPlay playsInline className="w-full h-full object-cover bg-black" />
+                {/* Opponent name badge */}
+                <div className="absolute top-1.5 left-1.5 bg-black/70 rounded-full px-2 py-0.5 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                  <span className="text-white text-[9px] font-bold truncate max-w-[60px]">
+                    {battle.streamIdA === id ? battle.nameB : battle.nameA}
+                  </span>
+                </div>
+                {/* Opponent score overlay */}
+                <div className="absolute bottom-1.5 left-1.5 bg-red-900/70 rounded-lg px-2 py-0.5 text-center">
+                  <p className="text-red-300 text-[8px]">🔴</p>
+                  <p className="text-white font-black text-sm leading-none">{(battle.streamIdA === id ? battle.totalB : battle.totalA).toLocaleString()}</p>
+                </div>
+              </div>
+
+              {/* RIGHT: my video (actual stream, already shown under) */}
+              <div className="relative w-1/2 h-full">
+                {/* My name badge */}
+                <div className="absolute top-1.5 right-1.5 bg-black/70 rounded-full px-2 py-0.5 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                  <span className="text-white text-[9px] font-bold truncate max-w-[60px]">
+                    {battle.streamIdA === id ? battle.nameA : battle.nameB}
+                  </span>
+                </div>
+                {/* My score overlay */}
+                <div className="absolute bottom-1.5 right-1.5 bg-blue-900/70 rounded-lg px-2 py-0.5 text-center">
+                  <p className="text-blue-300 text-[8px]">🔵</p>
+                  <p className="text-white font-black text-sm leading-none">{(battle.streamIdA === id ? battle.totalA : battle.totalB).toLocaleString()}</p>
+                </div>
+              </div>
+
+              {/* Center divider line with sword */}
+              <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 flex items-center justify-center pointer-events-none">
+                <div className="w-px h-full bg-white/30" />
+                <div className="absolute bg-black/80 rounded-full p-1 text-base">⚔️</div>
+              </div>
+            </div>
+
+            {/* ── Battle controls for broadcaster ── */}
             {isBroadcast && battle.active && (
-              <div className="pointer-events-auto px-3 py-1">
+              <div className="pointer-events-auto px-3 py-1 bg-black/80">
                 <button onClick={endBattleEarly} className="w-full py-1.5 rounded-xl bg-red-600/50 border border-red-500/30 text-red-300 text-xs font-bold" data-testid="btn-end-battle-early">
                   إنهاء الجولة مبكراً
                 </button>
               </div>
             )}
 
-            {/* Battle gift panel (viewers only) */}
+            {/* ── Battle gift panel (viewers only) ── */}
             {!isBroadcast && battle.active && user && (
-              <div className="pointer-events-auto mt-auto mb-24 mx-2">
-                <div className="bg-black/80 backdrop-blur-xl rounded-2xl border border-white/10 p-2.5">
-                  <p className="text-white/60 text-[10px] font-bold mb-1.5">🎁 أرسل هدية لمذيعك — المضاعفات للسكور فقط</p>
-                  <div className="flex gap-1.5 overflow-x-auto pb-1">
-                    {GIFTS.slice(0, 6).map(gift => (
-                      <div key={gift.type} className="flex flex-col items-center gap-0.5 min-w-[3.5rem]">
-                        <span className="text-xl">{gift.emoji}</span>
-                        <span className="text-[8px] text-yellow-400 font-bold">{gift.coins}🪙</span>
-                        <div className="flex gap-0.5">
-                          {BATTLE_MULTIPLIERS.map(m => (
-                            <button key={m.value} onClick={() => sendBattleGift(gift, m.value)}
-                              className={`${m.color} text-white text-[7px] font-bold px-1 py-0.5 rounded`}
-                              data-testid={`battle-gift-${gift.type}-${m.value}`}>
-                              {m.emoji}{m.label}
-                            </button>
-                          ))}
-                        </div>
+              <div className="pointer-events-auto bg-black/90 backdrop-blur-xl border-t border-white/10 px-2 py-2">
+                <p className="text-white/50 text-[9px] font-bold mb-1.5 text-center">🎁 أرسل هدية لمذيعك</p>
+                <div className="flex gap-1.5 overflow-x-auto pb-1">
+                  {GIFTS.slice(0, 6).map(gift => (
+                    <div key={gift.type} className="flex flex-col items-center gap-0.5 min-w-[3.5rem]">
+                      <span className="text-xl">{gift.emoji}</span>
+                      <span className="text-[8px] text-yellow-400 font-bold">{gift.coins}🪙</span>
+                      <div className="flex gap-0.5">
+                        {BATTLE_MULTIPLIERS.map(m => (
+                          <button key={m.value} onClick={() => sendBattleGift(gift, m.value)}
+                            className={`${m.color} text-white text-[7px] font-bold px-1 py-0.5 rounded`}
+                            data-testid={`battle-gift-${gift.type}-${m.value}`}>
+                            {m.emoji}{m.label}
+                          </button>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -2386,6 +2519,25 @@ export default function LiveStream() {
                 <FlipHorizontal className="w-6 h-6 text-white" />
               </button>
             )}
+            {/* FILTER button */}
+            <button
+              onClick={() => setShowFilterMenu(v => !v)}
+              data-testid="btn-beauty-filter"
+              className={`w-14 h-14 rounded-full flex flex-col items-center justify-center shadow-xl border-2 gap-0.5 ${filterIdx > 0 ? "bg-purple-600 border-purple-400" : "bg-black/70 border-white/20"}`}
+              title="فلتر الوجه"
+            >
+              <Sparkles className="w-5 h-5 text-white" />
+              <span className="text-white text-[8px] font-bold">{BEAUTY_FILTERS[filterIdx].icon}</span>
+            </button>
+            {/* SCREENSHOT button */}
+            <button
+              onClick={takeScreenshot}
+              data-testid="btn-screenshot"
+              className="w-14 h-14 rounded-full flex items-center justify-center shadow-xl bg-black/70 border-2 border-white/20"
+              title="تصوير سيلفي"
+            >
+              <Camera className="w-6 h-6 text-white" />
+            </button>
             {/* SHARE button for broadcaster */}
             <button
               onClick={() => setShowShare(true)}
