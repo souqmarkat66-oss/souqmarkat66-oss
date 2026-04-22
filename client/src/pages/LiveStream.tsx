@@ -53,6 +53,7 @@ export default function LiveStream() {
   const [camFacing,       setCamFacing]       = useState<"user"|"environment">("user");
   const [cameraError,     setCameraError]     = useState("");
   const [facingSupported, setFacingSupported] = useState(false);
+  const [needsPermTap,    setNeedsPermTap]    = useState(false);
 
   // Co-host state
   type CoHostStatus = "idle"|"choosing"|"requesting"|"accepted"|"rejected";
@@ -772,10 +773,20 @@ export default function LiveStream() {
     toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
   };
 
-  /* ─── auto-start WebRTC camera ──────────────────────── */
+  /* ─── auto-start WebRTC camera (only if already granted) ─── */
   useEffect(() => {
     if (!isBroadcast || broadcastMode !== "webrtc") return;
-    startBroadcast();
+    navigator.permissions.query({ name: "camera" as PermissionName })
+      .then(perm => {
+        if (perm.state === "granted") {
+          startBroadcast();
+        } else {
+          setNeedsPermTap(true);
+        }
+      })
+      .catch(() => {
+        startBroadcast();
+      });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [broadcastMode]);
 
@@ -1417,11 +1428,28 @@ export default function LiveStream() {
             <div className="w-20 h-20 rounded-full border-4 border-red-500/30 flex items-center justify-center animate-pulse">
               <Video className="w-10 h-10 text-red-400" />
             </div>
-            <p className="text-white font-semibold text-lg opacity-80">
-              {isBroadcast ? "جاري تشغيل الكاميرا..." : "في انتظار البث المباشر..."}
-            </p>
-            {!isBroadcast && (
-              <p className="text-white/40 text-sm">سيبدأ الفيديو تلقائياً عندما يبدأ المضيف البث</p>
+            {isBroadcast && needsPermTap ? (
+              <>
+                <p className="text-white font-bold text-lg">اضغط لتشغيل الكاميرا</p>
+                <p className="text-white/50 text-sm text-center max-w-xs">سيطلب المتصفح إذن الكاميرا — اضغط <strong className="text-white">السماح</strong></p>
+                <button
+                  data-testid="btn-tap-to-start"
+                  onClick={() => { setNeedsPermTap(false); startBroadcast(); }}
+                  className="mt-2 flex items-center gap-3 px-10 py-4 rounded-full bg-red-600 active:bg-red-500 text-white font-bold text-lg shadow-2xl active:scale-95 transition-all"
+                >
+                  <span className="w-3 h-3 rounded-full bg-white animate-pulse" />
+                  ابدأ البث الآن
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-white font-semibold text-lg opacity-80">
+                  {isBroadcast ? "جاري تشغيل الكاميرا..." : "في انتظار البث المباشر..."}
+                </p>
+                {!isBroadcast && (
+                  <p className="text-white/40 text-sm">سيبدأ الفيديو تلقائياً عندما يبدأ المضيف البث</p>
+                )}
+              </>
             )}
           </div>
         )}
