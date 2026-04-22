@@ -2378,7 +2378,7 @@ export default function LiveStream() {
           </div>
         )}
 
-        {/* ── CROSS-STREAM BATTLE OVERLAY ── TikTok Split Screen ── */}
+        {/* ── CROSS-STREAM BATTLE OVERLAY ── TikTok Style ── */}
         {battle && (() => {
           const iAmA    = battle.streamIdA === id;
           const myScore = iAmA ? battle.totalA : battle.totalB;
@@ -2388,77 +2388,79 @@ export default function LiveStream() {
           const total   = myScore + oppScore;
           const myWin   = myScore > oppScore;
           const oppWin  = oppScore > myScore;
-          const myMult  = total > 0 ? Math.max(1, Math.round(myScore / Math.max(oppScore, 1))) : 1;
-          const oppMult = total > 0 ? Math.max(1, Math.round(oppScore / Math.max(myScore, 1))) : 1;
 
           return (
             <div className="absolute inset-0 z-30 pointer-events-none flex flex-col">
 
-              {/* ── TOP BAR: scores + timer ── */}
-              <div className="flex items-start px-2 pt-2 gap-2">
-                {/* LEFT score (opponent) */}
-                <div className="flex-1 flex flex-col items-start gap-0.5">
-                  <div className={`flex items-center gap-1 rounded-full px-2.5 py-1 shadow-lg ${oppWin && battle.ended ? "bg-yellow-400" : "bg-rose-500/90 backdrop-blur-md"}`}>
-                    <span className="text-white font-black text-sm leading-none">{oppScore.toLocaleString()}</span>
-                  </div>
-                  <div className={`rounded px-1.5 py-0.5 text-[9px] font-black ${oppWin ? "bg-rose-600/90 text-white" : "bg-black/50 text-white/50"}`}>
-                    WIN ×{oppWin ? oppMult : 0}
-                  </div>
+              {/* ── ONE-BAR HEADER: pink | timer | cyan (exactly like TikTok) ── */}
+              <div className="flex h-9 items-stretch overflow-hidden">
+                {/* LEFT: pink — opponent score */}
+                <div className={`flex items-center justify-start gap-1.5 px-3 flex-1
+                  ${oppWin && battle.ended ? "bg-yellow-400" : "bg-rose-500"}`}>
+                  <span className="text-white font-black text-base leading-none tracking-tight">
+                    {oppScore.toLocaleString()}
+                  </span>
+                  {oppWin && !battle.ended && (
+                    <span className="text-white/80 text-[10px] font-bold">●</span>
+                  )}
                 </div>
 
-                {/* CENTER: timer */}
-                <div className="flex flex-col items-center">
+                {/* CENTER: timer — dark pill */}
+                <div className="bg-black/80 flex flex-col items-center justify-center px-3 min-w-[70px] gap-0">
                   {battle.active ? (
-                    <div className="bg-black/75 backdrop-blur-md rounded-xl px-2.5 py-1.5 flex flex-col items-center border border-white/20">
-                      <span className="text-yellow-400 text-xs">⚔️</span>
-                      <span className="text-white font-black text-sm font-mono leading-none">
+                    <>
+                      <span className="text-white font-black text-sm font-mono leading-tight">
                         {Math.floor(battle.timeLeft / 60)}:{(battle.timeLeft % 60).toString().padStart(2, "0")}
                       </span>
-                    </div>
-                  ) : battle.ended ? (
-                    <div className="bg-black/80 rounded-xl px-2 py-1">
-                      <span className="text-yellow-400 text-xs font-black">{battle.winner === "draw" ? "🤝 تعادل" : "🏆 انتهى"}</span>
-                    </div>
-                  ) : null}
+                      <span className="text-[9px]">💗</span>
+                    </>
+                  ) : (
+                    <span className="text-yellow-400 text-xs font-black">
+                      {battle.winner === "draw" ? "🤝" : "🏆"}
+                    </span>
+                  )}
                 </div>
 
-                {/* RIGHT score (me) */}
-                <div className="flex-1 flex flex-col items-end gap-0.5">
-                  <div className={`flex items-center gap-1 rounded-full px-2.5 py-1 shadow-lg ${myWin && battle.ended ? "bg-yellow-400" : "bg-cyan-500/90 backdrop-blur-md"}`}>
-                    <span className="text-white font-black text-sm leading-none">{myScore.toLocaleString()}</span>
-                  </div>
-                  <div className={`rounded px-1.5 py-0.5 text-[9px] font-black ${myWin ? "bg-cyan-600/90 text-white" : "bg-black/50 text-white/50"}`}>
-                    WIN ×{myWin ? myMult : 0}
-                  </div>
+                {/* RIGHT: cyan — my score */}
+                <div className={`flex items-center justify-end gap-1.5 px-3 flex-1
+                  ${myWin && battle.ended ? "bg-yellow-400" : "bg-cyan-500"}`}>
+                  {myWin && !battle.ended && (
+                    <span className="text-white/80 text-[10px] font-bold">●</span>
+                  )}
+                  <span className="text-white font-black text-base leading-none tracking-tight">
+                    {myScore.toLocaleString()}
+                  </span>
                 </div>
               </div>
 
-              {/* ── PROGRESS BAR ── */}
+              {/* ── PROGRESS BAR (1px, tight) ── */}
               {total > 0 && (
-                <div className="mx-2 mt-1 h-1 rounded-full overflow-hidden bg-white/10 flex">
-                  <div className="bg-rose-500 transition-all duration-700"
+                <div className="h-1 flex w-full">
+                  <div className="bg-rose-600 transition-all duration-700"
                     style={{ width: `${100 * oppScore / total}%` }} />
-                  <div className="bg-cyan-500 flex-1 transition-all duration-700" />
+                  <div className="bg-cyan-600 flex-1 transition-all duration-700" />
                 </div>
               )}
 
-              {/* ── SPLIT VIDEO AREA ── */}
-              <div className="relative flex-1 flex overflow-hidden mt-1">
+              {/* ── SPLIT VIDEOS ── */}
+              <div className="relative flex-1 flex overflow-hidden">
 
                 {/* LEFT: opponent video */}
-                <div className="relative w-1/2 h-full overflow-hidden">
+                <div className="relative w-1/2 h-full overflow-hidden border-r border-white/15">
                   <video ref={opponentVideoRef} autoPlay playsInline
                     className="w-full h-full object-cover bg-black" />
 
-                  {/* Opponent name */}
-                  <div className="absolute bottom-2 left-1.5 bg-black/60 rounded-full px-2 py-0.5 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
-                    <span className="text-white text-[9px] font-bold truncate max-w-[60px]">{oppName}</span>
+                  {/* Opponent name badge bottom */}
+                  <div className="absolute bottom-2 left-1.5">
+                    <div className="bg-black/60 rounded-full px-2 py-0.5 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                      <span className="text-white text-[9px] font-bold truncate max-w-[65px]">{oppName}</span>
+                    </div>
                   </div>
 
                   {battle.ended && oppWin && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                      <div className="bg-yellow-400/95 rounded-2xl px-5 py-3 text-center shadow-xl">
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                      <div className="bg-yellow-400/95 rounded-2xl px-4 py-2.5 text-center shadow-2xl">
                         <p className="text-2xl">🏆</p>
                         <p className="text-black font-black text-sm">فاز!</p>
                       </div>
@@ -2466,20 +2468,19 @@ export default function LiveStream() {
                   )}
                 </div>
 
-                {/* CENTER divider */}
-                <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 bg-white/20 z-10" />
-
-                {/* RIGHT: my video (broadcaster video fills here) */}
+                {/* RIGHT: my video (main broadcaster video fills this) */}
                 <div className="relative w-1/2 h-full overflow-hidden">
-                  {/* My name */}
-                  <div className="absolute bottom-2 right-1.5 bg-black/60 rounded-full px-2 py-0.5 flex items-center gap-1">
-                    <span className="text-white text-[9px] font-bold truncate max-w-[60px]">{myName}</span>
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                  {/* My name badge bottom */}
+                  <div className="absolute bottom-2 right-1.5">
+                    <div className="bg-black/60 rounded-full px-2 py-0.5 flex items-center gap-1">
+                      <span className="text-white text-[9px] font-bold truncate max-w-[65px]">{myName}</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                    </div>
                   </div>
 
                   {battle.ended && myWin && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                      <div className="bg-yellow-400/95 rounded-2xl px-5 py-3 text-center shadow-xl">
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                      <div className="bg-yellow-400/95 rounded-2xl px-4 py-2.5 text-center shadow-2xl">
                         <p className="text-2xl">🏆</p>
                         <p className="text-black font-black text-sm">فاز!</p>
                       </div>
@@ -2488,13 +2489,13 @@ export default function LiveStream() {
                 </div>
               </div>
 
-              {/* ── BOTTOM: gift panel (viewers) ── */}
+              {/* ── GIFT PANEL for viewers ── */}
               {!isBroadcast && battle.active && user && (
                 <div className="pointer-events-auto bg-black/90 backdrop-blur-xl border-t border-white/10 px-2 py-2">
-                  <p className="text-white/40 text-[8px] text-center mb-1.5">🎁 ادعم مذيعك في التحدي</p>
-                  <div className="flex gap-2 overflow-x-auto pb-1">
+                  <p className="text-white/40 text-[8px] text-center mb-1.5">🎁 ادعم مذيعك</p>
+                  <div className="flex gap-2 overflow-x-auto pb-0.5">
                     {GIFTS.slice(0, 6).map(gift => (
-                      <div key={gift.type} className="flex flex-col items-center gap-0.5 min-w-[3rem]">
+                      <div key={gift.type} className="flex flex-col items-center gap-0.5 min-w-[2.8rem]">
                         <span className="text-xl">{gift.emoji}</span>
                         <span className="text-[8px] text-yellow-400 font-bold">{gift.coins}🪙</span>
                         <div className="flex gap-0.5">
