@@ -1387,7 +1387,16 @@ export default function LiveStream() {
               )}
 
               <button
-                onClick={() => startCamera(camFacing)}
+                onClick={async () => {
+                  const ms = await startCamera(camFacing);
+                  if (!ms) return;
+                  if (!streaming) {
+                    setStreaming(true);
+                    socketRef.current?.emit("broadcaster", id);
+                    await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
+                    toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
+                  }
+                }}
                 className="flex items-center gap-2 px-8 py-3 rounded-full bg-white text-black font-bold text-sm shadow-xl hover:scale-105 transition"
                 data-testid="btn-retry-camera"
               >
