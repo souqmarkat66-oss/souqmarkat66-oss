@@ -2,7 +2,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { AdCard } from "@/components/AdCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { motion, AnimatePresence } from "framer-motion";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
 import { PlusCircle, LayoutGrid, Video, Search, Megaphone, ExternalLink, Star, Globe, SlidersHorizontal, ChevronDown, ArrowUpDown, X } from "lucide-react";
@@ -189,7 +189,10 @@ export default function Ads() {
   const [search, setSearch]       = useState(initialQ);
   const [selectedCat, setSelectedCat] = useState("الكل");
   const [showFilters, setShowFilters] = useState(false);
-  const [sortBy, setSortBy]       = useState("boost");
+  const [sortBy, setSortBy]       = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("sort") || "boost";
+  });
   const [region, setRegion]       = useState("");
   const [priceMin, setPriceMin]   = useState("");
   const [priceMax, setPriceMax]   = useState("");

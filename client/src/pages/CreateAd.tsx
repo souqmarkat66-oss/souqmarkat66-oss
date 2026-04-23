@@ -283,13 +283,10 @@ export default function CreateAd() {
           targetRadiusKm: locationTarget.radiusKm,
         } : {}),
       });
-      toast({ title: "🎉 تم نشر الإعلان بنجاح!", className: "bg-green-500 text-white border-none" });
+      toast({ title: "🎉 تم نشر الإعلان بنجاح! يظهر الآن لجميع المستخدمين.", className: "bg-green-500 text-white border-none" });
       qc.invalidateQueries({ queryKey: ["/api/ads"] });
-      if (newAd?.id) {
-        setLocation(`/ads/${newAd.id}`);
-      } else {
-        setLocation("/ads");
-      }
+      // Go to ads list sorted by newest so user sees their new ad at the top
+      setLocation("/ads?sort=newest");
     } catch (error: any) {
       toast({ variant: "destructive", title: "خطأ", description: error.message });
     }
@@ -325,8 +322,9 @@ export default function CreateAd() {
 
   const handleGenerateImage = async () => {
     const { description, productName, adTitle, title, customPrompt } = form.getValues();
-    const basePrompt = `Professional Arabic advertisement image for ${adTitle || productName || title || description}. High quality, vibrant colors, suitable for Egyptian market.`;
-    const prompt = customPrompt ? `${basePrompt} Additional context: ${customPrompt}` : basePrompt;
+    const subject = adTitle || productName || title || description || "منتج مصري";
+    const basePrompt = `Ultra-high quality professional Arabic advertisement photo for "${subject}". Egyptian market style. Photorealistic product showcase with premium studio lighting, sharp details, vibrant saturated colors, elegant modern composition. Bold Arabic-style design aesthetics. Eye-catching, premium brand feel. Shot like a professional commercial photographer. 4K quality, perfect focus, no blur, no text overlays.${customPrompt ? ` Extra context: ${customPrompt}` : ""}`;
+    const prompt = basePrompt;
     setGeneratingImage(true);
     try {
       const res = await fetch("/api/ai/generate-image", {
@@ -501,10 +499,11 @@ export default function CreateAd() {
 
       // ─── Step 2: Generate image ───────────────────────────────────
       setGenerateAllStep("توليد صورة الإعلان...");
-      const imgPrompt = `Professional Arabic advertisement image for ${adTitle || productName}. ${customPrompt || ""} High quality, vibrant colors, modern design, suitable for Egyptian market.`;
+      const subject2 = adTitle || productName || "منتج مصري";
+      const imgPrompt = `Ultra-high quality professional Arabic advertisement photo for "${subject2}". Egyptian market style. Photorealistic product showcase with premium studio lighting, sharp details, vibrant saturated colors, elegant modern composition. Bold Arabic-style design aesthetics. Eye-catching, premium brand feel. Shot like a professional commercial photographer. 4K quality, perfect focus, no blur, no text overlays.${customPrompt ? ` Context: ${customPrompt}` : ""}`;
       const imgRes = await fetch("/api/ai/generate-image", {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ prompt: imgPrompt, size: "1024x1024" }),
+        body: JSON.stringify({ prompt: imgPrompt, size: "1024x1536" }),
       });
       const imgData = await imgRes.json();
       if (!imgRes.ok) { setStep(1,"error"); throw new Error(imgData.message || "فشل توليد الصورة"); }
