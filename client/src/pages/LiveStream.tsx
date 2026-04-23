@@ -21,11 +21,18 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 
 /* ─── ICE servers ─────────────────────────────────────── */
 const ICE: RTCIceServer[] = [
-  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun.l.google.com:19302"  },
   { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "stun:stun2.l.google.com:19302" },
+  { urls: "stun:stun3.l.google.com:19302" },
+  { urls: "stun:stun4.l.google.com:19302" },
+  { urls: "stun:stun.cloudflare.com:3478" },
+  { urls: "stun:stun.nextcloud.com:443"   },
   { urls: "turn:openrelay.metered.ca:80",    username: "openrelayproject", credential: "openrelayproject" },
   { urls: "turn:openrelay.metered.ca:443",   username: "openrelayproject", credential: "openrelayproject" },
   { urls: "turns:openrelay.metered.ca:443",  username: "openrelayproject", credential: "openrelayproject" },
+  { urls: "turn:openrelay.metered.ca:80?transport=tcp",  username: "openrelayproject", credential: "openrelayproject" },
+  { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
 ];
 
 interface ChatMsg { userName: string; message: string; isOwner?: boolean; }
@@ -173,8 +180,9 @@ export default function LiveStream() {
   const [battleInvite, setBattleInvite] = useState<{inviteId:string; fromStreamId:string; fromName:string}|null>(null);
   const [battleInviteSent, setBattleInviteSent] = useState(false);
   const [liveStreamsForBattle, setLiveStreamsForBattle] = useState<any[]>([]);
-  const opponentVideoRef = useRef<HTMLVideoElement>(null);
-  const battlePeer = useRef<RTCPeerConnection|null>(null);
+  const opponentVideoRef   = useRef<HTMLVideoElement>(null);
+  const opponentStreamRef  = useRef<MediaStream|null>(null);   // saved stream → retry attach
+  const battlePeer         = useRef<RTCPeerConnection|null>(null);
 
   // Kicked state
   const [kicked, setKicked] = useState(false);
@@ -304,8 +312,13 @@ export default function LiveStream() {
       const devices = await navigator.mediaDevices.enumerateDevices();
       setFacingSupported(devices.filter(d => d.kind === "videoinput").length > 1);
       const ms = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: {
+          facingMode: facing,
+          width:     { ideal: 1280, min: 640 },
+          height:    { ideal: 720,  min: 480 },
+          frameRate: { ideal: 30,   min: 15  },
+        },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 48000 },
       });
       if (localStream.current) {
         const newVTrack = ms.getVideoTracks()[0];
@@ -725,30 +738,95 @@ export default function LiveStream() {
 
     socket.on("battle-watcher", async (watcherId: string) => {
       if (!localStream.current) return;
-      const pc = new RTCPeerConnection({ iceServers: ICE });
+      // Close existing peer for this watcher to avoid duplicate connections
+      const existing = peers.current.get(`battle_${watcherId}`);
+      if (existing) { existing.close(); peers.current.delete(`battle_${watcherId}`); }
+
+      const pc = new RTCPeerConnection({
+        iceServers: ICE,
+        iceTransportPolicy: "all",
+        bundlePolicy: "max-bundle",
+      });
       peers.current.set(`battle_${watcherId}`, pc);
       pc.onicecandidate = e => { if (e.candidate) socket.emit("battle-candidate", watcherId, e.candidate); };
-      localStream.current.getTracks().forEach(t => pc.addTrack(t, localStream.current!));
+
+      // Add all tracks with high-quality encoding
+      localStream.current.getTracks().forEach(track => {
+        const sender = pc.addTrack(track, localStream.current!);
+        // Set high bitrate for video
+        if (track.kind === "video") {
+          const params = sender.getParameters();
+          if (!params.encodings || params.encodings.length === 0) {
+            params.encodings = [{}];
+          }
+          params.encodings[0].maxBitrate = 2_500_000; // 2.5 Mbps
+          params.encodings[0].maxFramerate = 30;
+          sender.setParameters(params).catch(() => {});
+        }
+      });
+
       try {
-        const offer = await pc.createOffer();
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: false,
+          offerToReceiveVideo: false,
+          voiceActivityDetection: false,
+        });
         await pc.setLocalDescription(offer);
         socket.emit("battle-offer", watcherId, pc.localDescription);
       } catch {}
     });
 
     socket.on("battle-offer", async (fromId: string, offer: RTCSessionDescriptionInit) => {
-      if (battlePeer.current) battlePeer.current.close();
-      const pc = new RTCPeerConnection({ iceServers: ICE });
+      // Close old peer if exists
+      if (battlePeer.current) {
+        battlePeer.current.close();
+        battlePeer.current = null;
+      }
+      opponentStreamRef.current = null;
+
+      const pc = new RTCPeerConnection({
+        iceServers: ICE,
+        iceTransportPolicy: "all",
+        bundlePolicy: "max-bundle",
+      });
       battlePeer.current = pc;
-      pc.onicecandidate = e => { if (e.candidate) socket.emit("battle-candidate", fromId, e.candidate); };
-      pc.ontrack = e => {
-        if (opponentVideoRef.current && e.streams[0]) {
-          opponentVideoRef.current.srcObject = e.streams[0];
-          opponentVideoRef.current.play().catch(() => {});
+
+      pc.onicecandidate = e => {
+        if (e.candidate) socket.emit("battle-candidate", fromId, e.candidate);
+      };
+
+      // Monitor ICE state — attempt reconnect on failure
+      pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
+          // Force attach stream once connected
+          const el = opponentVideoRef.current;
+          const ms = opponentStreamRef.current;
+          if (el && ms) {
+            el.srcObject = ms;
+            el.play().catch(() => {});
+          }
+        }
+        if (pc.iceConnectionState === "failed") {
+          pc.restartIce?.();
         }
       };
+
+      pc.ontrack = e => {
+        const stream = e.streams[0] || new MediaStream([e.track]);
+        // Save to ref so useEffect can retry attach
+        opponentStreamRef.current = stream;
+        const el = opponentVideoRef.current;
+        if (el) {
+          el.srcObject = stream;
+          el.play().catch(() => {});
+        }
+      };
+
       await pc.setRemoteDescription(offer).catch(() => {});
-      const answer = await pc.createAnswer().catch(() => null);
+      const answer = await pc.createAnswer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+      }).catch(() => null);
       if (!answer) return;
       await pc.setLocalDescription(answer);
       socket.emit("battle-answer", fromId, pc.localDescription);
@@ -783,6 +861,35 @@ export default function LiveStream() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isBroadcast]);
+
+  /* ─── Battle: retry attaching opponent stream to video element ── */
+  useEffect(() => {
+    if (!battle) return;
+    // Immediately try to attach if we already have a stream
+    const tryAttach = () => {
+      const el = opponentVideoRef.current;
+      const ms = opponentStreamRef.current;
+      if (!el || !ms) return;
+      if (el.srcObject !== ms) {
+        el.srcObject = ms;
+      }
+      if (el.paused) {
+        el.play().catch(() => {});
+      }
+    };
+    tryAttach();
+    // Keep retrying every 800ms until video is playing
+    const interval = setInterval(() => {
+      const el = opponentVideoRef.current;
+      if (!el) return;
+      if (el.readyState >= 2 && !el.paused) {
+        clearInterval(interval); // playing fine
+        return;
+      }
+      tryAttach();
+    }, 800);
+    return () => clearInterval(interval);
+  }, [battle]);
 
   /* ─── In-stream ads ─────────────────────────────────── */
   useEffect(() => {
@@ -2447,8 +2554,19 @@ export default function LiveStream() {
 
                 {/* LEFT: opponent video */}
                 <div className="relative w-1/2 h-full overflow-hidden border-r border-white/15">
-                  <video ref={opponentVideoRef} autoPlay playsInline
-                    className="w-full h-full object-cover bg-black" />
+                  <video
+                    ref={el => {
+                      (opponentVideoRef as any).current = el;
+                      // Immediately attach if stream already received
+                      if (el && opponentStreamRef.current) {
+                        el.srcObject = opponentStreamRef.current;
+                        el.play().catch(() => {});
+                      }
+                    }}
+                    autoPlay playsInline
+                    className="w-full h-full object-cover bg-black"
+                    style={{ background: "#111" }}
+                  />
 
                   {/* Opponent name badge bottom */}
                   <div className="absolute bottom-2 left-1.5">
