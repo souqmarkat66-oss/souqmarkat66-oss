@@ -4316,8 +4316,16 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   app.get("/api/admin/campaigns", isAuthenticated, requireAdmin, async (req: any, res) => {
-    const campaigns = await storage.getAllAdCampaigns();
-    res.json(campaigns);
+    // Join with users to get advertiser name/phone/email
+    const r = await pool.query(`
+      SELECT ac.*,
+             u.first_name, u.last_name, u.email, u.phone_number,
+             CONCAT(u.first_name, ' ', u.last_name) AS advertiser_name
+      FROM ad_campaigns ac
+      LEFT JOIN users u ON u.id = ac.advertiser_id
+      ORDER BY ac.created_at DESC
+    `);
+    res.json(r.rows);
   });
 
   app.put("/api/admin/campaigns/:id", isAuthenticated, requireAdmin, async (req: any, res) => {

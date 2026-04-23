@@ -1498,37 +1498,78 @@ function CampaignsSection({ logAction }: { logAction: any }) {
 }
 
 function CampaignCard({ c, updateCampaign }: any) {
-  const spent = Number(c.spentEGP || 0);
-  const budget = Number(c.budgetEGP || 1);
-  const pct = Math.min(100, (spent / budget) * 100);
+  const spent  = Number(c.spent_egp  || c.spentEGP  || 0);
+  const budget = Number(c.budget_egp || c.budgetEGP || 1);
+  const pct    = Math.min(100, (spent / budget) * 100);
+  const mediaUrl = c.media_url || c.mediaUrl;
+  const advertiserName = c.advertiser_name || c.advertiserName || c.first_name || c.advertiser_id;
+  const createdAt = c.created_at ? new Date(c.created_at).toLocaleDateString("ar-EG") : "";
+  const categories = Array.isArray(c.target_categories) ? c.target_categories : [];
+  const regions = Array.isArray(c.target_regions) ? c.target_regions : [];
+
   return (
-    <Card className="rounded-xl" data-testid={`camp-${c.id}`}>
+    <Card className="rounded-xl border-border/60" data-testid={`camp-${c.id}`}>
       <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3 flex-1 min-w-0">
-            {c.mediaUrl && <img src={c.mediaUrl} alt="" className="w-12 h-12 rounded-xl object-cover bg-muted flex-shrink-0" />}
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 mb-1 flex-wrap">
-                <span className="font-semibold text-sm">{c.name}</span>
-                <StatusBadge status={c.status} />
-              </div>
-              <div className="flex gap-3 text-xs text-muted-foreground flex-wrap">
-                <span>👁️ {c.impressions?.toLocaleString()}</span>
-                <span>🖱️ {c.clicks?.toLocaleString()}</span>
-                <span>💸 {spent.toFixed(2)} / {budget.toFixed(2)} ج.م</span>
-              </div>
-              <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden w-48">
-                <div className={`h-full rounded-full ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-yellow-500" : "bg-primary"}`} style={{ width: `${pct}%` }} />
-              </div>
+        <div className="flex items-start gap-4">
+          {/* Media */}
+          {mediaUrl && (
+            <img src={mediaUrl} alt="" className="w-16 h-16 rounded-xl object-cover bg-muted flex-shrink-0 border border-border/40" />
+          )}
+          {/* Details */}
+          <div className="flex-1 min-w-0">
+            {/* Row 1: name + status */}
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <span className="font-bold text-sm">{c.name}</span>
+              <StatusBadge status={c.status} />
+              {createdAt && <span className="text-[10px] text-muted-foreground">{createdAt}</span>}
             </div>
+
+            {/* Row 2: Advertiser info */}
+            <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground/80">👤 {advertiserName}</span>
+              {c.phone_number && <span>📱 {c.phone_number}</span>}
+              {c.email && <span className="truncate max-w-[160px]">✉️ {c.email}</span>}
+            </div>
+
+            {/* Row 3: Stats */}
+            <div className="flex gap-4 text-xs text-muted-foreground flex-wrap mb-2">
+              <span>👁️ {(c.impressions || 0).toLocaleString("ar-EG")} مشاهدة</span>
+              <span>🖱️ {(c.clicks || 0).toLocaleString("ar-EG")} نقرة</span>
+              <span className="font-semibold">💸 {spent.toFixed(0)} / {budget.toFixed(0)} ج.م</span>
+              <span>⚡ {(c.cpm_rate_egp || 15).toFixed(0)} ج.م CPM</span>
+            </div>
+
+            {/* Progress bar */}
+            <div className="mb-2 h-1.5 bg-muted rounded-full overflow-hidden w-full max-w-xs">
+              <div className={`h-full rounded-full transition-all ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-yellow-500" : "bg-primary"}`} style={{ width: `${pct}%` }} />
+            </div>
+
+            {/* Row 4: Targeting tags */}
+            {(categories.length > 0 || regions.length > 0 || c.description) && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {categories.map((cat: string) => <Badge key={cat} variant="secondary" className="text-[10px] h-5">{cat}</Badge>)}
+                {regions.map((r: string) => <Badge key={r} variant="outline" className="text-[10px] h-5">📍{r}</Badge>)}
+                {c.description && <span className="text-[10px] text-muted-foreground italic truncate max-w-[200px]">{c.description}</span>}
+              </div>
+            )}
+
+            {/* Row 5: Target URL */}
+            {(c.target_url || c.targetUrl) && (
+              <a href={c.target_url || c.targetUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:underline mt-1 block truncate max-w-xs">
+                🔗 {c.target_url || c.targetUrl}
+              </a>
+            )}
           </div>
-          <div className="flex gap-1.5 flex-shrink-0 flex-wrap justify-end">
+
+          {/* Actions */}
+          <div className="flex flex-col gap-1.5 flex-shrink-0">
             {c.status === "pending" && <>
-              <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "active" })}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
-              <Button size="sm" variant="destructive" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "rejected" })}><XCircle className="w-3 h-3 me-1" />رفض</Button>
+              <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "active" })} data-testid={`btn-approve-camp-${c.id}`}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
+              <Button size="sm" variant="destructive" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "rejected" })} data-testid={`btn-reject-camp-${c.id}`}><XCircle className="w-3 h-3 me-1" />رفض</Button>
             </>}
-            {c.status === "active"  && <Button size="sm" variant="outline" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "paused" })}>⏸️ إيقاف</Button>}
-            {c.status === "paused"  && <Button size="sm" variant="outline" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "active" })}>▶️ تفعيل</Button>}
+            {c.status === "active"  && <Button size="sm" variant="outline" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "paused" })} data-testid={`btn-pause-camp-${c.id}`}>⏸️ إيقاف</Button>}
+            {c.status === "paused"  && <Button size="sm" variant="outline" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "active" })} data-testid={`btn-resume-camp-${c.id}`}>▶️ تفعيل</Button>}
+            {["active","paused"].includes(c.status) && <Button size="sm" variant="ghost" className="text-xs text-red-500 hover:bg-red-500/10" onClick={() => updateCampaign.mutate({ id: c.id, status: "rejected" })} data-testid={`btn-stop-camp-${c.id}`}>🛑 إيقاف نهائي</Button>}
           </div>
         </div>
       </CardContent>
