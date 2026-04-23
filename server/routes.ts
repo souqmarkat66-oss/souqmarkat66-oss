@@ -69,6 +69,98 @@ async function requireAdmin(req: any, res: any, next: any) {
   next();
 }
 
+// ══════════════════════════════════════════════════════════════
+// AI Payment Screenshot Verifier — uses GPT-4o Vision
+// Ensures submitted proof images are real Egyptian wallet receipts
+// ══════════════════════════════════════════════════════════════
+async function verifyPaymentScreenshot(
+  screenshotUrl: string,
+  expectedAmountEGP: number,
+  paymentMethod: string
+): Promise<{ ok: boolean; reason: string; detectedAmount?: number }> {
+  try {
+    // Build absolute file path from the relative /uploads/… URL
+    const relPath = screenshotUrl.replace(/^\//, "");
+    const absPath = path.join(process.cwd(), relPath);
+    if (!fs.existsSync(absPath)) {
+      return { ok: false, reason: "ملف الإيصال غير موجود على الخادم" };
+    }
+
+    // Read the image and convert to base64
+    const imgBuffer = fs.readFileSync(absPath);
+    const mimeType  = absPath.endsWith(".png") ? "image/png"
+                    : absPath.endsWith(".webp") ? "image/webp"
+                    : "image/jpeg";
+    const base64Img = imgBuffer.toString("base64");
+
+    const methodNames: Record<string, string> = {
+      vodafone: "فودافون كاش",
+      etisalat: "اتصالات كاش",
+      instapay: "انستاباي",
+      souq:     "تحويل بنكي",
+    };
+    const methodAr = methodNames[paymentMethod] || paymentMethod;
+
+    const prompt = `أنت نظام تحقق من إيصالات الدفع الإلكترونية المصرية.
+المهمة: افحص هذه الصورة وحدد إذا كانت إيصال دفع حقيقي من ${methodAr} أو أي محفظة إلكترونية مصرية معروفة (فودافون كاش، اتصالات كاش، انستاباي، بنك الاهلي، CIB، إلخ).
+
+المبلغ المتوقع: ${expectedAmountEGP} جنيه مصري.
+
+قيّم الصورة وأجب بـ JSON فقط بدون أي نص إضافي:
+{
+  "isValidReceipt": true/false,
+  "detectedAmount": <المبلغ الظاهر في الصورة أو null>,
+  "detectedSource": "<اسم التطبيق أو البنك الظاهر>",
+  "amountMatches": true/false,
+  "reason": "<سبب القبول أو الرفض بالعربية في جملة واحدة>"
+}
+
+قواعد الرفض:
+- إذا كانت الصورة ليست إيصال دفع (صورة عادية، منتج، شخص، خلفية إلخ)
+- إذا لم يظهر أي مبلغ واضح
+- إذا كانت الصورة مُزوَّرة أو مُعدَّلة بشكل واضح
+- إذا اختلف المبلغ الظاهر عن ${expectedAmountEGP} ج.م بأكثر من 5 جنيه
+
+قواعد القبول:
+- إيصال واضح من تطبيق أو بنك مصري معروف
+- يظهر مبلغ قريب من ${expectedAmountEGP} ج.م`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      max_tokens: 300,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Img}`, detail: "high" } }
+        ]
+      }]
+    });
+
+    const raw = response.choices[0]?.message?.content?.trim() || "{}";
+    // Extract JSON from response (may have backticks)
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return { ok: false, reason: "تعذّر تحليل الإيصال — حاول مرة أخرى" };
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    if (!parsed.isValidReceipt) {
+      return { ok: false, reason: parsed.reason || "الصورة لا تبدو إيصال دفع حقيقي" };
+    }
+    if (!parsed.amountMatches) {
+      return {
+        ok: false,
+        reason: parsed.reason || `المبلغ الظاهر في الإيصال (${parsed.detectedAmount || "غير واضح"} ج.م) لا يتطابق مع المبلغ المطلوب (${expectedAmountEGP} ج.م)`,
+        detectedAmount: parsed.detectedAmount
+      };
+    }
+    return { ok: true, reason: parsed.reason || "إيصال صحيح", detectedAmount: parsed.detectedAmount };
+  } catch (err: any) {
+    console.error("[verifyPaymentScreenshot]", err?.message);
+    // On AI error, allow the order through (fallback to manual admin review)
+    return { ok: true, reason: "تحقق تلقائي غير متاح — سيراجعه الأدمن" };
+  }
+}
+
 // AI credit check middleware
 async function checkAiCredits(req: any, res: any, next: any) {
   if (!req.user) return res.status(401).json({ message: "Unauthorized" });
@@ -1004,10 +1096,34 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const { packageId, coins, amountEGP, paymentMethod, paymentRef, screenshotUrl, userName } = req.body || {};
     if (!coins || !amountEGP || !paymentMethod) return res.status(400).json({ message: "بيانات ناقصة" });
 
+    // Sanitize screenshotUrl for coin purchase (only local /uploads/ paths)
+    let safeCoinsScreenshot: string | null = null;
+    if (screenshotUrl && typeof screenshotUrl === "string") {
+      const trimmed = screenshotUrl.trim();
+      if (/^\/uploads\/[^\s<>"]+$/.test(trimmed) || /^\/api\/uploads\/[^\s<>"]+$/.test(trimmed)) {
+        safeCoinsScreenshot = trimmed;
+      }
+    }
+
+    // ── AI Payment Screenshot Verification for coin purchase ────
+    if (safeCoinsScreenshot) {
+      const coinAmount = parseFloat(amountEGP);
+      if (!isNaN(coinAmount) && coinAmount > 0) {
+        const aiCheck = await verifyPaymentScreenshot(safeCoinsScreenshot, coinAmount, paymentMethod || "vodafone");
+        if (!aiCheck.ok) {
+          return res.status(400).json({
+            message: `❌ إيصال الدفع غير صالح: ${aiCheck.reason}`,
+            aiReason: aiCheck.reason,
+          });
+        }
+      }
+    }
+    // ────────────────────────────────────────────────────────────
+
     const r = await pool.query(
       `INSERT INTO coin_purchase_orders (user_id, user_name, package_id, coins, amount_egp, payment_method, payment_ref, screenshot_url, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending') RETURNING *`,
-      [userId, userName || null, packageId || null, coins, amountEGP, paymentMethod, paymentRef || null, screenshotUrl || null]
+      [userId, userName || null, packageId || null, coins, amountEGP, paymentMethod, paymentRef || null, safeCoinsScreenshot || null]
     );
     // Notify admins about new coin purchase
     try {
@@ -1419,6 +1535,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!safeScreenshotUrl && !paymentRef) {
       return res.status(400).json({ message: "يرجى رفع إيصال الدفع أو إدخال رقم العملية كدليل على الدفع" });
     }
+
+    // ── AI Payment Screenshot Verification ──────────────────────
+    // If a screenshot is provided, verify it is a real Egyptian wallet receipt
+    if (safeScreenshotUrl) {
+      const aiCheck = await verifyPaymentScreenshot(safeScreenshotUrl, amount, paymentMethod);
+      if (!aiCheck.ok) {
+        return res.status(400).json({
+          message: `❌ إيصال الدفع غير صالح: ${aiCheck.reason}`,
+          aiReason: aiCheck.reason,
+        });
+      }
+    }
+    // ────────────────────────────────────────────────────────────
 
     const userR = await pool.query(`SELECT first_name, last_name FROM users WHERE id = $1`, [userId]);
     const userName = `${userR.rows[0]?.first_name || ""} ${userR.rows[0]?.last_name || ""}`.trim() || userId;
