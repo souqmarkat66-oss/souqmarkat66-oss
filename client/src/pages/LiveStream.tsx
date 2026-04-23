@@ -2677,6 +2677,21 @@ export default function LiveStream() {
                 </div>
               </div>
 
+              {/* ── LIKE BUTTON during battle (free — no coins) ── */}
+              {!isBroadcast && battle.active && (
+                <div className="pointer-events-auto absolute top-10 right-2 z-10 flex flex-col items-center gap-0.5">
+                  <button
+                    onClick={handleLike}
+                    className={`w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-90
+                      ${liked ? "bg-red-500 scale-110" : "bg-black/60 backdrop-blur"}`}
+                    data-testid="btn-battle-like"
+                  >
+                    <Heart className={`w-5 h-5 ${liked ? "text-white fill-white" : "text-white"}`} />
+                  </button>
+                  <span className="text-white text-[10px] font-black drop-shadow">{likesCount}</span>
+                </div>
+              )}
+
               {/* ── GIFT PANEL for viewers ── */}
               {!isBroadcast && battle.active && user && (
                 <div className="pointer-events-auto bg-black/90 backdrop-blur-xl border-t border-white/10 px-2 py-2">
