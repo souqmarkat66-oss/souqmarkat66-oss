@@ -4319,7 +4319,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
     // Join with users to get advertiser name/phone/email
     const r = await pool.query(`
       SELECT ac.*,
-             u.first_name, u.last_name, u.email, u.phone_number,
+             u.first_name, u.last_name, u.email, u.phone,
              CONCAT(u.first_name, ' ', u.last_name) AS advertiser_name
       FROM ad_campaigns ac
       LEFT JOIN users u ON u.id = ac.advertiser_id

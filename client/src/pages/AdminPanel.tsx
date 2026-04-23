@@ -1527,7 +1527,7 @@ function CampaignCard({ c, updateCampaign }: any) {
             {/* Row 2: Advertiser info */}
             <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
               <span className="font-medium text-foreground/80">👤 {advertiserName}</span>
-              {c.phone_number && <span>📱 {c.phone_number}</span>}
+              {(c.phone || c.phone_number) && <span>📱 {c.phone || c.phone_number}</span>}
               {c.email && <span className="truncate max-w-[160px]">✉️ {c.email}</span>}
             </div>
 
