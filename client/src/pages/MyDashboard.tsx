@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import {
   Megaphone, Eye, Heart, MessageSquare, BarChart2, TrendingUp,
   DollarSign, Radio, Film, Tv, PlusCircle, ArrowUpRight,
-  Loader2, Star, Users, MousePointerClick, Wallet, PieChart, Utensils
+  Loader2, Star, Users, MousePointerClick, Wallet, PieChart, Utensils,
+  Clock, CheckCircle2, XCircle, ImageIcon
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -179,6 +180,114 @@ export default function MyDashboard() {
                 </Link>
               ))}
             </div>
+
+            {/* ══ ALL MY ADS — with status labels ══ */}
+            {myAds.length > 0 && (() => {
+              const pendingAds = myAds.filter((a: any) => a.status === "pending" || a.status === "review");
+              const activeAds  = myAds.filter((a: any) => a.status === "active");
+              const rejectedAds = myAds.filter((a: any) => a.status === "rejected");
+              return (
+                <div className="space-y-4">
+                  {/* Pending */}
+                  {pendingAds.length > 0 && (
+                    <Card className="border-yellow-400/50 bg-yellow-50/50 dark:bg-yellow-950/20 rounded-2xl">
+                      <CardHeader className="pb-2 pt-4 px-4">
+                        <CardTitle className="text-sm flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
+                          <Clock className="w-4 h-4 animate-pulse" />
+                          قيد المراجعة ({pendingAds.length})
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4 pb-4 space-y-2">
+                        {pendingAds.map((ad: any) => (
+                          <Link key={ad.id} href={`/ads/${ad.id}`}>
+                            <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white dark:bg-black/20 border border-yellow-300/50 hover:border-yellow-400 transition-colors cursor-pointer">
+                              {ad.mediaUrl ? (
+                                <img src={ad.mediaUrl} alt="" className="w-12 h-12 rounded-lg object-cover flex-shrink-0" onError={e => { (e.target as any).style.display='none'; }} />
+                              ) : (
+                                <div className="w-12 h-12 rounded-lg bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center flex-shrink-0">
+                                  <ImageIcon className="w-5 h-5 text-yellow-500" />
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold truncate">{ad.title}</p>
+                                <p className="text-xs text-muted-foreground truncate">{ad.description}</p>
+                              </div>
+                              <Badge className="bg-yellow-400/20 text-yellow-700 dark:text-yellow-400 border-yellow-400/40 text-[10px] flex-shrink-0">
+                                ⏳ قيد المراجعة
+                              </Badge>
+                            </div>
+                          </Link>
+                        ))}
+                        <p className="text-[11px] text-yellow-600/70 dark:text-yellow-400/60 text-center mt-1">سيتم مراجعة إعلاناتك خلال 24 ساعة وتفعيلها تلقائياً</p>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Active */}
+                  {activeAds.length > 0 && (
+                    <Card className="border-green-400/40 bg-green-50/30 dark:bg-green-950/10 rounded-2xl">
+                      <CardHeader className="pb-2 pt-4 px-4">
+                        <CardTitle className="text-sm flex items-center gap-2 text-green-700 dark:text-green-400">
+                          <CheckCircle2 className="w-4 h-4" />
+                          إعلانات نشطة ({activeAds.length})
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4 pb-4 space-y-2">
+                        {activeAds.slice(0, 5).map((ad: any) => (
+                          <Link key={ad.id} href={`/ads/${ad.id}`}>
+                            <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white dark:bg-black/20 border border-green-300/30 hover:border-green-400 transition-colors cursor-pointer">
+                              {ad.mediaUrl ? (
+                                <img src={ad.mediaUrl} alt="" className="w-12 h-12 rounded-lg object-cover flex-shrink-0" onError={e => { (e.target as any).style.display='none'; }} />
+                              ) : (
+                                <div className="w-12 h-12 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0">
+                                  <Megaphone className="w-5 h-5 text-green-500" />
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold truncate">{ad.title}</p>
+                                <p className="text-xs text-muted-foreground">{(ad.viewsCount||0).toLocaleString("ar-EG")} مشاهدة · {(ad.likesCount||0)} إعجاب</p>
+                              </div>
+                              <Badge className="bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30 text-[10px] flex-shrink-0">
+                                ✅ نشط
+                              </Badge>
+                            </div>
+                          </Link>
+                        ))}
+                        {activeAds.length > 5 && (
+                          <Link href="/my-content">
+                            <p className="text-center text-xs text-primary hover:underline mt-1">عرض كل الإعلانات ({activeAds.length})</p>
+                          </Link>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Rejected */}
+                  {rejectedAds.length > 0 && (
+                    <Card className="border-red-400/40 bg-red-50/30 dark:bg-red-950/10 rounded-2xl">
+                      <CardHeader className="pb-2 pt-4 px-4">
+                        <CardTitle className="text-sm flex items-center gap-2 text-red-600 dark:text-red-400">
+                          <XCircle className="w-4 h-4" />
+                          مرفوضة ({rejectedAds.length})
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4 pb-4 space-y-2">
+                        {rejectedAds.map((ad: any) => (
+                          <Link key={ad.id} href={`/ads/${ad.id}`}>
+                            <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white dark:bg-black/20 border border-red-300/30 hover:border-red-400 transition-colors cursor-pointer">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold truncate">{ad.title}</p>
+                              </div>
+                              <Badge className="bg-red-500/15 text-red-600 border-red-500/30 text-[10px] flex-shrink-0">❌ مرفوض</Badge>
+                            </div>
+                          </Link>
+                        ))}
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              );
+            })()}
 
             {myAds.length === 0 && myCampaigns.length === 0 && myChannels.length === 0 && (
               <Card className="border-dashed border-2 border-border/50">
