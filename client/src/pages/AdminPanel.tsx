@@ -3758,10 +3758,48 @@ function CoinsSection({ logAction }: { logAction: any }) {
     queryFn: () => fetch(`/api/admin/coins/codes?page=${codesPage}&limit=20`).then(r => r.json()),
   });
 
-  const { data: packagesData } = useQuery<any[]>({
-    queryKey: ["/api/coins/packages"],
-    queryFn: () => fetch("/api/coins/packages").then(r => r.json()),
+  const { data: packagesData, refetch: refetchPackages } = useQuery<any[]>({
+    queryKey: ["/api/admin/coins/packages/all"],
+    queryFn: () => fetch("/api/admin/coins/packages/all", { credentials: "include" }).then(r => r.json()),
   });
+
+  const [pkgSearch, setPkgSearch] = useState("");
+  const [showNewPkgForm, setShowNewPkgForm] = useState(false);
+  const [editingPkg, setEditingPkg] = useState<any | null>(null);
+  const [pkgForm, setPkgForm] = useState({ name: "", coins: "", priceEGP: "", bonusCoins: "0", sortOrder: "0", description: "", badge: "" });
+  const [pkgLoading, setPkgLoading] = useState(false);
+
+  const savePkg = async (isNew: boolean) => {
+    const { name, coins, priceEGP, bonusCoins, sortOrder, description, badge } = pkgForm;
+    if (!name || !coins || !priceEGP) return toast({ title: "تحقق من البيانات", description: "الاسم والعملات والسعر مطلوبة", variant: "destructive" });
+    setPkgLoading(true);
+    try {
+      const body = { name, coins: Number(coins), priceEGP: Number(priceEGP), bonusCoins: Number(bonusCoins) || 0, sortOrder: Number(sortOrder) || 0, description: description || null, badge: badge || null };
+      const url  = isNew ? "/api/admin/coins/packages" : `/api/admin/coins/packages/${editingPkg.id}`;
+      const meth = isNew ? "POST" : "PATCH";
+      const res  = await fetch(url, { method: meth, credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!res.ok) throw new Error((await res.json()).message);
+      toast({ title: isNew ? "✅ تم إضافة الباقة" : "✅ تم تحديث الباقة" });
+      setShowNewPkgForm(false);
+      setEditingPkg(null);
+      setPkgForm({ name: "", coins: "", priceEGP: "", bonusCoins: "0", sortOrder: "0", description: "", badge: "" });
+      refetchPackages();
+    } catch (e: any) {
+      toast({ title: "خطأ", description: e.message, variant: "destructive" });
+    } finally { setPkgLoading(false); }
+  };
+
+  const deletePkg = async (id: number) => {
+    if (!confirm("تأكيد الحذف؟")) return;
+    await fetch(`/api/admin/coins/packages/${id}`, { method: "DELETE", credentials: "include" });
+    toast({ title: "✅ تم الحذف" });
+    refetchPackages();
+  };
+
+  const togglePkgActive = async (pkg: any) => {
+    await fetch(`/api/admin/coins/packages/${pkg.id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isActive: !pkg.is_active }) });
+    refetchPackages();
+  };
 
   const { data: purchaseOrders, isLoading: ordersLoading, refetch: refetchOrders } = useQuery<any[]>({
     queryKey: ["/api/admin/coins/purchase-orders", ordersFilter],
@@ -4095,23 +4133,120 @@ function CoinsSection({ logAction }: { logAction: any }) {
 
       {/* ── TAB: Packages ── */}
       {coinTab === "packages" && (
-        <div className="space-y-4">
+        <div className="space-y-4" dir="rtl">
+          {/* Header + Search + New Package */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <input
+              value={pkgSearch}
+              onChange={e => setPkgSearch(e.target.value)}
+              placeholder="🔍 بحث في الباقات..."
+              className="flex-1 min-w-[160px] bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-yellow-500"
+              data-testid="input-pkg-search"
+            />
+            <Button
+              size="sm"
+              className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold gap-1"
+              onClick={() => { setShowNewPkgForm(v => !v); setEditingPkg(null); setPkgForm({ name: "", coins: "", priceEGP: "", bonusCoins: "0", sortOrder: "0", description: "", badge: "" }); }}
+              data-testid="btn-new-package"
+            >
+              <PlusCircle className="w-4 h-4" /> باقة جديدة
+            </Button>
+          </div>
+
+          {/* New / Edit Form */}
+          {(showNewPkgForm || editingPkg) && (
+            <Card className="bg-zinc-900 border-yellow-500/40">
+              <CardHeader className="pb-3 pt-4 px-4">
+                <CardTitle className="text-yellow-400 text-sm">{editingPkg ? "✏️ تعديل الباقة" : "➕ إضافة باقة جديدة"}</CardTitle>
+              </CardHeader>
+              <CardContent className="px-4 pb-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-white/50 text-xs mb-1 block">اسم الباقة *</label>
+                    <input value={pkgForm.name} onChange={e => setPkgForm(f => ({ ...f, name: e.target.value }))} placeholder="مثال: باقة البداية" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-500" data-testid="input-pkg-name" />
+                  </div>
+                  <div>
+                    <label className="text-white/50 text-xs mb-1 block">عدد العملات *</label>
+                    <input type="number" value={pkgForm.coins} onChange={e => setPkgForm(f => ({ ...f, coins: e.target.value }))} placeholder="100" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-500" data-testid="input-pkg-coins" />
+                  </div>
+                  <div>
+                    <label className="text-white/50 text-xs mb-1 block">السعر (ج.م) *</label>
+                    <input type="number" value={pkgForm.priceEGP} onChange={e => setPkgForm(f => ({ ...f, priceEGP: e.target.value }))} placeholder="10" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-500" data-testid="input-pkg-price" />
+                  </div>
+                  <div>
+                    <label className="text-white/50 text-xs mb-1 block">عملات مجانية (بونص)</label>
+                    <input type="number" value={pkgForm.bonusCoins} onChange={e => setPkgForm(f => ({ ...f, bonusCoins: e.target.value }))} placeholder="0" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-500" data-testid="input-pkg-bonus" />
+                  </div>
+                  <div>
+                    <label className="text-white/50 text-xs mb-1 block">شارة (مثال: 🔥 الأكثر مبيعاً)</label>
+                    <input value={pkgForm.badge} onChange={e => setPkgForm(f => ({ ...f, badge: e.target.value }))} placeholder="🔥 الأكثر مبيعاً" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-500" data-testid="input-pkg-badge" />
+                  </div>
+                  <div>
+                    <label className="text-white/50 text-xs mb-1 block">ترتيب العرض</label>
+                    <input type="number" value={pkgForm.sortOrder} onChange={e => setPkgForm(f => ({ ...f, sortOrder: e.target.value }))} placeholder="0" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-500" data-testid="input-pkg-sort" />
+                  </div>
+                  <div className="col-span-2 md:col-span-3">
+                    <label className="text-white/50 text-xs mb-1 block">وصف (اختياري)</label>
+                    <input value={pkgForm.description} onChange={e => setPkgForm(f => ({ ...f, description: e.target.value }))} placeholder="وصف قصير للباقة..." className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-500" data-testid="input-pkg-desc" />
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <Button size="sm" className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold" onClick={() => savePkg(!editingPkg)} disabled={pkgLoading} data-testid="btn-save-pkg">
+                    {pkgLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingPkg ? "💾 حفظ التعديلات" : "➕ إضافة الباقة")}
+                  </Button>
+                  <Button size="sm" variant="ghost" className="text-white/60" onClick={() => { setShowNewPkgForm(false); setEditingPkg(null); }}>إلغاء</Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Packages List */}
           <Card className="bg-zinc-900 border-zinc-700">
-            <CardHeader>
-              <CardTitle className="text-white text-base">باقات الشحن الحالية</CardTitle>
+            <CardHeader className="pb-2 pt-4 px-4">
+              <CardTitle className="text-white text-sm flex items-center justify-between">
+                <span>باقات الشحن ({(packagesData || []).length})</span>
+                <span className="text-xs text-white/40">نشط: {(packagesData || []).filter((p: any) => p.is_active).length} / متوقف: {(packagesData || []).filter((p: any) => !p.is_active).length}</span>
+              </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-4 pb-4">
               {!packagesData || packagesData.length === 0 ? (
-                <p className="text-white/40 text-center py-4">لا توجد باقات</p>
+                <p className="text-white/40 text-center py-8">لا توجد باقات — أضف باقة جديدة</p>
               ) : (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-                  {packagesData.map((pkg: any) => (
-                    <div key={pkg.id} className="bg-gradient-to-b from-yellow-500/10 to-zinc-800 border border-yellow-500/20 rounded-2xl p-3 text-center" data-testid={`pkg-${pkg.id}`}>
-                      <p className="text-yellow-400 font-bold text-lg">{pkg.coins + (pkg.bonus_coins || 0)}</p>
-                      <p className="text-white/40 text-xs">عملة</p>
-                      {pkg.bonus_coins > 0 && <p className="text-green-400 text-xs">+{pkg.bonus_coins} مجانًا</p>}
-                      <p className="text-white font-bold mt-2">{pkg.price_egp} ج.م</p>
-                      <p className="text-white/30 text-[10px] mt-1">{pkg.name}</p>
+                <div className="space-y-2">
+                  {(packagesData || [])
+                    .filter((p: any) => !pkgSearch || p.name?.includes(pkgSearch) || String(p.coins).includes(pkgSearch) || String(p.price_egp).includes(pkgSearch))
+                    .map((pkg: any) => (
+                    <div key={pkg.id} className={`flex items-center gap-3 p-3 rounded-xl border transition-colors ${pkg.is_active ? "bg-zinc-800 border-zinc-700" : "bg-zinc-950 border-zinc-800 opacity-60"}`} data-testid={`pkg-row-${pkg.id}`}>
+                      {/* Icon */}
+                      <div className="w-10 h-10 rounded-xl bg-yellow-500/15 flex items-center justify-center flex-shrink-0">
+                        <span className="text-yellow-400 font-bold text-sm">🪙</span>
+                      </div>
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-white font-bold text-sm">{pkg.name}</span>
+                          {pkg.badge && <span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded-full border border-yellow-500/30">{pkg.badge}</span>}
+                          {!pkg.is_active && <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full">متوقف</span>}
+                        </div>
+                        <div className="flex items-center gap-3 mt-0.5 text-xs text-white/50">
+                          <span className="text-yellow-400 font-semibold">{pkg.coins + (pkg.bonus_coins || 0)} عملة</span>
+                          {pkg.bonus_coins > 0 && <span className="text-green-400">+{pkg.bonus_coins} مجاناً</span>}
+                          <span className="text-white font-bold">{pkg.price_egp} ج.م</span>
+                          {pkg.description && <span className="truncate max-w-[120px]">{pkg.description}</span>}
+                        </div>
+                      </div>
+                      {/* Actions */}
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-blue-400 hover:bg-blue-500/10"
+                          onClick={() => { setEditingPkg(pkg); setShowNewPkgForm(false); setPkgForm({ name: pkg.name, coins: String(pkg.coins), priceEGP: String(pkg.price_egp), bonusCoins: String(pkg.bonus_coins || 0), sortOrder: String(pkg.sort_order || 0), description: pkg.description || "", badge: pkg.badge || "" }); }}
+                          data-testid={`btn-edit-pkg-${pkg.id}`}>✏️ تعديل</Button>
+                        <Button size="sm" variant="ghost" className={`h-7 px-2 text-xs ${pkg.is_active ? "text-orange-400 hover:bg-orange-500/10" : "text-green-400 hover:bg-green-500/10"}`}
+                          onClick={() => togglePkgActive(pkg)}
+                          data-testid={`btn-toggle-pkg-${pkg.id}`}>{pkg.is_active ? "⏸ إيقاف" : "▶ تفعيل"}</Button>
+                        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-red-400 hover:bg-red-500/10"
+                          onClick={() => deletePkg(pkg.id)}
+                          data-testid={`btn-delete-pkg-${pkg.id}`}>🗑 حذف</Button>
+                      </div>
                     </div>
                   ))}
                 </div>

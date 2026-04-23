@@ -1468,9 +1468,40 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch("/api/admin/coins/packages/:id", isAuthenticated, async (req: any, res) => {
     if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
-    const { isActive } = req.body || {};
-    await pool.query(`UPDATE coin_packages SET is_active = $1 WHERE id = $2`, [isActive, req.params.id]);
+    const { isActive, name, coins, priceEGP, bonusCoins, sortOrder, description, badge } = req.body || {};
+    // Full update if name/coins/price provided, otherwise just toggle isActive
+    if (name !== undefined || coins !== undefined || priceEGP !== undefined) {
+      await pool.query(
+        `UPDATE coin_packages SET
+          name        = COALESCE($1, name),
+          coins       = COALESCE($2, coins),
+          price_egp   = COALESCE($3, price_egp),
+          bonus_coins = COALESCE($4, bonus_coins),
+          sort_order  = COALESCE($5, sort_order),
+          description = COALESCE($6, description),
+          badge       = COALESCE($7, badge),
+          is_active   = COALESCE($8, is_active)
+         WHERE id = $9`,
+        [name ?? null, coins ?? null, priceEGP ?? null, bonusCoins ?? null, sortOrder ?? null, description ?? null, badge ?? null, isActive ?? null, req.params.id]
+      );
+    } else {
+      await pool.query(`UPDATE coin_packages SET is_active = $1 WHERE id = $2`, [isActive, req.params.id]);
+    }
+    const r = await pool.query(`SELECT * FROM coin_packages WHERE id = $1`, [req.params.id]);
+    res.json(r.rows[0] || { success: true });
+  });
+
+  app.delete("/api/admin/coins/packages/:id", isAuthenticated, async (req: any, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
+    await pool.query(`DELETE FROM coin_packages WHERE id = $1`, [req.params.id]);
     res.json({ success: true });
+  });
+
+  // GET all packages for admin (including inactive)
+  app.get("/api/admin/coins/packages/all", isAuthenticated, async (req: any, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
+    const r = await pool.query(`SELECT * FROM coin_packages ORDER BY sort_order, price_egp`);
+    res.json(r.rows);
   });
 
   // ================================================================
