@@ -86,6 +86,11 @@ export default function LiveStream() {
   const [swappedCohostId, setSwappedCohostId] = useState<string>(""); // broadcaster: which cohost is full-screen
   const [selfCamSwapped,  setSelfCamSwapped]  = useState(false);       // viewer: own cam is full-screen
 
+  // Viewer pinch/double-tap zoom
+  const [zoomScale,   setZoomScale]   = useState(1);
+  const [zoomOffset,  setZoomOffset]  = useState({ x: 0, y: 0 });
+  const zoomRef = useRef({ scale: 1, startDist: 0, startScale: 1, lastTap: 0, originX: 0, originY: 0 });
+
   // Share & Gift state
   const [showShare,       setShowShare]       = useState(false);
   const [showGiftPanel,   setShowGiftPanel]   = useState(false);
@@ -1500,7 +1505,61 @@ export default function LiveStream() {
     <div className="relative w-full h-[100dvh] bg-black flex flex-col overflow-hidden select-none" dir="rtl">
 
       {/* VIDEO AREA */}
-      <div className="relative flex-1 overflow-hidden bg-black">
+      <div
+        className="relative flex-1 overflow-hidden bg-black"
+        onTouchStart={e => {
+          if (isBroadcast) return;
+          if (e.touches.length === 2) {
+            // Pinch start
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            zoomRef.current.startDist  = Math.hypot(dx, dy);
+            zoomRef.current.startScale = zoomRef.current.scale;
+            zoomRef.current.originX    = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+            zoomRef.current.originY    = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+          } else if (e.touches.length === 1) {
+            // Double-tap detection
+            const now = Date.now();
+            if (now - zoomRef.current.lastTap < 300) {
+              // Double-tap: toggle 1x ↔ 2.5x
+              const next = zoomRef.current.scale > 1.1 ? 1 : 2.5;
+              zoomRef.current.scale = next;
+              if (next === 1) setZoomOffset({ x: 0, y: 0 });
+              setZoomScale(next);
+            }
+            zoomRef.current.lastTap = now;
+          }
+        }}
+        onTouchMove={e => {
+          if (isBroadcast || e.touches.length !== 2) return;
+          e.preventDefault();
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          const dist = Math.hypot(dx, dy);
+          const next = Math.min(5, Math.max(1, zoomRef.current.startScale * (dist / zoomRef.current.startDist)));
+          zoomRef.current.scale = next;
+          setZoomScale(next);
+          if (next <= 1) setZoomOffset({ x: 0, y: 0 });
+        }}
+        onTouchEnd={e => {
+          if (isBroadcast) return;
+          if (zoomRef.current.scale <= 1) {
+            zoomRef.current.scale = 1;
+            setZoomScale(1);
+            setZoomOffset({ x: 0, y: 0 });
+          }
+        }}
+      >
+        {/* Zoom reset button — visible only when zoomed */}
+        {!isBroadcast && zoomScale > 1.05 && (
+          <button
+            onClick={() => { zoomRef.current.scale = 1; setZoomScale(1); setZoomOffset({ x: 0, y: 0 }); }}
+            className="absolute top-14 left-3 z-50 bg-black/60 backdrop-blur rounded-full px-3 py-1 text-white text-xs font-bold flex items-center gap-1"
+          >
+            <span>✕</span>
+            <span>{zoomScale.toFixed(1)}×</span>
+          </button>
+        )}
         <video
           ref={videoRef}
           autoPlay
@@ -1510,8 +1569,11 @@ export default function LiveStream() {
           className="absolute inset-0 w-full h-full object-cover"
           style={{
             backgroundColor: "#000",
-            transform: (isBroadcast && camFacing === "user") ? "scaleX(-1)" : "none",
+            transform: `${(isBroadcast && camFacing === "user") ? "scaleX(-1) " : ""}scale(${zoomScale}) translate(${zoomOffset.x}px, ${zoomOffset.y}px)`,
             filter: isBroadcast ? BEAUTY_FILTERS[filterIdx].filter : "none",
+            transition: zoomScale === 1 ? "transform 0.25s ease" : "none",
+            transformOrigin: "center center",
+            willChange: "transform",
           }}
         />
 
