@@ -10,7 +10,7 @@ import {
   Copy, Check, Radio, Monitor, UserPlus, Users,
   Loader2, X, CheckCircle, XCircle,
   Share2, Gift, Flag, AlertTriangle, ShieldOff,
-  Camera, Sparkles,
+  Camera, Sparkles, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { SiWhatsapp, SiFacebook, SiX, SiTelegram, SiInstagram, SiTiktok, SiSnapchat } from "react-icons/si";
 import { Button } from "@/components/ui/button";
@@ -1550,16 +1550,6 @@ export default function LiveStream() {
           }
         }}
       >
-        {/* Zoom reset button — visible only when zoomed */}
-        {!isBroadcast && zoomScale > 1.05 && (
-          <button
-            onClick={() => { zoomRef.current.scale = 1; setZoomScale(1); setZoomOffset({ x: 0, y: 0 }); }}
-            className="absolute top-14 left-3 z-50 bg-black/60 backdrop-blur rounded-full px-3 py-1 text-white text-xs font-bold flex items-center gap-1"
-          >
-            <span>✕</span>
-            <span>{zoomScale.toFixed(1)}×</span>
-          </button>
-        )}
         <video
           ref={videoRef}
           autoPlay
@@ -1812,10 +1802,28 @@ export default function LiveStream() {
         {/* VIEWER ACTIONS */}
         {!isBroadcast && streaming && !ended && (
           <div className="absolute end-3 z-10 flex flex-col items-center gap-4" style={{ bottom: "88px" }}>
-            <div className="rounded-2xl bg-black/70 backdrop-blur px-3 py-2 border border-white/10 text-center max-w-[160px]">
-              <p className="text-white text-[11px] font-bold">لو الشاشة سوداء</p>
-              <p className="text-white/60 text-[10px] mt-0.5">اطلب من المذيع يرسلك دعوة كاميرا</p>
-            </div>
+
+            {/* ZOOM BUTTON — always visible */}
+            <button
+              onClick={() => {
+                const levels = [1, 2, 3];
+                const cur = zoomRef.current.scale;
+                const next = levels.find(l => l > cur + 0.1) ?? 1;
+                zoomRef.current.scale = next;
+                setZoomScale(next);
+                if (next === 1) setZoomOffset({ x: 0, y: 0 });
+              }}
+              className="flex flex-col items-center gap-0.5"
+              data-testid="btn-zoom-video"
+            >
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg backdrop-blur transition-all ${zoomScale > 1.05 ? "bg-green-500/90 ring-2 ring-green-400" : "bg-black/60"}`}>
+                {zoomScale > 1.05 ? <ZoomOut className="w-6 h-6 text-white" /> : <ZoomIn className="w-6 h-6 text-white" />}
+              </div>
+              <span className="text-white text-[10px] font-bold drop-shadow">
+                {zoomScale > 1.05 ? `${zoomScale.toFixed(0)}×` : "تكبير"}
+              </span>
+            </button>
+
             <button onClick={handleLike} className="flex flex-col items-center gap-0.5" data-testid="btn-stream-like">
               <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all ${liked ? "bg-red-500 scale-110" : "bg-black/60"}`}>
                 <Heart className={`w-6 h-6 ${liked ? "text-white fill-white" : "text-white"}`} />
