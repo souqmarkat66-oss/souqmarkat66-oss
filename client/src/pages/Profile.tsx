@@ -590,7 +590,7 @@ export default function Profile() {
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <div className="bg-muted/40 rounded-xl p-3 text-center">
               <div className="text-lg mb-1">🔗</div>
               <div className="text-xl font-black text-amber-500">{myStats.totalClicks}</div>
@@ -600,6 +600,18 @@ export default function Profile() {
               <div className="text-lg mb-1">💬</div>
               <div className="text-xl font-black text-cyan-500">{myStats.uniqueMessages}</div>
               <div className="text-[10px] text-muted-foreground font-medium">تواصلوا معك</div>
+            </div>
+            <div className="bg-muted/40 rounded-xl p-3 text-center">
+              <div className="text-lg mb-1">📱</div>
+              <div className="text-xl font-black text-green-600">{myStats.totalWhatsappClicks || 0}</div>
+              <div className="text-[10px] text-muted-foreground font-medium">نقرات واتساب</div>
+              <div className="text-[9px] text-muted-foreground">مشترون تواصلوا</div>
+            </div>
+            <div className="bg-muted/40 rounded-xl p-3 text-center">
+              <div className="text-lg mb-1">✅</div>
+              <div className="text-xl font-black text-teal-600">{myStats.soldAds || 0}</div>
+              <div className="text-[10px] text-muted-foreground font-medium">تم بيعها</div>
+              <div className="text-[9px] text-muted-foreground">إعلانات مباعة</div>
             </div>
           </div>
           {myStats.topAds?.length > 0 && (
@@ -618,9 +630,15 @@ export default function Profile() {
                         {ad.price_egp ? `${Number(ad.price_egp).toLocaleString()} ج.م` : "بدون سعر"}
                       </div>
                     </div>
-                    <div className="flex gap-3 text-[10px] text-muted-foreground">
+                    <div className="flex gap-2 text-[10px] text-muted-foreground flex-wrap justify-end">
                       <span className="flex items-center gap-0.5"><Eye className="w-3 h-3" /> {ad.views_count || 0}</span>
                       <span className="flex items-center gap-0.5"><Heart className="w-3 h-3" /> {ad.likes_count || 0}</span>
+                      {(ad.whatsapp_clicks || 0) > 0 && (
+                        <span className="flex items-center gap-0.5 text-green-600 font-bold">📱 {ad.whatsapp_clicks}</span>
+                      )}
+                      {ad.is_sold && (
+                        <span className="bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-400 px-1.5 rounded-full font-bold">مباع ✅</span>
+                      )}
                     </div>
                   </a>
                 ))}

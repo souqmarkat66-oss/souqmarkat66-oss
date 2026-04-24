@@ -2758,16 +2758,15 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.get("/api/my-stats", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
     try {
-      const [adsR, viewsR, likesR, clicksR, followersR, msgsR] = await Promise.all([
+      const [adsR, viewsR, likesR, clicksR, followersR, msgsR, waR, soldR] = await Promise.all([
         pool.query(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status='active') as active FROM ads WHERE user_id = $1`, [userId]),
         pool.query(`SELECT COALESCE(SUM(views_count),0) as total_views FROM ads WHERE user_id = $1`, [userId]),
         pool.query(`SELECT COALESCE(SUM(likes_count),0) as total_likes FROM ads WHERE user_id = $1`, [userId]),
         pool.query(`SELECT COUNT(*) as total_clicks FROM ad_link_clicks WHERE user_id = $1`, [userId]),
         pool.query(`SELECT COUNT(*) FROM user_follows WHERE following_id = $1`, [userId]),
-        pool.query(
-          `SELECT COUNT(DISTINCT sender_id) as unique_senders FROM messages WHERE receiver_id = $1`,
-          [userId]
-        ),
+        pool.query(`SELECT COUNT(DISTINCT sender_id) as unique_senders FROM messages WHERE receiver_id = $1`, [userId]),
+        pool.query(`SELECT COALESCE(SUM(whatsapp_clicks),0) as total_wa FROM ads WHERE user_id = $1`, [userId]),
+        pool.query(`SELECT COUNT(*) as sold_count FROM ads WHERE user_id = $1 AND is_sold = true`, [userId]),
       ]);
       const topAdsR = await pool.query(
         `SELECT id, title, views_count, likes_count, whatsapp_clicks, media_url, media_type, price_egp, created_at
@@ -2786,6 +2785,8 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const c = clicksR.rows[0] as any;
       const f = followersR.rows[0] as any;
       const m = msgsR.rows[0] as any;
+      const wa = waR.rows[0] as any;
+      const s = soldR.rows[0] as any;
 
       res.json({
         totalAds: Number(a.total),
@@ -2795,6 +2796,8 @@ Sitemap: ${BASE}/sitemap-pages.xml
         totalClicks: Number(c.total_clicks),
         followersCount: Number(f.count),
         uniqueMessages: Number(m.unique_senders),
+        totalWhatsappClicks: Number(wa.total_wa),
+        soldAds: Number(s.sold_count),
         topAds: topAdsR.rows,
         recentClicks: recentClicksR.rows,
       });
@@ -6571,6 +6574,21 @@ Sitemap: ${BASE}/sitemap-pages.xml
   // AD RENEW
   // ================================================================
   // Admin-only direct renew (no payment)
+  // ─── Mark Ad as Sold / Unsold ──────────────────────────────────────────
+  app.post("/api/ads/:id/mark-sold", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const id = parseInt(req.params.id);
+    try {
+      const r = await db.execute(sql`SELECT user_id, is_sold FROM ads WHERE id = ${id}`);
+      if (!r.rows.length) return res.status(404).json({ message: "الإعلان غير موجود" });
+      if ((r.rows[0] as any).user_id !== userId && !isAdminUser(req)) return res.status(403).json({ message: "غير مصرح" });
+      const currentlySold = (r.rows[0] as any).is_sold;
+      const newSold = !currentlySold;
+      await db.execute(sql`UPDATE ads SET is_sold = ${newSold} WHERE id = ${id}`);
+      res.json({ success: true, is_sold: newSold, message: newSold ? "تم وضع علامة مباع ✅" : "تم إلغاء علامة المباع" });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
   app.post("/api/ads/:id/renew", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
     const id = parseInt(req.params.id);

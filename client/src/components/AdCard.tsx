@@ -247,6 +247,22 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
   };
 
   const hasMedia = ad.mediaUrl && ad.mediaUrl.trim() !== "";
+  const isSold = (ad as any).is_sold === true;
+
+  const handleMarkSold = async (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    try {
+      const res = await fetch(`/api/ads/${ad.id}/mark-sold`, { method: "POST", credentials: "include" });
+      const data = await res.json();
+      if (res.ok) {
+        toast({ title: data.message });
+        qc.invalidateQueries({ queryKey: ["/api/ads"] });
+        qc.invalidateQueries({ queryKey: ["/api/my-stats"] });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "خطأ في التحديث" });
+    }
+  };
 
   return (
     <motion.div
@@ -339,8 +355,22 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
             </div>
           )}
 
+          {/* SOLD overlay */}
+          {isSold && (
+            <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-10 pointer-events-none">
+              <div className="bg-teal-500 text-white font-extrabold text-2xl px-6 py-3 rounded-2xl shadow-2xl rotate-[-8deg] border-4 border-white/30">
+                ✅ تم البيع
+              </div>
+            </div>
+          )}
+
           {/* Top-end badges */}
-          <div className="absolute top-3 end-3 flex flex-col gap-1.5 items-end">
+          <div className="absolute top-3 end-3 flex flex-col gap-1.5 items-end z-20">
+            {isSold && (
+              <Badge className="bg-teal-500 text-white shadow-lg px-2.5 py-0.5 rounded-full border-none font-bold text-xs">
+                ✅ مباع
+              </Badge>
+            )}
             {(ad as any).is_boosted && (
               <Badge className="bg-yellow-400 text-yellow-900 shadow-lg px-2.5 py-0.5 rounded-full border-none font-bold text-xs animate-pulse">
                 🚀 مميز
@@ -491,7 +521,7 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
               </span>
             </Link>
 
-            {/* Views + date + delete */}
+            {/* Views + date + owner actions */}
             <div className="flex items-center gap-2 text-[10px] text-muted-foreground shrink-0">
               <span className="flex items-center gap-1">
                 <Eye className="w-3 h-3" />
@@ -502,9 +532,19 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
                 {ad.createdAt && format(new Date(ad.createdAt), 'MMM d', { locale: language === 'ar' ? ar : enUS })}
               </span>
               {isOwner && (
-                <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground/50 hover:text-destructive rounded-full" onClick={handleDelete}>
-                  <Trash2 className="w-3 h-3" />
-                </Button>
+                <>
+                  <button
+                    onClick={handleMarkSold}
+                    title={isSold ? "إلغاء علامة المباع" : "تم البيع"}
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all ${isSold ? "bg-teal-500 text-white border-teal-500" : "border-teal-400 text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/30"}`}
+                    data-testid={`btn-mark-sold-${ad.id}`}
+                  >
+                    {isSold ? "✅ مباع" : "تم البيع؟"}
+                  </button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground/50 hover:text-destructive rounded-full" onClick={handleDelete}>
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </>
               )}
             </div>
           </div>
