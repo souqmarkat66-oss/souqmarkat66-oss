@@ -1948,6 +1948,16 @@ Sitemap: ${BASE}/sitemap-pages.xml
     res.json({ success: true });
   });
 
+  // ── WhatsNew: track how many users dismissed the banner ──
+  app.post("/api/whatsnew/seen", async (_req, res) => {
+    await db.execute(sql`
+      INSERT INTO platform_settings (key, value) VALUES ('whatsnew_seen_count', '1')
+      ON CONFLICT (key) DO UPDATE
+        SET value = (CAST(platform_settings.value AS INTEGER) + 1)::TEXT
+    `);
+    res.json({ ok: true });
+  });
+
   // ================================================================
   // AI USAGE INFO
   // ================================================================

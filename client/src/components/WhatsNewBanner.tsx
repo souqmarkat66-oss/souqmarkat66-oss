@@ -39,7 +39,10 @@ export function WhatsNewBanner() {
   }, [version, items.length]);
 
   const dismiss = () => {
-    if (version) localStorage.setItem(STORAGE_KEY, version);
+    if (version) {
+      localStorage.setItem(STORAGE_KEY, version);
+      fetch("/api/whatsnew/seen", { method: "POST", credentials: "include" }).catch(() => {});
+    }
     setVisible(false);
   };
 

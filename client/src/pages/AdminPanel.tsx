@@ -2166,10 +2166,12 @@ function SettingsSection({ logAction }: { logAction: any }) {
         app_version: wVersion.trim(),
         app_whatsnew: JSON.stringify(items),
         app_whatsnew_title: wTitle.trim() || "تحديث جديد! 🎉",
+        whatsnew_seen_count: "0",
       }),
     });
     setWSaving(false);
     setWVersion(""); setWTitle(""); setWItems("");
+    refetch();
     toast({ title: "✅ تم نشر التحديث", description: `الإصدار ${wVersion} — ظهر لجميع المستخدمين` });
     logAction("publish_update", "app_version", wVersion);
   };
@@ -2224,8 +2226,15 @@ function SettingsSection({ logAction }: { logAction: any }) {
             <p className="text-[10px] text-muted-foreground mt-1">كل سطر = نقطة تظهر للمستخدم في القائمة</p>
           </div>
           {settings?.app_version && (
-            <div className="text-xs text-muted-foreground bg-muted/40 px-3 py-2 rounded-lg">
-              آخر إصدار منشور: <span className="font-bold text-foreground">{settings.app_version}</span>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 text-xs text-muted-foreground bg-muted/40 px-3 py-2 rounded-lg">
+                آخر إصدار منشور: <span className="font-bold text-foreground">{settings.app_version}</span>
+              </div>
+              <div className="text-xs bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 px-3 py-2 rounded-lg flex items-center gap-1 font-medium whitespace-nowrap">
+                <span>👁</span>
+                <span>{settings?.whatsnew_seen_count || "0"}</span>
+                <span className="text-[10px] text-muted-foreground">شاهد</span>
+              </div>
             </div>
           )}
           <Button
