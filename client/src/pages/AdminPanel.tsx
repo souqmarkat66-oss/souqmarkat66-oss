@@ -342,6 +342,11 @@ function DashboardSection({ liveEvents = [], onClearEvents }: { liveEvents?: Liv
     queryKey: ["/api/settings"],
     queryFn: () => fetch("/api/settings").then(r => r.json()),
   });
+  const { data: fraudStats } = useQuery<any>({
+    queryKey: ["/api/admin/fraud-stats"],
+    queryFn: () => fetch("/api/admin/fraud-stats", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 60000,
+  });
 
   const publish = useMutation({
     mutationFn: () => fetch("/api/admin/publish", { method: "POST", credentials: "include" }).then(r => r.json()),
@@ -457,6 +462,36 @@ function DashboardSection({ liveEvents = [], onClearEvents }: { liveEvents?: Liv
           <StatCard icon={Clock}      label="طلبات سحب معلقة"  value={stats.pendingPayments}          color="text-amber-500" />
         </div>
       )}
+
+      {/* Fraud Detection Card */}
+      <Card className="rounded-2xl border-red-500/20 bg-gradient-to-l from-red-500/5 to-transparent">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <ShieldX className="w-5 h-5 text-red-500" />
+              <span className="font-bold text-sm">كشف الاحتيال والنفرات الوهمية</span>
+            </div>
+            <span className="flex items-center gap-1.5 text-xs bg-green-500/10 text-green-600 border border-green-500/20 px-2.5 py-1 rounded-full font-bold">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
+              مشغّل
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-background rounded-xl p-3 text-center border border-border/50">
+              <div className="text-xl font-bold text-red-500">{Number(fraudStats?.fraud_impressions || 0).toLocaleString()}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">مشاهدات وهمية</div>
+            </div>
+            <div className="bg-background rounded-xl p-3 text-center border border-border/50">
+              <div className="text-xl font-bold text-orange-500">{Number(fraudStats?.fraud_clicks || 0).toLocaleString()}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">نقرات وهمية</div>
+            </div>
+            <div className="bg-background rounded-xl p-3 text-center border border-border/50">
+              <div className="text-xl font-bold text-green-500">{Number(fraudStats?.total_legit || 0).toLocaleString()}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">تفاعل حقيقي</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Revenue quick view */}
       {adminRevenue && (
