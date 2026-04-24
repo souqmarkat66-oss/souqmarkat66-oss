@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, Upload, X, Download, ZoomIn, ZoomOut, RotateCcw, Wand2, Eraser, RefreshCw } from "lucide-react";
 
 const PRESET_BACKGROUNDS = [
+  { id: "pure-white", label: "خلفية بيضاء", gradient: "#ffffff", pattern: "white" },
   { id: "news-ar", label: "ستوديو أخبار", gradient: "linear-gradient(135deg,#0d1b6e 0%,#1565c0 50%,#0d47a1 100%)", pattern: "news" },
   { id: "office-gold", label: "مكتب ذهبي", gradient: "linear-gradient(135deg,#3e2723 0%,#6d4c41 40%,#bf8700 100%)", pattern: "office" },
   { id: "market-egypt", label: "سوق مصري", gradient: "linear-gradient(135deg,#bf360c 0%,#e64a19 50%,#ff6d00 100%)", pattern: "market" },
@@ -30,7 +31,7 @@ export default function SceneComposer({ onExport, onClose }: SceneComposerProps)
   const [personImg, setPersonImg] = useState<HTMLImageElement | null>(null);
   const [bgImg, setBgImg] = useState<HTMLImageElement | null>(null);
   const [bgBlobUrl, setBgBlobUrl] = useState<string>("");
-  const [selectedBg, setSelectedBg] = useState<typeof PRESET_BACKGROUNDS[0] | null>(PRESET_BACKGROUNDS[0]);
+  const [selectedBg, setSelectedBg] = useState<typeof PRESET_BACKGROUNDS[0] | null>(PRESET_BACKGROUNDS.find(b => b.id === "news-ar") ?? PRESET_BACKGROUNDS[0]);
 
   const [removingBg, setRemovingBg] = useState(false);
   const [removeBgStatus, setRemoveBgStatus] = useState("");
@@ -324,7 +325,7 @@ export default function SceneComposer({ onExport, onClose }: SceneComposerProps)
                   onClick={() => { setSelectedBg(bg); setBgImg(null); setBgBlobUrl(""); }}
                   className={`rounded-lg overflow-hidden border-2 transition-all ${selectedBg?.id === bg.id && !bgImg ? "border-amber-500 ring-2 ring-amber-300 scale-105" : "border-transparent hover:border-amber-400"}`}
                   title={bg.label} data-testid={`btn-scene-bg-${bg.id}`}>
-                  <div className="h-8 w-full" style={{ background: bg.gradient }} />
+                  <div className="h-8 w-full" style={{ background: bg.gradient, border: bg.id === 'pure-white' ? '1px solid #e0e0e0' : undefined }} />
                   <p className="text-[9px] text-center py-0.5 bg-white dark:bg-gray-700 leading-tight px-0.5 truncate">{bg.label}</p>
                 </button>
               ))}
