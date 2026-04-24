@@ -559,11 +559,14 @@ function ImageSlideshow({ images }: { images: string[] }) {
   if (images.length === 0) return null;
   const hasCurError = !!imgErrors[current];
   return (
-    <div className="relative w-full h-full bg-black">
+    <div className="relative w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900">
       {hasCurError ? (
-        <div className="w-full h-full flex flex-col items-center justify-center text-white/30">
-          <span className="text-5xl mb-2">📷</span>
-          <span className="text-sm">تعذّر تحميل الصورة</span>
+        <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground gap-3">
+          <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
+            <span className="text-3xl">🖼️</span>
+          </div>
+          <span className="text-sm font-medium">تعذّر تحميل الصورة</span>
+          <a href={images[current]} target="_blank" rel="noreferrer" className="text-xs text-primary underline">فتح الرابط مباشرة</a>
         </div>
       ) : (
         <img
@@ -797,14 +800,39 @@ export default function AdDetails() {
         <div className="lg:col-span-2">
           <div className="bg-card border rounded-3xl overflow-hidden shadow-sm">
             {/* Media */}
-            <div className="aspect-video bg-black relative overflow-hidden rounded-t-3xl">
+            <div className={`aspect-video relative overflow-hidden rounded-t-3xl ${ad.mediaUrl ? 'bg-black' : 'bg-gradient-to-br from-primary/10 via-primary/5 to-secondary/10'}`}>
               {ad.mediaType === 'video' ? (
                 <VideoPlayer src={ad.mediaUrl} />
               ) : ad.mediaUrl ? (
                 <ImageSlideshow images={[ad.mediaUrl]} />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-muted-foreground/30">
-                  <span className="text-6xl">📷</span>
+                /* Text-only ad — Facebook-style post card */
+                <div className="w-full h-full flex flex-col justify-center items-start p-8 gap-4">
+                  {/* Category */}
+                  {ad.category && ad.category !== 'general' && (
+                    <span className="bg-white/60 dark:bg-black/30 backdrop-blur-sm text-primary text-xs font-bold px-3 py-1 rounded-full border border-primary/20">
+                      {ad.category}
+                    </span>
+                  )}
+                  {/* Big title */}
+                  <h2 className="text-foreground font-extrabold text-2xl md:text-3xl leading-snug text-right w-full" dir="rtl">
+                    {ad.title}
+                  </h2>
+                  {/* Description */}
+                  {ad.description && (
+                    <p className="text-muted-foreground text-sm leading-relaxed line-clamp-3 text-right w-full" dir="rtl">
+                      {ad.description}
+                    </p>
+                  )}
+                  {/* Price */}
+                  {(ad.priceEGP ?? 0) > 0 && (
+                    <div className="bg-green-500 text-white font-extrabold text-lg px-4 py-1.5 rounded-full shadow">
+                      {ad.priceEGP?.toLocaleString()} ج.م
+                    </div>
+                  )}
+                  {/* Decorative */}
+                  <div className="absolute -bottom-10 -start-10 w-36 h-36 rounded-full bg-primary/5 pointer-events-none" />
+                  <div className="absolute -top-8 -end-8 w-28 h-28 rounded-full bg-secondary/10 pointer-events-none" />
                 </div>
               )}
             </div>
