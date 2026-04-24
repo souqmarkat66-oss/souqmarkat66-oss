@@ -348,10 +348,45 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
               />
             </div>
           ) : (
-            /* Placeholder when no media */
-            <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground bg-gradient-to-br from-muted to-muted/50">
-              <div className="text-4xl mb-2">📢</div>
-              <span className="text-xs">إعلان نصي</span>
+            /* Text-only ad — styled like a social post */
+            <div className={`w-full h-full flex flex-col justify-between p-5 overflow-hidden ${
+              (ad as any).is_boosted
+                ? 'bg-gradient-to-br from-yellow-400/20 via-orange-300/10 to-amber-200/20'
+                : (ad as any).is_admin_promo
+                ? 'bg-gradient-to-br from-emerald-400/20 via-teal-300/10 to-green-200/20'
+                : 'bg-gradient-to-br from-primary/10 via-primary/5 to-secondary/10'
+            }`}>
+              {/* Category chip */}
+              {(ad as any).category && (ad as any).category !== 'general' && (
+                <span className="self-start bg-white/60 dark:bg-black/30 backdrop-blur-sm text-primary text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-primary/20 mb-2">
+                  {(ad as any).category}
+                </span>
+              )}
+
+              {/* Title — big & bold */}
+              <div className="flex-1 flex items-center">
+                <p className="text-foreground font-extrabold text-xl leading-snug line-clamp-4 text-right" dir="rtl">
+                  {ad.title}
+                </p>
+              </div>
+
+              {/* Description preview */}
+              {ad.description && (
+                <p className="text-muted-foreground text-xs line-clamp-2 mt-2 text-right leading-relaxed" dir="rtl">
+                  {ad.description}
+                </p>
+              )}
+
+              {/* Price chip at bottom */}
+              {ad.priceEGP && (
+                <div className="mt-3 self-start bg-green-500 text-white text-sm font-extrabold px-3 py-1 rounded-full shadow-sm">
+                  {ad.priceEGP.toLocaleString()} ج.م
+                </div>
+              )}
+
+              {/* Decorative circle */}
+              <div className="absolute -bottom-8 -start-8 w-28 h-28 rounded-full bg-primary/5 pointer-events-none" />
+              <div className="absolute -top-6 -end-6 w-20 h-20 rounded-full bg-secondary/10 pointer-events-none" />
             </div>
           )}
 
