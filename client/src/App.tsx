@@ -42,6 +42,7 @@ import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import { GlobalAssistant } from "@/components/GlobalAssistant";
 import { PushSetup } from "@/components/PushSetup";
 import { InterestOnboarding } from "@/components/InterestOnboarding";
+import { WhatsNewBanner } from "@/components/WhatsNewBanner";
 import BottomNav from "@/components/BottomNav";
 import NotFound from "@/pages/not-found";
 
@@ -320,6 +321,7 @@ function App() {
         <TooltipProvider>
           <Toaster />
           <Router />
+          <WhatsNewBanner />
         </TooltipProvider>
       </LanguageProvider>
     </QueryClientProvider>

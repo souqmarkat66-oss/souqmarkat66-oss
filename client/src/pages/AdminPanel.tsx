@@ -2147,8 +2147,98 @@ function SettingsSection({ logAction }: { logAction: any }) {
 
   const groups = Array.from(new Set(numFields.map(f => f.group)));
 
+  // ── What's New publisher state ──
+  const [wVersion, setWVersion] = useState("");
+  const [wTitle,   setWTitle]   = useState("");
+  const [wItems,   setWItems]   = useState("");
+  const [wSaving,  setWSaving]  = useState(false);
+
+  const publishUpdate = async () => {
+    if (!wVersion.trim() || !wItems.trim()) {
+      toast({ title: "تأكد من الإصدار والتفاصيل", variant: "destructive" }); return;
+    }
+    setWSaving(true);
+    const items = wItems.split("\n").map(s => s.trim()).filter(Boolean);
+    await fetch("/api/settings/bulk", {
+      method: "PUT", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        app_version: wVersion.trim(),
+        app_whatsnew: JSON.stringify(items),
+        app_whatsnew_title: wTitle.trim() || "تحديث جديد! 🎉",
+      }),
+    });
+    setWSaving(false);
+    setWVersion(""); setWTitle(""); setWItems("");
+    toast({ title: "✅ تم نشر التحديث", description: `الإصدار ${wVersion} — ظهر لجميع المستخدمين` });
+    logAction("publish_update", "app_version", wVersion);
+  };
+
   return (
     <div className="max-w-2xl space-y-6">
+
+      {/* ── نشر تحديث جديد ── */}
+      <Card className="rounded-2xl border-primary/30 bg-primary/5">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-primary" />
+            نشر إشعار تحديث للمستخدمين
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            بعد النشر سيظهر بانر "الجديد" لكل مستخدم لم يراه — تلقائياً
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">رقم الإصدار *</label>
+              <input
+                value={wVersion}
+                onChange={e => setWVersion(e.target.value)}
+                placeholder="مثال: 2.5 أو 23 أبريل"
+                className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-primary"
+                data-testid="input-whatsnew-version"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">عنوان البانر (اختياري)</label>
+              <input
+                value={wTitle}
+                onChange={e => setWTitle(e.target.value)}
+                placeholder="تحديث جديد! 🎉"
+                className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-primary"
+                data-testid="input-whatsnew-title"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">الميزات والتحديثات (سطر لكل نقطة) *</label>
+            <textarea
+              value={wItems}
+              onChange={e => setWItems(e.target.value)}
+              placeholder={"تحقق من إيصالات الدفع بالذكاء الاصطناعي تلقائياً\nإضافة قسم قيد المراجعة في لوحتي\nتحسين باقات الشحن في لوحة التحكم\nإصلاح عرض تفاصيل الحملات الإعلانية"}
+              rows={4}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary resize-none"
+              data-testid="input-whatsnew-items"
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">كل سطر = نقطة تظهر للمستخدم في القائمة</p>
+          </div>
+          {settings?.app_version && (
+            <div className="text-xs text-muted-foreground bg-muted/40 px-3 py-2 rounded-lg">
+              آخر إصدار منشور: <span className="font-bold text-foreground">{settings.app_version}</span>
+            </div>
+          )}
+          <Button
+            onClick={publishUpdate}
+            disabled={wSaving}
+            className="w-full gap-2"
+            data-testid="btn-publish-update"
+          >
+            {wSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            نشر التحديث لجميع المستخدمين
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* ── Feature Toggles ── */}
       <Card className="rounded-2xl">
