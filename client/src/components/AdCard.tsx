@@ -5,7 +5,7 @@ import { useLanguage } from "./LanguageProvider";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square, Heart, Star, Zap, Copy, Tag } from "lucide-react";
+import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square, Heart, Star, Zap, Copy, Tag, MapPin, User } from "lucide-react";
 import { format } from "date-fns";
 import { ar, enUS } from "date-fns/locale";
 import { useAuth } from "@/hooks/use-auth";
@@ -339,7 +339,7 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
             </div>
           )}
 
-          {/* Language badge + Boost badge */}
+          {/* Top-end badges */}
           <div className="absolute top-3 end-3 flex flex-col gap-1.5 items-end">
             {(ad as any).is_boosted && (
               <Badge className="bg-yellow-400 text-yellow-900 shadow-lg px-2.5 py-0.5 rounded-full border-none font-bold text-xs animate-pulse">
@@ -348,12 +348,15 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
             )}
             {(ad as any).is_admin_promo && !(ad as any).is_boosted && (
               <Badge className="bg-emerald-500 text-white shadow-lg px-2.5 py-0.5 rounded-full border-none font-bold text-xs">
-                📢 إعلان ترويجي
+                📢 ترويجي
               </Badge>
             )}
-            <Badge variant="secondary" className="bg-background/90 backdrop-blur-md text-foreground shadow-sm px-3 py-1 rounded-full border-none font-medium text-xs">
-              {ad.language === 'ar' ? '🇪🇬 عربي' : '🇺🇸 EN'}
-            </Badge>
+            {/* "New" badge — posted within last 24h */}
+            {ad.createdAt && (Date.now() - new Date(ad.createdAt).getTime()) < 86_400_000 && !(ad as any).is_boosted && !(ad as any).is_admin_promo && (
+              <Badge className="bg-red-500 text-white shadow-lg px-2.5 py-0.5 rounded-full border-none font-bold text-xs">
+                🔥 جديد
+              </Badge>
+            )}
           </div>
 
           {/* Favorite button */}
@@ -384,32 +387,58 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
         </div>
 
         {/* Content */}
-        <CardContent className="p-5 flex-1 flex flex-col">
+        <CardContent className="p-4 flex-1 flex flex-col gap-2">
+
+          {/* Category + Location row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {(ad as any).category && (ad as any).category !== 'general' && (
+              <Badge variant="secondary" className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-primary/10 text-primary border-none">
+                {(ad as any).category}
+              </Badge>
+            )}
+            {(ad as any).seller_governorate && (
+              <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                <MapPin className="w-2.5 h-2.5" />
+                {(ad as any).seller_governorate}
+              </span>
+            )}
+          </div>
+
+          {/* Title */}
           <Link href={`/ads/${ad.id}`}>
-            <h3 className="font-bold text-lg leading-snug line-clamp-2 text-foreground hover:text-primary transition-colors cursor-pointer mb-2">
+            <h3 className="font-bold text-base leading-snug line-clamp-2 text-foreground hover:text-primary transition-colors cursor-pointer">
               {ad.title}
             </h3>
           </Link>
-          <p className="text-muted-foreground text-sm line-clamp-2 flex-1">
+
+          {/* Description */}
+          <p className="text-muted-foreground text-xs line-clamp-2 flex-1 leading-relaxed">
             {ad.description}
           </p>
 
-          {/* Price + Pay from App */}
-          {ad.priceEGP && (
-            <div className="mt-2 space-y-2">
-              <span className="text-lg font-bold text-green-600 dark:text-green-400">
-                {ad.priceEGP.toLocaleString()} ج.م
-              </span>
-              <PayFromAppButton price={ad.priceEGP} size="sm" className="w-full" />
+          {/* Price block */}
+          {ad.priceEGP ? (
+            <div className="flex items-center justify-between gap-2 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800/40 rounded-xl px-3 py-2">
+              <div>
+                <p className="text-[10px] text-green-700 dark:text-green-400 font-semibold">السعر</p>
+                <p className="text-xl font-extrabold text-green-700 dark:text-green-400 leading-none">
+                  {ad.priceEGP.toLocaleString()} <span className="text-sm font-bold">ج.م</span>
+                </p>
+              </div>
+              <PayFromAppButton price={ad.priceEGP} size="sm" className="shrink-0" />
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 bg-muted/50 rounded-xl px-3 py-2">
+              <span className="text-sm font-bold text-muted-foreground">السعر بالتراضي</span>
             </div>
           )}
 
-          {/* ⭐ Star Rating — Quick Rate from Card */}
+          {/* ⭐ Star Rating */}
           <QuickRating adId={ad.id} ratingData={ratingData} userId={user?.id} onRated={() => qc.invalidateQueries({ queryKey: ["/api/ratings/ad", ad.id] })} />
 
           {/* 🏷️ Coupon Badge */}
           {(ad as any).coupon_code && (
-            <div className="flex items-center gap-2 bg-gradient-to-l from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/20 border border-orange-200 dark:border-orange-800/50 rounded-xl p-2 mt-1">
+            <div className="flex items-center gap-2 bg-gradient-to-l from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/20 border border-orange-200 dark:border-orange-800/50 rounded-xl p-2">
               <div className="w-6 h-6 rounded-lg bg-orange-500 flex items-center justify-center flex-shrink-0">
                 <Tag className="w-3 h-3 text-white" />
               </div>
@@ -440,16 +469,40 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
             </div>
           )}
 
-          <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/40">
-            <div className="flex items-center text-xs text-muted-foreground/80 gap-1.5">
-              <Calendar className="w-3 h-3" />
-              {ad.createdAt && format(new Date(ad.createdAt), 'MMM d', { locale: language === 'ar' ? ar : enUS })}
-            </div>
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Eye className="w-3 h-3" />
-              {(ad.viewsCount || 0).toLocaleString()}
+          {/* Seller info + meta row */}
+          <div className="flex items-center justify-between pt-2 border-t border-border/40">
+            {/* Seller avatar + name */}
+            <Link href={`/profile/${(ad as any).user_id || ad.userId}`} onClick={e => e.stopPropagation()} className="flex items-center gap-2 min-w-0">
+              {(ad as any).seller_avatar ? (
+                <img
+                  src={(ad as any).seller_avatar}
+                  alt={(ad as any).seller_first_name || ""}
+                  className="w-7 h-7 rounded-full object-cover border border-border/60 shrink-0"
+                />
+              ) : (
+                <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <User className="w-3.5 h-3.5 text-primary" />
+                </div>
+              )}
+              <span className="text-xs font-semibold text-foreground/80 truncate max-w-[90px]">
+                {(ad as any).seller_first_name
+                  ? `${(ad as any).seller_first_name} ${(ad as any).seller_last_name || ''}`.trim()
+                  : "بائع"}
+              </span>
+            </Link>
+
+            {/* Views + date + delete */}
+            <div className="flex items-center gap-2 text-[10px] text-muted-foreground shrink-0">
+              <span className="flex items-center gap-1">
+                <Eye className="w-3 h-3" />
+                {(ad.viewsCount || 0).toLocaleString()}
+              </span>
+              <span className="flex items-center gap-1">
+                <Calendar className="w-3 h-3" />
+                {ad.createdAt && format(new Date(ad.createdAt), 'MMM d', { locale: language === 'ar' ? ar : enUS })}
+              </span>
               {isOwner && (
-                <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground/50 hover:text-destructive rounded-full ms-1" onClick={handleDelete}>
+                <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground/50 hover:text-destructive rounded-full" onClick={handleDelete}>
                   <Trash2 className="w-3 h-3" />
                 </Button>
               )}

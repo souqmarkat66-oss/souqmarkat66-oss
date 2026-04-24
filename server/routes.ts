@@ -2208,7 +2208,11 @@ Sitemap: ${BASE}/sitemap-pages.xml
       // ── Fetch page ──
       params.push(limit, offset);
       const dataRes = await pool.query(
-        `SELECT * FROM ads WHERE ${where} ORDER BY ${orderBy} LIMIT $${pi++} OFFSET $${pi++}`,
+        `SELECT a.*, u.first_name AS seller_first_name, u.last_name AS seller_last_name,
+                u.profile_image_url AS seller_avatar, u.governorate AS seller_governorate
+         FROM ads a
+         LEFT JOIN users u ON u.id = a.user_id
+         WHERE ${where} ORDER BY ${orderBy} LIMIT $${pi++} OFFSET $${pi++}`,
         params
       );
 
