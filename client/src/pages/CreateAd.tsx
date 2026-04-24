@@ -120,6 +120,13 @@ export default function CreateAd() {
   const [couponDiscountValue, setCouponDiscountValue] = useState("");
   const [generatedCouponCode, setGeneratedCouponCode] = useState("");
   const [couponGenerating, setCouponGenerating] = useState(false);
+  // Viral Trending Generator
+  const [trendMode, setTrendMode] = useState(false);
+  const [trendProduct, setTrendProduct] = useState("");
+  const [trendPlatform, setTrendPlatform] = useState("tiktok");
+  const [generatingTrend, setGeneratingTrend] = useState(false);
+  const [trendResult, setTrendResult] = useState<any>(null);
+  const [generatingTrendImage, setGeneratingTrendImage] = useState(false);
   // Targeting map states
   const [targetRegions, setTargetRegions] = useState<string[]>([]);
   const [targetInterests, setTargetInterests] = useState<string[]>([]);
@@ -473,6 +480,56 @@ export default function CreateAd() {
     const text = `${scene.narration || scene.visual}`;
     speakEgyptian(text);
     setTimeout(() => setSpeakingScene(null), 3000);
+  };
+
+  // ─── Viral Trending Generator ──────────────────────────────────────────
+  const handleGenerateTrend = async () => {
+    if (!trendProduct.trim()) { toast({ variant: "destructive", title: "أدخل اسم المنتج أولاً" }); return; }
+    setGeneratingTrend(true);
+    setTrendResult(null);
+    try {
+      const res = await fetch("/api/ai/generate-trending", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ productName: trendProduct, platform: trendPlatform }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "فشل التوليد");
+      setTrendResult(data);
+      toast({ title: "🔥 حزمة الترند جاهزة!", description: `تقييم الانتشار: ${data.viral_score}/100` });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "خطأ", description: e.message });
+    } finally { setGeneratingTrend(false); }
+  };
+
+  const applyTrendToForm = () => {
+    if (!trendResult) return;
+    const hook = trendResult.hook || "";
+    const title = trendResult.viral_title || "";
+    const desc = trendResult.viral_description || "";
+    const cta = trendResult.call_to_action || "";
+    const tags = trendResult.hashtags?.map((h: string) => `#${h}`).join(" ") || "";
+    form.setValue("title", `${hook} — ${title}`.slice(0, 120));
+    form.setValue("description", `${desc}\n\n${cta}\n\n${tags}`.trim());
+    toast({ title: "✅ تم التطبيق!", description: "الآن أكمل بقية بيانات الإعلان" });
+  };
+
+  const generateTrendImage = async () => {
+    if (!trendResult?.image_prompt) return;
+    setGeneratingTrendImage(true);
+    try {
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ prompt: trendResult.image_prompt, size: "1024x1536" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setAiImageUrl(data.url);
+      form.setValue("mediaUrl", data.url);
+      form.setValue("mediaType", "image");
+      toast({ title: "🖼️ الصورة جاهزة!" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "فشل توليد الصورة", description: e.message });
+    } finally { setGeneratingTrendImage(false); }
   };
 
   const handleGenerateAll = async () => {
@@ -876,12 +933,192 @@ export default function CreateAd() {
         </div>
       </div>
 
-      <div className="flex gap-3 mb-6">
-        <Button onClick={() => setAiMode(false)} variant={!aiMode ? "default" : "outline"} size="sm" data-testid="btn-manual-mode">✏️ يدوي</Button>
-        <Button onClick={() => setAiMode(true)} variant={aiMode ? "default" : "outline"} size="sm" className="gap-2" data-testid="btn-ai-mode">
+      <div className="flex gap-3 mb-6 flex-wrap">
+        <Button onClick={() => { setAiMode(false); setTrendMode(false); }} variant={!aiMode && !trendMode ? "default" : "outline"} size="sm" data-testid="btn-manual-mode">✏️ يدوي</Button>
+        <Button onClick={() => { setAiMode(true); setTrendMode(false); }} variant={aiMode && !trendMode ? "default" : "outline"} size="sm" className="gap-2" data-testid="btn-ai-mode">
           <Sparkles className="w-4 h-4" /> مساعد AI
         </Button>
+        <Button onClick={() => { setTrendMode(true); setAiMode(false); }} variant={trendMode ? "default" : "outline"} size="sm" className={`gap-2 ${trendMode ? "bg-gradient-to-r from-red-500 to-orange-500 border-none text-white" : "border-orange-400 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950/30"}`} data-testid="btn-trend-mode">
+          🔥 ترند فيروسي
+        </Button>
       </div>
+
+      {/* ─── Viral Trending Generator Panel ─────────────────────────────── */}
+      {trendMode && (
+        <AnimatePresence>
+          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
+            <Card className="rounded-2xl border-orange-400/40 bg-gradient-to-br from-orange-50/80 to-red-50/60 dark:from-orange-950/30 dark:to-red-950/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <span className="text-2xl">🔥</span>
+                  <div>
+                    <div className="text-orange-700 dark:text-orange-400 font-extrabold">مولّد الإعلان الفيروسي</div>
+                    <div className="text-xs font-normal text-muted-foreground">يستخدم أحدث تقنيات GPT-4o لإنشاء محتوى يشتعل مثل TikTok وInstagram وReels</div>
+                  </div>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Product Input */}
+                <div>
+                  <label className="text-sm font-bold mb-1.5 block">اسم منتجك أو خدمتك</label>
+                  <Input
+                    placeholder="مثال: كريم تبييض، موبايل سامسونج، مطعم شاورما، حجز فندق..."
+                    value={trendProduct}
+                    onChange={e => setTrendProduct(e.target.value)}
+                    className="bg-white dark:bg-background"
+                    data-testid="input-trend-product"
+                  />
+                </div>
+
+                {/* Platform Selector */}
+                <div>
+                  <label className="text-sm font-bold mb-1.5 block">المنصة المستهدفة</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      { id: "tiktok", label: "TikTok", emoji: "🎵" },
+                      { id: "instagram", label: "Instagram", emoji: "📸" },
+                      { id: "facebook", label: "Facebook", emoji: "👥" },
+                      { id: "youtube", label: "Shorts", emoji: "▶️" },
+                    ].map(p => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setTrendPlatform(p.id)}
+                        className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all flex flex-col items-center gap-1 ${trendPlatform === p.id ? "bg-orange-500 text-white border-orange-500 shadow-md" : "border-border bg-white dark:bg-background hover:border-orange-400"}`}
+                        data-testid={`btn-platform-${p.id}`}
+                      >
+                        <span className="text-lg">{p.emoji}</span>
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Generate Button */}
+                <Button
+                  type="button"
+                  onClick={handleGenerateTrend}
+                  disabled={generatingTrend}
+                  className="w-full bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 text-white font-extrabold text-base py-6 rounded-xl shadow-lg"
+                  data-testid="btn-generate-trend"
+                >
+                  {generatingTrend ? (
+                    <><Loader2 className="w-5 h-5 animate-spin me-2" /> يولّد الذكاء الاصطناعي إعلانك الترند...</>
+                  ) : (
+                    <>🔥 ولّد إعلان ترند فيروسي الآن</>
+                  )}
+                </Button>
+
+                {/* Results */}
+                {trendResult && (
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3 mt-2">
+                    {/* Viral Score */}
+                    <div className="flex items-center gap-3 bg-white dark:bg-background rounded-xl p-3 border border-orange-200 dark:border-orange-800/40">
+                      <div className="text-center">
+                        <div className={`text-3xl font-extrabold ${trendResult.viral_score >= 80 ? 'text-green-600' : trendResult.viral_score >= 60 ? 'text-orange-500' : 'text-red-500'}`}>
+                          {trendResult.viral_score}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground">/ 100</div>
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-sm font-bold">قوة الانتشار الفيروسي</div>
+                        <div className="w-full bg-muted rounded-full h-2 mt-1">
+                          <div className={`h-2 rounded-full transition-all ${trendResult.viral_score >= 80 ? 'bg-green-500' : trendResult.viral_score >= 60 ? 'bg-orange-500' : 'bg-red-500'}`} style={{ width: `${trendResult.viral_score}%` }} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Hook */}
+                    <div className="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-300 dark:border-yellow-800/40 rounded-xl p-3">
+                      <div className="text-[10px] font-bold text-yellow-700 dark:text-yellow-400 mb-1">⚡ الـ Hook — يشد الانتباه في 3 ثواني</div>
+                      <div className="font-extrabold text-base text-yellow-900 dark:text-yellow-200">{trendResult.hook}</div>
+                    </div>
+
+                    {/* Viral Title */}
+                    <div className="bg-white dark:bg-background rounded-xl p-3 border">
+                      <div className="text-[10px] font-bold text-muted-foreground mb-1">🏆 العنوان الفيروسي</div>
+                      <div className="font-bold text-foreground">{trendResult.viral_title}</div>
+                    </div>
+
+                    {/* Description */}
+                    <div className="bg-white dark:bg-background rounded-xl p-3 border">
+                      <div className="text-[10px] font-bold text-muted-foreground mb-1">📝 الوصف بأسلوب ترند</div>
+                      <div className="text-sm text-foreground whitespace-pre-line">{trendResult.viral_description}</div>
+                    </div>
+
+                    {/* CTA */}
+                    <div className="bg-green-50 dark:bg-green-950/30 border border-green-300 dark:border-green-800/40 rounded-xl p-3">
+                      <div className="text-[10px] font-bold text-green-700 dark:text-green-400 mb-1">📣 دعوة العمل (CTA)</div>
+                      <div className="font-bold text-green-800 dark:text-green-300">{trendResult.call_to_action}</div>
+                    </div>
+
+                    {/* Hashtags */}
+                    {trendResult.hashtags?.length > 0 && (
+                      <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 rounded-xl p-3">
+                        <div className="text-[10px] font-bold text-blue-700 dark:text-blue-400 mb-2">🏷️ هاشتاقات الترند</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {trendResult.hashtags.map((tag: string, i: number) => (
+                            <span key={i} className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-bold px-2 py-0.5 rounded-full">#{tag}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Content Angles */}
+                    {trendResult.content_angles?.length > 0 && (
+                      <div className="bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/40 rounded-xl p-3">
+                        <div className="text-[10px] font-bold text-purple-700 dark:text-purple-400 mb-2">🎯 زوايا تسويقية بديلة</div>
+                        <div className="space-y-1.5">
+                          {trendResult.content_angles.map((angle: string, i: number) => (
+                            <div key={i} className="flex gap-2 text-xs text-foreground">
+                              <span className="text-purple-500 font-bold shrink-0">{i + 1}.</span>
+                              <span>{angle}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Viral Tips */}
+                    {trendResult.viral_tips?.length > 0 && (
+                      <div className="bg-muted/60 rounded-xl p-3">
+                        <div className="text-[10px] font-bold text-muted-foreground mb-2">💡 نصائح لزيادة الانتشار</div>
+                        <div className="space-y-1">
+                          {trendResult.viral_tips.map((tip: string, i: number) => (
+                            <div key={i} className="flex gap-2 text-xs text-foreground">
+                              <span className="text-primary">✓</span>
+                              <span>{tip}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button type="button" onClick={applyTrendToForm} className="bg-primary text-white font-bold rounded-xl" data-testid="btn-apply-trend">
+                        <CheckCircle2 className="w-4 h-4 me-1" /> طبّق على الإعلان
+                      </Button>
+                      <Button type="button" variant="outline" onClick={generateTrendImage} disabled={generatingTrendImage} className="rounded-xl font-bold border-orange-400 text-orange-600" data-testid="btn-trend-image">
+                        {generatingTrendImage
+                          ? <><Loader2 className="w-4 h-4 animate-spin me-1" /> يولّد الصورة...</>
+                          : <><ImageIcon className="w-4 h-4 me-1" /> ولّد صورة ترند</>}
+                      </Button>
+                    </div>
+
+                    {/* Preview generated image */}
+                    {aiImageUrl && trendMode && (
+                      <div className="rounded-xl overflow-hidden border border-orange-200">
+                        <img src={aiImageUrl} alt="صورة الترند" className="w-full object-cover max-h-64" />
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+        </AnimatePresence>
+      )}
 
       {/* AI Credits Badge */}
       {aiMode && aiUsage && (

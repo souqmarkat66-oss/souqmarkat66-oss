@@ -4892,6 +4892,64 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
+  // ─── AI VIRAL / TRENDING AD GENERATOR ─────────────────────────────────
+  app.post("/api/ai/generate-trending", isAuthenticated, checkAiCredits, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { productName, category, targetAudience, platform = "tiktok" } = req.body;
+      if (!productName) return res.status(400).json({ message: "productName مطلوب" });
+
+      const platformHints: Record<string, string> = {
+        tiktok: "TikTok وReels — فيديوهات قصيرة تجذب الانتباه في أول 3 ثواني، أسلوب شبابي طريف",
+        instagram: "Instagram — جمالي وأنيق، صور احترافية، كابشن قصير وجذاب",
+        facebook: "Facebook — مباشر ومقنع، يخاطب الأسرة والأعمار المختلفة",
+        youtube: "YouTube Shorts — محتوى تعليمي أو ترفيهي مع قيمة مضافة واضحة",
+      };
+
+      const sysMsg = `أنت خبير تسويق رقمي متخصص في إنشاء محتوى فيروسي (viral) للسوق المصري العربي.
+قواعدك:
+١- اكتب بالعربية الفصيحة السهلة أو العامية المصرية الجذابة حسب المنصة
+٢- الـ Hook يجب أن يشد الانتباه خلال 3 ثواني فقط
+٣- استخدم أساليب الـ viral marketing المثبتة: الفضول، التحدي، الإثارة، الفائدة المباشرة
+٤- الهاشتاقات تكون مزيج من الترند العالمي والمحلي المصري
+٥- أعد JSON فقط بدون أي نص خارجه`;
+
+      const userMsg = `أنشئ حزمة إعلان فيروسي ترند لـ: "${productName}"
+الفئة: ${category || "عام"}
+الجمهور المستهدف: ${targetAudience || "جميع المصريين"}
+المنصة: ${platformHints[platform] || platformHints.tiktok}
+
+أعد JSON بالمفاتيح التالية:
+- "hook": جملة صدمة تشد الانتباه في 3 ثواني (مثال: "ليه بتدفع أكتر؟!" / "السر اللي مش هيتقالك!")
+- "viral_title": عنوان فيروسي لا يقاوم (عربي جذاب)
+- "viral_description": وصف بأسلوب ترند — قصير ومؤثر (3-4 جمل بالعامية المصرية)
+- "call_to_action": دعوة عمل قوية (مثال: "اطلب دلوقتي قبل ما ينتهي!")
+- "hashtags": مصفوفة 10 هاشتاق مزيج عربي وإنجليزي (بدون #)
+- "content_angles": مصفوفة 3 زوايا تسويقية مختلفة للتجربة
+- "viral_score": تقييم إمكانية الانتشار من 100 (رقم فقط)
+- "viral_tips": مصفوفة 3 نصائح لزيادة الانتشار
+- "image_prompt": وصف بالإنجليزية لصورة DALL-E احترافية تناسب الإعلان`;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: sysMsg },
+          { role: "user", content: userMsg },
+        ],
+        response_format: { type: "json_object" },
+      });
+
+      const content = JSON.parse(response.choices[0]?.message?.content || "{}");
+      await storage.recordAiUsage(userId, 'trending');
+      if (req.aiChargeEGP) {
+        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم توليد إعلان ترند فيروسي');
+      }
+      res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
+    } catch (error: any) {
+      res.status(500).json({ message: "فشل التوليد: " + error.message });
+    }
+  });
+
   // AI Image generation (uses DALL-E via image routes, but track usage here)
   app.post("/api/ai/generate-image", isAuthenticated, checkAiCredits, async (req: any, res) => {
     const userId = req.user.claims.sub;
