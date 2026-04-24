@@ -313,7 +313,7 @@ export default function CreateAd() {
       const data = await res.json();
       if (!res.ok) {
         if (data.message === 'insufficient_credits') {
-          toast({ variant: "destructive", title: "انتهت الرصيد المجاني", description: `تكلفة الرصيد الإضافي: ${data.pricePerCredit} جنيه` });
+          toast({ variant: "destructive", title: "انتهى الرصيد المجاني 🔴", description: `كل طلب إضافي بـ ${data.pricePerCredit} ج — اشحن رصيدك من صفحة الإيرادات` });
           return;
         }
         throw new Error(data.message);
@@ -343,7 +343,7 @@ export default function CreateAd() {
       const data = await res.json();
       if (!res.ok) {
         if (data.message === 'insufficient_credits') {
-          toast({ variant: "destructive", title: "انتهت الرصيد المجاني", description: `اشحن رصيدك من صفحة الإيرادات` });
+          toast({ variant: "destructive", title: "انتهى الرصيد المجاني 🔴", description: `كل طلب إضافي بـ ${data.pricePerCredit} ج — اشحن رصيدك من صفحة الإيرادات` });
           return;
         }
         throw new Error(data.message);
@@ -383,7 +383,7 @@ export default function CreateAd() {
       const data = await res.json();
       if (!res.ok) {
         if (data.message === 'insufficient_credits') {
-          toast({ variant: "destructive", title: "رصيدك غير كافٍ", description: "اشحن رصيدك من صفحة المحفظة" });
+          toast({ variant: "destructive", title: "انتهى الرصيد المجاني 🔴", description: `كل طلب إضافي بـ ${data.pricePerCredit} ج — اشحن رصيدك من صفحة الإيرادات` });
           return;
         }
         throw new Error(data.message);
@@ -409,7 +409,7 @@ export default function CreateAd() {
       const data = await res.json();
       if (!res.ok) {
         if (data.message === 'insufficient_credits') {
-          toast({ variant: "destructive", title: "انتهت الرصيد المجاني" });
+          toast({ variant: "destructive", title: "انتهى الرصيد المجاني 🔴", description: `كل طلب إضافي بـ ${data.pricePerCredit || 15} ج — اشحن رصيدك من صفحة الإيرادات` });
           return;
         }
         throw new Error(data.message);
@@ -1122,16 +1122,21 @@ export default function CreateAd() {
 
       {/* AI Credits Badge */}
       {aiMode && aiUsage && (
-        <div className="mb-4 flex items-center gap-3 bg-muted rounded-xl p-3">
-          <CreditCard className="w-5 h-5 text-primary" />
+        <div className={`mb-4 flex items-center gap-3 rounded-xl p-3 border ${aiUsage.remaining > 0 ? 'bg-muted border-transparent' : 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800'}`}>
+          <CreditCard className={`w-5 h-5 ${aiUsage.remaining > 0 ? 'text-primary' : 'text-red-500'}`} />
           <div className="flex-1">
-            <span className="text-sm font-medium">رصيد AI المجاني: </span>
+            <span className="text-sm font-medium">رصيد AI: </span>
             <Badge variant={aiUsage.remaining > 0 ? "default" : "destructive"} className="ml-2">
-              {aiUsage.remaining} متبقي من {aiUsage.freeCredits}
+              {aiUsage.remaining > 0 ? `${aiUsage.remaining} طلب مجاني متبقي` : 'انتهى الرصيد المجاني'}
             </Badge>
           </div>
-          {aiUsage.remaining === 0 && (
-            <span className="text-xs text-muted-foreground">{aiUsage.pricePerCredit} ج/طلب إضافي</span>
+          {aiUsage.remaining === 0 ? (
+            <a href="/earnings" className="shrink-0 text-xs font-bold bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-full transition-all flex items-center gap-1">
+              <CreditCard className="w-3 h-3" />
+              اشحن {aiUsage.pricePerCredit} ج/طلب
+            </a>
+          ) : (
+            <span className="text-xs text-muted-foreground shrink-0">ثم {aiUsage.pricePerCredit} ج/طلب</span>
           )}
         </div>
       )}
