@@ -126,7 +126,7 @@ async function verifyPaymentScreenshot(
 - يظهر مبلغ قريب من ${expectedAmountEGP} ج.م`;
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4.1",
       max_tokens: 300,
       messages: [{
         role: "user",
@@ -4805,7 +4805,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
         ? `اكتب عنواناً ووصفاً إعلانياً جذاباً للمنتج التالي:\n- المنتج: "${productName}"\n- الجمهور المستهدف: "${targetAudience}"${titleHint}${customHint}\nأعد JSON بمفتاحين فقط: "title" (عنوان لا يتجاوز 10 كلمات) و"description" (وصف من 2-4 جمل).`
         : `Write a catchy ad for: "${productName}". Target: "${targetAudience}".${titleHint}${customHint} Return JSON with "title" and "description".`;
       const response = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4.1",
         messages: [
           { role: "system", content: sysMsg },
           { role: "user", content: userMsg },
@@ -4838,7 +4838,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
         ? `اكتب مقالة تسويقية احترافية عن: "${topic}". أعد JSON بمفتاحين: "title" (عنوان جذاب) و"content" (المقالة كاملة منظّمة بفقرات).`
         : `Write a professional marketing article about: "${topic}". Tone: ${tone || 'professional'}. Return JSON with "title" and "content".`;
       const response = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4.1",
         messages: [
           { role: "system", content: sysMsg },
           { role: "user", content: userMsg },
@@ -4874,7 +4874,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
         ? `اكتب سكريبت فيديو إعلاني سينمائي احترافي للمنتج: "${productName}"${titleHint}${customHint}\nمدة الفيديو: ${duration || 30} ثانية.\nأعد JSON بالمفاتيح التالية:\n- "title": عنوان الفيديو\n- "script": النص الكامل\n- "voiceover": التعليق الصوتي بالعربية الفصحى\n- "scenes": مصفوفة 4-6 مشاهد، كل مشهد يحتوي: "time" و"visual" و"narration" و"mood" و"transition"\n- "music": وصف الموسيقى التصويرية\n- "callToAction": دعوة للعمل`
         : `Write a cinematic video ad script for "${productName}"${titleHint}${customHint} (${duration || 30}s). Return JSON: "title", "script", "voiceover", "scenes" (4-6 with "time","visual","narration","mood","transition"), "music", "callToAction".`;
       const response = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4.1",
         messages: [
           { role: "system", content: sysMsg },
           { role: "user", content: userMsg },
@@ -4931,7 +4931,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 - "image_prompt": وصف بالإنجليزية لصورة DALL-E احترافية تناسب الإعلان`;
 
       const response = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4.1",
         messages: [
           { role: "system", content: sysMsg },
           { role: "user", content: userMsg },
@@ -5019,7 +5019,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
         : `Analyze these images and create a professional ad${productName ? ` for ${productName}` : ''}${targetAudience ? ` targeting ${targetAudience}` : ''}.\nReturn JSON: {"title": "...", "description": "..."}`;
 
       const response = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4.1",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: [{ type: "text", text: userPrompt }, ...imageContents] }
@@ -5285,7 +5285,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const prompt = `Translate the following ad content to ${langName}. Keep it natural, catchy and suitable for advertising.\n\nTitle: ${title || ""}\nDescription: ${description || ""}\n\nReturn JSON: {"title": "translated title", "description": "translated description"}`;
 
       const response = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4.1",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
         max_tokens: 400,
@@ -5364,7 +5364,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
       // Generate Arabic caption
       const captionResp = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-4.1-mini",
         messages: [{
           role: "user",
           content: `اكتب وصفاً تسويقياً قصيراً وشهياً باللغة العربية لـ"${dishName}" ${description ? `(${description})` : ""} ${restaurantName ? `من مطعم ${restaurantName}` : ""} ${price ? `بسعر ${price} جنيه` : ""}. الوصف لا يزيد عن 3 جمل قصيرة ومشوّقة.`
@@ -7264,7 +7264,7 @@ ${reelTags}
 الرد يجب أن يكون باللغة العربية، احترافياً ومفيداً وقابلاً للتطبيق مباشرة.`;
 
       const response = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4.1",
         messages: [{ role: "user", content: prompt }],
         max_tokens: 800,
       });
@@ -7336,7 +7336,7 @@ ${reelTags}
         : 'اشتري X احصل على Y';
 
       const aiResponse = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4.1",
         messages: [{
           role: "user",
           content: `أنت خبير تسويق محترف. قم بإنشاء كوبون خصم احترافي وجذاب للمنشأة التالية:
