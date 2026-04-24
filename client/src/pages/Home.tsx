@@ -324,7 +324,7 @@ export default function Home() {
               { icon: Radio, title: "بث مباشر", desc: "كاميرا وصوت وصورة مع دردشة حية", color: "text-red-500", bg: "bg-red-500/10", href: "/channels" },
               { icon: Megaphone, title: "إعلانات ذكية", desc: "توليد محتوى بالذكاء الاصطناعي", color: "text-primary", bg: "bg-primary/10", href: "/create" },
               { icon: BarChart2, title: "حملات مستهدفة", desc: "استهداف حقيقي مثل Facebook Ads", color: "text-blue-500", bg: "bg-blue-500/10", href: "/campaigns" },
-              { icon: TrendingUp, title: "إيرادات القنوات", desc: "اربح من قناتك مثل YouTube", color: "text-green-500", bg: "bg-green-500/10", href: "/revenue" },
+              { icon: TrendingUp, title: "لوحة الصدارة", desc: "أبرز البائعين والقنوات والريلز", color: "text-yellow-500", bg: "bg-yellow-500/10", href: "/leaderboard" },
             ].map(f => (
               <Link key={f.title} href={f.href}>
                 <motion.div whileHover={{ y: -4 }} className="cursor-pointer">

@@ -3125,6 +3125,54 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // ================================================================
+  // ================================================================
+  // LEADERBOARD
+  // ================================================================
+  app.get("/api/leaderboard", async (_req, res) => {
+    try {
+      const [topSellers, topChannels, topReels] = await Promise.all([
+        pool.query(`
+          SELECT u.id, u.first_name, u.last_name, u.profile_image_url,
+            COUNT(a.id)::int as ads_count,
+            COALESCE(SUM(a.views_count), 0)::int as total_views,
+            COALESCE(SUM(a.likes_count), 0)::int as total_likes
+          FROM users u
+          JOIN ads a ON a.user_id = u.id AND a.status = 'active'
+          GROUP BY u.id, u.first_name, u.last_name, u.profile_image_url
+          ORDER BY total_views DESC, ads_count DESC
+          LIMIT 10
+        `),
+        pool.query(`
+          SELECT c.id, c.name, c.avatar_url, c.subscriber_count,
+            COALESCE(c.earnings_egp, 0) as earnings_egp,
+            COALESCE(c.views_count, 0) as views_count,
+            u.first_name, u.last_name, u.profile_image_url as owner_avatar,
+            c.is_verified
+          FROM channels c
+          JOIN users u ON u.id = c.user_id
+          ORDER BY c.subscriber_count DESC, c.views_count DESC
+          LIMIT 10
+        `),
+        pool.query(`
+          SELECT r.id, r.title, r.thumbnail_url, r.views_count, r.likes_count,
+            c.name as channel_name, c.avatar_url as channel_avatar
+          FROM reels r
+          LEFT JOIN channels c ON c.id = r.channel_id
+          WHERE r.status = 'active'
+          ORDER BY r.views_count DESC
+          LIMIT 10
+        `),
+      ]);
+      res.json({
+        topSellers: topSellers.rows,
+        topChannels: topChannels.rows,
+        topReels: topReels.rows,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   // REELS ROUTES
   // ================================================================
   app.get("/api/reels", async (req: any, res) => {

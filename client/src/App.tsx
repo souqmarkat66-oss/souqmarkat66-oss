@@ -38,6 +38,7 @@ import Coupons from "@/pages/Coupons";
 import MenuGenerator from "@/pages/MenuGenerator";
 import PublicMenu from "@/pages/PublicMenu";
 import WalletPage from "@/pages/Wallet";
+import Leaderboard from "@/pages/Leaderboard";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import { GlobalAssistant } from "@/components/GlobalAssistant";
 import { PushSetup } from "@/components/PushSetup";
@@ -158,6 +159,7 @@ function Router() {
               <Route path="/wallet">
                 <ProtectedRoute component={WalletPage} />
               </Route>
+              <Route path="/leaderboard" component={Leaderboard} />
               <Route component={NotFound} />
             </Switch>
           </main>
