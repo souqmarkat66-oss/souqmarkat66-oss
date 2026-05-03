@@ -68,7 +68,9 @@ export default function StartStream() {
       const ms = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       ms.getTracks().forEach(t => t.stop()); // نوقف الـ preview هنا، LiveStream هيفتحها بنفسه
     } catch {
-      /* لو رُفض الإذن — نكمل بدونه (LiveStream هيتعامل معاه) */
+      toast({ variant: "destructive", title: "⚠️ الكاميرا محجوبة", description: "افتح إعدادات المتصفح وأعطِ الموقع إذن الكاميرا والميكروفون، ثم أعد المحاولة" });
+      setLoading(false);
+      return;
     }
     try {
       const res = await fetch("/api/streams", {
