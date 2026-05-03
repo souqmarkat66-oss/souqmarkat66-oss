@@ -355,25 +355,30 @@ export default function Social() {
           </div>
 
           {/* Referral Code Card */}
-          <div className="border rounded-2xl p-5 bg-gradient-to-br from-primary/5 to-purple-500/5 border-primary/20">
+          <div className="border-2 rounded-2xl p-5 bg-gradient-to-br from-primary/10 to-purple-500/10 border-primary/30 shadow-sm">
             <div className="flex items-center gap-2 mb-3">
               <Sparkles className="w-5 h-5 text-primary" />
               <h3 className="font-extrabold text-base">كود الإحالة الخاص بك</h3>
+              <span className="text-xs bg-green-500/15 text-green-600 border border-green-500/30 rounded-full px-2 py-0.5 font-bold">مجاناً 🎁</span>
             </div>
-            <div className="flex items-center gap-2 mb-4">
-              <div className="flex-1 bg-background border border-primary/30 rounded-xl px-4 py-3 font-mono text-xl font-extrabold text-primary text-center tracking-widest">
-                {referralData?.code || "—"}
+            <div className="flex items-center gap-2 mb-3">
+              <div className="flex-1 bg-background border-2 border-primary/40 rounded-xl px-4 py-3 font-mono text-2xl font-extrabold text-primary text-center tracking-[0.3em] select-all">
+                {referralData?.code
+                  ? referralData.code
+                  : <span className="text-muted-foreground text-base animate-pulse">جاري التحميل...</span>
+                }
               </div>
               <button
                 onClick={copyInvite}
-                className="w-12 h-12 rounded-xl bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-all"
+                className="w-12 h-12 rounded-xl bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-all shadow-md shadow-primary/20"
                 data-testid="btn-copy-invite"
+                title="نسخ الكود"
               >
                 {copied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
               </button>
             </div>
-            <p className="text-xs text-muted-foreground text-center">
-              كل صديق يسجّل بكودك → أنت وهو تاخدوا مكافأة 🎁
+            <p className="text-xs text-muted-foreground text-center bg-background/60 rounded-lg py-2 px-3">
+              📤 شارك الكود → صديقك يسجّل → <strong>أنتوا الاتنين تاخدوا مكافأة</strong> 🎁
             </p>
           </div>
 

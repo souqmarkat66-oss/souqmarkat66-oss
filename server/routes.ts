@@ -4051,12 +4051,18 @@ Sitemap: ${BASE}/sitemap-pages.xml
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // GET /api/auth/me/referral — referral code + stats
+  // GET /api/auth/me/referral — referral code + stats (auto-generate if missing)
   app.get("/api/auth/me/referral", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
     try {
       const userRow = await db.execute(sql`SELECT referral_code FROM users WHERE id = ${userId} LIMIT 1`);
-      const code = userRow.rows[0]?.referral_code;
+      let code = (userRow.rows[0] as any)?.referral_code;
+      // Auto-generate code if user doesn't have one
+      if (!code) {
+        code = Math.random().toString(36).substring(2, 6).toUpperCase() +
+               Math.random().toString(36).substring(2, 6).toUpperCase();
+        await db.execute(sql`UPDATE users SET referral_code = ${code} WHERE id = ${userId}`);
+      }
       const statsRow = await db.execute(sql`SELECT COUNT(*) as count, COALESCE(SUM(bonus_egp),0) as earned FROM referrals WHERE referrer_id = ${userId}`);
       res.json({ code, stats: statsRow.rows[0] });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
