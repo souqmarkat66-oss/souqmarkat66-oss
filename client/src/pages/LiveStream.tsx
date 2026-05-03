@@ -104,6 +104,14 @@ export default function LiveStream() {
   const [flyingGifts,     setFlyingGifts]     = useState<FlyingGift[]>([]);
   const [myCoins,         setMyCoins]         = useState(0); // loaded from DB
 
+  // ── Gift Combo (Double / Triple / Mega) state ──
+  interface ComboDisplay { id: number; emoji: string; count: number; label: string; color: string; fading: boolean; }
+  const [comboDisplay,    setComboDisplay]    = useState<ComboDisplay | null>(null);
+  const lastGiftTypeRef   = useRef<string>("");
+  const comboCountRef     = useRef(0);
+  const comboTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const comboFadeRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Hand raise state (viewer)
   const [handRaised,      setHandRaised]      = useState(false);
   const [handInvited,     setHandInvited]     = useState(false);
@@ -531,6 +539,36 @@ export default function LiveStream() {
       } else if (data.battleTeam === "B") {
         battleScoreBRef.current += data.giftCoins;
         setBattleScoreB(battleScoreBRef.current);
+      }
+      // ── Combo Detection (Double / Triple / Mega) ──
+      if (lastGiftTypeRef.current === data.giftEmoji) {
+        comboCountRef.current += 1;
+      } else {
+        comboCountRef.current = 1;
+        lastGiftTypeRef.current = data.giftEmoji;
+      }
+      const count = comboCountRef.current;
+      if (count >= 2) {
+        const getComboInfo = (n: number) => {
+          if (n >= 10) return { label: `MEGA x${n}!! 🔥`, color: "#ff0080" };
+          if (n >= 5)  return { label: `COMBO x${n}! ⚡`,  color: "#f97316" };
+          if (n === 4) return { label: "QUAD! 💥",          color: "#a855f7" };
+          if (n === 3) return { label: "TRIPLE! 🎯",        color: "#eab308" };
+          return          { label: "DOUBLE! ✨",             color: "#22c55e" };
+        };
+        const { label, color } = getComboInfo(count);
+        if (comboTimerRef.current) clearTimeout(comboTimerRef.current);
+        if (comboFadeRef.current)  clearTimeout(comboFadeRef.current);
+        setComboDisplay({ id: Date.now(), emoji: data.giftEmoji, count, label, color, fading: false });
+        // Start fade-out 2s after last gift in streak
+        comboTimerRef.current = setTimeout(() => {
+          setComboDisplay(prev => prev ? { ...prev, fading: true } : null);
+          comboFadeRef.current = setTimeout(() => {
+            setComboDisplay(null);
+            comboCountRef.current = 0;
+            lastGiftTypeRef.current = "";
+          }, 400);
+        }, 2000);
       }
     });
 
@@ -1726,6 +1764,59 @@ export default function LiveStream() {
             <span className="text-5xl drop-shadow-2xl">{g.emoji}</span>
           </div>
         ))}
+
+        {/* ── GIFT COMBO OVERLAY (Double / Triple / Mega) ── */}
+        {comboDisplay && (
+          <div
+            key={comboDisplay.id}
+            className={`absolute left-1/2 top-1/2 z-50 pointer-events-none flex flex-col items-center gap-1 ${comboDisplay.fading ? "combo-fadeout" : "combo-burst"}`}
+          >
+            {/* Ripple ring */}
+            <div
+              className="absolute left-1/2 top-1/2 w-32 h-32 rounded-full combo-ring"
+              style={{ background: `radial-gradient(circle, ${comboDisplay.color}55 0%, transparent 70%)` }}
+            />
+            {/* Emoji stack */}
+            <div className="flex gap-0 mb-1">
+              {Array.from({ length: Math.min(comboDisplay.count, 5) }).map((_, i) => (
+                <span
+                  key={i}
+                  className="combo-emoji"
+                  style={{
+                    fontSize: comboDisplay.count >= 10 ? "2.8rem" : comboDisplay.count >= 5 ? "2.4rem" : "2rem",
+                    animationDelay: `${i * 0.07}s`,
+                    filter: `drop-shadow(0 0 8px ${comboDisplay.color})`,
+                  }}
+                >
+                  {comboDisplay.emoji}
+                </span>
+              ))}
+              {comboDisplay.count > 5 && (
+                <span className="text-white font-extrabold text-2xl" style={{ textShadow: `0 0 12px ${comboDisplay.color}` }}>
+                  +{comboDisplay.count - 5}
+                </span>
+              )}
+            </div>
+            {/* Combo label */}
+            <div
+              className="px-5 py-2 rounded-full font-extrabold text-white text-xl tracking-wider"
+              style={{
+                background: `linear-gradient(135deg, ${comboDisplay.color}cc, ${comboDisplay.color}88)`,
+                boxShadow: `0 0 24px ${comboDisplay.color}99, 0 4px 16px rgba(0,0,0,0.4)`,
+                border: `2px solid ${comboDisplay.color}`,
+                textShadow: "0 2px 8px rgba(0,0,0,0.6)",
+              }}
+            >
+              {comboDisplay.label}
+            </div>
+            {/* Coin multiplier badge */}
+            {comboDisplay.count >= 2 && (
+              <div className="mt-1 px-3 py-1 rounded-full bg-yellow-400/20 border border-yellow-400/50 text-yellow-300 text-xs font-bold">
+                x{comboDisplay.count} نفس الهدية!
+              </div>
+            )}
+          </div>
+        )}
 
         {/* IN-STREAM AD BANNER */}
         {streaming && adVisible && streamAds.length > 0 && stream?.showAds !== false && (() => {
