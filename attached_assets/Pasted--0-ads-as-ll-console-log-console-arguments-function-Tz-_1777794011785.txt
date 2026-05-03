@@ -1,0 +1,19 @@
+
+0|ads-as   | ll(console.log,console,arguments)}function Tz(t){try{t==null?ea.storage.removeItem("debug"):ea.storage.debug=t}catch{}}function lk(){var t;try{t=ea.storage.debug}catch{}return!t&&typeof process<"u"&&"env"in process&&(t=process.env.DEBUG),t}ea.enable(lk());function Az(){try{return window.localStorage}catch{}}});var gk=R((Lt,hk)=>{var mk=require("tty"),Pu=require("util");Lt=hk.exports=Zb();Lt.init=Lz;Lt.log=Nz;Lt.formatArgs=Rz;Lt.save=Oz;Lt.load=fk;Lt.useColors=Cz;Lt.colors=[6,2,3,4,5,1];Lt.inspectOpts=Object.keys(process.env).filter(function(t){return/^debug_/i.test(t)}).reduce(function(t,e){var a=e.substring(6).toLowerCase().replace(/_([a-z])/g,function(s,r){return r.toUpperCase()}),n=process.env[e];return/^(yes|on|true|enabled)$/i.test(n)?n=!0:/^(no|off|false|disabled)$/i.test(n)?n=!1:n==="null"?n=null:n=Number(n),t[a]=n,t},{});var lo=parseInt(process.env.DEBUG_FD,10)||2;lo!==1&&lo!==2&&Pu.deprecate(function(){},"except for stderr(2) and stdout(1), any other usage of DEBUG_FD is deprecated. Override debug.log if you want to use a different log function (https://git.io/debug_fd)")();var Iz=lo===1?process.stdout:lo===2?process.stderr:kz(lo);function Cz(){return"colors"in Lt.inspectOpts?!!Lt.inspectOpts.colors:mk.isatty(lo)}Lt.formatters.o=function(t){return this.inspectOpts.colors=this.useColors,Pu.inspect(t,this.inspectOpts).split(`
+0|ads-as   |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
+0|ads-as   | 
+0|ads-as   | Error: DATABASE_URL must be set. Did you forget to provision a database?
+0|ads-as   |     at /root/dist/index.cjs:58:124338
+0|ads-as   |     at /root/dist/index.cjs:1:225
+0|ads-as   |     at Object.<anonymous> (/root/dist/index.cjs:74:1000)
+0|ads-as   |     at Module._compile (node:internal/modules/cjs/loader:1521:14)
+0|ads-as   |     at Module._extensions..js (node:internal/modules/cjs/loader:1623:10)
+0|ads-as   |     at Module.load (node:internal/modules/cjs/loader:1266:32)
+0|ads-as   |     at Module._load (node:internal/modules/cjs/loader:1091:12)
+0|ads-as   |     at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:164:12)
+0|ads-as   |     at node:internal/main/run_main_module:28:49
+0|ads-as   | 
+0|ads-as   | Node.js v20.20.2
+
+root@srv1602266:~/server# 
+
