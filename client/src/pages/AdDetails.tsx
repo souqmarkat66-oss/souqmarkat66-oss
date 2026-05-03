@@ -589,6 +589,130 @@ function ImageSlideshow({ images }: { images: string[] }) {
   );
 }
 
+// ── مشغّل قراءة الإعلان بالصوت ──────────────────────────────────
+function AdVoicePlayer({ title, description }: { title: string; description: string }) {
+  const [voice, setVoice] = useState<"male" | "female">("female");
+  const [status, setStatus] = useState<"idle" | "loading" | "playing" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState("");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const text = `${title}. ${description}`;
+
+  const speakBrowser = () => {
+    if (!('speechSynthesis' in window)) return false;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = "ar-EG";
+    utter.rate = 0.88;
+    utter.pitch = voice === "female" ? 1.2 : 0.85;
+    utter.onstart = () => setStatus("playing");
+    utter.onend = () => setStatus("idle");
+    utter.onerror = () => setStatus("idle");
+    window.speechSynthesis.speak(utter);
+    return true;
+  };
+
+  const handlePlay = async () => {
+    if (status === "playing") {
+      audioRef.current?.pause();
+      window.speechSynthesis?.cancel();
+      setStatus("idle");
+      return;
+    }
+    setStatus("loading");
+    setErrorMsg("");
+    const apiVoice = voice === "male" ? "onyx" : "nova";
+    try {
+      const res = await fetch("/api/ai/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ text, voice: apiVoice }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "فشل");
+      const audio = new Audio(data.url);
+      audioRef.current = audio;
+      audio.onplay = () => setStatus("playing");
+      audio.onended = () => setStatus("idle");
+      audio.onerror = () => {
+        setStatus("error");
+        setErrorMsg("تعذّر تشغيل الصوت");
+      };
+      await audio.play();
+    } catch {
+      // Fallback: browser TTS
+      const ok = speakBrowser();
+      if (!ok) {
+        setStatus("error");
+        setErrorMsg("مش متاح دلوقتي — جرّب تاني");
+      }
+    }
+  };
+
+  return (
+    <div className="mt-5 rounded-2xl border border-border/50 bg-muted/20 p-4" dir="rtl">
+      <p className="text-xs font-bold text-muted-foreground mb-3 flex items-center gap-1.5">
+        <Volume2 className="w-3.5 h-3.5" /> استمع للإعلان بالعامية المصرية
+      </p>
+
+      {/* Voice selector */}
+      <div className="flex gap-2 mb-3">
+        <button
+          onClick={() => { setVoice("female"); setStatus("idle"); audioRef.current?.pause(); window.speechSynthesis?.cancel(); }}
+          className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold border transition-all ${
+            voice === "female"
+              ? "bg-pink-500 text-white border-pink-500 shadow-md shadow-pink-500/20"
+              : "bg-muted border-border text-muted-foreground hover:border-pink-300"
+          }`}
+          data-testid="btn-tts-voice-female"
+        >
+          <span className="text-base">👩</span> صوت ست
+        </button>
+        <button
+          onClick={() => { setVoice("male"); setStatus("idle"); audioRef.current?.pause(); window.speechSynthesis?.cancel(); }}
+          className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold border transition-all ${
+            voice === "male"
+              ? "bg-blue-500 text-white border-blue-500 shadow-md shadow-blue-500/20"
+              : "bg-muted border-border text-muted-foreground hover:border-blue-300"
+          }`}
+          data-testid="btn-tts-voice-male"
+        >
+          <span className="text-base">🧔</span> صوت رجالي
+        </button>
+      </div>
+
+      {/* Play button */}
+      <button
+        onClick={handlePlay}
+        disabled={status === "loading"}
+        className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-extrabold text-sm transition-all ${
+          status === "loading"
+            ? "bg-muted text-muted-foreground cursor-wait"
+            : status === "playing"
+            ? "bg-red-500/10 border border-red-300 text-red-600 dark:text-red-400"
+            : status === "error"
+            ? "bg-red-50 dark:bg-red-950/20 border border-red-200 text-red-600"
+            : voice === "female"
+            ? "bg-gradient-to-r from-pink-500 to-rose-500 text-white shadow-lg shadow-pink-500/20 hover:opacity-90"
+            : "bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-lg shadow-blue-500/20 hover:opacity-90"
+        }`}
+        data-testid="btn-tts-play"
+      >
+        {status === "loading" ? (
+          <><Loader2 className="w-4 h-4 animate-spin" /> بيجهّز الصوت...</>
+        ) : status === "playing" ? (
+          <><span className="text-base">⏹</span> وقّف الصوت</>
+        ) : status === "error" ? (
+          <><span className="text-base">⚠️</span> {errorMsg} — اضغط للمحاولة تاني</>
+        ) : (
+          <><Volume2 className="w-4 h-4" /> {voice === "female" ? "👩 اسمعي الإعلان" : "🧔 اسمع الإعلان"}</>
+        )}
+      </button>
+    </div>
+  );
+}
+
 function StarRating({ value, onChange, readonly }: { value: number; onChange?: (v: number) => void; readonly?: boolean }) {
   const [hovered, setHovered] = useState(0);
   return (
@@ -849,6 +973,9 @@ export default function AdDetails() {
 
               <h1 className="text-2xl md:text-3xl font-bold mb-4 leading-tight">{ad.title}</h1>
               <p className="text-muted-foreground whitespace-pre-wrap leading-relaxed">{ad.description}</p>
+
+              {/* ── 🔊 Voice Player ── */}
+              <AdVoicePlayer title={ad.title} description={ad.description || ""} />
 
               {/* Like/Comment */}
               <div className="mt-6">
