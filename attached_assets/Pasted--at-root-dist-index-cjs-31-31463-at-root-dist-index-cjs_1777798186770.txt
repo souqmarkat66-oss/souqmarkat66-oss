@@ -1,0 +1,73 @@
+    at $ (/root/dist/index.cjs:31:31463)
+    at /root/dist/index.cjs:31:31062
+8:48:36 AM [express] GET /api/messages/unread-count 500 in 15ms :: {"message":"secret option required for sessions"}
+chmod 700 ~/.ssh &&chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys
+
+root@srv1602266:~# Internal Server Error: Error: secret option required for sessions
+    at /root/dist/index.cjs:64:1542
+    at Oi.handleRequest (/root/dist/index.cjs:31:26432)
+    at $ (/root/dist/index.cjs:31:31463)
+    at /root/dist/index.cjs:31:31062
+    at HF (/root/dist/index.cjs:31:33053)
+    at k (/root/dist/index.cjs:31:30995)
+    at /root/dist/index.cjs:1192:1634
+    at Oi.handleRequest (/root/dist/index.cjs:31:26432)
+    at $ (/root/dist/index.cjs:31:31463)
+    at /root/dist/index.cjs:31:31062
+8:48:51 AM [express] GET /api/notifications/unread-count 500 in 15ms :: {"message":"secret option required for sessions"}
+Internal Server Error: Error: secret option required for sessions
+    at /root/dist/index.cjs:64:1542
+    at Oi.handleRequest (/root/dist/index.cjs:31:26432)
+    at $ (/root/dist/index.cjs:31:31463)
+    at /root/dist/index.cjs:31:31062
+    at HF (/root/dist/index.cjs:31:33053)
+    at k (/root/dist/index.cjs:31:30995)
+    at /root/dist/index.cjs:1192:1634
+    at Oi.handleRequest (/root/dist/index.cjs:31:26432)
+    at $ (/root/dist/index.cjs:31:31463)
+    at /root/dist/index.cjs:31:31062
+8:48:51 AM [express] GET /api/messages/unread-count 500 in 15ms :: {"message":"secret option required for sessions"}
+Internal Server Error: Error: secret option required for sessions
+    at /root/dist/index.cjs:64:1542
+    at Oi.handleRequest (/root/dist/index.cjs:31:26432)
+    at $ (/root/dist/index.cjs:31:31463)
+    at /root/dist/index.cjs:31:31062
+    at HF (/root/dist/index.cjs:31:33053)
+    at k (/root/dist/index.cjs:31:30995)
+    at /root/dist/index.cjs:1192:1634
+    at Oi.handleRequest (/root/dist/index.cjs:31:26432)
+    at $ (/root/dist/index.cjs:31:31463)
+    at /root/dist/index.cjs:31:31062
+8:49:06 AM [express] GET /api/notifications/unread-count 500 in 14ms :: {"message":"secret option required for sessions"}
+Internal Server Error: Error: secret option required for sessions
+    at /root/dist/index.cjs:64:1542
+    at Oi.handleRequest (/root/dist/index.cjs:31:26432)
+    at $ (/root/dist/index.cjs:31:31463)
+    at /root/dist/index.cjs:31:31062
+    at HF (/root/dist/index.cjs:31:33053)
+    at k (/root/dist/index.cjs:31:30995)
+    at /root/dist/index.cjs:1192:1634
+    at Oi.handleRequest (/root/dist/index.cjs:31:26432)
+    at $ (/root/dist/index.cjs:31:31463)
+    at /root/dist/index.cjs:31:31062
+8:49:06 AM [express] GET /api/messages/unread-count 500 in 14ms :: {"message":"secret option required for sessions"}
+Internal Server Error: Error: secret option required for sessions
+    at /root/dist/index.cjs:64:1542
+    at Oi.handleRequest (/root/dist/index.cjs:31:26432)
+    at $ (/root/dist/index.cjs:31:31463)
+    at /root/dist/index.cjs:31:31062
+    at HF (/root/dist/index.cjs:31:33053)
+    at k (/root/dist/index.cjs:31:30995)
+    at /root/dist/index.cjs:1192:1634
+    at Oi.handleRequest (/root/dist/index.cjs:31:26432)
+    at $ (/root/dist/index.cjs:31:31463)
+    at /root/dist/index.cjs:31:31062
+8:49:09 AM [express] GET /api/streams 500 in 12ms :: {"message":"secret option required for sessions"}
+cat /root/.env | grcat /root/.env | grep -n "SESSION_SECRET"
+
+8:SESSION_SECRET=93a54853850aafd061ce10aed616585e46ecf981e7ebb0f72736cda672c2ae01
+root@srv1602266:~# 
+
+
+
+
