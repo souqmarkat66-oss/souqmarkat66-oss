@@ -1,0 +1,32 @@
+[PM2] Applying action deleteProcessId on app [all](ids: [ 0 ])
+[PM2] [ads-as](0) ✓
+┌────┬───────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┬──────────┬──────────┐
+│ id │ name      │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │ user     │ watching │
+└────┴───────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
+[PM2][WARN] Applications ads-as not running, starting...
+[PM2] App [ads-as] launched (1 instances)
+┌────┬───────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┬──────────┬──────────┐
+│ id │ name      │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │ user     │ watching │
+├────┼───────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┼──────────┼──────────┤
+│ 0  │ ads-as    │ default     │ 1.0.0   │ fork    │ 2987     │ 0s     │ 0    │ online    │ 0%       │ 18.0mb   │ root     │ disabled │
+└────┴───────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
+[PM2] Saving current process list...
+[PM2] Successfully saved in /root/.pm2/dump.pm2
+root@srv1602266:~/server# pm2 logs ads-as --lines 5 --nostream
+
+[TAILING] Tailing last 5 lines for [ads-as] process (change the value with --lines option)
+/root/.pm2/logs/ads-as-error.log last 5 lines:
+0|ads-as   |   constraint: undefined,
+0|ads-as   |   file: 'aclchk.c',
+0|ads-as   |   line: '2950',
+0|ads-as   |   routine: 'aclcheck_error'
+0|ads-as   | }
+
+/root/.pm2/logs/ads-as-out.log last 5 lines:
+0|ads-as   | [5/3/2026, 11:18:17 AM] [INFO] HTTP server listening on port undefined:8000
+0|ads-as   | [5/3/2026, 11:18:17 AM] [INFO] Rtmp Server listening on port undefined:1935
+0|ads-as   | 11:18:17 AM [express] serving on port 5000
+0|ads-as   | 11:18:20 AM [express] GET /api/notifications/unread-count 401 in 7ms :: {"message":"Unauthorized"}
+0|ads-as   | 11:18:20 AM [express] GET /api/messages/unread-count 401 in 4ms :: {"message":"Unauthorized"}
+
+root@srv1602266:~/server# 
