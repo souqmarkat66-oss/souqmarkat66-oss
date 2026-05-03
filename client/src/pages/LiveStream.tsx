@@ -9,7 +9,7 @@ import {
   WifiOff, Volume2, VolumeX, FlipHorizontal,
   Copy, Check, Radio, Monitor, UserPlus, Users,
   Loader2, X, CheckCircle, XCircle,
-  Share2, Gift,
+  Share2, Gift, Megaphone,
 } from "lucide-react";
 import { SiWhatsapp, SiFacebook, SiX, SiTelegram, SiInstagram, SiTiktok, SiSnapchat } from "react-icons/si";
 import { Button } from "@/components/ui/button";
@@ -1657,6 +1657,22 @@ export default function LiveStream() {
           >
             <Users className="w-3.5 h-3.5" />
             {autoAccept ? "قبول تلقائي" : "قبول يدوي"}
+          </button>
+        )}
+
+        {/* AD TOGGLE BUTTON (broadcaster only) — عرض/إخفاء إعلان بدون انقطاع البث */}
+        {isBroadcast && streaming && streamAds.length > 0 && stream?.showAds !== false && (
+          <button
+            onClick={() => setAdVisible(v => !v)}
+            className={`absolute top-14 end-3 z-20 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-bold border transition-all ${
+              adVisible
+                ? "bg-yellow-500 border-yellow-400 text-black"
+                : "bg-black/60 border-white/20 text-white/70 hover:border-yellow-400 hover:text-yellow-300"
+            }`}
+            data-testid="btn-toggle-stream-ad"
+          >
+            <Megaphone className="w-3.5 h-3.5" />
+            {adVisible ? "إخفاء الإعلان" : "عرض الإعلان"}
           </button>
         )}
 

@@ -472,23 +472,23 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
               data-testid={`btn-share-ad-${ad.id}`}
             />
 
-            {/* 🚀 Boost — Ad Owner Only */}
+            {/* 🚀 Boost — Ad Owner Only (prominent) */}
             {isOwner && (
               <button
                 onClick={handleBoost}
                 disabled={boosting || boosted}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex-1 justify-center ${
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-extrabold border-2 transition-all flex-1 justify-center shadow-sm ${
                   boosted
-                    ? "bg-green-500 text-white border-green-500"
-                    : "bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 border-orange-300 dark:border-orange-700"
-                } disabled:opacity-60`}
+                    ? "bg-green-500 text-white border-green-500 shadow-green-200 dark:shadow-green-900"
+                    : "bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white border-orange-400 shadow-orange-200 dark:shadow-orange-900/40"
+                } disabled:opacity-70`}
                 data-testid={`btn-boost-ad-${ad.id}`}
               >
                 {boosting
-                  ? <><Loader2 className="w-3 h-3 animate-spin" /> جارٍ...</>
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> جارٍ...</>
                   : boosted
-                  ? <>✓ أُرسل الإشعار</>
-                  : <><Zap className="w-3 h-3" /> عزّز الإعلان 🚀</>
+                  ? <>✅ تم الإرسال</>
+                  : <><Zap className="w-4 h-4 fill-current" /> عزّز إعلانك 🚀</>
                 }
               </button>
             )}

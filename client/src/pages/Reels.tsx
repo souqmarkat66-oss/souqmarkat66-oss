@@ -1539,12 +1539,12 @@ export default function Reels() {
         </div>
       )}
 
-      {/* ── إعلان overlay كل 3 ريلز ─────────────────────── */}
-      {activeIndex % 3 === 0 && activeIndex > 0 && (
+      {/* ── إعلان overlay كل ريلين ─────────────────────── */}
+      {activeIndex % 2 === 0 && (
         <AdWidget
           variant="overlay"
           className="bottom-24 left-3"
-          refreshInterval={15000}
+          refreshInterval={12000}
           dismissible
         />
       )}

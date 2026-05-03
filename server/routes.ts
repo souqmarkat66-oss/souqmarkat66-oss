@@ -1488,9 +1488,9 @@ Sitemap: ${BASE}/sitemap-pages.xml
       await db.execute(sql`UPDATE boost_orders SET status = ${status} WHERE id = ${req.params.id}`);
 
       if (status === 'confirmed') {
-        // ✅ ACTIVATE: mark ad as boosted for 30 days
+        // ✅ ACTIVATE: mark ad as boosted for 7 days
         await db.execute(sql`
-          UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '30 days'
+          UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '7 days'
           WHERE id = ${order.ad_id}
         `);
         // Actually run the boost

@@ -77,6 +77,9 @@ function Router() {
               <Route path="/create">
                 <ProtectedRoute component={CreateAd} />
               </Route>
+              <Route path="/create-ad">
+                <ProtectedRoute component={CreateAd} />
+              </Route>
               <Route path="/channels" component={Channels} />
               <Route path="/channels/:id" component={ChannelPage} />
               <Route path="/livestream" component={LiveStreamList} />
