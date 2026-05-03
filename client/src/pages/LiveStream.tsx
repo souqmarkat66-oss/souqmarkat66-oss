@@ -536,11 +536,11 @@ export default function LiveStream() {
       .then(r => r.json())
       .then(data => {
         const ads = Array.isArray(data) ? data : (data.ads || []);
-        const imageAds = ads.filter((a: any) => a.media_type === "image" || !a.media_type);
+        const imageAds = ads.filter((a: any) => a.mediaType === "image" || a.media_type === "image" || !a.mediaType);
         // Sort: boosted & promo ads appear first, then regular
         const sorted = [...imageAds].sort((a: any, b: any) => {
-          const aScore = (a.is_boosted ? 2 : 0) + (a.is_admin_promo ? 1 : 0);
-          const bScore = (b.is_boosted ? 2 : 0) + (b.is_admin_promo ? 1 : 0);
+          const aScore = (a.isBoosted ? 2 : 0) + (a.isAdminPromo ? 1 : 0);
+          const bScore = (b.isBoosted ? 2 : 0) + (b.isAdminPromo ? 1 : 0);
           return bScore - aScore;
         });
         if (sorted.length > 0) setStreamAds(sorted);

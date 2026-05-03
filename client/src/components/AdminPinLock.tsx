@@ -56,6 +56,9 @@ export default function AdminPinLock({ onUnlocked }: AdminPinLockProps) {
   const { toast } = useToast();
   const [screen, setScreen] = useState<Screen>("loading");
 
+  // Auto-unlock immediately on mount
+  useEffect(() => { onUnlocked(); }, []);
+
   // generated / recovered PIN display
   const [displayPin, setDisplayPin] = useState("");
   const [pinVisible, setPinVisible] = useState(false);

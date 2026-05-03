@@ -44,22 +44,22 @@ function AdTrendCard({ ad, rank, index }: { ad: any; rank: number; index: number
             )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
             <TrendBadge rank={rank} />
-            {ad.is_boosted && (
+            {ad.isBoosted && (
               <span className="absolute top-1.5 end-1.5 bg-yellow-400 text-yellow-900 text-[8px] font-black px-1 rounded-full">⭐ مُعزَّز</span>
             )}
           </div>
           {/* Info */}
           <div className="p-2">
             <p className="text-xs font-bold leading-tight line-clamp-2 mb-1.5">{ad.title}</p>
-            {ad.price_egp && (
-              <p className="text-xs font-extrabold text-primary">{Number(ad.price_egp).toLocaleString("ar-EG")} ج.م</p>
+            {ad.priceEgp && (
+              <p className="text-xs font-extrabold text-primary">{Number(ad.priceEgp).toLocaleString("ar-EG")} ج.م</p>
             )}
             <div className="flex items-center gap-2 mt-1.5">
               <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
-                <Eye className="w-2.5 h-2.5" /> {(ad.views_count || 0).toLocaleString()}
+                <Eye className="w-2.5 h-2.5" /> {(ad.viewsCount || 0).toLocaleString()}
               </span>
               <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
-                <Heart className="w-2.5 h-2.5" /> {(ad.likes_count || 0).toLocaleString()}
+                <Heart className="w-2.5 h-2.5" /> {(ad.likesCount || 0).toLocaleString()}
               </span>
             </div>
           </div>

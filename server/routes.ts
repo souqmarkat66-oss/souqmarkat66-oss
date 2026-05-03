@@ -1584,39 +1584,46 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
       // Check boost price
       const boostPriceRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_price_egp' LIMIT 1`);
-      const boostPrice = parseFloat((boostPriceRow.rows[0] as any)?.value || "0");
+      const boostPrice = parseFloat((boostPriceRow.rows[0] as any)?.value || "250");
 
       const { payment_ref } = req.body || {};
-      const isPaid = !!payment_ref; // client sends payment_ref when user has paid
+      const isPaid = !!payment_ref;
 
-      // Rate limit: check last boost time — max once per 30 days for FREE boosts
-      const lastBoost = await db.execute(
+      // Check if this ad was EVER boosted before (all time)
+      const everBoosted = await db.execute(
         sql`SELECT created_at FROM notifications
             WHERE link = ${`/ads/${adId}`} AND title LIKE '%🚀%'
             ORDER BY created_at DESC LIMIT 1`
       );
 
-      if (lastBoost.rows.length > 0) {
-        const last = new Date((lastBoost.rows[0] as any).created_at);
+      const hasEverBoosted = everBoosted.rows.length > 0;
+
+      if (hasEverBoosted) {
+        const last = new Date((everBoosted.rows[0] as any).created_at);
         const daysAgo = (Date.now() - last.getTime()) / 86_400_000;
-        if (daysAgo < 30) {
+        // 7-day cooldown after first free boost
+        if (daysAgo < 7) {
           if (isPaid) {
-            // Paid extra boost — allow immediately, skip the 30-day limit
-          } else if (boostPrice > 0) {
-            // Free limit used up → offer paid option
-            const daysLeft = Math.ceil(30 - daysAgo);
+            // Paid boost — allow immediately
+          } else {
+            const daysLeft = Math.ceil(7 - daysAgo);
             return res.status(402).json({
               requiresPayment: true,
               price: boostPrice,
               message: `استخدمت تعزيزك المجاني. يمكنك التعزيز الآن مقابل ${boostPrice} ج.م أو الانتظار ${daysLeft} يوم`,
             });
-          } else {
-            // Price = 0, strictly once per 30 days
-            const daysLeft = Math.ceil(30 - daysAgo);
-            return res.status(429).json({ message: `يمكنك تعزيز هذا الإعلان مرة واحدة كل 30 يوم. الأيام المتبقية: ${daysLeft} يوم` });
           }
         }
+        // After 7 days, always require payment
+        if (!isPaid && boostPrice > 0) {
+          return res.status(402).json({
+            requiresPayment: true,
+            price: boostPrice,
+            message: `التعزيز الأول كان مجانياً. التعزيز الآن مقابل ${boostPrice} ج.م فقط`,
+          });
+        }
       }
+      // First ever boost → FREE (no payment needed)
 
       const publisherName = req.user.claims?.first_name || "معلن";
       const adLink = `/ads/${adId}`;
@@ -4115,7 +4122,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
         if (allowedKeys.has(r.key)) settings[r.key] = r.value;
       }
       const defaults: Record<string, string> = {
-        boost_price_egp: '50', boost_enabled: 'true',
+        boost_price_egp: '250', boost_enabled: 'true',
         renewal_price_30: '30', renewal_price_60: '55', renewal_price_90: '75',
         campaign_min_budget_egp: '100', wallet_min_withdrawal_egp: '100',
         ai_price_image: '10', ai_price_video: '25', ai_price_animation: '20',

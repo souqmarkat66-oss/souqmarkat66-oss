@@ -254,7 +254,7 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: index * 0.05 }}
     >
-      <Card className={`group overflow-hidden transition-all duration-300 hover:shadow-2xl bg-card h-full flex flex-col rounded-3xl ${(ad as any).is_boosted ? 'border-2 border-yellow-400 shadow-yellow-400/20 shadow-lg hover:border-yellow-300 hover:shadow-yellow-400/40' : (ad as any).is_admin_promo ? 'border-2 border-emerald-400 shadow-emerald-400/10 shadow-md hover:border-emerald-300' : 'border-border/50 hover:border-primary/50 hover:shadow-primary/10'}`}>
+      <Card className={`group overflow-hidden transition-all duration-300 hover:shadow-2xl bg-card h-full flex flex-col rounded-3xl ${ad.isBoosted ? 'border-2 border-yellow-400 shadow-yellow-400/20 shadow-lg hover:border-yellow-300 hover:shadow-yellow-400/40' : ad.isAdminPromo ? 'border-2 border-emerald-400 shadow-emerald-400/10 shadow-md hover:border-emerald-300' : 'border-border/50 hover:border-primary/50 hover:shadow-primary/10'}`}>
 
         {/* Media Area */}
         <div className="relative aspect-[4/3] bg-muted overflow-hidden">
@@ -341,12 +341,12 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
 
           {/* Language badge + Boost badge */}
           <div className="absolute top-3 end-3 flex flex-col gap-1.5 items-end">
-            {(ad as any).is_boosted && (
+            {ad.isBoosted && (
               <Badge className="bg-yellow-400 text-yellow-900 shadow-lg px-2.5 py-0.5 rounded-full border-none font-bold text-xs animate-pulse">
                 🚀 مميز
               </Badge>
             )}
-            {(ad as any).is_admin_promo && !(ad as any).is_boosted && (
+            {ad.isAdminPromo && !ad.isBoosted && (
               <Badge className="bg-emerald-500 text-white shadow-lg px-2.5 py-0.5 rounded-full border-none font-bold text-xs">
                 📢 إعلان ترويجي
               </Badge>
