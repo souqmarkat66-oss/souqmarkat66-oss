@@ -101,7 +101,7 @@ export default function LiveStream() {
   const [payMethod,       setPayMethod]       = useState<"vodafone"|"instapay"|"bank">("vodafone");
   const [payRef,          setPayRef]          = useState("");
   const [payLoading,      setPayLoading]      = useState(false);
-  interface FlyingGift { id: number; emoji: string; x: number; }
+  interface FlyingGift { id: number; emoji: string; x: number; glow?: string; big?: boolean; }
   const [flyingGifts,     setFlyingGifts]     = useState<FlyingGift[]>([]);
   const [myCoins,         setMyCoins]         = useState(0); // loaded from DB
 
@@ -167,6 +167,9 @@ export default function LiveStream() {
   const canvasStreamRef  = useRef<MediaStream | null>(null);
   const bgImageElem      = useRef<HTMLImageElement | null>(null);
   const bgInputRef       = useRef<HTMLInputElement>(null);
+  // Rapid-fire gift (نظام التكبيث)
+  const rapidFireTimer   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rapidFireCount   = useRef(0);
 
   /* ── stream data ── */
   const { data: stream } = useQuery<any>({
@@ -546,10 +549,11 @@ export default function LiveStream() {
     }
 
     // ── Gift events (both broadcaster and viewer) ──
-    socket.on("stream-gift", (data: { id: number; giftEmoji: string; giftName: string; giftCoins: number; userName: string; battleTeam?: "A"|"B" }) => {
+    socket.on("stream-gift", (data: { id: number; giftEmoji: string; giftName: string; giftCoins: number; userName: string; battleTeam?: "A"|"B"; glow?: string }) => {
       const x = 10 + Math.random() * 60;
       const flyId = Date.now() + Math.random();
-      setFlyingGifts(prev => [...prev, { id: flyId, emoji: data.giftEmoji, x }]);
+      const big = data.giftCoins >= 100;
+      setFlyingGifts(prev => [...prev, { id: flyId, emoji: data.giftEmoji, x, glow: data.glow, big }]);
       setTimeout(() => setFlyingGifts(prev => prev.filter(g => g.id !== flyId)), 3000);
       if (isBroadcast) {
         toast({ title: `🎁 هدية من ${data.userName}!`, description: `${data.giftEmoji} ${data.giftName} — ${data.giftCoins} عملة` });
@@ -1019,14 +1023,25 @@ export default function LiveStream() {
 
   /* ─── Gift helpers ────────────────────────────────────── */
   const GIFTS = [
-    { type: "rose",    emoji: "🌹", name: "وردة",      coins: 5   },
-    { type: "heart",   emoji: "❤️", name: "قلب",       coins: 10  },
-    { type: "star",    emoji: "⭐", name: "نجمة",      coins: 20  },
-    { type: "crown",   emoji: "👑", name: "تاج",       coins: 50  },
-    { type: "fire",    emoji: "🔥", name: "نار",       coins: 30  },
-    { type: "diamond", emoji: "💎", name: "ألماسة",    coins: 100 },
-    { type: "clap",    emoji: "👏", name: "تصفيق",     coins: 5   },
-    { type: "rocket",  emoji: "🚀", name: "صاروخ",     coins: 75  },
+    // ── رخيصة ──
+    { type: "clap",    emoji: "👏", name: "تصفيق",     coins: 5,   glow: "#ffffff" },
+    { type: "rose",    emoji: "🌹", name: "وردة",       coins: 5,   glow: "#ff6b9d" },
+    { type: "heart",   emoji: "❤️", name: "قلب",        coins: 10,  glow: "#ef4444" },
+    { type: "kiss",    emoji: "💋", name: "قبلة",       coins: 15,  glow: "#ec4899" },
+    { type: "star",    emoji: "⭐", name: "نجمة",       coins: 20,  glow: "#facc15" },
+    { type: "icecream",emoji: "🍦", name: "آيس كريم",   coins: 20,  glow: "#fbcfe8" },
+    // ── متوسطة ──
+    { type: "fire",    emoji: "🔥", name: "نار",        coins: 30,  glow: "#f97316" },
+    { type: "bomb",    emoji: "💣", name: "قنبلة",      coins: 40,  glow: "#6b7280" },
+    { type: "crown",   emoji: "👑", name: "تاج",        coins: 50,  glow: "#eab308" },
+    { type: "money",   emoji: "💰", name: "كنز",        coins: 60,  glow: "#22c55e" },
+    { type: "rocket",  emoji: "🚀", name: "صاروخ",      coins: 75,  glow: "#3b82f6" },
+    // ── غالية ──
+    { type: "diamond", emoji: "💎", name: "ألماسة",     coins: 100, glow: "#06b6d4" },
+    { type: "lion",    emoji: "🦁", name: "أسد",        coins: 150, glow: "#d97706" },
+    { type: "car",     emoji: "🏎️", name: "سيارة",      coins: 200, glow: "#dc2626" },
+    { type: "castle",  emoji: "🏰", name: "قصر",        coins: 300, glow: "#8b5cf6" },
+    { type: "ufo",     emoji: "🛸", name: "مركبة فضاء", coins: 500, glow: "#10b981" },
   ];
 
   const sendGift = (gift: typeof GIFTS[0]) => {
@@ -1041,6 +1056,7 @@ export default function LiveStream() {
       giftName: gift.name, giftCoins: gift.coins, userName, userId: (user as any).id,
       broadcasterUserId: stream?.userId,
       battleTeam: battleActive ? giftTeamChoice : undefined,
+      glow: gift.glow,
     });
     setMyCoins(prev => prev - gift.coins);
     // Sync wallet from server after a short delay
@@ -1898,10 +1914,20 @@ export default function LiveStream() {
         {flyingGifts.map(g => (
           <div
             key={g.id}
-            className="absolute bottom-40 z-30 pointer-events-none"
+            className="absolute bottom-40 z-30 pointer-events-none flex flex-col items-center"
             style={{ left: `${g.x}%`, animation: "giftFly 3s ease-out forwards" }}
           >
-            <span className="text-5xl drop-shadow-2xl">{g.emoji}</span>
+            {g.glow && g.big && (
+              <div className="absolute inset-0 rounded-full animate-ping opacity-40"
+                style={{ background: `radial-gradient(circle, ${g.glow} 0%, transparent 70%)`, width: "80px", height: "80px", top: "-10px", left: "-10px" }} />
+            )}
+            <span
+              className="drop-shadow-2xl"
+              style={{
+                fontSize: g.big ? "4rem" : "3rem",
+                filter: g.glow ? `drop-shadow(0 0 12px ${g.glow}) drop-shadow(0 0 20px ${g.glow})` : "drop-shadow(0 4px 8px rgba(0,0,0,0.5))",
+              }}
+            >{g.emoji}</span>
           </div>
         ))}
 
@@ -2122,17 +2148,19 @@ export default function LiveStream() {
             >
               <Tv2 className="w-5 h-5 text-white" />
             </button>
-            {/* Battle button — only if there are guests */}
-            {activeCoHosts.length > 0 && (
-              <button
-                onClick={() => setShowBattleSetup(true)}
-                data-testid="btn-start-battle"
-                className="h-12 px-4 rounded-full bg-gradient-to-r from-orange-500 to-pink-600 flex items-center gap-1.5 text-white font-bold text-xs shadow-xl border border-orange-400/30"
-              >
-                <Swords className="w-4 h-4" />
-                معركة
-              </button>
-            )}
+            {/* Battle button — always visible, disabled hint if no guests */}
+            <button
+              onClick={() => setShowBattleSetup(true)}
+              data-testid="btn-start-battle"
+              className={`h-12 px-3 rounded-full flex items-center gap-1.5 text-white font-bold text-xs shadow-xl border transition-all ${
+                activeCoHosts.length > 0
+                  ? "bg-gradient-to-r from-orange-500 to-pink-600 border-orange-400/30"
+                  : "bg-black/60 border-white/20 opacity-70"
+              }`}
+            >
+              <Swords className="w-4 h-4" />
+              تحدي
+            </button>
             <button
               onClick={endStream}
               data-testid="btn-end-stream"
@@ -2593,13 +2621,18 @@ export default function LiveStream() {
 
       {/* GIFT PANEL */}
       {showGiftPanel && !isBroadcast && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowGiftPanel(false)}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => { setShowGiftPanel(false); if(rapidFireTimer.current){clearInterval(rapidFireTimer.current);rapidFireTimer.current=null;} }}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-safe" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-2">
               <div>
                 <h3 className="text-white font-bold text-lg">أرسل هدية 🎁</h3>
-                <p className="text-white/50 text-xs">رصيدك: <span className="text-yellow-400 font-bold">{myCoins} عملة</span></p>
+                <div className="flex items-center gap-2">
+                  <p className="text-white/50 text-xs">رصيدك: <span className="text-yellow-400 font-bold">{myCoins} عملة</span></p>
+                  <span className="text-[10px] bg-orange-500/20 text-orange-300 rounded-full px-2 py-0.5 border border-orange-500/30">
+                    📌 اضغط باستمرار للتكبيث السريع!
+                  </span>
+                </div>
               </div>
               <button onClick={() => setShowGiftPanel(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
                 <X className="w-4 h-4 text-white" />
@@ -2608,33 +2641,73 @@ export default function LiveStream() {
             {/* Battle team selector (shown during battle) */}
             {battleActive && (
               <div className="flex gap-2 mb-3">
-                <button
-                  onClick={() => setGiftTeamChoice("A")}
-                  className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${giftTeamChoice === "A" ? "bg-red-500 text-white" : "bg-white/10 text-white/60"}`}
-                  data-testid="btn-gift-team-a"
-                >
-                  🔴 هدية للفريق أ
-                </button>
-                <button
-                  onClick={() => setGiftTeamChoice("B")}
-                  className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${giftTeamChoice === "B" ? "bg-blue-500 text-white" : "bg-white/10 text-white/60"}`}
-                  data-testid="btn-gift-team-b"
-                >
-                  🔵 هدية للفريق ب
-                </button>
+                <button onClick={() => setGiftTeamChoice("A")} className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${giftTeamChoice === "A" ? "bg-red-500 text-white" : "bg-white/10 text-white/60"}`} data-testid="btn-gift-team-a">🔴 هدية للفريق أ</button>
+                <button onClick={() => setGiftTeamChoice("B")} className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${giftTeamChoice === "B" ? "bg-blue-500 text-white" : "bg-white/10 text-white/60"}`} data-testid="btn-gift-team-b">🔵 هدية للفريق ب</button>
               </div>
             )}
-            <div className="grid grid-cols-4 gap-3">
-              {GIFTS.map(gift => (
+
+            {/* ── Cheap gifts ── */}
+            <p className="text-white/40 text-[10px] font-bold mb-1.5 mt-1">هدايا اعتيادية</p>
+            <div className="grid grid-cols-4 gap-2 mb-3">
+              {GIFTS.filter(g => g.coins <= 30).map(gift => (
                 <button
                   key={gift.type}
-                  onClick={() => { sendGift(gift); }}
-                  className={`flex flex-col items-center gap-1 bg-white/10 hover:bg-white/20 active:scale-95 transition-all rounded-2xl p-3 border ${myCoins >= gift.coins ? "border-white/10" : "border-red-500/30 opacity-50"}`}
+                  onPointerDown={() => {
+                    sendGift(gift);
+                    rapidFireCount.current = 1;
+                    rapidFireTimer.current = setInterval(() => {
+                      rapidFireCount.current += 1;
+                      sendGift(gift);
+                    }, 350);
+                  }}
+                  onPointerUp={() => { if(rapidFireTimer.current){clearInterval(rapidFireTimer.current);rapidFireTimer.current=null;} }}
+                  onPointerLeave={() => { if(rapidFireTimer.current){clearInterval(rapidFireTimer.current);rapidFireTimer.current=null;} }}
+                  className={`flex flex-col items-center gap-1 active:scale-95 transition-all rounded-2xl p-2.5 border ${myCoins >= gift.coins ? "bg-white/10 border-white/10" : "bg-red-500/5 border-red-500/20 opacity-40"}`}
+                  data-testid={`btn-gift-${gift.type}`}
+                  style={{ boxShadow: myCoins >= gift.coins ? `0 0 0 0 ${gift.glow}` : "none" }}
+                >
+                  <span className="text-2xl" style={{ filter: `drop-shadow(0 0 4px ${gift.glow})` }}>{gift.emoji}</span>
+                  <span className="text-white text-[10px] font-bold">{gift.name}</span>
+                  <span className="text-yellow-400 text-[9px]">{gift.coins}🪙</span>
+                </button>
+              ))}
+            </div>
+
+            {/* ── Medium gifts ── */}
+            <p className="text-white/40 text-[10px] font-bold mb-1.5">هدايا مميزة ⭐</p>
+            <div className="grid grid-cols-4 gap-2 mb-3">
+              {GIFTS.filter(g => g.coins > 30 && g.coins <= 100).map(gift => (
+                <button
+                  key={gift.type}
+                  onPointerDown={() => {
+                    sendGift(gift);
+                    rapidFireTimer.current = setInterval(() => sendGift(gift), 600);
+                  }}
+                  onPointerUp={() => { if(rapidFireTimer.current){clearInterval(rapidFireTimer.current);rapidFireTimer.current=null;} }}
+                  onPointerLeave={() => { if(rapidFireTimer.current){clearInterval(rapidFireTimer.current);rapidFireTimer.current=null;} }}
+                  className={`flex flex-col items-center gap-1 active:scale-95 transition-all rounded-2xl p-2.5 border ${myCoins >= gift.coins ? "bg-gradient-to-b from-white/15 to-white/5 border-white/20" : "bg-red-500/5 border-red-500/20 opacity-40"}`}
                   data-testid={`btn-gift-${gift.type}`}
                 >
-                  <span className="text-3xl">{gift.emoji}</span>
+                  <span className="text-2xl" style={{ filter: `drop-shadow(0 0 6px ${gift.glow})` }}>{gift.emoji}</span>
                   <span className="text-white text-[10px] font-bold">{gift.name}</span>
-                  <span className="text-yellow-400 text-[10px] font-bold">{gift.coins} 🪙</span>
+                  <span className="text-yellow-400 text-[9px]">{gift.coins}🪙</span>
+                </button>
+              ))}
+            </div>
+
+            {/* ── Premium gifts ── */}
+            <p className="text-white/40 text-[10px] font-bold mb-1.5">هدايا فاخرة 💎</p>
+            <div className="grid grid-cols-4 gap-2">
+              {GIFTS.filter(g => g.coins > 100).map(gift => (
+                <button
+                  key={gift.type}
+                  onClick={() => sendGift(gift)}
+                  className={`flex flex-col items-center gap-1 active:scale-95 transition-all rounded-2xl p-2.5 border-2 ${myCoins >= gift.coins ? "bg-gradient-to-b from-yellow-500/20 to-yellow-600/5 border-yellow-500/30" : "bg-red-500/5 border-red-500/20 opacity-40"}`}
+                  data-testid={`btn-gift-${gift.type}`}
+                >
+                  <span className="text-2xl" style={{ filter: `drop-shadow(0 0 8px ${gift.glow}) drop-shadow(0 0 16px ${gift.glow})` }}>{gift.emoji}</span>
+                  <span className="text-white text-[10px] font-bold">{gift.name}</span>
+                  <span className="text-yellow-400 font-extrabold text-[9px]">{gift.coins}🪙</span>
                 </button>
               ))}
             </div>
@@ -2656,27 +2729,34 @@ export default function LiveStream() {
                 <X className="w-4 h-4 text-white" />
               </button>
             </div>
+            {activeCoHosts.length === 0 && (
+              <div className="mb-4 bg-orange-500/10 border border-orange-500/30 rounded-2xl p-4 flex items-start gap-3">
+                <span className="text-2xl flex-shrink-0">⚔️</span>
+                <div>
+                  <p className="text-orange-300 font-bold text-sm">لا يوجد ضيوف حالياً</p>
+                  <p className="text-orange-300/70 text-xs mt-0.5">اطلب من شخص ما رفع إيده أو ادعُه كضيف للبث أولاً، ثم ابدأ التحدي</p>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3 mb-4">
               <button
-                onClick={() => startBattle("1v1")}
-                className="flex flex-col items-center gap-2 bg-gradient-to-br from-red-500/20 to-orange-500/20 border border-red-500/40 rounded-2xl p-5 active:scale-95 transition-all"
+                onClick={() => activeCoHosts.length > 0 ? startBattle("1v1") : toast({ title: "ادعُ ضيفاً أولاً!", description: "اطلب من شخص رفع إيده للانضمام", variant: "destructive" })}
+                className={`flex flex-col items-center gap-2 rounded-2xl p-5 active:scale-95 transition-all border ${activeCoHosts.length > 0 ? "bg-gradient-to-br from-red-500/20 to-orange-500/20 border-red-500/40" : "bg-white/5 border-white/10 opacity-60"}`}
                 data-testid="btn-battle-1v1"
-                disabled={activeCoHosts.length < 1}
               >
                 <span className="text-3xl">⚔️</span>
                 <span className="text-white font-extrabold text-base">1 ضد 1</span>
                 <span className="text-white/50 text-xs">أنت ضد ضيف واحد</span>
               </button>
               <button
-                onClick={() => startBattle("2v2")}
-                className="flex flex-col items-center gap-2 bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-blue-500/40 rounded-2xl p-5 active:scale-95 transition-all"
+                onClick={() => activeCoHosts.length >= 2 ? startBattle("2v2") : toast({ title: "تحتاج ضيفين على الأقل!", variant: "destructive" })}
+                className={`flex flex-col items-center gap-2 rounded-2xl p-5 active:scale-95 transition-all border ${activeCoHosts.length >= 2 ? "bg-gradient-to-br from-blue-500/20 to-purple-500/20 border-blue-500/40" : "bg-white/5 border-white/10 opacity-60"}`}
                 data-testid="btn-battle-2v2"
-                disabled={activeCoHosts.length < 2}
               >
                 <span className="text-3xl">🛡️</span>
                 <span className="text-white font-extrabold text-base">2 ضد 2</span>
-                <span className="text-white/50 text-xs">فريقان كل فريق 2 أشخاص</span>
-                {activeCoHosts.length < 2 && <span className="text-red-400 text-[10px]">تحتاج ضيفين على الأقل</span>}
+                <span className="text-white/50 text-xs">فريقان كل فريق 2</span>
+                {activeCoHosts.length < 2 && <span className="text-red-400 text-[10px]">تحتاج ضيفين</span>}
               </button>
             </div>
             <p className="text-center text-white/40 text-xs">⏱️ مدة المعركة: دقيقتان | 🪙 النقاط من الهدايا فقط (لا تُسحب)</p>
