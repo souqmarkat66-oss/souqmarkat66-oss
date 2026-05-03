@@ -160,3 +160,4 @@ Preferred communication style: Arabic/bilingual, everyday language.
 
 ### Authentication
 - Replit OpenID Connect
+- `SESSION_SECRET` — Required secret for express-session. Must be set via Replit Secrets (at least 32 random characters). Without it the server throws "secret option required for sessions" and auth will not work.
