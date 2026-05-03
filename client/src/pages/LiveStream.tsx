@@ -1417,20 +1417,53 @@ export default function LiveStream() {
 
         {/* Camera error */}
         {isBroadcast && cameraError && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-6 gap-5 z-20">
-            <div className="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-5 gap-4 z-20 overflow-y-auto py-8" dir="rtl">
+            <div className="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
               <VideoOff className="w-10 h-10 text-red-400" />
             </div>
-            <p className="text-white font-bold text-base">{cameraError}</p>
-            <p className="text-white/50 text-xs max-w-xs">
-              تأكد من أنك سمحت للمتصفح بالوصول للكاميرا في إعدادات الجهاز، ثم اضغط حاول مجدداً
-            </p>
+            <p className="text-white font-extrabold text-lg">الكاميرا محجوبة ⛔</p>
+            <p className="text-white/60 text-sm max-w-xs">المتصفح يحتاج إذن الكاميرا والميكروفون — اتّبع الخطوات التالية:</p>
+
+            {/* Steps */}
+            <div className="w-full max-w-xs bg-white/5 rounded-2xl p-4 text-right space-y-3">
+              <div className="flex items-start gap-3">
+                <span className="w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center flex-shrink-0 mt-0.5 font-bold">١</span>
+                <div>
+                  <p className="text-white text-sm font-bold">Chrome (أندرويد):</p>
+                  <p className="text-white/50 text-xs mt-0.5">اضغط على 🔒 قفل بجانب الرابط → اضغط "إعدادات الموقع" → حوّل الكاميرا والميكروفون لـ "السماح"</p>
+                </div>
+              </div>
+              <div className="w-full h-px bg-white/10" />
+              <div className="flex items-start gap-3">
+                <span className="w-6 h-6 rounded-full bg-orange-500 text-white text-xs flex items-center justify-center flex-shrink-0 mt-0.5 font-bold">٢</span>
+                <div>
+                  <p className="text-white text-sm font-bold">Safari (آيفون):</p>
+                  <p className="text-white/50 text-xs mt-0.5">اعدادات الجهاز → Safari → الكاميرا → اختر "السماح" — ثم ارجع وجرّب مجدداً</p>
+                </div>
+              </div>
+              <div className="w-full h-px bg-white/10" />
+              <div className="flex items-start gap-3">
+                <span className="w-6 h-6 rounded-full bg-blue-500 text-white text-xs flex items-center justify-center flex-shrink-0 mt-0.5 font-bold">٣</span>
+                <div>
+                  <p className="text-white text-sm font-bold">بعد الإذن:</p>
+                  <p className="text-white/50 text-xs mt-0.5">اضغط الزر أدناه لتشغيل الكاميرا مباشرة</p>
+                </div>
+              </div>
+            </div>
+
             <button
               onClick={retryCamera}
-              className="flex items-center gap-2 px-6 py-3 rounded-full bg-white text-black font-bold text-sm"
+              className="flex items-center gap-2 px-8 py-4 rounded-full bg-white text-black font-bold text-base active:scale-95 transition-transform"
               data-testid="btn-retry-camera"
             >
-              <RotateCcw className="w-4 h-4" /> حاول مجدداً
+              <RotateCcw className="w-5 h-5" /> حاول مجدداً
+            </button>
+            <button
+              onClick={() => setLocation("/livestream")}
+              className="text-white/30 text-xs"
+              data-testid="btn-cancel-camera"
+            >
+              إلغاء والعودة
             </button>
           </div>
         )}

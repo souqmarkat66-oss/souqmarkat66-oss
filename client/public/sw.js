@@ -1,6 +1,5 @@
 // Service Worker — Souq Ads Network
-// Handles: Push Notifications + Notification Clicks only
-// No page caching (Vite SPA handles its own assets)
+// v2 — Force update support + Push Notifications
 
 self.addEventListener('install', event => {
   self.skipWaiting();
@@ -14,9 +13,16 @@ self.addEventListener('activate', event => {
   );
 });
 
+// Allow main.tsx to trigger skipWaiting from the page
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('fetch', event => {
-  // Pass all requests through — do NOT intercept or cache
-  // This prevents the app from hanging on stale cached versions
+  // Pass all requests through — do NOT cache
+  // index.html served with no-cache headers from Express
 });
 
 self.addEventListener('push', event => {
