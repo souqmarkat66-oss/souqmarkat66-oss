@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MessageCircle, X, Send, Loader2, Bot, Sparkles } from "lucide-react";
@@ -595,6 +596,14 @@ function findAnswer(q: string): string | null {
 }
 
 export function GlobalAssistant() {
+  const { data: siteSettings } = useQuery<Record<string, string>>({
+    queryKey: ["/api/settings"],
+    queryFn: () => fetch("/api/settings").then(r => r.json()),
+    staleTime: 60_000,
+  });
+
+  const assistantEnabled = siteSettings ? (siteSettings["feature_assistant"] !== "0") : true;
+
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<{ role: "user" | "bot"; text: string }[]>([
     {
@@ -657,6 +666,8 @@ export function GlobalAssistant() {
       return <span key={i}>{part}</span>;
     });
   };
+
+  if (!assistantEnabled) return null;
 
   return (
     <>

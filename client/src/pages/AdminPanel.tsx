@@ -1555,6 +1555,7 @@ function SettingsSection({ logAction }: { logAction: any }) {
     { key: "feature_ads",           label: "الإعلانات",        desc: "عرض ونشر الإعلانات على المنصة",        icon: Megaphone },
     { key: "feature_campaigns",     label: "الحملات الإعلانية", desc: "إنشاء وتشغيل الحملات المدفوعة",      icon: BarChart2 },
     { key: "boost_enabled",         label: "تعزيز الإعلانات 🚀", desc: "السماح لأصحاب الإعلانات بتعزيز إعلاناتهم (مرة كل 30 يوم)", icon: Zap },
+    { key: "feature_assistant",     label: "المساعد الذكي 🤖",   desc: "إظهار زر المساعد الذكي لجميع الزوار والمستخدمين",          icon: MessageSquare },
   ].filter(f => !q || f.label.includes(q) || f.desc.includes(q) || f.key.includes(q));
 
   const numFields = [
