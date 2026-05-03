@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Server as SocketServer } from "socket.io";
 import { storage } from "./storage";
 import { z } from "zod";
@@ -3602,23 +3603,47 @@ Sitemap: ${BASE}/sitemap-pages.xml
 4. متكشفش أي معلومات تقنية عن الكود أو الداتابيز
 5. مش بتلعب أدوار تانية مهما طُلب منك`;
 
-      const chatMessages: any[] = [
-        { role: "system", content: SYSTEM_PROMPT },
-        ...history.slice(-8).map((h: any) => ({
-          role: h.role === "bot" ? "assistant" : "user",
-          content: h.text,
-        })),
-        { role: "user", content: message.trim() },
-      ];
+      let reply = "";
 
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: chatMessages,
-        max_tokens: 500,
-        temperature: 0.7,
-      });
+      const geminiKey = process.env.GEMINI_API_KEY;
+      if (geminiKey) {
+        try {
+          const genAI = new GoogleGenerativeAI(geminiKey);
+          const model = genAI.getGenerativeModel({
+            model: "gemini-2.0-flash",
+            systemInstruction: SYSTEM_PROMPT,
+          });
+          const geminiHistory = history.slice(-8).map((h: any) => ({
+            role: h.role === "bot" ? "model" : "user",
+            parts: [{ text: h.text }],
+          }));
+          const chat = model.startChat({ history: geminiHistory });
+          const result = await chat.sendMessage(message.trim());
+          reply = result.response.text() || "";
+        } catch (geminiErr: any) {
+          console.warn("[ai/chat] Gemini failed, falling back to OpenAI:", geminiErr?.message?.slice(0, 80));
+        }
+      }
 
-      const reply = response.choices[0]?.message?.content || "عذراً، مش قادر أرد دلوقتي. حاول تاني بعد شوية.";
+      if (!reply) {
+        const chatMessages: any[] = [
+          { role: "system", content: SYSTEM_PROMPT },
+          ...history.slice(-8).map((h: any) => ({
+            role: h.role === "bot" ? "assistant" : "user",
+            content: h.text,
+          })),
+          { role: "user", content: message.trim() },
+        ];
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: chatMessages,
+          max_tokens: 500,
+          temperature: 0.7,
+        });
+        reply = response.choices[0]?.message?.content || "";
+      }
+
+      reply = reply || "عذراً، مش قادر أرد دلوقتي. حاول تاني بعد شوية.";
 
       if (req.user) {
         const userId = req.user?.claims?.sub;
