@@ -118,6 +118,8 @@ export default function CreateAd() {
   const [editingImage, setEditingImage] = useState(false);
   const refImgInputRef = useRef<HTMLInputElement>(null);
   const [ttsVoice, setTtsVoice] = useState<"nova" | "onyx">("nova");
+  const [generatingViral, setGeneratingViral] = useState(false);
+  const [viralResult, setViralResult] = useState<any>(null);
 
   // Auto-advance cinema slideshow
   useEffect(() => {
@@ -333,6 +335,33 @@ export default function CreateAd() {
     } catch (e: any) {
       toast({ variant: "destructive", title: "فشل التحليل", description: e.message });
     } finally { setAnalyzingImage(false); }
+  };
+
+  const handleGenerateViral = async () => {
+    const { productName, targetAudience, language: lang } = form.getValues();
+    if (!productName) { toast({ variant: "destructive", title: "أدخل اسم المنتج أولاً" }); return; }
+    setGeneratingViral(true);
+    try {
+      const res = await fetch("/api/ai/generate-viral-ad", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productName, targetAudience, language: lang }),
+        credentials: "include"
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.message === 'insufficient_credits') {
+          toast({ variant: "destructive", title: "انتهت الرصيد المجاني" }); return;
+        }
+        throw new Error(data.message);
+      }
+      setViralResult(data);
+      if (data.title) form.setValue("title", data.title);
+      if (data.description) form.setValue("description", data.description);
+      toast({ title: "🔥 تم توليد الإعلان الفيروسي!" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "فشل التوليد", description: e.message });
+    } finally { setGeneratingViral(false); }
   };
 
   // Translate generated text
@@ -629,6 +658,10 @@ export default function CreateAd() {
                         {generatingScript ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
                         سكريبت فيديو سينمائي
                       </Button>
+                      <Button type="button" onClick={handleGenerateViral} disabled={generatingViral} size="sm" className="gap-2 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white border-0" data-testid="btn-gen-viral">
+                        {generatingViral ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>🔥</span>}
+                        إعلان فيروسي
+                      </Button>
                       <Button type="button" onClick={handleTranslate} disabled={translating} size="sm" variant="outline" className="gap-2" data-testid="btn-translate">
                         {translating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Languages className="w-4 h-4" />}
                         ترجمة النص
@@ -638,6 +671,40 @@ export default function CreateAd() {
                         تحميل كملف
                       </Button>
                     </div>
+
+                    {/* Viral Ad Result */}
+                    {viralResult && (
+                      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border-2 border-orange-400/40 bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-950/20 dark:to-red-950/20 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="font-bold text-sm flex items-center gap-1">🔥 الإعلان الفيروسي</p>
+                          <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => setViralResult(null)}><X className="w-3 h-3" /></Button>
+                        </div>
+                        {viralResult.hook && (
+                          <div className="bg-white/60 dark:bg-black/20 rounded-lg p-3">
+                            <p className="text-xs text-muted-foreground mb-1">الجملة الافتتاحية الصادمة</p>
+                            <p className="text-sm font-medium">{viralResult.hook}</p>
+                          </div>
+                        )}
+                        {viralResult.hashtags?.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {viralResult.hashtags.map((h: string, i: number) => (
+                              <Badge key={i} variant="secondary" className="text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300">{h.startsWith('#') ? h : `#${h}`}</Badge>
+                            ))}
+                          </div>
+                        )}
+                        {viralResult.callToAction && (
+                          <p className="text-xs text-muted-foreground">📢 {viralResult.callToAction}</p>
+                        )}
+                        {viralResult.tips?.length > 0 && (
+                          <div className="space-y-1">
+                            <p className="text-xs font-bold text-muted-foreground">نصائح الانتشار:</p>
+                            {viralResult.tips.map((tip: string, i: number) => (
+                              <p key={i} className="text-xs text-muted-foreground">💡 {tip}</p>
+                            ))}
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
 
                     {/* AI Image Edit section */}
                     {(aiImageUrl || refImages.length > 0) && (

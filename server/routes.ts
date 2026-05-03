@@ -3276,6 +3276,37 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
+  app.post("/api/ai/generate-viral-ad", isAuthenticated, checkAiCredits, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { productName, targetAudience, language } = req.body;
+      const prompt = language === 'ar'
+        ? `أنت خبير في صناعة الإعلانات الفيروسية على السوشيال ميديا في مصر. اكتب إعلاناً فيروسياً قوياً للمنتج: "${productName}" للجمهور: "${targetAudience || 'عام'}".
+الإعلان الفيروسي يجب أن يحتوي على:
+- عنوان صادم يجعل الناس يتوقفون عن التمرير
+- جملة افتتاحية مثيرة للفضول أو العاطفة
+- وصف عاطفي يلمس المشاعر ويحفز المشاركة
+- هاشتاقات مناسبة للسوشيال ميديا المصرية
+- دعوة قوية للعمل
+- emoji مناسبة
+أعد JSON مع المفاتيح: "title", "description", "hook", "hashtags" (مصفوفة نصوص), "callToAction", "tips" (مصفوفة نصائح لزيادة الانتشار).`
+        : `You are a viral marketing expert for social media. Create a viral ad for: "${productName}", target: "${targetAudience || 'general'}". Return JSON with: "title", "description", "hook", "hashtags" (string array), "callToAction", "tips" (string array of virality tips).`;
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+      });
+      const content = JSON.parse(response.choices[0]?.message?.content || "{}");
+      await storage.recordAiUsage(userId, 'viral_ad');
+      if (req.aiChargeEGP) {
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد إعلان فيروسي', channelId: null, campaignId: null });
+      }
+      res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to generate viral ad: " + error.message });
+    }
+  });
+
   app.post("/api/ai/generate-article", isAuthenticated, checkAiCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;

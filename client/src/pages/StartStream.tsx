@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Radio, Video, AlertCircle, Plus } from "lucide-react";
+import { Radio, Video, AlertCircle, Plus, Camera, Mic } from "lucide-react";
 import type { Channel } from "@shared/schema";
 
 const schema = z.object({
@@ -27,6 +27,18 @@ export default function StartStream() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
+  const [permStatus, setPermStatus] = useState<"idle"|"requesting"|"granted"|"denied">("idle");
+
+  const requestCameraPermission = async () => {
+    setPermStatus("requesting");
+    try {
+      const ms = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      ms.getTracks().forEach(t => t.stop());
+      setPermStatus("granted");
+    } catch {
+      setPermStatus("denied");
+    }
+  };
 
   const { data: myChannel } = useQuery<Channel | null>({
     queryKey: ["/api/channels/mine"],
@@ -83,6 +95,53 @@ export default function StartStream() {
         <Button onClick={() => createChannelMutation.mutate(user?.firstName + " Channel" || "قناتي")} disabled={createChannelMutation.isPending} className="gap-2">
           <Plus className="w-4 h-4" />
           إنشاء قناة تلقائياً
+        </Button>
+      </div>
+    );
+  }
+
+  if (permStatus !== "granted") {
+    return (
+      <div className="container max-w-lg px-4 py-16 text-center">
+        <div className="w-20 h-20 rounded-3xl bg-red-500 flex items-center justify-center mx-auto mb-6">
+          <Radio className="w-10 h-10 text-white" />
+        </div>
+        <h2 className="text-2xl font-bold mb-2">البث المباشر</h2>
+        <p className="text-muted-foreground mb-8">للبدء في البث المباشر، نحتاج إذنك للوصول إلى الكاميرا والميكروفون</p>
+        <Card className="rounded-3xl border-border/50 mb-6 text-right">
+          <CardContent className="p-5 space-y-3">
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/50">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <Camera className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-semibold text-sm">الكاميرا</p>
+                <p className="text-xs text-muted-foreground">لنقل صورتك للمشاهدين</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/50">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <Mic className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-semibold text-sm">الميكروفون</p>
+                <p className="text-xs text-muted-foreground">لنقل صوتك للمشاهدين</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        {permStatus === "denied" && (
+          <p className="text-sm text-destructive mb-4">تم رفض الإذن — يرجى السماح للمتصفح بالوصول من إعدادات الموقع ثم أعد المحاولة</p>
+        )}
+        <Button
+          onClick={requestCameraPermission}
+          disabled={permStatus === "requesting"}
+          size="lg"
+          className="w-full bg-red-500 hover:bg-red-600 text-white gap-2"
+          data-testid="btn-allow-camera"
+        >
+          <Camera className="w-5 h-5" />
+          {permStatus === "requesting" ? "جاري طلب الإذن..." : "السماح بالكاميرا والميكروفون"}
         </Button>
       </div>
     );
