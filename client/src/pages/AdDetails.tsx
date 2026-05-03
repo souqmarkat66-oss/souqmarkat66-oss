@@ -840,28 +840,6 @@ export default function AdDetails() {
                     label="مشاركة"
                     data-testid="btn-share-ad"
                   />
-                  {/* 🚀 Boost — Ad Owner Only */}
-                  {user?.id === ad.userId && boostSettings?.enabled !== false && (
-                    <button
-                      onClick={() => handleBoost()}
-                      disabled={boosting || boosted}
-                      className={`flex items-center gap-1.5 h-7 px-3 rounded-full text-xs font-bold border transition-all ${
-                        boosted
-                          ? "bg-green-500 text-white border-green-500"
-                          : "bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 border-orange-300 dark:border-orange-700"
-                      } disabled:opacity-60`}
-                      data-testid="btn-boost-ad-details"
-                    >
-                      {boosting
-                        ? <><Loader2 className="w-3 h-3 animate-spin" /> جارٍ...</>
-                        : boosted
-                        ? <>✓ تم التعزيز</>
-                        : boostSettings && boostSettings.price > 0
-                        ? <><Zap className="w-3 h-3" /> عزّز 🚀 ({boostSettings.price} ج.م)</>
-                        : <><Zap className="w-3 h-3" /> عزّز مجاناً 🚀</>
-                      }
-                    </button>
-                  )}
                   {/* QR Code */}
                   <Button variant="outline" size="sm" className="gap-1.5 h-7 rounded-full text-xs" onClick={() => setQrOpen(true)}>
                     <QrCode className="w-3 h-3" /> QR
@@ -876,6 +854,37 @@ export default function AdDetails() {
               <div className="mt-6">
                 <LikeCommentBar targetType="ad" targetId={ad.id} initialLikes={ad.likesCount || 0} ownerId={ad.userId} />
               </div>
+
+              {/* ── 🚀 BOOST BUTTON — Ad Owner Only — below media ── */}
+              {user?.id === ad.userId && boostSettings?.enabled !== false && (
+                <div className="mt-5">
+                  <button
+                    onClick={() => handleBoost()}
+                    disabled={boosting || boosted}
+                    className={`w-full flex items-center justify-center gap-3 py-4 rounded-2xl font-extrabold text-base transition-all shadow-lg ${
+                      boosted
+                        ? "bg-green-500 text-white shadow-green-500/20 cursor-default"
+                        : "bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 active:scale-[0.98] text-white shadow-orange-500/30"
+                    } disabled:opacity-70`}
+                    data-testid="btn-boost-ad-details"
+                  >
+                    {boosting ? (
+                      <><Loader2 className="w-5 h-5 animate-spin" /> جارٍ التعزيز...</>
+                    ) : boosted ? (
+                      <>✅ تم التعزيز — إعلانك في المقدمة!</>
+                    ) : boostSettings && boostSettings.price > 0 ? (
+                      <><Zap className="w-5 h-5" /> عزّز إعلانك الآن 🚀 ({boostSettings.price} ج.م)</>
+                    ) : (
+                      <><Zap className="w-5 h-5" /> عزّز إعلانك مجاناً 🚀</>
+                    )}
+                  </button>
+                  {!boosted && (
+                    <p className="text-xs text-center text-muted-foreground mt-1.5">
+                      📣 يظهر إعلانك أول نتائج البحث لمدة 7 أيام
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* ── RATINGS SECTION ── */}
               <div className="mt-8 border-t border-border/40 pt-6">

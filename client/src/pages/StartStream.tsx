@@ -88,14 +88,52 @@ export default function StartStream() {
 
   if (!myChannel) {
     return (
-      <div className="container max-w-lg px-4 py-16 text-center">
-        <AlertCircle className="w-16 h-16 mx-auto mb-4 text-yellow-500" />
-        <h2 className="text-2xl font-bold mb-2">تحتاج إلى قناة أولاً</h2>
-        <p className="text-muted-foreground mb-6">أنشئ قناتك لتتمكن من بدء البث المباشر</p>
-        <Button onClick={() => createChannelMutation.mutate(user?.firstName + " Channel" || "قناتي")} disabled={createChannelMutation.isPending} className="gap-2">
-          <Plus className="w-4 h-4" />
-          إنشاء قناة تلقائياً
+      <div className="container max-w-lg px-4 py-12 text-center" dir="rtl">
+        {/* Hero */}
+        <div className="relative mb-8">
+          <div className="w-28 h-28 rounded-3xl bg-gradient-to-br from-red-500 to-pink-600 flex items-center justify-center mx-auto mb-5 shadow-2xl shadow-red-500/30">
+            <Radio className="w-14 h-14 text-white" />
+          </div>
+          <div className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-yellow-400 flex items-center justify-center text-base shadow-lg">
+            📺
+          </div>
+        </div>
+
+        <h2 className="text-3xl font-extrabold mb-2">ابدأ قناتك الآن!</h2>
+        <p className="text-muted-foreground mb-8 text-base">
+          أنشئ قناتك مجاناً وابدأ البث المباشر مع آلاف المشاهدين
+        </p>
+
+        {/* Benefits */}
+        <div className="grid grid-cols-3 gap-3 mb-8 text-center">
+          <div className="bg-red-50 dark:bg-red-950/20 rounded-2xl p-3 border border-red-100 dark:border-red-800/30">
+            <div className="text-2xl mb-1">🎥</div>
+            <p className="text-xs font-bold text-red-700 dark:text-red-400">بث مباشر</p>
+          </div>
+          <div className="bg-purple-50 dark:bg-purple-950/20 rounded-2xl p-3 border border-purple-100 dark:border-purple-800/30">
+            <div className="text-2xl mb-1">👥</div>
+            <p className="text-xs font-bold text-purple-700 dark:text-purple-400">مشاهدين</p>
+          </div>
+          <div className="bg-green-50 dark:bg-green-950/20 rounded-2xl p-3 border border-green-100 dark:border-green-800/30">
+            <div className="text-2xl mb-1">🎁</div>
+            <p className="text-xs font-bold text-green-700 dark:text-green-400">هدايا</p>
+          </div>
+        </div>
+
+        <Button
+          onClick={() => createChannelMutation.mutate((user?.firstName || "قناتي") + " Channel")}
+          disabled={createChannelMutation.isPending}
+          size="lg"
+          className="w-full gap-2 bg-gradient-to-r from-red-500 to-pink-600 hover:from-red-600 hover:to-pink-700 text-white font-extrabold text-base py-6 rounded-2xl shadow-xl shadow-red-500/25"
+          data-testid="btn-create-channel"
+        >
+          {createChannelMutation.isPending ? (
+            <><span className="animate-spin">⏳</span> جارٍ الإنشاء...</>
+          ) : (
+            <><Plus className="w-5 h-5" /> إنشاء قناتي الآن — مجاناً</>
+          )}
         </Button>
+        <p className="text-xs text-muted-foreground mt-3">✨ لا تحتاج بطاقة بنكية — مجاني تماماً</p>
       </div>
     );
   }
