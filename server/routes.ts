@@ -3510,6 +3510,65 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
+  // ─── D-ID TALKING AVATAR ─────────────────────────────────────────
+  app.post("/api/ai/talking-avatar", isAuthenticated, async (req: any, res) => {
+    try {
+      const { imageUrl, text, voice = "female" } = req.body;
+      if (!imageUrl) return res.status(400).json({ message: "imageUrl مطلوب" });
+      if (!text || text.trim().length < 2) return res.status(400).json({ message: "النص مطلوب" });
+
+      const DID_KEY = process.env.DID_API_KEY;
+      if (!DID_KEY) return res.status(500).json({ message: "DID_API_KEY غير مضبوط" });
+
+      const voiceId = voice === "female" ? "ar-EG-SalmaNeural" : "ar-EG-ShakirNeural";
+      const authHeader = "Basic " + Buffer.from(`${DID_KEY}:`).toString("base64");
+
+      const createRes = await fetch("https://api.d-id.com/talks", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": authHeader,
+        },
+        body: JSON.stringify({
+          source_url: imageUrl.startsWith("http") ? imageUrl : `https://ads-as.com${imageUrl}`,
+          script: {
+            type: "text",
+            input: text.trim(),
+            provider: { type: "microsoft", voice_id: voiceId },
+          },
+          config: { fluent: true, pad_audio: 0.5 },
+        }),
+      });
+
+      const createData = await createRes.json();
+      if (!createRes.ok) {
+        console.error("D-ID create error:", createData);
+        return res.status(500).json({ message: createData.description || createData.message || "فشل إنشاء الفيديو" });
+      }
+
+      res.json({ id: createData.id });
+    } catch (error: any) {
+      console.error("D-ID error:", error);
+      res.status(500).json({ message: "خطأ في D-ID: " + error.message });
+    }
+  });
+
+  app.get("/api/ai/talking-avatar/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const DID_KEY = process.env.DID_API_KEY;
+      if (!DID_KEY) return res.status(500).json({ message: "DID_API_KEY غير مضبوط" });
+
+      const authHeader = "Basic " + Buffer.from(`${DID_KEY}:`).toString("base64");
+      const pollRes = await fetch(`https://api.d-id.com/talks/${req.params.id}`, {
+        headers: { "Authorization": authHeader },
+      });
+      const data = await pollRes.json();
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // ─── AI IMAGES-TO-VIDEO (FFmpeg Cinematic HD) ──────────────────
   app.post("/api/ai/images-to-video", isAuthenticated, async (req: any, res) => {
     const tmpFiles: string[] = [];

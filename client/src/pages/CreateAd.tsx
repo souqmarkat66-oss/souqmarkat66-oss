@@ -120,6 +120,40 @@ export default function CreateAd() {
   const [ttsVoice, setTtsVoice] = useState<"nova" | "onyx">("nova");
   const [generatingViral, setGeneratingViral] = useState(false);
   const [viralResult, setViralResult] = useState<any>(null);
+  // D-ID Talking Avatar
+  const [didAvatarUrl, setDidAvatarUrl] = useState("");
+  const [didUploading, setDidUploading] = useState(false);
+  const [didGenerating, setDidGenerating] = useState(false);
+  const [didPollId, setDidPollId] = useState("");
+  const [didVideoUrl, setDidVideoUrl] = useState("");
+  const [didVoice, setDidVoice] = useState<"female" | "male">("female");
+  const [didStatus, setDidStatus] = useState<"idle" | "creating" | "polling" | "done" | "error">("idle");
+  const [didError, setDidError] = useState("");
+  const didAvatarRef = useRef<HTMLInputElement>(null);
+
+  // D-ID polling
+  const pollDID = async (id: string) => {
+    setDidStatus("polling");
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      try {
+        const r = await fetch(`/api/ai/talking-avatar/${id}`, { credentials: "include" });
+        const d = await r.json();
+        if (d.status === "done") {
+          setDidVideoUrl(d.result_url);
+          setDidStatus("done");
+          return;
+        }
+        if (d.status === "error" || d.status === "rejected") {
+          setDidError(d.error?.description || "فشل توليد الفيديو");
+          setDidStatus("error");
+          return;
+        }
+      } catch { /* continue polling */ }
+    }
+    setDidError("انتهت مهلة الانتظار — حاول مرة ثانية");
+    setDidStatus("error");
+  };
 
   // Auto-advance cinema slideshow
   useEffect(() => {
@@ -943,6 +977,174 @@ export default function CreateAd() {
                         </div>
                       </motion.div>
                     )}
+                    {/* ── 🎭 D-ID TALKING AVATAR SECTION ── */}
+                    <div className="mt-4 rounded-2xl border border-violet-300 dark:border-violet-700 bg-gradient-to-br from-violet-50 to-purple-50 dark:from-violet-950/30 dark:to-purple-950/20 p-4 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-9 h-9 rounded-xl bg-violet-600 flex items-center justify-center flex-shrink-0">
+                          <span className="text-lg">🎭</span>
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-violet-800 dark:text-violet-200">مقدّم إعلان متكلم بالذكاء الاصطناعي</p>
+                          <p className="text-[10px] text-violet-600 dark:text-violet-400">ارفع صورة شخص — سيتكلم بنص إعلانك تلقائياً</p>
+                        </div>
+                      </div>
+
+                      {/* Avatar image upload */}
+                      <input
+                        ref={didAvatarRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          e.target.value = "";
+                          setDidUploading(true);
+                          try {
+                            const fd = new FormData();
+                            fd.append("file", file);
+                            const r = await fetch("/api/upload", { method: "POST", body: fd, credentials: "include" });
+                            const d = await r.json();
+                            if (d.url) { setDidAvatarUrl(d.url); setDidVideoUrl(""); setDidStatus("idle"); }
+                          } finally { setDidUploading(false); }
+                        }}
+                      />
+
+                      {/* Avatar preview or upload zone */}
+                      {didAvatarUrl ? (
+                        <div className="flex items-center gap-3">
+                          <div className="relative">
+                            <img src={didAvatarUrl} alt="avatar" className="w-20 h-20 rounded-2xl object-cover border-2 border-violet-300" />
+                            <button
+                              type="button"
+                              onClick={() => { setDidAvatarUrl(""); setDidVideoUrl(""); setDidStatus("idle"); }}
+                              className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center"
+                            >✕</button>
+                          </div>
+                          <div className="text-xs text-violet-700 dark:text-violet-300">
+                            <p className="font-bold mb-1">✅ الصورة جاهزة</p>
+                            <button
+                              type="button"
+                              onClick={() => didAvatarRef.current?.click()}
+                              className="underline text-violet-500"
+                            >تغيير الصورة</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => didAvatarRef.current?.click()}
+                          disabled={didUploading}
+                          className="w-full flex flex-col items-center justify-center gap-1.5 py-5 rounded-xl border-2 border-dashed border-violet-300 text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-all"
+                          data-testid="btn-upload-did-avatar"
+                        >
+                          {didUploading
+                            ? <Loader2 className="w-5 h-5 animate-spin" />
+                            : <><span className="text-2xl">🧑‍💼</span><span className="text-xs font-bold">ارفع صورة المقدّم</span><span className="text-[10px] opacity-70">رجل أو امرأة — JPG أو PNG</span></>
+                          }
+                        </button>
+                      )}
+
+                      {/* Voice selector */}
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDidVoice("female")}
+                          className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold border transition-all ${
+                            didVoice === "female"
+                              ? "bg-pink-500 text-white border-pink-500 shadow-sm"
+                              : "bg-white dark:bg-gray-800 border-gray-200 text-gray-600"
+                          }`}
+                        >👩 صوت ست مصرية</button>
+                        <button
+                          type="button"
+                          onClick={() => setDidVoice("male")}
+                          className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold border transition-all ${
+                            didVoice === "male"
+                              ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                              : "bg-white dark:bg-gray-800 border-gray-200 text-gray-600"
+                          }`}
+                        >🧔 صوت راجل مصري</button>
+                      </div>
+
+                      {/* Generate button */}
+                      {didAvatarUrl && (
+                        <button
+                          type="button"
+                          disabled={didStatus === "creating" || didStatus === "polling"}
+                          onClick={async () => {
+                            const text = [form.getValues("title"), form.getValues("description")].filter(Boolean).join(". ");
+                            if (!text.trim()) { toast({ variant: "destructive", title: "اكتب عنوان ووصف الإعلان أولاً" }); return; }
+                            setDidStatus("creating");
+                            setDidError("");
+                            setDidVideoUrl("");
+                            try {
+                              const r = await fetch("/api/ai/talking-avatar", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                credentials: "include",
+                                body: JSON.stringify({ imageUrl: didAvatarUrl, text, voice: didVoice }),
+                              });
+                              const d = await r.json();
+                              if (!r.ok) throw new Error(d.message || "فشل");
+                              setDidPollId(d.id);
+                              toast({ title: "🎬 جارٍ إنشاء الفيديو — انتظر قليلاً..." });
+                              await pollDID(d.id);
+                            } catch (e: any) {
+                              setDidError(e.message);
+                              setDidStatus("error");
+                            }
+                          }}
+                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 text-white text-sm font-bold hover:from-violet-700 hover:to-purple-700 disabled:opacity-60 transition-all shadow-md"
+                          data-testid="btn-generate-talking-avatar"
+                        >
+                          {didStatus === "creating" ? (
+                            <><Loader2 className="w-4 h-4 animate-spin" /> جارٍ التجهيز...</>
+                          ) : didStatus === "polling" ? (
+                            <><Loader2 className="w-4 h-4 animate-spin" /> جارٍ إنتاج الفيديو...</>
+                          ) : (
+                            <><span className="text-base">🎭</span> أنتج فيديو المقدّم المتكلم</>
+                          )}
+                        </button>
+                      )}
+
+                      {/* Status / Progress */}
+                      {didStatus === "polling" && (
+                        <div className="text-center text-xs text-violet-600 animate-pulse">⏳ D-ID يعالج الفيديو — قد يستغرق 30-60 ثانية...</div>
+                      )}
+                      {didStatus === "error" && (
+                        <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 rounded-xl p-3 text-xs text-red-600 text-center">
+                          ⚠️ {didError}
+                          <button onClick={() => setDidStatus("idle")} className="block mx-auto mt-1 underline">حاول مرة ثانية</button>
+                        </div>
+                      )}
+
+                      {/* Video result */}
+                      {didStatus === "done" && didVideoUrl && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-bold text-green-700 dark:text-green-400 text-center">✅ الفيديو جاهز!</p>
+                          <video src={didVideoUrl} controls className="w-full rounded-xl border border-violet-200" />
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => { form.setValue("mediaUrl", didVideoUrl); form.setValue("mediaType", "video"); toast({ title: "✅ تم استخدام الفيديو في الإعلان!" }); }}
+                              className="flex-1 py-2 rounded-xl bg-violet-600 text-white text-xs font-bold hover:bg-violet-700"
+                              data-testid="btn-use-did-video"
+                            >
+                              استخدم هذا الفيديو في الإعلان
+                            </button>
+                            <a
+                              href={didVideoUrl}
+                              download
+                              className="flex-1 py-2 rounded-xl border border-violet-300 text-violet-700 dark:text-violet-300 text-xs font-bold text-center hover:bg-violet-50 dark:hover:bg-violet-900/20"
+                            >
+                              ⬇ تحميل
+                            </a>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                   </CardContent>
                 </Card>
               </motion.div>
