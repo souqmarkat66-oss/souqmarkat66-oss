@@ -3527,6 +3527,65 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
+  // ─── AI CHAT — المساعد المصري لسوق ماركات ────────────────────
+  app.post("/api/ai/chat", async (req: any, res) => {
+    try {
+      const { message, context, history = [] } = req.body;
+      if (!message || !message.trim()) {
+        return res.status(400).json({ message: "الرسالة مطلوبة" });
+      }
+
+      const SYSTEM_PROMPT = context || `أنت "مساعد سوق"، المساعد الذكي الرسمي لمنصة **شبكة سوق للإعلانات** — المنصة المصرية للإعلانات المبوبة والبث المباشر والتسويق الرقمي.
+
+🎯 شخصيتك:
+- بتتكلم عامية مصرية سلسة وواضحة
+- أسلوبك ودود وعملي، بتساعد التاجر يبيع بضاعته
+- مش بتبالغ في الكلام — جواباتك قصيرة ومفيدة
+- بتستخدم emojis بشكل معتدل عشان الكلام يكون حيوي
+
+📋 معلوماتك عن المنصة:
+- نشر الإعلانات المبوبة مجاناً مع صور وفيديو
+- البث المباشر والريلز القصيرة
+- قنوات المحتوى مع تحقيق دخل (الناشر يكسب 60% من الإيراد)
+- حملات إعلانية CPM/CPC باستهداف المحافظات المصرية
+- دفع بالجنيه المصري (فودافون كاش / اتصالات / InstaPay)
+- ذكاء اصطناعي لكتابة الإعلانات وتوليد الصور والفيديو
+- نظام كريدت AI: 3 مجانية، والإضافية بـ 5 جنيه/كريدت
+
+🚫 قواعد:
+- لو سألوك عن حاجة مش ليها علاقة بالمنصة أو التجارة، قولهم بأدب إنك متخصص في سوق ماركات بس
+- متكتبش كود برمجي أو تجاوب على أسئلة سياسية أو دينية`;
+
+      const chatMessages: any[] = [
+        { role: "system", content: SYSTEM_PROMPT },
+        ...history.slice(-8).map((h: any) => ({
+          role: h.role === "bot" ? "assistant" : "user",
+          content: h.text,
+        })),
+        { role: "user", content: message.trim() },
+      ];
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: chatMessages,
+        max_tokens: 500,
+        temperature: 0.7,
+      });
+
+      const reply = response.choices[0]?.message?.content || "عذراً، مش قادر أرد دلوقتي. حاول تاني بعد شوية.";
+
+      if (req.user) {
+        const userId = req.user?.claims?.sub;
+        if (userId) storage.recordAiUsage(userId, 'chat').catch(() => {});
+      }
+
+      res.json({ reply });
+    } catch (error: any) {
+      console.error("[ai/chat] error:", error?.message);
+      res.status(500).json({ message: "حدث خطأ مؤقت، حاول تاني بعد شوية" });
+    }
+  });
+
   // ─── AI TEXT-TO-SPEECH (Egyptian Arabic via gpt-audio) ───────
   app.post("/api/ai/tts", isAuthenticated, async (req: any, res) => {
     try {

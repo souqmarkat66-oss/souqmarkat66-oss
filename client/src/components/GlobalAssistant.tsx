@@ -633,7 +633,7 @@ export function GlobalAssistant() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ message: q, context: AI_CONTEXT }),
+        body: JSON.stringify({ message: q, context: AI_CONTEXT, history: messages.slice(-8) }),
       });
       if (res.ok) {
         const d = await res.json();
