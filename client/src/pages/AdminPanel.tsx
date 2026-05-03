@@ -3007,10 +3007,15 @@ function CoinsSection({ logAction }: { logAction: any }) {
     queryFn: () => fetch(`/api/admin/coins/codes?page=${codesPage}&limit=20`).then(r => r.json()),
   });
 
-  const { data: packagesData } = useQuery<any[]>({
+  const { data: packagesData, refetch: refetchPackages } = useQuery<any[]>({
     queryKey: ["/api/coins/packages"],
     queryFn: () => fetch("/api/coins/packages").then(r => r.json()),
   });
+  // New package form
+  const [newPkg, setNewPkg] = useState({ name: "", coins: "", priceEGP: "", bonusCoins: "", sortOrder: "0" });
+  const [addingPkg, setAddingPkg] = useState(false);
+  const [editingPkg, setEditingPkg] = useState<any>(null); // null = not editing
+  const [deletingPkg, setDeletingPkg] = useState(false);
 
   const { data: purchaseOrders, isLoading: ordersLoading, refetch: refetchOrders } = useQuery<any[]>({
     queryKey: ["/api/admin/coins/purchase-orders", ordersFilter],
@@ -3343,23 +3348,156 @@ function CoinsSection({ logAction }: { logAction: any }) {
 
       {/* ── TAB: Packages ── */}
       {coinTab === "packages" && (
-        <div className="space-y-4">
+        <div className="space-y-4" dir="rtl">
+          {/* Add new package form */}
+          <Card className="bg-zinc-900 border-zinc-700">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-white text-base flex items-center gap-2">
+                <span>➕</span> إضافة باقة جديدة
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
+                {[
+                  { key: "name",      label: "اسم الباقة",     placeholder: "مثال: باقة بداية" },
+                  { key: "coins",     label: "عدد العملات",    placeholder: "100" },
+                  { key: "priceEGP",  label: "السعر (ج.م)",    placeholder: "25" },
+                  { key: "bonusCoins",label: "عملات مجانية",   placeholder: "0" },
+                  { key: "sortOrder", label: "الترتيب",        placeholder: "0" },
+                ].map(f => (
+                  <div key={f.key}>
+                    <label className="text-white/50 text-xs mb-1 block">{f.label}</label>
+                    <input
+                      type={f.key === "name" ? "text" : "number"}
+                      value={(newPkg as any)[f.key]}
+                      onChange={e => setNewPkg(p => ({ ...p, [f.key]: e.target.value }))}
+                      placeholder={f.placeholder}
+                      className="w-full bg-zinc-800 border border-zinc-600 text-white rounded-xl px-3 py-2 text-sm"
+                      data-testid={`input-pkg-${f.key}`}
+                    />
+                  </div>
+                ))}
+              </div>
+              <button
+                disabled={addingPkg || !newPkg.name || !newPkg.coins || !newPkg.priceEGP}
+                onClick={async () => {
+                  setAddingPkg(true);
+                  try {
+                    const res = await fetch("/api/admin/coins/packages", {
+                      method: "POST", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ name: newPkg.name, coins: Number(newPkg.coins), priceEGP: Number(newPkg.priceEGP), bonusCoins: Number(newPkg.bonusCoins || 0), sortOrder: Number(newPkg.sortOrder || 0) }),
+                    });
+                    if (!res.ok) throw new Error("فشل");
+                    toast({ title: "✅ تم إضافة الباقة" });
+                    setNewPkg({ name: "", coins: "", priceEGP: "", bonusCoins: "", sortOrder: "0" });
+                    refetchPackages();
+                  } catch { toast({ title: "❌ خطأ", variant: "destructive" }); }
+                  setAddingPkg(false);
+                }}
+                className="px-6 py-2 rounded-xl bg-yellow-500 text-black font-bold text-sm disabled:opacity-50"
+                data-testid="btn-add-package"
+              >
+                {addingPkg ? "جاري الإضافة..." : "إضافة الباقة"}
+              </button>
+            </CardContent>
+          </Card>
+
+          {/* Existing packages */}
           <Card className="bg-zinc-900 border-zinc-700">
             <CardHeader>
-              <CardTitle className="text-white text-base">باقات الشحن الحالية</CardTitle>
+              <CardTitle className="text-white text-base">الباقات الحالية</CardTitle>
             </CardHeader>
             <CardContent>
               {!packagesData || packagesData.length === 0 ? (
                 <p className="text-white/40 text-center py-4">لا توجد باقات</p>
               ) : (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                <div className="space-y-2">
                   {packagesData.map((pkg: any) => (
-                    <div key={pkg.id} className="bg-gradient-to-b from-yellow-500/10 to-zinc-800 border border-yellow-500/20 rounded-2xl p-3 text-center" data-testid={`pkg-${pkg.id}`}>
-                      <p className="text-yellow-400 font-bold text-lg">{pkg.coins + (pkg.bonus_coins || 0)}</p>
-                      <p className="text-white/40 text-xs">عملة</p>
-                      {pkg.bonus_coins > 0 && <p className="text-green-400 text-xs">+{pkg.bonus_coins} مجانًا</p>}
-                      <p className="text-white font-bold mt-2">{pkg.price_egp} ج.م</p>
-                      <p className="text-white/30 text-[10px] mt-1">{pkg.name}</p>
+                    <div key={pkg.id} className="bg-zinc-800 border border-zinc-700 rounded-2xl p-4" data-testid={`pkg-${pkg.id}`}>
+                      {editingPkg?.id === pkg.id ? (
+                        /* Edit row */
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 items-end">
+                          {[
+                            { key: "name",      label: "الاسم",          val: editingPkg.name },
+                            { key: "coins",     label: "عملات",          val: editingPkg.coins },
+                            { key: "priceEGP",  label: "السعر",          val: editingPkg.priceEGP },
+                            { key: "bonusCoins",label: "مجانية",         val: editingPkg.bonusCoins },
+                            { key: "sortOrder", label: "ترتيب",          val: editingPkg.sortOrder },
+                          ].map(f => (
+                            <div key={f.key}>
+                              <label className="text-white/50 text-[10px] mb-1 block">{f.label}</label>
+                              <input
+                                type={f.key === "name" ? "text" : "number"}
+                                value={f.val}
+                                onChange={e => setEditingPkg((p: any) => ({ ...p, [f.key]: e.target.value }))}
+                                className="w-full bg-zinc-700 border border-zinc-500 text-white rounded-xl px-2 py-1.5 text-sm"
+                              />
+                            </div>
+                          ))}
+                          <div className="flex gap-2 col-span-2 md:col-span-5">
+                            <button
+                              onClick={async () => {
+                                const res = await fetch(`/api/admin/coins/packages/${pkg.id}`, {
+                                  method: "PATCH", headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ name: editingPkg.name, coins: Number(editingPkg.coins), priceEGP: Number(editingPkg.priceEGP), bonusCoins: Number(editingPkg.bonusCoins || 0), sortOrder: Number(editingPkg.sortOrder || 0) }),
+                                });
+                                if (res.ok) { toast({ title: "✅ تم التعديل" }); setEditingPkg(null); refetchPackages(); }
+                                else toast({ title: "❌ خطأ", variant: "destructive" });
+                              }}
+                              className="px-4 py-1.5 rounded-xl bg-green-500 text-white font-bold text-sm"
+                              data-testid={`btn-save-pkg-${pkg.id}`}
+                            >💾 حفظ</button>
+                            <button onClick={() => setEditingPkg(null)} className="px-4 py-1.5 rounded-xl bg-zinc-600 text-white font-bold text-sm">إلغاء</button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* View row */
+                        <div className="flex items-center gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-yellow-400 font-extrabold text-lg">{pkg.coins + (pkg.bonus_coins || 0)}</span>
+                              <span className="text-white/40 text-xs">عملة</span>
+                              {pkg.bonus_coins > 0 && <span className="text-green-400 text-xs bg-green-500/10 rounded-full px-2 py-0.5">+{pkg.bonus_coins} مجاناً</span>}
+                              <span className="text-white font-bold">{pkg.price_egp} ج.م</span>
+                              <span className="text-white/40 text-xs">— {pkg.name}</span>
+                              <span className={`text-xs rounded-full px-2 py-0.5 ${pkg.is_active ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+                                {pkg.is_active ? "فعّال" : "معطّل"}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex gap-2 flex-shrink-0">
+                            {/* Toggle active */}
+                            <button
+                              onClick={async () => {
+                                await fetch(`/api/admin/coins/packages/${pkg.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isActive: !pkg.is_active }) });
+                                refetchPackages();
+                              }}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold ${pkg.is_active ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30" : "bg-green-500/20 text-green-400 border border-green-500/30"}`}
+                              data-testid={`btn-toggle-pkg-${pkg.id}`}
+                            >{pkg.is_active ? "تعطيل" : "تفعيل"}</button>
+                            {/* Edit */}
+                            <button
+                              onClick={() => setEditingPkg({ id: pkg.id, name: pkg.name, coins: pkg.coins, priceEGP: pkg.price_egp, bonusCoins: pkg.bonus_coins || 0, sortOrder: pkg.sort_order || 0 })}
+                              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                              data-testid={`btn-edit-pkg-${pkg.id}`}
+                            >✏️ تعديل</button>
+                            {/* Delete */}
+                            <button
+                              disabled={deletingPkg}
+                              onClick={async () => {
+                                if (!confirm(`حذف باقة "${pkg.name}"؟`)) return;
+                                setDeletingPkg(true);
+                                const res = await fetch(`/api/admin/coins/packages/${pkg.id}`, { method: "DELETE" });
+                                if (res.ok) { toast({ title: "✅ تم الحذف" }); refetchPackages(); }
+                                else toast({ title: "❌ خطأ في الحذف", variant: "destructive" });
+                                setDeletingPkg(false);
+                              }}
+                              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/30"
+                              data-testid={`btn-delete-pkg-${pkg.id}`}
+                            >🗑️ حذف</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

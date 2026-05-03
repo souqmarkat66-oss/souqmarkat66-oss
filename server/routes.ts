@@ -798,8 +798,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch("/api/admin/coins/packages/:id", isAuthenticated, async (req: any, res) => {
     if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
-    const { isActive } = req.body || {};
-    await pool.query(`UPDATE coin_packages SET is_active = $1 WHERE id = $2`, [isActive, req.params.id]);
+    const { isActive, name, coins, priceEGP, bonusCoins, sortOrder } = req.body || {};
+    if (name !== undefined || coins !== undefined || priceEGP !== undefined) {
+      await pool.query(
+        `UPDATE coin_packages SET name=COALESCE($1,name), coins=COALESCE($2,coins), price_egp=COALESCE($3,price_egp), bonus_coins=COALESCE($4,bonus_coins), sort_order=COALESCE($5,sort_order) WHERE id=$6`,
+        [name ?? null, coins ?? null, priceEGP ?? null, bonusCoins ?? null, sortOrder ?? null, req.params.id]
+      );
+    } else {
+      await pool.query(`UPDATE coin_packages SET is_active = $1 WHERE id = $2`, [isActive, req.params.id]);
+    }
+    res.json({ success: true });
+  });
+
+  app.delete("/api/admin/coins/packages/:id", isAuthenticated, async (req: any, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
+    await pool.query(`DELETE FROM coin_packages WHERE id = $1`, [req.params.id]);
     res.json({ success: true });
   });
 

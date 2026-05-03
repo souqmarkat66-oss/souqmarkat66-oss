@@ -170,6 +170,12 @@ export default function LiveStream() {
   // Rapid-fire gift (نظام التكبيث)
   const rapidFireTimer   = useRef<ReturnType<typeof setInterval> | null>(null);
   const rapidFireCount   = useRef(0);
+  // Spam banner — visible to all viewers when someone spams gifts
+  interface SpamBanner { id: number; userId: string; userName: string; emoji: string; glow: string; count: number; }
+  const [spamBanners,    setSpamBanners]    = useState<SpamBanner[]>([]);
+  const spamMapRef       = useRef<Map<string, { count: number; emoji: string; glow: string; timerId: ReturnType<typeof setTimeout> }>>(new Map());
+  // Noise suppression toggle for guest
+  const [noiseSuppress,  setNoiseSuppress]  = useState(true);
 
   /* ── stream data ── */
   const { data: stream } = useQuery<any>({
@@ -549,7 +555,7 @@ export default function LiveStream() {
     }
 
     // ── Gift events (both broadcaster and viewer) ──
-    socket.on("stream-gift", (data: { id: number; giftEmoji: string; giftName: string; giftCoins: number; userName: string; battleTeam?: "A"|"B"; glow?: string }) => {
+    socket.on("stream-gift", (data: { id: number; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId?: string; battleTeam?: "A"|"B"; glow?: string }) => {
       const x = 10 + Math.random() * 60;
       const flyId = Date.now() + Math.random();
       const big = data.giftCoins >= 100;
@@ -586,7 +592,6 @@ export default function LiveStream() {
         if (comboTimerRef.current) clearTimeout(comboTimerRef.current);
         if (comboFadeRef.current)  clearTimeout(comboFadeRef.current);
         setComboDisplay({ id: Date.now(), emoji: data.giftEmoji, count, label, color, fading: false });
-        // Start fade-out 2s after last gift in streak
         comboTimerRef.current = setTimeout(() => {
           setComboDisplay(prev => prev ? { ...prev, fading: true } : null);
           comboFadeRef.current = setTimeout(() => {
@@ -595,6 +600,25 @@ export default function LiveStream() {
             lastGiftTypeRef.current = "";
           }, 400);
         }, 2000);
+      }
+      // ── Spam / تكبيث Banner (per-user rapid-fire counter) ──
+      const uid = data.userId || data.userName;
+      const prev = spamMapRef.current.get(uid);
+      if (prev) clearTimeout(prev.timerId);
+      const newCount = (prev && prev.emoji === data.giftEmoji) ? prev.count + 1 : 1;
+      const tId = setTimeout(() => {
+        spamMapRef.current.delete(uid);
+        setSpamBanners(b => b.filter(x => x.userId !== uid));
+      }, 1800);
+      spamMapRef.current.set(uid, { count: newCount, emoji: data.giftEmoji, glow: data.glow || "#facc15", timerId: tId });
+      if (newCount >= 2) {
+        setSpamBanners(b => {
+          const existing = b.find(x => x.userId === uid);
+          if (existing) return b.map(x => x.userId === uid ? { ...x, count: newCount, emoji: data.giftEmoji } : x);
+          return [...b, { id: Date.now(), userId: uid, userName: data.userName, emoji: data.giftEmoji, glow: data.glow || "#facc15", count: newCount }];
+        });
+      } else {
+        setSpamBanners(b => b.filter(x => x.userId !== uid));
       }
     });
 
@@ -1565,6 +1589,31 @@ export default function LiveStream() {
                   </div>
                   <span className="text-white text-[10px] font-bold drop-shadow">{forceMuted ? "مكتوم" : "صوت"}</span>
                 </button>
+                {/* Noise suppression toggle */}
+                <button
+                  onClick={async () => {
+                    const newVal = !noiseSuppress;
+                    setNoiseSuppress(newVal);
+                    try {
+                      const audioTrack = coHostStream.current?.getAudioTracks()[0];
+                      if (audioTrack && typeof (audioTrack as any).applyConstraints === "function") {
+                        await (audioTrack as any).applyConstraints({
+                          noiseSuppression: newVal,
+                          echoCancellation: newVal,
+                          autoGainControl: newVal,
+                        });
+                      }
+                    } catch (_) {}
+                    toast({ title: newVal ? "🔇 منع الضوضاء: تشغيل" : "🔊 منع الضوضاء: إيقاف" });
+                  }}
+                  className="flex flex-col items-center gap-0.5"
+                  data-testid="btn-noise-suppress"
+                >
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg backdrop-blur ${noiseSuppress ? "bg-green-700/80" : "bg-zinc-700/80"}`}>
+                    <span className="text-xl">{noiseSuppress ? "🔇" : "🔊"}</span>
+                  </div>
+                  <span className="text-white text-[10px] font-bold drop-shadow">ضوضاء</span>
+                </button>
                 {/* Leave button */}
                 <button onClick={leaveCoHost} className="flex flex-col items-center gap-0.5" data-testid="btn-leave-cohost">
                   <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-red-600 animate-pulse">
@@ -1908,6 +1957,31 @@ export default function LiveStream() {
               </div>
             )}
           </>
+        )}
+
+        {/* ── SPAM / تكبيث BANNERS — shows sender name + ×count to all viewers ── */}
+        {spamBanners.length > 0 && (
+          <div className="absolute bottom-44 start-3 z-40 flex flex-col gap-1.5 pointer-events-none">
+            {spamBanners.map(b => (
+              <div
+                key={b.userId}
+                className="flex items-center gap-2 rounded-2xl px-3 py-1.5 animate-bounce"
+                style={{
+                  background: `linear-gradient(135deg, ${b.glow}33, ${b.glow}18)`,
+                  border: `1.5px solid ${b.glow}66`,
+                  boxShadow: `0 0 12px ${b.glow}44`,
+                }}
+              >
+                <span className="text-xl" style={{ filter: `drop-shadow(0 0 6px ${b.glow})` }}>{b.emoji}</span>
+                <div className="flex flex-col">
+                  <span className="text-white text-[10px] font-bold leading-none">{b.userName}</span>
+                  <span className="font-extrabold leading-none" style={{ color: b.glow, fontSize: "14px", textShadow: `0 0 8px ${b.glow}` }}>
+                    ×{b.count} تكبيث 🔥
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
 
         {/* FLYING GIFT ANIMATIONS */}
