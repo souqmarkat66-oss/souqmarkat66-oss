@@ -806,7 +806,7 @@ export default function LiveStream() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bgMode]);
 
-  /* ─── startWebRTC: called directly from button click (not via useEffect) ─── */
+  /* ─── startWebRTC: called directly from button click (or auto-start useEffect) ─── */
   const startWebRTC = useCallback(async () => {
     if (streamStarted.current) return;
     streamStarted.current = true;
@@ -814,6 +814,7 @@ export default function LiveStream() {
     const ms = await startCamera(camFacing);
     if (!ms) {
       streamStarted.current = false;
+      setBroadcastMode(null);
       return;
     }
     setStreaming(true);
@@ -822,6 +823,19 @@ export default function LiveStream() {
     toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camFacing, id, startCamera, toast]);
+
+  /* ─── Auto-start WebRTC when StartStream already opened the camera ─────────
+     startCamera() will reuse window.__pendingCameraStream (no new getUserMedia call)
+     so this is safe to run from useEffect without a user-gesture requirement.    */
+  const autoStartFiredRef = useRef(false);
+  useEffect(() => {
+    if (!isBroadcast) return;
+    if (autoStartFiredRef.current) return;
+    if (!(window as any).__pendingCameraStream) return;
+    autoStartFiredRef.current = true;
+    startWebRTC();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBroadcast]);
 
   /* ─── retryCamera: reset guard then start full WebRTC ── */
   const retryCamera = useCallback(async () => {
@@ -1327,23 +1341,9 @@ export default function LiveStream() {
 
   /* ═══ MODE PICKER for broadcaster — shows on first entry (broadcastMode === null) ═══ */
   if (isBroadcast && broadcastMode === null && !streaming) {
-    /* ✅ إذا كان StartStream فتح الكاميرا مسبقاً، ابدأ WebRTC تلقائياً بدون ما نطلب من المستخدم ضغطة تانية */
-    const hasPending = !!(window as any).__pendingCameraStream;
-    if (hasPending) {
-      startWebRTC();
-    }
     return (
       <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-50 p-6 gap-5" dir="rtl">
-        {hasPending ? (
-          /* جاري تشغيل الكاميرا تلقائياً */
-          <>
-            <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mb-2 animate-pulse">
-              <Video className="w-8 h-8 text-red-400" />
-            </div>
-            <p className="text-white text-lg font-bold">جاري تشغيل الكاميرا...</p>
-            <div className="w-8 h-8 rounded-full border-2 border-red-500 border-t-transparent animate-spin" />
-          </>
-        ) : (
+        {(
           /* المستخدم وصل مباشرة لصفحة البث بدون كاميرا — يختار يدوياً */
           <>
             <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mb-2">
