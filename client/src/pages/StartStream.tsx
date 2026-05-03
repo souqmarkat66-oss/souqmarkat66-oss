@@ -140,47 +140,88 @@ export default function StartStream() {
 
   if (permStatus !== "granted") {
     return (
-      <div className="container max-w-lg px-4 py-16 text-center">
-        <div className="w-20 h-20 rounded-3xl bg-red-500 flex items-center justify-center mx-auto mb-6">
-          <Radio className="w-10 h-10 text-white" />
+      <div className="fixed inset-0 bg-black/50 flex items-end justify-center z-50" dir="rtl">
+        {/* Dimmed background showing behind */}
+        <div className="absolute inset-0 bg-gradient-to-b from-zinc-900 to-black opacity-90" />
+
+        {/* Bottom sheet — mimics browser native permission popup */}
+        <div className="relative w-full max-w-sm bg-white dark:bg-zinc-100 rounded-t-3xl overflow-hidden shadow-2xl">
+          {/* Top drag handle */}
+          <div className="flex justify-center pt-3 pb-1">
+            <div className="w-10 h-1 rounded-full bg-zinc-300" />
+          </div>
+
+          {/* Site header */}
+          <div className="flex items-center gap-3 px-5 py-3 border-b border-zinc-200">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-red-500 to-pink-600 flex items-center justify-center shadow-md flex-shrink-0">
+              <span className="text-white text-base">📹</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-zinc-900 font-bold text-sm leading-tight">ads-as.com يريد</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <Camera className="w-3.5 h-3.5 text-zinc-500" />
+                <Mic className="w-3.5 h-3.5 text-zinc-500" />
+                <p className="text-zinc-500 text-xs">الوصول للكاميرا والميكروفون</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Permission info */}
+          <div className="px-5 py-4">
+            <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-3 mb-4">
+              <span className="text-xl mt-0.5 flex-shrink-0">🎥</span>
+              <p className="text-zinc-700 text-xs leading-relaxed">
+                لبدء البث المباشر وإيصال صورتك وصوتك للمشاهدين، يحتاج الموقع إذنك للوصول للكاميرا والميكروفون. لن تُستخدم إلا أثناء البث فقط.
+              </p>
+            </div>
+
+            {permStatus === "denied" && (
+              <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-2xl p-3 mb-4">
+                <span className="text-base flex-shrink-0">⚠️</span>
+                <p className="text-red-700 text-xs leading-relaxed">
+                  تم رفض الإذن — اذهب لإعدادات المتصفح ← إعدادات الموقع ← الكاميرا والميكروفون ← "السماح"، ثم أعد المحاولة
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Options — exactly like browser popup */}
+          <div className="border-t border-zinc-200 divide-y divide-zinc-100">
+            <button
+              onClick={requestCameraPermission}
+              disabled={permStatus === "requesting"}
+              className="w-full px-5 py-4 text-right text-blue-600 font-medium text-[15px] hover:bg-zinc-50 active:bg-zinc-100 transition-colors flex items-center gap-3 disabled:opacity-60"
+              data-testid="btn-allow-always"
+            >
+              {permStatus === "requesting" ? (
+                <span className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin flex-shrink-0" />
+              ) : (
+                <Camera className="w-4 h-4 flex-shrink-0 text-blue-500" />
+              )}
+              {permStatus === "requesting" ? "جاري طلب الإذن..." : "السماح بالاستخدام أثناء زيارة الموقع"}
+            </button>
+            <button
+              onClick={requestCameraPermission}
+              disabled={permStatus === "requesting"}
+              className="w-full px-5 py-4 text-right text-blue-600 font-medium text-[15px] hover:bg-zinc-50 active:bg-zinc-100 transition-colors flex items-center gap-3 disabled:opacity-60"
+              data-testid="btn-allow-once"
+            >
+              <span className="text-blue-500 text-base flex-shrink-0">🔓</span>
+              السماح بالاستخدام هذه المرة
+            </button>
+            <button
+              onClick={() => setLocation("/")}
+              className="w-full px-5 py-4 text-right text-red-500 font-medium text-[15px] hover:bg-red-50 active:bg-red-100 transition-colors flex items-center gap-3"
+              data-testid="btn-deny-camera"
+            >
+              <span className="text-red-400 text-base flex-shrink-0">🚫</span>
+              عدم السماح مطلقاً
+            </button>
+          </div>
+
+          {/* iOS safe-area spacer */}
+          <div className="h-6 bg-white dark:bg-zinc-100" />
         </div>
-        <h2 className="text-2xl font-bold mb-2">البث المباشر</h2>
-        <p className="text-muted-foreground mb-8">للبدء في البث المباشر، نحتاج إذنك للوصول إلى الكاميرا والميكروفون</p>
-        <Card className="rounded-3xl border-border/50 mb-6 text-right">
-          <CardContent className="p-5 space-y-3">
-            <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/50">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-                <Camera className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <p className="font-semibold text-sm">الكاميرا</p>
-                <p className="text-xs text-muted-foreground">لنقل صورتك للمشاهدين</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/50">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-                <Mic className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <p className="font-semibold text-sm">الميكروفون</p>
-                <p className="text-xs text-muted-foreground">لنقل صوتك للمشاهدين</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        {permStatus === "denied" && (
-          <p className="text-sm text-destructive mb-4">تم رفض الإذن — يرجى السماح للمتصفح بالوصول من إعدادات الموقع ثم أعد المحاولة</p>
-        )}
-        <Button
-          onClick={requestCameraPermission}
-          disabled={permStatus === "requesting"}
-          size="lg"
-          className="w-full bg-red-500 hover:bg-red-600 text-white gap-2"
-          data-testid="btn-allow-camera"
-        >
-          <Camera className="w-5 h-5" />
-          {permStatus === "requesting" ? "جاري طلب الإذن..." : "السماح بالكاميرا والميكروفون"}
-        </Button>
       </div>
     );
   }
