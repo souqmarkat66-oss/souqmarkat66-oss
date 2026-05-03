@@ -1,0 +1,33 @@
+DONE
+root@srv1602266:~/server# pm2 delete all && pm2 start /root/ecosystem.config.cjs && pm2 save && sleep 3 && pm2 logs ads-as --lines 5 --nostream
+
+[PM2] Applying action deleteProcessId on app [all](ids: [ 0 ])
+[PM2] [ads-as](0) ✓
+┌────┬───────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┬──────────┬──────────┐
+│ id │ name      │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │ user     │ watching │
+└────┴───────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
+[PM2][WARN] Applications ads-as not running, starting...
+[PM2] App [ads-as] launched (1 instances)
+┌────┬───────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┬──────────┬──────────┐
+│ id │ name      │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │ user     │ watching │
+├────┼───────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┼──────────┼──────────┤
+│ 0  │ ads-as    │ default     │ 1.0.0   │ fork    │ 3049     │ 0s     │ 0    │ online    │ 0%       │ 15.9mb   │ root     │ disabled │
+└────┴───────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
+[PM2] Saving current process list...
+[PM2] Successfully saved in /root/.pm2/dump.pm2
+[TAILING] Tailing last 5 lines for [ads-as] process (change the value with --lines option)
+/root/.pm2/logs/ads-as-error.log last 5 lines:
+0|ads-as   |   constraint: undefined,
+0|ads-as   |   file: 'aclchk.c',
+0|ads-as   |   line: '2950',
+0|ads-as   |   routine: 'aclcheck_error'
+0|ads-as   | }
+
+/root/.pm2/logs/ads-as-out.log last 5 lines:
+0|ads-as   | [RTMP] Server started on port 1935 (RTMP) and 8000 (HLS)
+0|ads-as   | [5/3/2026, 11:21:14 AM] [INFO] WebSocket server listening on port undefined:8000
+0|ads-as   | [5/3/2026, 11:21:14 AM] [INFO] HTTP server listening on port undefined:8000
+0|ads-as   | [5/3/2026, 11:21:14 AM] [INFO] Rtmp Server listening on port undefined:1935
+0|ads-as   | 11:21:14 AM [express] serving on port 5000
+
+root@srv1602266:~/server# 
