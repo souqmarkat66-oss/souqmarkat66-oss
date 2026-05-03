@@ -85,6 +85,11 @@ export default function LiveStream() {
   const [battleWinner,    setBattleWinner]    = useState<"A"|"B"|"draw"|null>(null);
   const [giftTeamChoice,  setGiftTeamChoice]  = useState<"A"|"B">("A"); // viewer's chosen side
   const [showBattleSetup, setShowBattleSetup] = useState(false);
+  // Cross-stream battle challenge state
+  const [showChallengeList, setShowChallengeList] = useState(false);
+  const [liveStreams,       setLiveStreams]    = useState<any[]>([]);
+  const [challengeSentTo,   setChallengeSentTo]   = useState<string|null>(null); // streamId waiting for response
+  const [incomingChallenge, setIncomingChallenge] = useState<{challengerStreamId:string; challengerSocketId:string; challengerName:string}|null>(null);
   const battleScoreARef   = useRef(0);
   const battleScoreBRef   = useRef(0);
   const battleTimerRef    = useRef<ReturnType<typeof setInterval>|null>(null);
@@ -563,6 +568,21 @@ export default function LiveStream() {
         toast({ title: "تمت إزالتك من البث", variant: "destructive" });
       });
     }
+
+    // ── Cross-stream Battle Challenge ────────────────────────────────
+    if (isBroadcast) {
+      socket.on("battle-challenge-incoming", (data: { challengerStreamId: string; challengerSocketId: string; challengerName: string }) => {
+        setIncomingChallenge(data);
+      });
+    }
+    socket.on("battle-challenge-result", (data: { accepted: boolean; responderStreamId: string; responderName: string }) => {
+      setChallengeSentTo(null);
+      if (data.accepted) {
+        toast({ title: `✅ ${data.responderName} قبل التحدي!`, description: "سينضم إلى بثك الآن..." });
+      } else {
+        toast({ title: `❌ ${data.responderName} رفض التحدي`, variant: "destructive" });
+      }
+    });
 
     // ── Gift events (both broadcaster and viewer) ──
     socket.on("stream-gift", (data: { id: number; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId?: string; battleTeam?: "A"|"B"; glow?: string }) => {
@@ -2832,24 +2852,34 @@ export default function LiveStream() {
                 <X className="w-4 h-4 text-white" />
               </button>
             </div>
+
+            {/* ── تحدي بث مباشر آخر (لو مفيش ضيوف) ── */}
             {activeCoHosts.length === 0 && (
-              <div className="mb-4 bg-orange-500/10 border border-orange-500/30 rounded-2xl p-4 flex items-start gap-3">
-                <span className="text-2xl flex-shrink-0">⚔️</span>
-                <div>
-                  <p className="text-orange-300 font-bold text-sm">لا يوجد ضيوف حالياً</p>
-                  <p className="text-orange-300/70 text-xs mt-0.5">اطلب من شخص ما رفع إيده أو ادعُه كضيف للبث أولاً، ثم ابدأ التحدي</p>
-                </div>
-              </div>
+              <button
+                onClick={async () => {
+                  setShowBattleSetup(false);
+                  const r = await fetch("/api/streams", { credentials: "include" });
+                  const all = await r.json();
+                  setLiveStreams((all || []).filter((s: any) => s.status === "live" && String(s.id) !== String(id)));
+                  setShowChallengeList(true);
+                }}
+                className="w-full mb-4 py-4 rounded-2xl bg-gradient-to-r from-orange-500 to-pink-600 text-white font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                data-testid="btn-challenge-live"
+              >
+                <Swords className="w-5 h-5" />
+                تحدي بث مباشر آخر ⚔️
+              </button>
             )}
+
             <div className="grid grid-cols-2 gap-3 mb-4">
               <button
-                onClick={() => activeCoHosts.length > 0 ? startBattle("1v1") : toast({ title: "ادعُ ضيفاً أولاً!", description: "اطلب من شخص رفع إيده للانضمام", variant: "destructive" })}
+                onClick={() => activeCoHosts.length > 0 ? startBattle("1v1") : toast({ title: "ادعُ ضيفاً أولاً أو تحدَّ بثاً آخر!", variant: "destructive" })}
                 className={`flex flex-col items-center gap-2 rounded-2xl p-5 active:scale-95 transition-all border ${activeCoHosts.length > 0 ? "bg-gradient-to-br from-red-500/20 to-orange-500/20 border-red-500/40" : "bg-white/5 border-white/10 opacity-60"}`}
                 data-testid="btn-battle-1v1"
               >
                 <span className="text-3xl">⚔️</span>
                 <span className="text-white font-extrabold text-base">1 ضد 1</span>
-                <span className="text-white/50 text-xs">أنت ضد ضيف واحد</span>
+                <span className="text-white/50 text-xs">أنت ضد ضيف موجود</span>
               </button>
               <button
                 onClick={() => activeCoHosts.length >= 2 ? startBattle("2v2") : toast({ title: "تحتاج ضيفين على الأقل!", variant: "destructive" })}
@@ -2863,6 +2893,132 @@ export default function LiveStream() {
               </button>
             </div>
             <p className="text-center text-white/40 text-xs">⏱️ مدة المعركة: دقيقتان | 🪙 النقاط من الهدايا فقط (لا تُسحب)</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── CHALLENGE LIST — picks a live stream to challenge ── */}
+      {showChallengeList && isBroadcast && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowChallengeList(false)}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-safe max-h-[75vh] overflow-y-auto" onClick={e => e.stopPropagation()} dir="rtl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white font-bold text-base flex items-center gap-2">
+                <Swords className="w-4 h-4 text-orange-400" /> اختر بثاً لتتحداه
+              </h3>
+              <button onClick={() => setShowChallengeList(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+
+            {challengeSentTo && (
+              <div className="mb-4 bg-orange-500/10 border border-orange-500/30 rounded-2xl p-3 flex items-center gap-3">
+                <div className="w-5 h-5 rounded-full border-2 border-orange-400 border-t-transparent animate-spin flex-shrink-0" />
+                <p className="text-orange-300 text-sm">في انتظار الرد على طلب التحدي...</p>
+              </div>
+            )}
+
+            {liveStreams.length === 0 ? (
+              <div className="text-center py-10">
+                <p className="text-4xl mb-3">😔</p>
+                <p className="text-white/60 text-sm">لا توجد بثوث مباشرة أخرى الآن</p>
+                <p className="text-white/30 text-xs mt-1">انتظر حتى يبدأ شخص آخر البث</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {liveStreams.map((s: any) => (
+                  <button
+                    key={s.id}
+                    disabled={!!challengeSentTo}
+                    onClick={() => {
+                      setChallengeSentTo(String(s.id));
+                      socketRef.current?.emit("battle-challenge", {
+                        challengerStreamId: String(id),
+                        targetStreamId: String(s.id),
+                        challengerName: user?.firstName || "مجهول",
+                      });
+                      toast({ title: "⚔️ تم إرسال طلب التحدي!", description: `إلى بث: ${s.title}` });
+                    }}
+                    className={`w-full flex items-center gap-3 p-3 rounded-2xl border transition-all active:scale-95 ${
+                      challengeSentTo === String(s.id)
+                        ? "bg-orange-500/20 border-orange-400/40"
+                        : "bg-white/5 border-white/10 hover:bg-white/10"
+                    } disabled:opacity-60`}
+                    data-testid={`btn-challenge-stream-${s.id}`}
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                      <span className="text-red-400 text-lg">🔴</span>
+                    </div>
+                    <div className="flex-1 text-right min-w-0">
+                      <p className="text-white font-bold text-sm truncate">{s.title}</p>
+                      <p className="text-white/40 text-xs">{s.viewerCount || 0} مشاهد</p>
+                    </div>
+                    {challengeSentTo === String(s.id) ? (
+                      <div className="w-4 h-4 rounded-full border-2 border-orange-400 border-t-transparent animate-spin flex-shrink-0" />
+                    ) : (
+                      <Swords className="w-4 h-4 text-orange-400 flex-shrink-0" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── INCOMING BATTLE CHALLENGE popup (for challenged broadcaster) ── */}
+      {incomingChallenge && isBroadcast && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" dir="rtl">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative w-full max-w-xs bg-zinc-900 rounded-3xl p-6 text-center shadow-2xl border border-orange-500/30">
+            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-orange-500 to-pink-600 flex items-center justify-center mx-auto mb-4 shadow-xl shadow-orange-500/30">
+              <Swords className="w-8 h-8 text-white" />
+            </div>
+            <h3 className="text-white font-extrabold text-lg mb-1">طلب تحدي! ⚔️</h3>
+            <p className="text-white/70 text-sm mb-1">
+              <span className="text-orange-400 font-bold">{incomingChallenge.challengerName}</span>
+            </p>
+            <p className="text-white/50 text-xs mb-6">يريد تحديك في معركة الهدايا — دقيقتان من المرح!</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  socketRef.current?.emit("battle-challenge-response", {
+                    accepted: true,
+                    challengerSocketId: incomingChallenge.challengerSocketId,
+                    responderStreamId: String(id),
+                    responderName: user?.firstName || "مجهول",
+                  });
+                  setIncomingChallenge(null);
+                  // Join challenger's stream as co-host
+                  socketRef.current?.emit("request-cohost", {
+                    streamId: incomingChallenge.challengerStreamId,
+                    userId: user?.id || "",
+                    userName: user?.firstName || "مجهول",
+                    withCamera: true,
+                  });
+                  toast({ title: "✅ قبلت التحدي!", description: "سيتم دمج البثين الآن" });
+                }}
+                className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-orange-500 to-pink-600 text-white font-bold active:scale-95 transition-transform"
+                data-testid="btn-accept-challenge"
+              >
+                قبول ⚔️
+              </button>
+              <button
+                onClick={() => {
+                  socketRef.current?.emit("battle-challenge-response", {
+                    accepted: false,
+                    challengerSocketId: incomingChallenge.challengerSocketId,
+                    responderStreamId: String(id),
+                    responderName: user?.firstName || "مجهول",
+                  });
+                  setIncomingChallenge(null);
+                }}
+                className="flex-1 py-3 rounded-2xl bg-white/10 text-white/60 font-bold active:scale-95 transition-transform"
+                data-testid="btn-reject-challenge"
+              >
+                رفض
+              </button>
+            </div>
           </div>
         </div>
       )}

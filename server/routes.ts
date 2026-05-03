@@ -542,6 +542,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       socket.to(`stream:${data.streamId}`).emit("new-follower", { userName: data.userName });
     });
 
+    /* ─── Battle Challenge (cross-stream) ───────────────────────────
+     * challenger → server → challenged broadcaster
+     * challengerStreamId : the room challenger is broadcasting FROM
+     * targetStreamId     : the room we want to challenge
+     * challengerName     : display name of challenger
+     */
+    socket.on("battle-challenge", (data: { challengerStreamId: string; targetStreamId: string; challengerName: string }) => {
+      const targetRoom = streamRooms.get(data.targetStreamId);
+      if (!targetRoom?.broadcasterId) return;
+      // Forward to target broadcaster only
+      io.to(targetRoom.broadcasterId).emit("battle-challenge-incoming", {
+        challengerStreamId: data.challengerStreamId,
+        challengerSocketId: socket.id,
+        challengerName: data.challengerName,
+      });
+    });
+
+    /* challenger is notified of accept/reject */
+    socket.on("battle-challenge-response", (data: { accepted: boolean; challengerSocketId: string; responderStreamId: string; responderName: string }) => {
+      io.to(data.challengerSocketId).emit("battle-challenge-result", {
+        accepted: data.accepted,
+        responderStreamId: data.responderStreamId,
+        responderName: data.responderName,
+      });
+    });
+
     socket.on("disconnect", () => {
       streamRooms.forEach((room, streamId) => {
         if (room.broadcasterId === socket.id) {
