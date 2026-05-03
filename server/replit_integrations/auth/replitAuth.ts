@@ -6,6 +6,7 @@ import session from "express-session";
 import type { Express, RequestHandler } from "express";
 import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
+import { randomBytes } from "crypto";
 import { authStorage } from "./storage";
 
 const getOidcConfig = memoize(
@@ -20,10 +21,7 @@ const getOidcConfig = memoize(
   { maxAge: 3600 * 1000 }
 );
 
-const SESSION_SECRET_FALLBACK = (() => {
-  const { randomBytes } = require("crypto");
-  return randomBytes(32).toString("hex");
-})();
+const SESSION_SECRET_FALLBACK = randomBytes(32).toString("hex");
 
 export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week

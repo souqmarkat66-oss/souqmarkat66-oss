@@ -20,15 +20,18 @@ import express from "express";
 import * as webpushModule from "web-push";
 const webpush: typeof webpushModule = (webpushModule as any).default || webpushModule;
 
-// Convert snake_case DB row keys to camelCase for frontend
-function toCamel(row: any): any {
-  if (!row || typeof row !== 'object') return row;
-  return Object.fromEntries(
-    Object.entries(row).map(([k, v]) => [
-      k.replace(/_([a-z])/g, (_, c) => c.toUpperCase()),
-      v
-    ])
-  );
+// Deep-convert snake_case keys to camelCase recursively
+function deepToCamel(obj: any): any {
+  if (Array.isArray(obj)) return obj.map(deepToCamel);
+  if (obj && typeof obj === 'object' && !(obj instanceof Date)) {
+    return Object.fromEntries(
+      Object.entries(obj).map(([k, v]) => [
+        k.replace(/_([a-z])/g, (_, c) => c.toUpperCase()),
+        deepToCamel(v)
+      ])
+    );
+  }
+  return obj;
 }
 
 // Admin user ID
@@ -84,6 +87,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const proto = req.headers["x-forwarded-proto"] || "https";
       return res.redirect(301, `${proto}://${canonical}${req.url}`);
     }
+    next();
+  });
+
+  // ── Auto-convert all JSON responses: snake_case → camelCase ──
+  app.use((_req, res, next) => {
+    const orig = res.json.bind(res);
+    res.json = function(data: any) { return orig(deepToCamel(data)); };
     next();
   });
 
@@ -1049,7 +1059,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
         ORDER BY trending_score DESC
         LIMIT $1
       `, [limit]);
-      res.json(rows.rows.map(toCamel));
+      res.json(rows.rows);
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -1150,7 +1160,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
               ORDER BY created_at DESC LIMIT 50`
         );
       }
-      res.json(result.rows.map(toCamel));
+      res.json(result.rows);
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -1264,7 +1274,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       );
 
       res.json({
-        ads:   dataRes.rows.map(toCamel),
+        ads:   dataRes.rows,
         total,
         page,
         limit,
@@ -2475,7 +2485,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       } else {
         result = await db.execute(sql`SELECT * FROM ads ORDER BY created_at DESC LIMIT 50`);
       }
-      res.json(result.rows.map(toCamel));
+      res.json(result.rows);
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -3290,9 +3300,10 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.post("/api/ai/generate-viral-ad", isAuthenticated, checkAiCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const { productName, targetAudience, language } = req.body;
+      const { productName, adTitle, targetAudience, language } = req.body;
+      const productLabel = adTitle || productName || "المنتج";
       const prompt = language === 'ar'
-        ? `أنت خبير في صناعة الإعلانات الفيروسية على السوشيال ميديا في مصر. اكتب إعلاناً فيروسياً قوياً للمنتج: "${productName}" للجمهور: "${targetAudience || 'عام'}".
+        ? `أنت خبير في صناعة الإعلانات الفيروسية على السوشيال ميديا في مصر. اكتب إعلاناً فيروسياً قوياً للمنتج: "${productLabel}" للجمهور: "${targetAudience || 'عام'}".
 الإعلان الفيروسي يجب أن يحتوي على:
 - عنوان صادم يجعل الناس يتوقفون عن التمرير
 - جملة افتتاحية مثيرة للفضول أو العاطفة
@@ -4177,7 +4188,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const result = await db.execute(
         sql`SELECT * FROM ads WHERE user_id = ${userId} AND status = 'active' ORDER BY created_at DESC LIMIT 20`
       );
-      res.json(result.rows.map(toCamel));
+      res.json(result.rows);
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -4436,7 +4447,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
             )
             ORDER BY created_at DESC LIMIT 6`
       );
-      res.json(similar.rows.map(toCamel));
+      res.json(similar.rows);
     } catch { res.json([]); }
   });
 

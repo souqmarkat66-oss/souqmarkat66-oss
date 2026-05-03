@@ -1,0 +1,34 @@
+⚡ Done in 312ms
+[PM2] Applying action restartProcessId on app [all](ids: [ 0 ])
+[PM2] [ads-as](0) ✓
+┌────┬───────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┬──────────┬──────────┐
+│ id │ name      │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │ user     │ watching │
+├────┼───────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┼──────────┼──────────┤
+│ 0  │ ads-as    │ default     │ 1.0.0   │ fork    │ 2395     │ 0s     │ 8    │ online    │ 0%       │ 18.6mb   │ root     │ disabled │
+└────┴───────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
+[PM2] Saving current process list...
+[PM2] Successfully saved in /root/.pm2/dump.pm2
+root@srv1602266:~/server# python3 -c "
+file = '/root/server/server/routes.ts'
+with open(file,'r') as f: c=f.read()
+if 'function toCamel' not in c:
+    fn='\nfunction toCamel(row: any): any {\n  if (!row) return row;\n  return Object.fromEntries(Object.entries(row).map(([k,v])=>[k.replace(/_([a-z])/g,(_,x)=>x.toUpperCase()),v]));\n}\n'
+    c=c.replace('// Admin user ID',fn+'\n// Admin user ID',1)
+    print('ADDED toCamel')
+else: print('ALREADY EXISTS')
+fixes=[('res.json(rows.rows);','res.json(rows.rows.map(toCamel));'),('ads:   dataRes.rows,','ads:   dataRes.rows.map(toCamel),'),('res.json(similar.rows);','res.json(similar.rows.map(toCamel));')]
+for o,n in fixes:
+    if o in c: c=c.replace(o,n); print('fixed:',o[:45])
+    else: print('NOT FOUND:',o[:45])
+with open(file,'w') as f: f.write(c)
+print('DONE')
+"
+ALREADY EXISTS
+NOT FOUND: res.json(rows.rows);
+NOT FOUND: ads:   dataRes.rows,
+NOT FOUND: res.json(similar.rows);
+DONE
+root@srv1602266:~/server# curl -s "https://ads-as.com/api/ads?limit=1" | python3 -c "import sys,json;a=json.load(sys.stdin)['ads'][0];print('Fixed:','YES' if a.get('mediaUrl') else 'NO','| val:',a.get('mediaUrl','MISSING'))"
+
+Fixed: NO | val: MISSING
+root@srv1602266:~/server# 
