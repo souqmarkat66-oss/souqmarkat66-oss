@@ -2,10 +2,15 @@ import fs from "node:fs";
 import OpenAI, { toFile } from "openai";
 import { Buffer } from "node:buffer";
 
-export const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+// On Replit: use AI_INTEGRATIONS proxy. On VPS/production: fall back to real OpenAI key.
+const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.startsWith("sk-")
+  ? process.env.AI_INTEGRATIONS_OPENAI_API_KEY
+  : process.env.OPENAI_API_KEY;
+const baseURL = process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.startsWith("sk-")
+  ? process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+  : undefined;
+
+export const openai = new OpenAI({ apiKey, baseURL });
 
 /**
  * Generate an image and return as Buffer.

@@ -2,10 +2,15 @@ import type { Express, Request, Response } from "express";
 import OpenAI from "openai";
 import { chatStorage } from "./storage";
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+// On Replit: use AI_INTEGRATIONS proxy. On VPS/production: fall back to real OpenAI key.
+const _chatKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.startsWith("sk-")
+  ? process.env.AI_INTEGRATIONS_OPENAI_API_KEY
+  : process.env.OPENAI_API_KEY;
+const _chatBase = process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.startsWith("sk-")
+  ? process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+  : undefined;
+
+const openai = new OpenAI({ apiKey: _chatKey, baseURL: _chatBase });
 
 export function registerChatRoutes(app: Express): void {
   // Get all conversations
