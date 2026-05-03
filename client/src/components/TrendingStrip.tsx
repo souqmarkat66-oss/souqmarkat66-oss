@@ -32,9 +32,9 @@ function AdTrendCard({ ad, rank, index }: { ad: any; rank: number; index: number
         <div className="relative rounded-2xl overflow-hidden bg-muted border border-border/40 cursor-pointer hover:border-primary/40 hover:shadow-lg transition-all duration-200 group">
           {/* Thumbnail */}
           <div className="h-28 bg-gradient-to-br from-primary/10 to-muted relative">
-            {ad.media_url && !imgErr && ad.media_type !== "video" ? (
+            {ad.mediaUrl && !imgErr && ad.mediaType !== "video" ? (
               <img
-                src={ad.media_url}
+                src={ad.mediaUrl}
                 alt={ad.title}
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                 onError={() => setImgErr(true)}
@@ -139,8 +139,8 @@ function ChannelTrendCard({ ch, rank, index, liveIds }: { ch: any; rank: number;
           ${isLive ? "border-red-500/60 ring-2 ring-red-500/30" : "border-border/40 hover:border-primary/40 hover:shadow-lg"}`}>
           {/* Banner */}
           <div className="h-20 bg-gradient-to-br from-primary/20 to-secondary/20 relative overflow-hidden">
-            {ch.banner_url && (
-              <img src={ch.banner_url} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" alt="" />
+            {(ch.bannerUrl || ch.banner_url) && (
+              <img src={ch.bannerUrl || ch.banner_url} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" alt="" />
             )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
             <TrendBadge rank={rank} />
@@ -158,18 +158,18 @@ function ChannelTrendCard({ ch, rank, index, liveIds }: { ch: any; rank: number;
           {/* Avatar + info */}
           <div className="px-2 pb-2 -mt-4">
             <div className="w-10 h-10 rounded-full border-2 border-background bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white text-sm font-bold shadow-md mx-auto mb-1 overflow-hidden">
-              {ch.avatar_url
-                ? <img src={ch.avatar_url} className="w-full h-full object-cover" alt="" />
+              {(ch.avatarUrl || ch.avatar_url)
+                ? <img src={ch.avatarUrl || ch.avatar_url} className="w-full h-full object-cover" alt="" />
                 : <span>{ch.name?.[0]?.toUpperCase()}</span>}
             </div>
             <div className="text-center">
               <div className="flex items-center justify-center gap-0.5">
                 <p className="text-[11px] font-bold line-clamp-1">{ch.name}</p>
-                {ch.is_verified && <CheckCircle className="w-2.5 h-2.5 text-primary shrink-0" />}
+                {(ch.isVerified || ch.is_verified) && <CheckCircle className="w-2.5 h-2.5 text-primary shrink-0" />}
               </div>
               <div className="flex items-center justify-center gap-1.5 mt-0.5">
                 <span className="flex items-center gap-0.5 text-[9px] text-muted-foreground">
-                  <Users className="w-2 h-2" /> {(ch.subscriber_count || 0).toLocaleString()}
+                  <Users className="w-2 h-2" /> {(ch.subscriberCount || ch.subscriber_count || 0).toLocaleString()}
                 </span>
               </div>
             </div>

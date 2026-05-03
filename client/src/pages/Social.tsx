@@ -476,8 +476,8 @@ export default function Social() {
                   </span>
                 </div>
                 <div className="flex gap-3 p-3">
-                  {ad.media_url && (
-                    <img src={ad.media_url} alt={ad.title} className="w-16 h-16 rounded-xl object-cover flex-shrink-0" />
+                  {(ad.mediaUrl || ad.media_url) && (
+                    <img src={ad.mediaUrl || ad.media_url} alt={ad.title} className="w-16 h-16 rounded-xl object-cover flex-shrink-0" />
                   )}
                   <div className="min-w-0">
                     <div className="flex items-center gap-1 mb-0.5">

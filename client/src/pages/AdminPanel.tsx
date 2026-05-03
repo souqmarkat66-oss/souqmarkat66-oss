@@ -710,13 +710,13 @@ function AdsSection({ logAction }: { logAction: any }) {
             <div className="space-y-2">
               {promoAds.map((ad: any) => (
                 <div key={ad.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-background border border-emerald-100">
-                  {ad.media_url && ad.media_type === "image" && (
-                    <img src={ad.media_url} alt="" className="w-12 h-12 rounded-lg object-cover flex-shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                  {(ad.mediaUrl || ad.media_url) && (ad.mediaType || ad.media_type) === "image" && (
+                    <img src={ad.mediaUrl || ad.media_url} alt="" className="w-12 h-12 rounded-lg object-cover flex-shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
                   )}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold truncate">{ad.title}</p>
                     <p className="text-xs text-muted-foreground truncate">{ad.description}</p>
-                    {ad.price_egp && <p className="text-xs text-emerald-600 font-bold">{ad.price_egp} ج.م</p>}
+                    {(ad.priceEgp || ad.price_egp) && <p className="text-xs text-emerald-600 font-bold">{ad.priceEgp || ad.price_egp} ج.م</p>}
                   </div>
                   <Button size="sm" variant="destructive" className="text-xs flex-shrink-0" onClick={() => { if (confirm("حذف الإعلان الترويجي؟")) deletePromo.mutate(ad.id); }} data-testid={`btn-delete-promo-ad-${ad.id}`}>
                     <Trash2 className="w-3 h-3" />
@@ -748,7 +748,7 @@ function AdsSection({ logAction }: { logAction: any }) {
                     <div className="flex items-center gap-2 mb-1"><Badge variant="outline" className="text-xs">تعديل #{ad.id}</Badge></div>
                     <Input value={editForm.title ?? ad.title} onChange={e => setEditForm((f: any) => ({ ...f, title: e.target.value }))} placeholder="العنوان" />
                     <div className="grid grid-cols-2 gap-3">
-                      <Input type="number" step="0.5" value={editForm.priceEGP ?? (ad.price_egp || "")} onChange={e => setEditForm((f: any) => ({ ...f, priceEGP: e.target.value }))} placeholder="السعر (ج.م)" />
+                      <Input type="number" step="0.5" value={editForm.priceEGP ?? (ad.priceEgp || ad.price_egp || "")} onChange={e => setEditForm((f: any) => ({ ...f, priceEGP: e.target.value }))} placeholder="السعر (ج.م)" />
                       <Select value={editForm.status ?? ad.status} onValueChange={v => setEditForm((f: any) => ({ ...f, status: v }))}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
@@ -767,8 +767,8 @@ function AdsSection({ logAction }: { logAction: any }) {
                   </div>
                 ) : (
                   <div className="flex items-center gap-3">
-                    {ad.media_url && ad.media_type === "image" && (
-                      <img src={ad.media_url} alt="" className="w-14 h-14 rounded-xl object-cover bg-muted flex-shrink-0" />
+                    {(ad.mediaUrl || ad.media_url) && (ad.mediaType || ad.media_type) === "image" && (
+                      <img src={ad.mediaUrl || ad.media_url} alt="" className="w-14 h-14 rounded-xl object-cover bg-muted flex-shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -777,14 +777,14 @@ function AdsSection({ logAction }: { logAction: any }) {
                       </div>
                       <div className="flex gap-3 text-xs text-muted-foreground flex-wrap">
                         <span>#{ad.id}</span>
-                        {ad.price_egp && <span className="text-green-600 font-medium">{ad.price_egp} ج.م</span>}
-                        <span>👁️ {ad.views_count || 0}</span>
-                        <span>❤️ {ad.likes_count || 0}</span>
-                        <span>{ad.created_at ? format(new Date(ad.created_at), "dd/MM/yyyy", { locale: ar }) : ""}</span>
+                        {(ad.priceEgp || ad.price_egp) && <span className="text-green-600 font-medium">{ad.priceEgp || ad.price_egp} ج.م</span>}
+                        <span>👁️ {ad.viewsCount || ad.views_count || 0}</span>
+                        <span>❤️ {ad.likesCount || ad.likes_count || 0}</span>
+                        <span>{(ad.createdAt || ad.created_at) ? format(new Date(ad.createdAt || ad.created_at), "dd/MM/yyyy", { locale: ar }) : ""}</span>
                       </div>
                     </div>
                     <div className="flex gap-1.5 flex-shrink-0">
-                      <Button size="sm" variant="outline" className="text-xs" onClick={() => { setEditId(ad.id); setEditForm({ title: ad.title, priceEGP: ad.price_egp || "", status: ad.status }); }}>
+                      <Button size="sm" variant="outline" className="text-xs" onClick={() => { setEditId(ad.id); setEditForm({ title: ad.title, priceEGP: ad.priceEgp || ad.price_egp || "", status: ad.status }); }}>
                         <Edit2 className="w-3 h-3" />
                       </Button>
                       <Button size="sm" variant={ad.status === "active" ? "secondary" : "default"} className="text-xs"
@@ -850,9 +850,9 @@ function ReelsSection({ logAction }: { logAction: any }) {
               <CardContent className="p-3">
                 <div className="font-semibold text-sm truncate mb-1">{r.title}</div>
                 <div className="flex gap-3 text-xs text-muted-foreground mb-3">
-                  <span>👁️ {r.views_count || 0}</span>
-                  <span>❤️ {r.likes_count || 0}</span>
-                  <span>💬 {r.comments_count || 0}</span>
+                  <span>👁️ {r.viewsCount || r.views_count || 0}</span>
+                  <span>❤️ {r.likesCount || r.likes_count || 0}</span>
+                  <span>💬 {r.commentsCount || r.comments_count || 0}</span>
                 </div>
                 <div className="flex gap-1.5">
                   <Button size="sm" variant="outline" className="flex-1 text-xs"

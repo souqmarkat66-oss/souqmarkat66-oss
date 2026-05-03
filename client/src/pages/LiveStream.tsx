@@ -1596,7 +1596,7 @@ export default function LiveStream() {
             >
               {/* Ad thumbnail */}
               <img
-                src={ad.media_url}
+                src={ad.mediaUrl || ad.media_url}
                 alt={ad.title}
                 className="w-14 h-14 rounded-xl object-cover flex-shrink-0 border border-white/10"
               />
@@ -1606,15 +1606,15 @@ export default function LiveStream() {
                   <span className="text-[9px] text-yellow-400 font-bold bg-yellow-400/15 rounded px-1 py-0.5">إعلان</span>
                 </div>
                 <p className="text-white text-xs font-bold truncate leading-tight">{ad.title}</p>
-                {ad.price_egp && (
-                  <p className="text-green-400 text-[11px] font-bold">{Number(ad.price_egp).toLocaleString("ar-EG")} ج.م</p>
+                {(ad.priceEgp || ad.price_egp) && (
+                  <p className="text-green-400 text-[11px] font-bold">{Number(ad.priceEgp || ad.price_egp).toLocaleString("ar-EG")} ج.م</p>
                 )}
               </div>
               {/* CTA button */}
               <div className="flex flex-col gap-1.5 flex-shrink-0">
-                {ad.whatsapp_number ? (
+                {(ad.whatsappNumber || ad.whatsapp_number) ? (
                   <a
-                    href={`https://wa.me/${ad.whatsapp_number.replace(/\D/g, "")}`}
+                    href={`https://wa.me/${(ad.whatsappNumber || ad.whatsapp_number).replace(/\D/g, "")}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-1 bg-green-500 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-xl"
