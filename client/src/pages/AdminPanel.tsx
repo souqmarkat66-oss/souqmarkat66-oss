@@ -1498,6 +1498,9 @@ function BroadcastSection({ logAction }: { logAction: any }) {
 function SettingsSection({ logAction }: { logAction: any }) {
   const { toast } = useToast();
   const [form, setForm] = useState<Record<string, string>>({});
+  const [search, setSearch] = useState("");
+  const [autoSaveTimer, setAutoSaveTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
 
   const { data: settings, refetch } = useQuery<Record<string, string>>({
     queryKey: ["/api/settings"],
@@ -1507,11 +1510,26 @@ function SettingsSection({ logAction }: { logAction: any }) {
   const save = useMutation({
     mutationFn: (data: Record<string, string>) =>
       fetch("/api/settings/bulk", { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }).then(r => r.json()),
-    onSuccess: () => { refetch(); setForm({}); toast({ title: "✅ تم حفظ الإعدادات" }); logAction("update_settings", "platform_settings", JSON.stringify(Object.keys(form))); },
+    onSuccess: (_, data) => {
+      refetch();
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2000);
+      logAction("update_settings", "platform_settings", JSON.stringify(Object.keys(data)));
+    },
   });
 
   const get = (key: string, def: string) => form[key] !== undefined ? form[key] : (settings?.[key] ?? def);
-  const set = (key: string, val: string) => setForm(f => ({ ...f, [key]: val }));
+
+  const set = (key: string, val: string) => {
+    const updated = { ...form, [key]: val };
+    setForm(updated);
+    setSaveStatus("saving");
+    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    const timer = setTimeout(() => {
+      save.mutate(updated);
+    }, 800);
+    setAutoSaveTimer(timer);
+  };
 
   const toggleFeature = async (key: string, current: string) => {
     const newVal = current === "1" ? "0" : "1";
@@ -1525,6 +1543,8 @@ function SettingsSection({ logAction }: { logAction: any }) {
     toast({ title: newVal === "1" ? `✅ تم تفعيل الخاصية` : `⏸️ تم إيقاف الخاصية` });
   };
 
+  const q = search.trim().toLowerCase();
+
   const features = [
     { key: "feature_reels",         label: "ريلز",            desc: "السماح برفع ومشاهدة الريلز",           icon: Film },
     { key: "feature_livestream",    label: "البث المباشر",    desc: "السماح بإنشاء وعرض البث المباشر",       icon: Radio },
@@ -1535,7 +1555,7 @@ function SettingsSection({ logAction }: { logAction: any }) {
     { key: "feature_ads",           label: "الإعلانات",        desc: "عرض ونشر الإعلانات على المنصة",        icon: Megaphone },
     { key: "feature_campaigns",     label: "الحملات الإعلانية", desc: "إنشاء وتشغيل الحملات المدفوعة",      icon: BarChart2 },
     { key: "boost_enabled",         label: "تعزيز الإعلانات 🚀", desc: "السماح لأصحاب الإعلانات بتعزيز إعلاناتهم (مرة كل 30 يوم)", icon: Zap },
-  ];
+  ].filter(f => !q || f.label.includes(q) || f.desc.includes(q) || f.key.includes(q));
 
   const numFields = [
     { key: "cpm_rate_egp",            label: "سعر الألف مشاهدة (CPM)",       suffix: "ج.م",         default: "15",   group: "الأسعار" },
@@ -1545,58 +1565,110 @@ function SettingsSection({ logAction }: { logAction: any }) {
     { key: "ai_free_credits",         label: "رصيد AI المجاني (يوزر جديد)",  suffix: "رصيد",        default: "3",    group: "الذكاء الاصطناعي" },
     { key: "ai_price_per_credit_egp", label: "سعر رصيد AI الإضافي",          suffix: "ج.م/رصيد",   default: "5",    group: "الذكاء الاصطناعي" },
     { key: "coupon_price_egp",        label: "سعر توليد كوبون بالـ AI 🎟️",  suffix: "ج.م",         default: "15",   group: "الكوبونات" },
-  ];
+  ].filter(f => !q || f.label.includes(q) || f.group.includes(q) || f.key.includes(q));
 
+  const infoFields = [
+    { key: "platform_name",       label: "اسم المنصة",               group: "هوية المنصة",              default: "شبكة سوق للإعلانات",                                            dir: "rtl" as const },
+    { key: "platform_tagline",    label: "شعار المنصة (tagline)",    group: "هوية المنصة",              default: "أفضل منصة إعلانية في مصر والعالم العربي",                      dir: "rtl" as const },
+    { key: "app_play_store",      label: "Google Play",              group: "روابط التطبيق",            default: "https://play.google.com/store/apps/details?id=com.apmo.souqmarket", dir: "ltr" as const },
+    { key: "app_app_store",       label: "App Store (iOS)",          group: "روابط التطبيق",            default: "https://apps.apple.com/eg/app/as-souqmarket/id6740153334",          dir: "ltr" as const },
+    { key: "app_huawei",          label: "AppGallery (Huawei)",      group: "روابط التطبيق",            default: "https://app.as-souqmarkat.com/?from-splash=false",                  dir: "ltr" as const },
+    { key: "contact_whatsapp",    label: "رقم واتساب الدعم",         group: "أرقام التواصل والدفع",     default: "",                                                                 dir: "ltr" as const },
+    { key: "contact_vodafone_cash", label: "رقم فودافون كاش",       group: "أرقام التواصل والدفع",     default: "01098553911",                                                      dir: "ltr" as const },
+    { key: "contact_instapay",    label: "رقم إنستاباي",             group: "أرقام التواصل والدفع",     default: "",                                                                 dir: "ltr" as const },
+  ].filter(f => !q || f.label.includes(q) || f.group.includes(q) || f.key.includes(q));
+
+  const bannerMatches = !q || "شريط الإعلان".includes(q) || "promo_banner".includes(q) || "بانر".includes(q) || "شريط".includes(q);
   const groups = Array.from(new Set(numFields.map(f => f.group)));
+  const infoGroups = Array.from(new Set(infoFields.map(f => f.group)));
+  const noResults = features.length === 0 && numFields.length === 0 && infoFields.length === 0 && !bannerMatches;
 
   return (
     <div className="max-w-2xl space-y-6">
 
+      {/* ── Live Search Bar ── */}
+      <div className="relative">
+        <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+        <Input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="ابحث في الإعدادات… (مثال: CPM، واتساب، البث)"
+          className="pr-9 text-sm"
+          data-testid="settings-search"
+        />
+        {search && (
+          <button onClick={() => setSearch("")} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+            <XCircle className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
+      {/* ── Auto-save status ── */}
+      {saveStatus !== "idle" && (
+        <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg font-medium transition-all
+          ${saveStatus === "saving" ? "bg-yellow-500/10 text-yellow-600" : "bg-green-500/10 text-green-600"}`}>
+          {saveStatus === "saving"
+            ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> جارٍ الحفظ التلقائي…</>
+            : <><CheckCircle className="w-3.5 h-3.5" /> تم الحفظ تلقائياً ✅</>
+          }
+        </div>
+      )}
+
+      {/* ── No results ── */}
+      {noResults && (
+        <div className="text-center py-12 text-muted-foreground">
+          <Search className="w-8 h-8 mx-auto mb-2 opacity-40" />
+          <p className="text-sm">لا توجد نتائج لـ "<strong>{search}</strong>"</p>
+        </div>
+      )}
+
       {/* ── Feature Toggles ── */}
-      <Card className="rounded-2xl">
-        <CardHeader>
-          <CardTitle className="text-sm flex items-center gap-2">
-            <ToggleRight className="w-4 h-4 text-primary" />
-            تفعيل / إيقاف الخصائص
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">التغييرات تؤثر فوراً على جميع المستخدمين</p>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {features.map(({ key, label, desc, icon: Icon }) => {
-            const isOn = get(key, "1") === "1";
-            return (
-              <div
-                key={key}
-                onClick={() => toggleFeature(key, get(key, "1"))}
-                data-testid={`toggle-${key}`}
-                className={`flex items-center justify-between p-3 rounded-xl border-2 cursor-pointer transition-all select-none
-                  ${isOn
-                    ? "border-green-500/40 bg-green-500/5 hover:bg-green-500/10"
-                    : "border-red-400/30 bg-red-500/5 hover:bg-red-500/10"
-                  }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isOn ? "bg-green-500/20" : "bg-red-400/20"}`}>
-                    <Icon className={`w-5 h-5 ${isOn ? "text-green-600" : "text-red-400"}`} />
-                  </div>
-                  <div>
-                    <p className={`text-sm font-bold ${isOn ? "text-foreground" : "text-muted-foreground"}`}>{label}</p>
-                    <p className="text-xs text-muted-foreground">{desc}</p>
-                  </div>
-                </div>
-                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold
-                  ${isOn ? "bg-green-500 text-white" : "bg-red-400/80 text-white"}`}
+      {features.length > 0 && (
+        <Card className="rounded-2xl">
+          <CardHeader>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <ToggleRight className="w-4 h-4 text-primary" />
+              تفعيل / إيقاف الخصائص
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">التغييرات تؤثر فوراً على جميع المستخدمين</p>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {features.map(({ key, label, desc, icon: Icon }) => {
+              const isOn = get(key, "1") === "1";
+              return (
+                <div
+                  key={key}
+                  onClick={() => toggleFeature(key, get(key, "1"))}
+                  data-testid={`toggle-${key}`}
+                  className={`flex items-center justify-between p-3 rounded-xl border-2 cursor-pointer transition-all select-none
+                    ${isOn
+                      ? "border-green-500/40 bg-green-500/5 hover:bg-green-500/10"
+                      : "border-red-400/30 bg-red-500/5 hover:bg-red-500/10"
+                    }`}
                 >
-                  {isOn
-                    ? <><CheckCircle className="w-3.5 h-3.5" /> ظاهر</>
-                    : <><XCircle className="w-3.5 h-3.5" /> مخفي</>
-                  }
+                  <div className="flex items-center gap-3">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isOn ? "bg-green-500/20" : "bg-red-400/20"}`}>
+                      <Icon className={`w-5 h-5 ${isOn ? "text-green-600" : "text-red-400"}`} />
+                    </div>
+                    <div>
+                      <p className={`text-sm font-bold ${isOn ? "text-foreground" : "text-muted-foreground"}`}>{label}</p>
+                      <p className="text-xs text-muted-foreground">{desc}</p>
+                    </div>
+                  </div>
+                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold
+                    ${isOn ? "bg-green-500 text-white" : "bg-red-400/80 text-white"}`}
+                  >
+                    {isOn
+                      ? <><CheckCircle className="w-3.5 h-3.5" /> ظاهر</>
+                      : <><XCircle className="w-3.5 h-3.5" /> مخفي</>
+                    }
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── Numeric Settings ── */}
       {groups.map(group => (
@@ -1623,133 +1695,94 @@ function SettingsSection({ logAction }: { logAction: any }) {
       ))}
 
       {/* ── Platform Info Settings ── */}
-      <Card className="rounded-2xl">
-        <CardHeader>
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Globe className="w-4 h-4 text-primary" />
-            معلومات المنصة والتواصل
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">تعديل اسم المنصة وروابط التطبيق وأرقام التواصل — تُطبَّق فوراً</p>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          {/* Platform Identity */}
-          <div className="space-y-3">
-            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">هوية المنصة</p>
-            <div>
-              <label className="text-xs font-medium block mb-1">اسم المنصة</label>
-              <Input value={get("platform_name", "شبكة سوق للإعلانات")} onChange={e => set("platform_name", e.target.value)} placeholder="شبكة سوق للإعلانات" data-testid="setting-platform-name" />
-            </div>
-            <div>
-              <label className="text-xs font-medium block mb-1">شعار المنصة (tagline)</label>
-              <Input value={get("platform_tagline", "أفضل منصة إعلانية في مصر والعالم العربي")} onChange={e => set("platform_tagline", e.target.value)} placeholder="أفضل منصة إعلانية..." data-testid="setting-platform-tagline" />
-            </div>
-          </div>
+      {infoFields.length > 0 && (
+        <Card className="rounded-2xl">
+          <CardHeader>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Globe className="w-4 h-4 text-primary" />
+              معلومات المنصة والتواصل
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">تعديل اسم المنصة وروابط التطبيق وأرقام التواصل — تُطبَّق فوراً</p>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {infoGroups.map(group => (
+              <div key={group} className="space-y-3">
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">{group}</p>
+                {infoFields.filter(f => f.group === group).map(field => (
+                  <div key={field.key}>
+                    <label className="text-xs font-medium block mb-1">{field.label}</label>
+                    <Input
+                      dir={field.dir}
+                      value={get(field.key, field.default)}
+                      onChange={e => set(field.key, e.target.value)}
+                      placeholder={field.default}
+                      data-testid={`setting-${field.key}`}
+                      className="text-xs"
+                    />
+                  </div>
+                ))}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
-          {/* App Store Links */}
-          <div className="space-y-3">
-            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">روابط تطبيق سوق ماركات</p>
-            <div>
-              <label className="text-xs font-medium block mb-1 flex items-center gap-1">
-                <span className="w-4 h-4 rounded bg-[#01875f] inline-flex items-center justify-center"><span className="text-white text-[8px]">▶</span></span>
-                Google Play
-              </label>
-              <Input dir="ltr" value={get("app_play_store", "https://play.google.com/store/apps/details?id=com.apmo.souqmarket")} onChange={e => set("app_play_store", e.target.value)} data-testid="setting-app-play-store" className="text-xs" />
+      {/* ── Promo Banner ── */}
+      {bannerMatches && (
+        <Card className="border-amber-500/40 bg-amber-50/30 dark:bg-amber-950/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <span className="text-amber-500">📢</span>
+              شريط الإعلان المتحرك (سوق ماركات)
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">شريط يظهر في أعلى الصفحة الرئيسية — يمكن تفعيله وتغيير نصه حسب العروض</p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium">إظهار الشريط</label>
+              <button
+                type="button"
+                onClick={() => set("promo_banner_enabled", get("promo_banner_enabled", "1") === "1" ? "0" : "1")}
+                data-testid="toggle-promo-banner"
+                className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${get("promo_banner_enabled", "1") === "1" ? "bg-green-500 text-white" : "bg-red-500 text-white"}`}
+              >
+                {get("promo_banner_enabled", "1") === "1" ? "✓ ظاهر" : "✗ مخفي"}
+              </button>
             </div>
             <div>
-              <label className="text-xs font-medium block mb-1 flex items-center gap-1">
-                <span className="w-4 h-4 rounded bg-gray-800 inline-flex items-center justify-center"><span className="text-white text-[8px]"></span></span>
-                App Store (iOS)
-              </label>
-              <Input dir="ltr" value={get("app_app_store", "https://apps.apple.com/eg/app/as-souqmarket/id6740153334")} onChange={e => set("app_app_store", e.target.value)} data-testid="setting-app-app-store" className="text-xs" />
+              <label className="text-xs font-medium block mb-1">نص الشريط (افصل بين الجمل بـ |)</label>
+              <textarea
+                value={get("promo_banner_text", "")}
+                onChange={e => set("promo_banner_text", e.target.value)}
+                rows={3}
+                data-testid="setting-promo-banner-text"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary"
+                placeholder="🎉 عرض خاص | قسّط على 18 شهر | حمّل التطبيق الآن"
+              />
             </div>
             <div>
-              <label className="text-xs font-medium block mb-1 flex items-center gap-1">
-                <span className="w-4 h-4 rounded bg-[#cf0a2c] inline-flex items-center justify-center"><span className="text-white text-[8px]">H</span></span>
-                AppGallery (Huawei)
-              </label>
-              <Input dir="ltr" value={get("app_huawei", "https://app.as-souqmarkat.com/?from-splash=false")} onChange={e => set("app_huawei", e.target.value)} data-testid="setting-app-huawei" className="text-xs" />
+              <label className="text-xs font-medium block mb-1">رابط الضغط على الشريط</label>
+              <input
+                type="url" dir="ltr"
+                value={get("promo_banner_url", "https://play.google.com/store/apps/details?id=com.apmo.souqmarket")}
+                onChange={e => set("promo_banner_url", e.target.value)}
+                data-testid="setting-promo-banner-url"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                placeholder="https://play.google.com/store/apps/details?id=..."
+              />
             </div>
-          </div>
+            {get("promo_banner_enabled", "1") === "1" && get("promo_banner_text", "") && (
+              <div className="overflow-hidden rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 py-2 px-4">
+                <p className="text-white text-xs font-bold text-center truncate">{get("promo_banner_text", "")}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
-          {/* Contact Numbers */}
-          <div className="space-y-3">
-            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">أرقام التواصل والدفع</p>
-            <div>
-              <label className="text-xs font-medium block mb-1">رقم واتساب الدعم</label>
-              <Input dir="ltr" value={get("contact_whatsapp", "")} onChange={e => set("contact_whatsapp", e.target.value)} placeholder="201234567890" data-testid="setting-contact-whatsapp" />
-            </div>
-            <div>
-              <label className="text-xs font-medium block mb-1">رقم فودافون كاش</label>
-              <Input dir="ltr" value={get("contact_vodafone_cash", "01098553911")} onChange={e => set("contact_vodafone_cash", e.target.value)} placeholder="01xxxxxxxxx" data-testid="setting-contact-vodafone" />
-            </div>
-            <div>
-              <label className="text-xs font-medium block mb-1">رقم إنستاباي</label>
-              <Input dir="ltr" value={get("contact_instapay", "")} onChange={e => set("contact_instapay", e.target.value)} placeholder="01xxxxxxxxx" data-testid="setting-contact-instapay" />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Promo Banner */}
-      <Card className="border-amber-500/40 bg-amber-50/30 dark:bg-amber-950/20">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <span className="text-amber-500">📢</span>
-            شريط الإعلان المتحرك (سوق ماركات)
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">شريط يظهر في أعلى الصفحة الرئيسية — يمكن تفعيله وتغيير نصه حسب العروض</p>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium">إظهار الشريط</label>
-            <button
-              type="button"
-              onClick={() => set("promo_banner_enabled", get("promo_banner_enabled", "1") === "1" ? "0" : "1")}
-              data-testid="toggle-promo-banner"
-              className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${get("promo_banner_enabled", "1") === "1" ? "bg-green-500 text-white" : "bg-red-500 text-white"}`}
-            >
-              {get("promo_banner_enabled", "1") === "1" ? "✓ ظاهر" : "✗ مخفي"}
-            </button>
-          </div>
-          <div>
-            <label className="text-xs font-medium block mb-1">نص الشريط (افصل بين الجمل بـ |)</label>
-            <textarea
-              value={get("promo_banner_text", "")}
-              onChange={e => set("promo_banner_text", e.target.value)}
-              rows={3}
-              data-testid="setting-promo-banner-text"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary"
-              placeholder="🎉 عرض خاص | قسّط على 18 شهر | حمّل التطبيق الآن"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium block mb-1">رابط الضغط على الشريط (رابط تحميل التطبيق)</label>
-            <input
-              type="url"
-              dir="ltr"
-              value={get("promo_banner_url", "https://play.google.com/store/apps/details?id=com.apmo.souqmarket")}
-              onChange={e => set("promo_banner_url", e.target.value)}
-              data-testid="setting-promo-banner-url"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              placeholder="https://play.google.com/store/apps/details?id=..."
-            />
-          </div>
-          {get("promo_banner_enabled", "1") === "1" && get("promo_banner_text", "") && (
-            <div className="overflow-hidden rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 py-2 px-4">
-              <p className="text-white text-xs font-bold text-center truncate">{get("promo_banner_text", "")}</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Button
-        className="w-full gap-2" disabled={Object.keys(form).length === 0 || save.isPending}
-        onClick={() => save.mutate(form)} data-testid="btn-save-settings"
-      >
-        {save.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-        حفظ جميع الإعدادات
-      </Button>
-      <p className="text-xs text-muted-foreground text-center">تغيير سعر CPM يؤثر على الحملات الجديدة فقط</p>
+      <p className="text-xs text-muted-foreground text-center pb-4">
+        💾 الحفظ تلقائي فور التعديل — تغيير سعر CPM يؤثر على الحملات الجديدة فقط
+      </p>
     </div>
   );
 }
