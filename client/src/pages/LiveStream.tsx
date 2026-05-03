@@ -97,7 +97,7 @@ export default function LiveStream() {
   const [showHandsList,   setShowHandsList]   = useState(false);
 
   // RTMP mode state
-  const [broadcastMode,   setBroadcastMode]   = useState<"webrtc"|"rtmp">("webrtc");
+  const [broadcastMode,   setBroadcastMode]   = useState<"webrtc"|"rtmp"|null>(null);
   const [rtmpKey,         setRtmpKey]         = useState<string>("");
   const [rtmpUrl,         setRtmpUrl]         = useState<string>("rtmp://ads-as.com/live");
   const [copiedKey,       setCopiedKey]       = useState(false);
@@ -571,9 +571,10 @@ export default function LiveStream() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adVisible, streamAds]);
 
-  /* ─── auto-start WebRTC camera ──────────────────────── */
+  /* ─── auto-start WebRTC camera (fires only when user explicitly picks webrtc mode) ─── */
   useEffect(() => {
     if (!isBroadcast || broadcastMode !== "webrtc" || streamStarted.current) return;
+    // broadcastMode is set to "webrtc" only from user button click — safe to call getUserMedia
     streamStarted.current = true;
     (async () => {
       const ms = await startCamera(camFacing);
@@ -1026,28 +1027,19 @@ export default function LiveStream() {
     );
   }
 
-  /* ═══ MODE PICKER for broadcaster ═══════════════════════ */
-  if (isBroadcast && !streamStarted.current && broadcastMode === "webrtc" && !streaming) {
+  /* ═══ MODE PICKER for broadcaster — shows on first entry (broadcastMode === null) ═══ */
+  if (isBroadcast && broadcastMode === null && !streaming) {
     return (
       <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-50 p-6 gap-5" dir="rtl">
         <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mb-2">
           <Video className="w-8 h-8 text-red-400" />
         </div>
         <h2 className="text-white text-xl font-bold">اختر طريقة البث</h2>
+        <p className="text-white/60 text-sm text-center">اضغط على طريقة البث وسيطلب المتصفح إذن الكاميرا والميكروفون</p>
         <div className="flex flex-col gap-3 w-full max-w-xs">
           <button
             onClick={() => {
-              streamStarted.current = true;
               setBroadcastMode("webrtc");
-              // trigger camera start
-              (async () => {
-                const ms = await startCamera(camFacing);
-                if (!ms) return;
-                setStreaming(true);
-                socketRef.current?.emit("broadcaster", id);
-                await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
-                toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء الآن" });
-              })();
             }}
             className="w-full py-4 rounded-2xl bg-white text-black font-bold text-base flex items-center justify-center gap-2"
             data-testid="btn-start-webrtc"
