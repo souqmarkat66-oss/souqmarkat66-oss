@@ -9,7 +9,7 @@ import {
   WifiOff, Volume2, VolumeX, FlipHorizontal,
   Copy, Check, Radio, Monitor, UserPlus, Users,
   Loader2, X, CheckCircle, XCircle,
-  Share2, Gift, Megaphone,
+  Share2, Gift, Megaphone, Swords, Trophy, Timer,
 } from "lucide-react";
 import { SiWhatsapp, SiFacebook, SiX, SiTelegram, SiInstagram, SiTiktok, SiSnapchat } from "react-icons/si";
 import { Button } from "@/components/ui/button";
@@ -72,6 +72,21 @@ export default function LiveStream() {
   // Video swap state (tap PiP to swap with main screen)
   const [swappedCohostId, setSwappedCohostId] = useState<string>(""); // broadcaster: which cohost is full-screen
   const [selfCamSwapped,  setSelfCamSwapped]  = useState(false);       // viewer: own cam is full-screen
+
+  // ── Battle (معركة) state ──────────────────────────────────
+  const MAX_COHOSTS = 8;
+  const [battleActive,    setBattleActive]    = useState(false);
+  const [battleMode,      setBattleMode]      = useState<"1v1"|"2v2">("1v1");
+  const [battleScoreA,    setBattleScoreA]    = useState(0); // Team A = broadcaster side
+  const [battleScoreB,    setBattleScoreB]    = useState(0); // Team B = guest side
+  const [battleSecs,      setBattleSecs]      = useState(120);
+  const [battleRunning,   setBattleRunning]   = useState(false);
+  const [battleWinner,    setBattleWinner]    = useState<"A"|"B"|"draw"|null>(null);
+  const [giftTeamChoice,  setGiftTeamChoice]  = useState<"A"|"B">("A"); // viewer's chosen side
+  const [showBattleSetup, setShowBattleSetup] = useState(false);
+  const battleScoreARef   = useRef(0);
+  const battleScoreBRef   = useRef(0);
+  const battleTimerRef    = useRef<ReturnType<typeof setInterval>|null>(null);
 
   // Share & Gift state
   const [showShare,       setShowShare]       = useState(false);
@@ -501,13 +516,21 @@ export default function LiveStream() {
     }
 
     // ── Gift events (both broadcaster and viewer) ──
-    socket.on("stream-gift", (data: { id: number; giftEmoji: string; giftName: string; giftCoins: number; userName: string }) => {
+    socket.on("stream-gift", (data: { id: number; giftEmoji: string; giftName: string; giftCoins: number; userName: string; battleTeam?: "A"|"B" }) => {
       const x = 10 + Math.random() * 60;
       const flyId = Date.now() + Math.random();
       setFlyingGifts(prev => [...prev, { id: flyId, emoji: data.giftEmoji, x }]);
       setTimeout(() => setFlyingGifts(prev => prev.filter(g => g.id !== flyId)), 3000);
       if (isBroadcast) {
         toast({ title: `🎁 هدية من ${data.userName}!`, description: `${data.giftEmoji} ${data.giftName} — ${data.giftCoins} عملة` });
+      }
+      // Battle scoring — score-only, NOT added to balance
+      if (data.battleTeam === "A") {
+        battleScoreARef.current += data.giftCoins;
+        setBattleScoreA(battleScoreARef.current);
+      } else if (data.battleTeam === "B") {
+        battleScoreBRef.current += data.giftCoins;
+        setBattleScoreB(battleScoreBRef.current);
       }
     });
 
@@ -690,6 +713,10 @@ export default function LiveStream() {
   };
 
   const acceptCoHost = (socketId: string, userName: string) => {
+    if (activeCoHosts.length >= MAX_COHOSTS) {
+      toast({ title: "الحد الأقصى للضيوف", description: `يمكن قبول ${MAX_COHOSTS} ضيوف كحد أقصى`, variant: "destructive" });
+      return;
+    }
     const req = coHostRequests.find(r => r.socketId === socketId);
     socketRef.current?.emit("accept-cohost", { streamId: id, guestSocketId: socketId, guestName: userName });
     setCoHostRequests(prev => prev.filter(r => r.socketId !== socketId));
@@ -791,6 +818,43 @@ export default function LiveStream() {
     setPayLoading(false);
   };
 
+  /* ─── Battle helpers ─────────────────────────────────── */
+  const startBattle = (mode: "1v1"|"2v2") => {
+    setBattleMode(mode);
+    setBattleScoreA(0); setBattleScoreB(0);
+    battleScoreARef.current = 0; battleScoreBRef.current = 0;
+    setBattleSecs(120); setBattleWinner(null);
+    setBattleActive(true); setBattleRunning(true);
+    setShowBattleSetup(false);
+    socketRef.current?.emit("battle-start", { streamId: id, mode });
+    toast({ title: "⚔️ المعركة بدأت!", description: `وضع ${mode === "1v1" ? "1 ضد 1" : "2 ضد 2"} — مدة 2 دقيقة` });
+  };
+
+  const endBattle = () => {
+    if (battleTimerRef.current) clearInterval(battleTimerRef.current);
+    setBattleRunning(false);
+    const winner = battleScoreARef.current > battleScoreBRef.current ? "A"
+                 : battleScoreBRef.current > battleScoreARef.current ? "B" : "draw";
+    setBattleWinner(winner);
+    socketRef.current?.emit("battle-end", { streamId: id, winner, scoreA: battleScoreARef.current, scoreB: battleScoreBRef.current });
+    setTimeout(() => { setBattleActive(false); setBattleWinner(null); }, 5000);
+  };
+
+  // Battle countdown timer
+  useEffect(() => {
+    if (!battleRunning) return;
+    battleTimerRef.current = setInterval(() => {
+      setBattleSecs(s => {
+        if (s <= 1) { endBattle(); return 0; }
+        return s - 1;
+      });
+    }, 1000);
+    return () => { if (battleTimerRef.current) clearInterval(battleTimerRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [battleRunning]);
+
+  const fmtTimer = (s: number) => `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+
   /* ─── Gift helpers ────────────────────────────────────── */
   const GIFTS = [
     { type: "rose",    emoji: "🌹", name: "وردة",      coins: 5   },
@@ -814,6 +878,7 @@ export default function LiveStream() {
       streamId: id, giftType: gift.type, giftEmoji: gift.emoji,
       giftName: gift.name, giftCoins: gift.coins, userName, userId: (user as any).id,
       broadcasterUserId: stream?.userId,
+      battleTeam: battleActive ? giftTeamChoice : undefined,
     });
     setMyCoins(prev => prev - gift.coins);
     // Sync wallet from server after a short delay
@@ -1448,134 +1513,206 @@ export default function LiveStream() {
           </div>
         )}
 
-        {/* CO-HOST PiP Grid — broadcaster sees all guests; tap to swap with main screen */}
-        {isBroadcast && activeCoHosts.length > 0 && (
+        {/* ══════════ BATTLE MODE — split-screen layout ══════════ */}
+        {battleActive && activeCoHosts.length > 0 && (
           <>
-            {/* Own cam small PiP shown only when a co-host is swapped to full screen */}
-            {swappedCohostId && (
-              <div
-                className="absolute bottom-36 end-3 z-30 w-24 h-36 rounded-xl overflow-hidden border-2 border-white/60 shadow-xl cursor-pointer"
-                onClick={() => setSwappedCohostId("")}
-                data-testid="video-broadcaster-self-pip"
-              >
+            {/* Score bar */}
+            <div className="absolute top-0 inset-x-0 z-40 bg-black/80 backdrop-blur-md px-4 py-2">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-1">
+                  <span className="text-white font-extrabold text-sm">الفريق أ 🔴</span>
+                  <span className="text-yellow-400 font-bold text-sm">{battleScoreA} 🪙</span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <div className="flex items-center gap-1 text-white/80 text-xs font-bold">
+                    <Timer className="w-3 h-3" />
+                    {fmtTimer(battleSecs)}
+                  </div>
+                  {battleWinner && (
+                    <span className={`text-xs font-extrabold ${battleWinner === "draw" ? "text-yellow-400" : "text-green-400"}`}>
+                      {battleWinner === "A" ? "🏆 الفريق أ فاز!" : battleWinner === "B" ? "🏆 الفريق ب فاز!" : "🤝 تعادل!"}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-yellow-400 font-bold text-sm">{battleScoreB} 🪙</span>
+                  <span className="text-white font-extrabold text-sm">الفريق ب 🔵</span>
+                </div>
+              </div>
+              {/* Score progress bar */}
+              <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden flex">
+                {(() => {
+                  const total = battleScoreA + battleScoreB || 1;
+                  const pctA = Math.round((battleScoreA / total) * 100);
+                  return (
+                    <>
+                      <div className="h-full bg-red-500 transition-all duration-500" style={{ width: `${pctA}%` }} />
+                      <div className="h-full bg-blue-500 transition-all duration-500 flex-1" />
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* Battle split-screen — Team A (broadcaster) left | Team B (guests) right */}
+            <div className="absolute inset-0 flex z-5 mt-12">
+              {/* Team A — broadcaster */}
+              <div className="w-1/2 h-full relative border-r border-white/30">
                 <video
                   autoPlay playsInline muted
-                  ref={el => {
-                    if (el && localStream.current && !el.srcObject) {
-                      el.srcObject = localStream.current;
-                      el.play().catch(() => {});
-                    }
-                  }}
+                  ref={el => { if (el && localStream.current && !el.srcObject) { el.srcObject = localStream.current; el.play().catch(()=>{}); }}}
                   className="w-full h-full object-cover"
                   style={{ transform: camFacing === "user" ? "scaleX(-1)" : "none" }}
                 />
-                <div className="absolute bottom-1 inset-x-0 flex justify-center">
-                  <span className="text-[9px] text-white bg-black/60 rounded-full px-1.5 py-0.5 font-bold">أنت</span>
+                <div className="absolute bottom-2 inset-x-0 flex justify-center">
+                  <span className="text-[10px] text-white bg-red-600 rounded-full px-2 py-0.5 font-bold">🔴 الفريق أ</span>
                 </div>
+                {battleMode === "2v2" && activeCoHosts[1] && (
+                  <div className="absolute bottom-16 inset-x-0 flex justify-center">
+                    <div className="w-20 h-28 rounded-xl overflow-hidden border border-red-400">
+                      <video autoPlay playsInline ref={el => { if (el) { coHostVideoRefs.current.set(activeCoHosts[1].socketId, el); const ms = coHostStreams.current.get(activeCoHosts[1].socketId); if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); } }}} className="w-full h-full object-cover" />
+                    </div>
+                  </div>
+                )}
               </div>
+              {/* Team B — first co-host */}
+              <div className="w-1/2 h-full relative">
+                {activeCoHosts[0] && (
+                  <>
+                    {activeCoHosts[0].hasCamera !== false ? (
+                      <video
+                        autoPlay playsInline
+                        ref={el => { if (el) { coHostVideoRefs.current.set(activeCoHosts[0].socketId, el); const ms = coHostStreams.current.get(activeCoHosts[0].socketId); if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); } }}}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
+                        <Mic className="w-10 h-10 text-blue-300" />
+                      </div>
+                    )}
+                    <div className="absolute bottom-2 inset-x-0 flex justify-center">
+                      <span className="text-[10px] text-white bg-blue-600 rounded-full px-2 py-0.5 font-bold">🔵 الفريق ب</span>
+                    </div>
+                    {battleMode === "2v2" && activeCoHosts[2] && (
+                      <div className="absolute bottom-16 inset-x-0 flex justify-center">
+                        <div className="w-20 h-28 rounded-xl overflow-hidden border border-blue-400">
+                          <video autoPlay playsInline ref={el => { if (el) { coHostVideoRefs.current.set(activeCoHosts[2].socketId, el); const ms = coHostStreams.current.get(activeCoHosts[2].socketId); if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); } }}} className="w-full h-full object-cover" />
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Battle end button (broadcaster) */}
+            {isBroadcast && (
+              <button
+                onClick={endBattle}
+                className="absolute top-16 end-3 z-50 px-3 py-1.5 rounded-full bg-red-500/80 text-white text-xs font-bold"
+                data-testid="btn-end-battle"
+              >
+                إنهاء المعركة
+              </button>
+            )}
+          </>
+        )}
+
+        {/* ══════════ NORMAL MODE — horizontal co-host row ══════════ */}
+        {isBroadcast && activeCoHosts.length > 0 && !battleActive && (
+          <>
+            {/* When a co-host is swapped to full-screen */}
+            {swappedCohostId && (
+              <>
+                {activeCoHosts.filter(ch => ch.socketId === swappedCohostId).map(ch => (
+                  <div key={ch.socketId} className="absolute inset-0 z-10" onClick={() => setSwappedCohostId("")}>
+                    {ch.hasCamera !== false ? (
+                      <video autoPlay playsInline
+                        ref={el => { if (el) { coHostVideoRefs.current.set(ch.socketId, el); const ms = coHostStreams.current.get(ch.socketId); if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); }}}}
+                        className="w-full h-full object-cover cursor-pointer" />
+                    ) : (
+                      <div className="w-full h-full bg-zinc-900 flex items-center justify-center cursor-pointer">
+                        <Mic className="w-10 h-10 text-purple-300" />
+                      </div>
+                    )}
+                    <div className="absolute top-4 start-4">
+                      <span className="text-[10px] text-white bg-purple-600 rounded-full px-2 py-1">{ch.name}</span>
+                    </div>
+                    <div className="absolute top-4 end-4">
+                      <span className="text-[10px] text-white bg-black/60 rounded-full px-2 py-1">اضغط للرجوع</span>
+                    </div>
+                    {/* Hidden audio for audio-only */}
+                    <audio autoPlay ref={el => { if (el) { const ms = coHostStreams.current.get(ch.socketId); if (ms && !ch.hasCamera && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); }}}} style={{ display: "none" }} />
+                  </div>
+                ))}
+                {/* Broadcaster self-pip when co-host is full screen */}
+                <div className="absolute bottom-36 end-3 z-30 w-20 h-28 rounded-xl overflow-hidden border-2 border-white/60 shadow-xl cursor-pointer"
+                  onClick={() => setSwappedCohostId("")} data-testid="video-broadcaster-self-pip">
+                  <video autoPlay playsInline muted
+                    ref={el => { if (el && localStream.current && !el.srcObject) { el.srcObject = localStream.current; el.play().catch(()=>{}); }}}
+                    className="w-full h-full object-cover"
+                    style={{ transform: camFacing === "user" ? "scaleX(-1)" : "none" }} />
+                  <div className="absolute bottom-0.5 inset-x-0 flex justify-center">
+                    <span className="text-[9px] text-white bg-black/60 rounded-full px-1.5 py-0.5 font-bold">أنت</span>
+                  </div>
+                </div>
+              </>
             )}
 
-            {activeCoHosts.map((ch, idx) => {
-              const isSwapped = swappedCohostId === ch.socketId;
-              return (
-                <div
-                  key={ch.socketId}
-                  className={isSwapped
-                    ? "absolute inset-0 z-10"
-                    : "absolute z-20"
-                  }
-                  style={isSwapped ? {} : {
-                    bottom: `${9 + idx * 10}rem`,
-                    [document.documentElement.dir === "rtl" ? "left" : "right"]: "0.75rem",
-                  }}
-                >
-                  {/* Hidden audio element for audio-only guests */}
-                  <audio
-                    autoPlay
-                    ref={el => {
-                      if (el) {
-                        const ms = coHostStreams.current.get(ch.socketId);
-                        if (ms && !ch.hasCamera && !el.srcObject) { el.srcObject = ms; el.play().catch(() => {}); }
-                      }
-                    }}
-                    style={{ display: "none" }}
-                  />
-                  {/* Video (hidden for audio-only guests) */}
-                  {ch.hasCamera !== false ? (
-                    <video
-                      autoPlay playsInline
-                      ref={el => {
-                        if (el) {
-                          coHostVideoRefs.current.set(ch.socketId, el);
-                          const ms = coHostStreams.current.get(ch.socketId);
-                          if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(() => {}); }
-                        }
-                      }}
-                      onClick={() => setSwappedCohostId(isSwapped ? "" : ch.socketId)}
-                      className={isSwapped
-                        ? "w-full h-full object-cover cursor-pointer"
-                        : "w-24 h-36 rounded-xl object-cover border-2 border-purple-500 shadow-xl cursor-pointer"
-                      }
-                      data-testid={`video-cohost-${idx}`}
-                    />
-                  ) : (
-                    /* Audio-only guest placeholder */
-                    <div
-                      onClick={() => {}}
-                      className={isSwapped
-                        ? "w-full h-full bg-zinc-900 flex flex-col items-center justify-center"
-                        : "w-24 h-36 rounded-xl bg-zinc-900 border-2 border-purple-500 shadow-xl flex flex-col items-center justify-center gap-2"
-                      }
-                      data-testid={`video-cohost-${idx}`}
-                    >
-                      <div className="w-10 h-10 rounded-full bg-purple-600/30 flex items-center justify-center">
-                        <Mic className="w-5 h-5 text-purple-300" />
+            {/* Horizontal row of co-hosts (not swapped) */}
+            {!swappedCohostId && (
+              <div
+                className="absolute z-20 flex flex-row gap-2 px-2 overflow-x-auto"
+                style={{ bottom: "96px", left: 0, right: 0, scrollbarWidth: "none" }}
+                data-testid="cohost-grid"
+              >
+                {activeCoHosts.map((ch, idx) => (
+                  <div key={ch.socketId} className="relative flex-shrink-0 w-24 h-36 rounded-2xl overflow-visible">
+                    {/* Audio */}
+                    <audio autoPlay ref={el => { if (el) { const ms = coHostStreams.current.get(ch.socketId); if (ms && !ch.hasCamera && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); }}}} style={{ display: "none" }} />
+                    {ch.hasCamera !== false ? (
+                      <video autoPlay playsInline
+                        ref={el => { if (el) { coHostVideoRefs.current.set(ch.socketId, el); const ms = coHostStreams.current.get(ch.socketId); if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); }}}}
+                        onClick={() => setSwappedCohostId(ch.socketId)}
+                        className="w-full h-full rounded-2xl object-cover border-2 border-purple-500 shadow-xl cursor-pointer"
+                        data-testid={`video-cohost-${idx}`}
+                      />
+                    ) : (
+                      <div className="w-full h-full rounded-2xl bg-zinc-900 border-2 border-purple-500 shadow-xl flex flex-col items-center justify-center gap-2" data-testid={`video-cohost-${idx}`}>
+                        <div className="w-9 h-9 rounded-full bg-purple-600/30 flex items-center justify-center">
+                          <Mic className="w-4 h-4 text-purple-300" />
+                        </div>
+                        <span className="text-[8px] text-purple-300 font-bold">صوت فقط</span>
                       </div>
-                      <span className="text-[9px] text-purple-300 font-bold">صوت فقط</span>
+                    )}
+                    {/* Name badge */}
+                    <div className="absolute top-1 inset-x-0 flex justify-center pointer-events-none">
+                      <span className="text-[9px] text-white bg-purple-600 rounded-full px-1.5 py-0.5 font-bold truncate max-w-[88px]">{ch.name}</span>
                     </div>
-                  )}
-                  {/* Name badge */}
-                  <div className={`absolute ${isSwapped ? "top-4 start-4" : "top-1 inset-x-0"} flex items-center justify-center`}>
-                    <span className="text-[9px] text-white bg-purple-600 rounded-full px-1.5 py-0.5 font-bold truncate max-w-[100px]">{ch.name}</span>
+                    {/* Muted badge */}
+                    {mutedCohosts.has(ch.socketId) && (
+                      <div className="absolute bottom-1 start-1 pointer-events-none">
+                        <MicOff className="w-3 h-3 text-red-400" />
+                      </div>
+                    )}
+                    {/* Remove button */}
+                    <button
+                      onClick={e => { e.stopPropagation(); endCoHostFromBroadcaster(ch.socketId); }}
+                      className="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center shadow-lg z-10"
+                      data-testid={`btn-end-cohost-${idx}`}
+                    ><X className="w-2.5 h-2.5 text-white" /></button>
+                    {/* Mute button */}
+                    <button
+                      onClick={e => { e.stopPropagation(); toggleMuteCohost(ch.socketId); }}
+                      className={`absolute -bottom-1.5 -end-1.5 w-5 h-5 rounded-full flex items-center justify-center shadow-lg z-10 ${mutedCohosts.has(ch.socketId) ? "bg-red-500" : "bg-zinc-700"}`}
+                      data-testid={`btn-mute-cohost-${idx}`}
+                    >
+                      {mutedCohosts.has(ch.socketId) ? <MicOff className="w-2.5 h-2.5 text-white" /> : <Mic className="w-2.5 h-2.5 text-white" />}
+                    </button>
                   </div>
-                  {/* Swap hint when full screen */}
-                  {isSwapped && (
-                    <div className="absolute top-4 end-4">
-                      <span className="text-[10px] text-white bg-black/60 rounded-full px-2 py-1">اضغط للمبادلة</span>
-                    </div>
-                  )}
-                  {/* Muted badge */}
-                  {mutedCohosts.has(ch.socketId) && (
-                    <div className="absolute bottom-1 start-1">
-                      <MicOff className="w-3 h-3 text-red-400" />
-                    </div>
-                  )}
-                  {/* Controls when not swapped */}
-                  {!isSwapped && (
-                    <>
-                      {/* Remove button */}
-                      <button
-                        onClick={e => { e.stopPropagation(); endCoHostFromBroadcaster(ch.socketId); }}
-                        className="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center shadow-lg"
-                        data-testid={`btn-end-cohost-${idx}`}
-                      >
-                        <X className="w-2.5 h-2.5 text-white" />
-                      </button>
-                      {/* Mute/Unmute button */}
-                      <button
-                        onClick={e => { e.stopPropagation(); toggleMuteCohost(ch.socketId); }}
-                        className={`absolute -bottom-1.5 -end-1.5 w-5 h-5 rounded-full flex items-center justify-center shadow-lg ${mutedCohosts.has(ch.socketId) ? "bg-red-500" : "bg-zinc-700"}`}
-                        data-testid={`btn-mute-cohost-${idx}`}
-                      >
-                        {mutedCohosts.has(ch.socketId)
-                          ? <MicOff className="w-2.5 h-2.5 text-white" />
-                          : <Mic className="w-2.5 h-2.5 text-white" />}
-                      </button>
-                    </>
-                  )}
-                </div>
-              );
-            })}
+                ))}
+              </div>
+            )}
           </>
         )}
 
@@ -1680,38 +1817,49 @@ export default function LiveStream() {
         )}
 
         {/* BROADCASTER CONTROLS (WebRTC) */}
-        {isBroadcast && streaming && broadcastMode === "webrtc" && (
-          <div className="absolute inset-x-0 z-10 flex items-center justify-center gap-3 px-5" style={{ bottom: "84px" }}>
+        {isBroadcast && streaming && broadcastMode === "webrtc" && !battleActive && (
+          <div className="absolute inset-x-0 z-10 flex items-center justify-center gap-2 px-3" style={{ bottom: "84px" }}>
             <button
               onClick={toggleMute}
               data-testid="btn-toggle-mic"
-              className={`w-14 h-14 rounded-full flex items-center justify-center shadow-xl transition-all border-2 ${muted ? "bg-red-500 border-red-400" : "bg-black/70 border-white/20"}`}
+              className={`w-12 h-12 rounded-full flex items-center justify-center shadow-xl transition-all border-2 ${muted ? "bg-red-500 border-red-400" : "bg-black/70 border-white/20"}`}
             >
-              {muted ? <MicOff className="w-6 h-6 text-white" /> : <Mic className="w-6 h-6 text-white" />}
+              {muted ? <MicOff className="w-5 h-5 text-white" /> : <Mic className="w-5 h-5 text-white" />}
             </button>
             <button
               onClick={toggleVideo}
               data-testid="btn-toggle-camera"
-              className={`w-14 h-14 rounded-full flex items-center justify-center shadow-xl transition-all border-2 ${videoOff ? "bg-red-500 border-red-400" : "bg-black/70 border-white/20"}`}
+              className={`w-12 h-12 rounded-full flex items-center justify-center shadow-xl transition-all border-2 ${videoOff ? "bg-red-500 border-red-400" : "bg-black/70 border-white/20"}`}
             >
-              {videoOff ? <VideoOff className="w-6 h-6 text-white" /> : <Video className="w-6 h-6 text-white" />}
+              {videoOff ? <VideoOff className="w-5 h-5 text-white" /> : <Video className="w-5 h-5 text-white" />}
             </button>
             {facingSupported && (
               <button
                 onClick={flipCamera}
                 data-testid="btn-flip-camera"
-                className="w-14 h-14 rounded-full flex items-center justify-center shadow-xl bg-black/70 border-2 border-white/20"
+                className="w-12 h-12 rounded-full flex items-center justify-center shadow-xl bg-black/70 border-2 border-white/20"
               >
-                <FlipHorizontal className="w-6 h-6 text-white" />
+                <FlipHorizontal className="w-5 h-5 text-white" />
+              </button>
+            )}
+            {/* Battle button — only if there are guests */}
+            {activeCoHosts.length > 0 && (
+              <button
+                onClick={() => setShowBattleSetup(true)}
+                data-testid="btn-start-battle"
+                className="h-12 px-4 rounded-full bg-gradient-to-r from-orange-500 to-pink-600 flex items-center gap-1.5 text-white font-bold text-xs shadow-xl border border-orange-400/30"
+              >
+                <Swords className="w-4 h-4" />
+                معركة
               </button>
             )}
             <button
               onClick={endStream}
               data-testid="btn-end-stream"
-              className="h-14 px-6 rounded-full bg-red-600 flex items-center gap-2 text-white font-bold text-sm shadow-xl"
+              className="h-12 px-4 rounded-full bg-red-600 flex items-center gap-1.5 text-white font-bold text-xs shadow-xl"
             >
-              <PhoneOff className="w-5 h-5" />
-              إنهاء البث
+              <PhoneOff className="w-4 h-4" />
+              إنهاء
             </button>
           </div>
         )}
@@ -1999,7 +2147,7 @@ export default function LiveStream() {
         <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowGiftPanel(false)}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-safe" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-3">
               <div>
                 <h3 className="text-white font-bold text-lg">أرسل هدية 🎁</h3>
                 <p className="text-white/50 text-xs">رصيدك: <span className="text-yellow-400 font-bold">{myCoins} عملة</span></p>
@@ -2008,6 +2156,25 @@ export default function LiveStream() {
                 <X className="w-4 h-4 text-white" />
               </button>
             </div>
+            {/* Battle team selector (shown during battle) */}
+            {battleActive && (
+              <div className="flex gap-2 mb-3">
+                <button
+                  onClick={() => setGiftTeamChoice("A")}
+                  className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${giftTeamChoice === "A" ? "bg-red-500 text-white" : "bg-white/10 text-white/60"}`}
+                  data-testid="btn-gift-team-a"
+                >
+                  🔴 هدية للفريق أ
+                </button>
+                <button
+                  onClick={() => setGiftTeamChoice("B")}
+                  className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${giftTeamChoice === "B" ? "bg-blue-500 text-white" : "bg-white/10 text-white/60"}`}
+                  data-testid="btn-gift-team-b"
+                >
+                  🔵 هدية للفريق ب
+                </button>
+              </div>
+            )}
             <div className="grid grid-cols-4 gap-3">
               {GIFTS.map(gift => (
                 <button
@@ -2022,6 +2189,48 @@ export default function LiveStream() {
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── BATTLE SETUP DIALOG (broadcaster) ── */}
+      {showBattleSetup && isBroadcast && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowBattleSetup(false)}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-6 pb-safe" onClick={e => e.stopPropagation()} dir="rtl">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="text-white font-bold text-lg flex items-center gap-2"><Swords className="w-5 h-5 text-orange-400" /> بدء المعركة</h3>
+                <p className="text-white/50 text-xs mt-0.5">اختر نوع المعركة — النقاط من الهدايا فقط (لا تُضاف للرصيد)</p>
+              </div>
+              <button onClick={() => setShowBattleSetup(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <button
+                onClick={() => startBattle("1v1")}
+                className="flex flex-col items-center gap-2 bg-gradient-to-br from-red-500/20 to-orange-500/20 border border-red-500/40 rounded-2xl p-5 active:scale-95 transition-all"
+                data-testid="btn-battle-1v1"
+                disabled={activeCoHosts.length < 1}
+              >
+                <span className="text-3xl">⚔️</span>
+                <span className="text-white font-extrabold text-base">1 ضد 1</span>
+                <span className="text-white/50 text-xs">أنت ضد ضيف واحد</span>
+              </button>
+              <button
+                onClick={() => startBattle("2v2")}
+                className="flex flex-col items-center gap-2 bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-blue-500/40 rounded-2xl p-5 active:scale-95 transition-all"
+                data-testid="btn-battle-2v2"
+                disabled={activeCoHosts.length < 2}
+              >
+                <span className="text-3xl">🛡️</span>
+                <span className="text-white font-extrabold text-base">2 ضد 2</span>
+                <span className="text-white/50 text-xs">فريقان كل فريق 2 أشخاص</span>
+                {activeCoHosts.length < 2 && <span className="text-red-400 text-[10px]">تحتاج ضيفين على الأقل</span>}
+              </button>
+            </div>
+            <p className="text-center text-white/40 text-xs">⏱️ مدة المعركة: دقيقتان | 🪙 النقاط من الهدايا فقط (لا تُسحب)</p>
           </div>
         </div>
       )}
