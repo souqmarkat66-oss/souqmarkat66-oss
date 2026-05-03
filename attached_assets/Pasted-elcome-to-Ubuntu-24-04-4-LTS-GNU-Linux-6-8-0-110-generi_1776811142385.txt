@@ -1,0 +1,94 @@
+elcome to Ubuntu 24.04.4 LTS (GNU/Linux 6.8.0-110-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+
+ System information as of Tue Apr 21 22:34:39 UTC 2026
+
+  System load:  0.0               Processes:             120
+  Usage of /:   3.8% of 95.82GB   Users logged in:       0
+  Memory usage: 3%                IPv4 address for eth0: 72.61.177.222
+  Swap usage:   0%                IPv6 address for eth0: 2a02:4780:41:9640::1
+
+ * Strictly confined Kubernetes makes edge and IoT secure. Learn how MicroK8s
+   just raised the bar for easy, resilient and secure K8s cluster deployment.
+
+   https://ubuntu.com/engage/secure-kubernetes-at-the-edge
+
+Expanded Security Maintenance for Applications is not enabled.
+
+0 updates can be applied immediately.
+
+Enable ESM Apps to receive additional future security updates.
+See https://ubuntu.com/esm or run: sudo pro status
+
+
+1 updates could not be installed automatically. For more details,
+see /var/log/unattended-upgrades/unattended-upgrades.log
+
+Last login: Tue Apr 21 22:30:41 2026 from 169.254.0.1
+root@srv1602266:~# root 
+Command 'root' not found, but can be installed with:
+snap install root-framework
+root@srv1602266:~# ^C
+root@srv1602266:~# root 
+Command 'root' not found, but can be installed with:snap install root-frameworkroot@srv1602266:~# fail2ban-client unban --all && certbot renew --force-renewal && systemctl reload nginx && cd /root && pm2 delete all 2>/dev/null; pm2 start npm --name "ads-as" -- start && pm2 save && pm2 startup systemd -u root --hp /root && echo "==== تمام خلصنا ===="
+
+Command 'fail2ban-client' not found, but can be installed with:
+apt install fail2ban
+[PM2] Starting /usr/bin/npm in fork_mode (1 instance)
+[PM2] Done.
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 0  │ ads-as             │ fork     │ 0    │ online    │ 0%       │ 104.3mb  │
+│ 1  │ ads-as             │ fork     │ 0    │ online    │ 0%       │ 18.1mb   │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+[PM2] Saving current process list...
+[PM2] Successfully saved in /root/.pm2/dump.pm2
+[PM2] Init System found: systemd
+Platform systemd
+Template
+[Unit]
+Description=PM2 process manager
+Documentation=https://pm2.keymetrics.io/
+After=network.target
+
+[Service]
+Type=forking
+User=root
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+Environment=PM2_HOME=/root/.pm2
+PIDFile=/root/.pm2/pm2.pid
+Restart=on-failure
+
+ExecStart=/usr/lib/node_modules/pm2/bin/pm2 resurrect
+ExecReload=/usr/lib/node_modules/pm2/bin/pm2 reload all
+ExecStop=/usr/lib/node_modules/pm2/bin/pm2 kill
+
+[Install]
+WantedBy=multi-user.target
+
+Target path
+/etc/systemd/system/pm2-root.service
+Command list
+[ 'systemctl enable pm2-root' ]
+[PM2] Writing init configuration in /etc/systemd/system/pm2-root.service
+[PM2] Making script booting at startup...
+[PM2] [-] Executing: systemctl enable pm2-root...
+[PM2] [v] Command successfully executed.
++---------------------------------------+
+[PM2] Freeze a process list on reboot via:
+$ pm2 save
+
+[PM2] Remove init script via:
+$ pm2 unstartup systemd
+==== تمام خلصنا ====
+root@srv1602266:~# ^C
+root@srv1602266:~# 
+root@srv1602266:~# ^C
+root@srv1602266:~# 

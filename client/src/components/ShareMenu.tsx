@@ -3,9 +3,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Share2, Copy, Check, ExternalLink } from "lucide-react";
-import { SiWhatsapp, SiFacebook, SiTelegram, SiX, SiInstagram, SiTiktok, SiSnapchat, SiYoutube, SiLinkedin, SiPinterest, SiThreads } from "react-icons/si";
-import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@/hooks/use-auth";
+import { SiWhatsapp, SiFacebook, SiTelegram, SiX, SiInstagram, SiTiktok, SiSnapchat } from "react-icons/si";
 
 interface ShareMenuProps {
   url: string;
@@ -29,20 +27,10 @@ export function ShareMenu({
   "data-testid": testId,
 }: ShareMenuProps) {
   const { toast } = useToast();
-  const { user } = useAuth();
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState(false);
 
-  const { data: refData } = useQuery<{ code: string }>({
-    queryKey: ["/api/auth/me/referral"],
-    queryFn: () => fetch("/api/auth/me/referral", { credentials: "include" }).then(r => r.json()),
-    enabled: !!user,
-    staleTime: 10 * 60 * 1000,
-  });
-  const refCode = refData?.code;
-
-  const baseUrl = url.startsWith("http") ? url : `${window.location.origin}${url}`;
-  const fullUrl = refCode ? `${baseUrl}?ref=${refCode}` : baseUrl;
+  const fullUrl = url.startsWith("http") ? url : `${window.location.origin}${url}`;
   const encodedUrl = encodeURIComponent(fullUrl);
   const encodedTitle = encodeURIComponent(title);
 
@@ -102,40 +90,10 @@ export function ShareMenu({
       onClick: () => copyAndOpen("تيك توك"),
     },
     {
-      name: "يوتيوب",
-      icon: <SiYoutube className="w-5 h-5" />,
-      color: "hover:bg-red-50 dark:hover:bg-red-950/30 text-red-600",
-      href: null,
-      external: false,
-      onClick: () => copyAndOpen("يوتيوب"),
-    },
-    {
       name: "سناب شات",
       icon: <SiSnapchat className="w-5 h-5" />,
       color: "hover:bg-yellow-50 dark:hover:bg-yellow-950/30 text-yellow-500",
       href: `https://www.snapchat.com/scan?attachmentUrl=${encodedUrl}`,
-      external: true,
-    },
-    {
-      name: "لينكدإن",
-      icon: <SiLinkedin className="w-5 h-5" />,
-      color: "hover:bg-blue-50 dark:hover:bg-blue-950/30 text-blue-700",
-      href: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`,
-      external: true,
-    },
-    {
-      name: "ثريدز",
-      icon: <SiThreads className="w-5 h-5" />,
-      color: "hover:bg-zinc-100 dark:hover:bg-zinc-800 text-foreground",
-      href: null,
-      external: false,
-      onClick: () => copyAndOpen("ثريدز"),
-    },
-    {
-      name: "بينتيريست",
-      icon: <SiPinterest className="w-5 h-5" />,
-      color: "hover:bg-red-50 dark:hover:bg-red-950/30 text-red-500",
-      href: `https://pinterest.com/pin/create/button/?url=${encodedUrl}&description=${encodedTitle}`,
       external: true,
     },
   ];
@@ -184,18 +142,13 @@ export function ShareMenu({
           sideOffset={6}
           onClick={e => e.stopPropagation()}
         >
-          {refCode && (
-            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-700 rounded-xl px-3 py-2 mb-3 text-xs text-amber-800 dark:text-amber-400">
-              💰 <strong>شارك واكسب!</strong> رابطك يحتوي على كودك الشخصي — كل تسجيل جديد = مكافأة في محفظتك
-            </div>
-          )}
           <p className="text-sm font-bold text-foreground mb-2 flex items-center gap-1.5">
             <Share2 className="w-4 h-4 text-primary" />
             شارك على
           </p>
 
-          <div className="grid grid-cols-4 gap-2 mb-3">
-            {platforms.map(p => (
+          <div className="grid grid-cols-4 gap-2 mb-1">
+            {platforms.slice(0, 4).map(p => (
               p.external && p.href ? (
                 <a
                   key={p.name}
@@ -203,22 +156,50 @@ export function ShareMenu({
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={() => setOpen(false)}
-                  className={`flex flex-col items-center gap-1.5 rounded-xl p-2 transition-colors cursor-pointer ${p.color}`}
+                  className={`flex flex-col items-center gap-1.5 rounded-xl p-2.5 transition-colors cursor-pointer ${p.color}`}
                   data-testid={`btn-share-${p.name}`}
                 >
                   {p.icon}
-                  <span className="text-[9px] font-semibold leading-none text-center">{p.name}</span>
+                  <span className="text-[10px] font-semibold leading-none text-center">{p.name}</span>
                 </a>
               ) : (
                 <button
                   key={p.name}
                   onClick={p.onClick}
-                  className={`flex flex-col items-center gap-1.5 rounded-xl p-2 transition-colors cursor-pointer ${p.color} relative`}
+                  className={`flex flex-col items-center gap-1.5 rounded-xl p-2.5 transition-colors cursor-pointer ${p.color}`}
                   data-testid={`btn-share-${p.name}`}
-                  title="انسخ الرابط والصقه"
                 >
                   {p.icon}
-                  <span className="text-[9px] font-semibold leading-none text-center">{p.name}</span>
+                  <span className="text-[10px] font-semibold leading-none text-center">{p.name}</span>
+                </button>
+              )
+            ))}
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            {platforms.slice(4).map(p => (
+              p.external && p.href ? (
+                <a
+                  key={p.name}
+                  href={p.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setOpen(false)}
+                  className={`flex flex-col items-center gap-1.5 rounded-xl p-2.5 transition-colors cursor-pointer ${p.color}`}
+                  data-testid={`btn-share-${p.name}`}
+                >
+                  {p.icon}
+                  <span className="text-[10px] font-semibold leading-none text-center">{p.name}</span>
+                </a>
+              ) : (
+                <button
+                  key={p.name}
+                  onClick={p.onClick}
+                  className={`flex flex-col items-center gap-1.5 rounded-xl p-2.5 transition-colors cursor-pointer ${p.color}`}
+                  data-testid={`btn-share-${p.name}`}
+                >
+                  {p.icon}
+                  <span className="text-[10px] font-semibold leading-none text-center">{p.name}</span>
                 </button>
               )
             ))}

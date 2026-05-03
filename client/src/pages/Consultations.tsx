@@ -54,7 +54,7 @@ const PACKAGES = [
 ];
 
 const PAYMENT_METHODS = [
-  { value: "vodafone",  label: "📱 فودافون كاش",    number: "01098559311" },
+  { value: "vodafone",  label: "📱 فودافون كاش",    number: "01098553911" },
   { value: "etisalat",  label: "📲 اتصالات e& كاش", number: "01126665741" },
   { value: "instapay",  label: "💳 InstaPay",        number: "01285558567" },
 ];
@@ -509,83 +509,51 @@ export default function Consultations() {
                   </Select>
                 </div>
 
-                {/* ─── سوق ماركات: show app links only ─── */}
-                {paymentMethod === "souq" ? (
-                  <div className="space-y-3">
-                    <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 space-y-3">
-                      <p className="text-xs font-bold text-primary">🏦 ادفع عبر تطبيق سوق ماركات أو تحويل بنكي</p>
-                      <div className="flex items-center gap-2 bg-white/60 dark:bg-black/20 rounded-xl px-3 py-2">
-                        <span className="text-xs text-muted-foreground">رقم البنك الأهلي:</span>
-                        <span className="font-mono font-bold text-sm flex-1 select-all">01285558567</span>
-                      </div>
-                      <div className="space-y-2">
-                        <a href="https://play.google.com/store/apps/details?id=com.apmo.souqmarket" target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-3 w-full bg-[#01875f] text-white rounded-xl px-4 py-2.5 transition-colors hover:bg-[#017a57]">
-                          <span className="text-lg">▶</span>
-                          <span className="text-sm font-bold">Google Play</span>
-                        </a>
-                        <a href="https://apps.apple.com/eg/app/as-souqmarket/id6740153334" target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-3 w-full bg-black text-white rounded-xl px-4 py-2.5 transition-colors hover:bg-zinc-800">
-                          <span className="text-lg"></span>
-                          <span className="text-sm font-bold">App Store</span>
-                        </a>
-                        <a href="https://app.as-souqmarkat.com/?from-splash=false" target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-3 w-full bg-[#cf0a2c] text-white rounded-xl px-4 py-2.5 transition-colors hover:bg-[#b0091f]">
-                          <span className="text-lg">🔴</span>
-                          <span className="text-sm font-bold">AppGallery (Huawei)</span>
-                        </a>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-sm font-bold mb-1 block">رقم الطلب من التطبيق <span className="text-red-500">*</span></label>
-                      <Input
-                        placeholder="مثال: ORD-12345"
-                        value={paymentRef}
-                        onChange={e => setPaymentRef(e.target.value)}
-                        dir="ltr"
-                        className="font-mono"
-                        data-testid="input-payment-ref"
-                      />
-                    </div>
+                {paymentMethod && (
+                  <div className="bg-background rounded-lg p-3 border text-sm">
+                    <p className="font-bold mb-1">ارسل المبلغ على:</p>
+                    <p className="font-mono font-black text-lg text-primary">
+                      {PAYMENT_METHODS.find(m => m.value === paymentMethod)?.number}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">ثم ارفع صورة الإيصال وأدخل مرجع الدفع</p>
                   </div>
-                ) : paymentMethod ? (
-                  /* ─── Vodafone / InstaPay: show number + receipt ─── */
-                  <div className="space-y-3">
-                    <div className="bg-background rounded-lg p-3 border text-sm">
-                      <p className="font-bold mb-1">ارسل المبلغ على:</p>
-                      <p className="font-mono font-black text-lg text-primary">
-                        {PAYMENT_METHODS.find(m => m.value === paymentMethod)?.number}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">ثم ارفع صورة الإيصال وأدخل مرجع الدفع</p>
+                )}
+
+                <div>
+                  <label className="text-sm font-bold mb-1 block">مرجع الدفع / رقم العملية</label>
+                  <Input placeholder="مثال: TRX123456789" value={paymentRef} onChange={e => setPaymentRef(e.target.value)} data-testid="input-payment-ref" />
+                </div>
+
+                <div>
+                  <label className="text-sm font-bold mb-1 block">صورة إيصال الدفع</label>
+                  <input ref={screenRef} type="file" accept="image/*" className="hidden" onChange={handleScreenshot} />
+                  {screenshotUrl ? (
+                    <div className="relative inline-block">
+                      <img src={screenshotUrl} alt="إيصال" className="h-24 rounded-lg border object-cover" />
+                      <button onClick={() => setScreenshotUrl("")} className="absolute -top-1 -end-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center">
+                        <X className="w-3 h-3" />
+                      </button>
                     </div>
-                    <div>
-                      <label className="text-sm font-bold mb-1 block">مرجع الدفع / رقم العملية</label>
-                      <Input placeholder="مثال: TRX123456789" value={paymentRef} onChange={e => setPaymentRef(e.target.value)} data-testid="input-payment-ref" />
-                    </div>
-                    <div>
-                      <label className="text-sm font-bold mb-1 block">صورة إيصال الدفع</label>
-                      <input ref={screenRef} type="file" accept="image/*" className="hidden" onChange={handleScreenshot} />
-                      {screenshotUrl ? (
-                        <div className="relative inline-block">
-                          <img src={screenshotUrl} alt="إيصال" className="h-24 rounded-lg border object-cover" />
-                          <button onClick={() => setScreenshotUrl("")} className="absolute -top-1 -end-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center">
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => screenRef.current?.click()}
-                          disabled={uploadingScreen}
-                          className="w-full border-2 border-dashed border-border rounded-xl p-3 flex items-center justify-center gap-2 hover:border-primary transition-colors text-sm text-muted-foreground"
-                          data-testid="btn-upload-screenshot"
-                        >
-                          {uploadingScreen ? <Loader2 className="w-4 h-4 animate-spin" /> : <Image className="w-4 h-4" />}
-                          {uploadingScreen ? "جاري الرفع..." : "ارفع صورة الإيصال"}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ) : null}
+                  ) : (
+                    <button
+                      onClick={() => screenRef.current?.click()}
+                      disabled={uploadingScreen}
+                      className="w-full border-2 border-dashed border-border rounded-xl p-3 flex items-center justify-center gap-2 hover:border-primary transition-colors text-sm text-muted-foreground"
+                      data-testid="btn-upload-screenshot"
+                    >
+                      {uploadingScreen ? <Loader2 className="w-4 h-4 animate-spin" /> : <Image className="w-4 h-4" />}
+                      {uploadingScreen ? "جاري الرفع..." : "ارفع صورة الإيصال"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Pay from App alternative */}
+            {amount > 0 && (
+              <div className="text-center">
+                <p className="text-xs text-muted-foreground mb-2">— أو ادفع مباشرة من التطبيق —</p>
+                <PayFromAppButton price={amount} label="ادفع من تطبيق سوق ماركات" className="w-full" />
               </div>
             )}
 

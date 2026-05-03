@@ -5,7 +5,8 @@ import { useLanguage } from "./LanguageProvider";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square, Heart, Star, Zap, Copy, Tag, MapPin, User } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Eye, Trash2, Calendar, Play, Volume2, VolumeX, Loader2, Headphones, Square, Heart, Star, Zap, CreditCard, Copy, Tag } from "lucide-react";
 import { format } from "date-fns";
 import { ar, enUS } from "date-fns/locale";
 import { useAuth } from "@/hooks/use-auth";
@@ -133,6 +134,9 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
   const [cardVoice, setCardVoice] = useState<"nova" | "onyx">("nova");
   const [boosting, setBoosting]     = useState(false);
   const [boosted, setBoosted]       = useState(false);
+  const [boostPayDialog, setBoostPayDialog] = useState(false);
+  const [boostPrice, setBoostPrice] = useState(0);
+  const [payRef, setPayRef]         = useState("");
 
   const { data: favData } = useQuery<{ favorited: boolean }>({
     queryKey: ["/api/favorites", ad.id, "check"],
@@ -203,31 +207,27 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
     }
   };
 
-  const doBoost = async () => {
+  const doBoost = async (paymentRef?: string) => {
     setBoosting(true);
     try {
       const res = await fetch(`/api/ads/${ad.id}/boost-notify`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ payment_ref: paymentRef || undefined }),
       });
       const data = await res.json();
-      if (res.status === 402 && data.requiresWalletTopup) {
-        toast({
-          variant: "destructive",
-          title: "💰 رصيد غير كافٍ",
-          description: `رصيدك ${data.balance} ج.م — التعزيز يحتاج ${data.price} ج.م. اضغط لشحن محفظتك`,
-          action: undefined,
-        });
-        setTimeout(() => { window.location.href = "/wallet"; }, 1800);
+      if (res.status === 402 && data.requiresPayment) {
+        setBoostPrice(data.price);
+        setBoostPayDialog(true);
       } else if (res.status === 429) {
         toast({ variant: "destructive", title: "⏳ حد التعزيز", description: data.message });
       } else if (res.status === 403) {
         toast({ variant: "destructive", title: "🚫 التعزيز معطّل", description: data.message });
       } else if (res.ok) {
         setBoosted(true);
+        setBoostPayDialog(false);
         toast({
-          title: `🚀 تم التعزيز!`,
+          title: `🚀 تم إرسال الإشعار!`,
           description: data.notifiedCount > 0
             ? `وصل لـ ${data.notifiedCount} مستخدم`
             : "سيصل لجميع المستخدمين",
@@ -247,22 +247,6 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
   };
 
   const hasMedia = ad.mediaUrl && ad.mediaUrl.trim() !== "";
-  const isSold = (ad as any).is_sold === true;
-
-  const handleMarkSold = async (e: React.MouseEvent) => {
-    e.preventDefault(); e.stopPropagation();
-    try {
-      const res = await fetch(`/api/ads/${ad.id}/mark-sold`, { method: "POST", credentials: "include" });
-      const data = await res.json();
-      if (res.ok) {
-        toast({ title: data.message });
-        qc.invalidateQueries({ queryKey: ["/api/ads"] });
-        qc.invalidateQueries({ queryKey: ["/api/my-stats"] });
-      }
-    } catch {
-      toast({ variant: "destructive", title: "خطأ في التحديث" });
-    }
-  };
 
   return (
     <motion.div
@@ -348,64 +332,15 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
               />
             </div>
           ) : (
-            /* Text-only ad — styled like a social post */
-            <div className={`w-full h-full flex flex-col justify-between p-5 overflow-hidden ${
-              (ad as any).is_boosted
-                ? 'bg-gradient-to-br from-yellow-400/20 via-orange-300/10 to-amber-200/20'
-                : (ad as any).is_admin_promo
-                ? 'bg-gradient-to-br from-emerald-400/20 via-teal-300/10 to-green-200/20'
-                : 'bg-gradient-to-br from-primary/10 via-primary/5 to-secondary/10'
-            }`}>
-              {/* Category chip */}
-              {(ad as any).category && (ad as any).category !== 'general' && (
-                <span className="self-start bg-white/60 dark:bg-black/30 backdrop-blur-sm text-primary text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-primary/20 mb-2">
-                  {(ad as any).category}
-                </span>
-              )}
-
-              {/* Title — big & bold */}
-              <div className="flex-1 flex items-center">
-                <p className="text-foreground font-extrabold text-xl leading-snug line-clamp-4 text-right" dir="rtl">
-                  {ad.title}
-                </p>
-              </div>
-
-              {/* Description preview */}
-              {ad.description && (
-                <p className="text-muted-foreground text-xs line-clamp-2 mt-2 text-right leading-relaxed" dir="rtl">
-                  {ad.description}
-                </p>
-              )}
-
-              {/* Price chip at bottom */}
-              {ad.priceEGP && (
-                <div className="mt-3 self-start bg-green-500 text-white text-sm font-extrabold px-3 py-1 rounded-full shadow-sm">
-                  {ad.priceEGP.toLocaleString()} ج.م
-                </div>
-              )}
-
-              {/* Decorative circle */}
-              <div className="absolute -bottom-8 -start-8 w-28 h-28 rounded-full bg-primary/5 pointer-events-none" />
-              <div className="absolute -top-6 -end-6 w-20 h-20 rounded-full bg-secondary/10 pointer-events-none" />
+            /* Placeholder when no media */
+            <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground bg-gradient-to-br from-muted to-muted/50">
+              <div className="text-4xl mb-2">📢</div>
+              <span className="text-xs">إعلان نصي</span>
             </div>
           )}
 
-          {/* SOLD overlay */}
-          {isSold && (
-            <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-10 pointer-events-none">
-              <div className="bg-teal-500 text-white font-extrabold text-2xl px-6 py-3 rounded-2xl shadow-2xl rotate-[-8deg] border-4 border-white/30">
-                ✅ تم البيع
-              </div>
-            </div>
-          )}
-
-          {/* Top-end badges */}
-          <div className="absolute top-3 end-3 flex flex-col gap-1.5 items-end z-20">
-            {isSold && (
-              <Badge className="bg-teal-500 text-white shadow-lg px-2.5 py-0.5 rounded-full border-none font-bold text-xs">
-                ✅ مباع
-              </Badge>
-            )}
+          {/* Language badge + Boost badge */}
+          <div className="absolute top-3 end-3 flex flex-col gap-1.5 items-end">
             {(ad as any).is_boosted && (
               <Badge className="bg-yellow-400 text-yellow-900 shadow-lg px-2.5 py-0.5 rounded-full border-none font-bold text-xs animate-pulse">
                 🚀 مميز
@@ -413,15 +348,12 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
             )}
             {(ad as any).is_admin_promo && !(ad as any).is_boosted && (
               <Badge className="bg-emerald-500 text-white shadow-lg px-2.5 py-0.5 rounded-full border-none font-bold text-xs">
-                📢 ترويجي
+                📢 إعلان ترويجي
               </Badge>
             )}
-            {/* "New" badge — posted within last 24h */}
-            {ad.createdAt && (Date.now() - new Date(ad.createdAt).getTime()) < 86_400_000 && !(ad as any).is_boosted && !(ad as any).is_admin_promo && (
-              <Badge className="bg-red-500 text-white shadow-lg px-2.5 py-0.5 rounded-full border-none font-bold text-xs">
-                🔥 جديد
-              </Badge>
-            )}
+            <Badge variant="secondary" className="bg-background/90 backdrop-blur-md text-foreground shadow-sm px-3 py-1 rounded-full border-none font-medium text-xs">
+              {ad.language === 'ar' ? '🇪🇬 عربي' : '🇺🇸 EN'}
+            </Badge>
           </div>
 
           {/* Favorite button */}
@@ -452,58 +384,32 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
         </div>
 
         {/* Content */}
-        <CardContent className="p-4 flex-1 flex flex-col gap-2">
-
-          {/* Category + Location row */}
-          <div className="flex items-center gap-2 flex-wrap">
-            {(ad as any).category && (ad as any).category !== 'general' && (
-              <Badge variant="secondary" className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-primary/10 text-primary border-none">
-                {(ad as any).category}
-              </Badge>
-            )}
-            {(ad as any).seller_governorate && (
-              <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                <MapPin className="w-2.5 h-2.5" />
-                {(ad as any).seller_governorate}
-              </span>
-            )}
-          </div>
-
-          {/* Title */}
+        <CardContent className="p-5 flex-1 flex flex-col">
           <Link href={`/ads/${ad.id}`}>
-            <h3 className="font-bold text-base leading-snug line-clamp-2 text-foreground hover:text-primary transition-colors cursor-pointer">
+            <h3 className="font-bold text-lg leading-snug line-clamp-2 text-foreground hover:text-primary transition-colors cursor-pointer mb-2">
               {ad.title}
             </h3>
           </Link>
-
-          {/* Description */}
-          <p className="text-muted-foreground text-xs line-clamp-2 flex-1 leading-relaxed">
+          <p className="text-muted-foreground text-sm line-clamp-2 flex-1">
             {ad.description}
           </p>
 
-          {/* Price block */}
-          {ad.priceEGP ? (
-            <div className="flex items-center justify-between gap-2 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800/40 rounded-xl px-3 py-2">
-              <div>
-                <p className="text-[10px] text-green-700 dark:text-green-400 font-semibold">السعر</p>
-                <p className="text-xl font-extrabold text-green-700 dark:text-green-400 leading-none">
-                  {ad.priceEGP.toLocaleString()} <span className="text-sm font-bold">ج.م</span>
-                </p>
-              </div>
-              <PayFromAppButton price={ad.priceEGP} size="sm" className="shrink-0" />
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 bg-muted/50 rounded-xl px-3 py-2">
-              <span className="text-sm font-bold text-muted-foreground">السعر بالتراضي</span>
+          {/* Price + Pay from App */}
+          {ad.priceEGP && (
+            <div className="mt-2 space-y-2">
+              <span className="text-lg font-bold text-green-600 dark:text-green-400">
+                {ad.priceEGP.toLocaleString()} ج.م
+              </span>
+              <PayFromAppButton price={ad.priceEGP} size="sm" className="w-full" />
             </div>
           )}
 
-          {/* ⭐ Star Rating */}
+          {/* ⭐ Star Rating — Quick Rate from Card */}
           <QuickRating adId={ad.id} ratingData={ratingData} userId={user?.id} onRated={() => qc.invalidateQueries({ queryKey: ["/api/ratings/ad", ad.id] })} />
 
           {/* 🏷️ Coupon Badge */}
           {(ad as any).coupon_code && (
-            <div className="flex items-center gap-2 bg-gradient-to-l from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/20 border border-orange-200 dark:border-orange-800/50 rounded-xl p-2">
+            <div className="flex items-center gap-2 bg-gradient-to-l from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/20 border border-orange-200 dark:border-orange-800/50 rounded-xl p-2 mt-1">
               <div className="w-6 h-6 rounded-lg bg-orange-500 flex items-center justify-center flex-shrink-0">
                 <Tag className="w-3 h-3 text-white" />
               </div>
@@ -534,52 +440,18 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
             </div>
           )}
 
-          {/* Seller info + meta row */}
-          <div className="flex items-center justify-between pt-2 border-t border-border/40">
-            {/* Seller avatar + name */}
-            <Link href={`/profile/${(ad as any).user_id || ad.userId}`} onClick={e => e.stopPropagation()} className="flex items-center gap-2 min-w-0">
-              {(ad as any).seller_avatar ? (
-                <img
-                  src={(ad as any).seller_avatar}
-                  alt={(ad as any).seller_first_name || ""}
-                  className="w-7 h-7 rounded-full object-cover border border-border/60 shrink-0"
-                />
-              ) : (
-                <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <User className="w-3.5 h-3.5 text-primary" />
-                </div>
-              )}
-              <span className="text-xs font-semibold text-foreground/80 truncate max-w-[90px]">
-                {(ad as any).seller_first_name
-                  ? `${(ad as any).seller_first_name} ${(ad as any).seller_last_name || ''}`.trim()
-                  : "بائع"}
-              </span>
-            </Link>
-
-            {/* Views + date + owner actions */}
-            <div className="flex items-center gap-2 text-[10px] text-muted-foreground shrink-0">
-              <span className="flex items-center gap-1">
-                <Eye className="w-3 h-3" />
-                {(ad.viewsCount || 0).toLocaleString()}
-              </span>
-              <span className="flex items-center gap-1">
-                <Calendar className="w-3 h-3" />
-                {ad.createdAt && format(new Date(ad.createdAt), 'MMM d', { locale: language === 'ar' ? ar : enUS })}
-              </span>
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/40">
+            <div className="flex items-center text-xs text-muted-foreground/80 gap-1.5">
+              <Calendar className="w-3 h-3" />
+              {ad.createdAt && format(new Date(ad.createdAt), 'MMM d', { locale: language === 'ar' ? ar : enUS })}
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Eye className="w-3 h-3" />
+              {(ad.viewsCount || 0).toLocaleString()}
               {isOwner && (
-                <>
-                  <button
-                    onClick={handleMarkSold}
-                    title={isSold ? "إلغاء علامة المباع" : "تم البيع"}
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all ${isSold ? "bg-teal-500 text-white border-teal-500" : "border-teal-400 text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/30"}`}
-                    data-testid={`btn-mark-sold-${ad.id}`}
-                  >
-                    {isSold ? "✅ مباع" : "تم البيع؟"}
-                  </button>
-                  <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground/50 hover:text-destructive rounded-full" onClick={handleDelete}>
-                    <Trash2 className="w-3 h-3" />
-                  </Button>
-                </>
+                <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground/50 hover:text-destructive rounded-full ms-1" onClick={handleDelete}>
+                  <Trash2 className="w-3 h-3" />
+                </Button>
               )}
             </div>
           </div>
@@ -683,6 +555,61 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
         </CardContent>
       </Card>
 
+      {/* ── Boost Payment Dialog ── */}
+      <Dialog open={boostPayDialog} onOpenChange={setBoostPayDialog}>
+        <DialogContent dir="rtl" className="max-w-sm rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap className="w-5 h-5 text-orange-500" /> تعزيز الإعلان 🚀
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 text-sm">
+            <div className="bg-orange-50 dark:bg-orange-900/20 rounded-xl p-4 text-center">
+              <p className="text-2xl font-bold text-orange-600">{boostPrice} ج.م</p>
+              <p className="text-xs text-muted-foreground mt-1">رسوم التعزيز — مرة واحدة كل 30 يوم</p>
+            </div>
+            <div className="space-y-2 text-xs text-muted-foreground">
+              <p className="font-bold text-foreground">طرق الدفع المتاحة:</p>
+              {[
+                { name: "فودافون كاش", num: "01098553911" },
+                { name: "اتصالات كاش", num: "01126665741" },
+                { name: "إنستاباي",    num: "01285558567" },
+              ].map(({ name, num }) => (
+                <div key={num} className="flex items-center justify-between bg-muted/50 rounded-lg px-3 py-2">
+                  <span>{name}: <span className="font-mono font-bold">{num}</span></span>
+                  <button onClick={() => { navigator.clipboard.writeText(num); toast({ title: "✅ تم نسخ الرقم" }); }} className="text-primary hover:text-primary/80">
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">رقم العملية / مرجع الدفع</label>
+              <input
+                value={payRef}
+                onChange={e => setPayRef(e.target.value)}
+                placeholder="أدخل رقم العملية بعد الدفع"
+                className="w-full border rounded-lg px-3 py-2 text-sm bg-background"
+                data-testid="input-boost-payref"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setBoostPayDialog(false)}>إلغاء</Button>
+              <Button
+                className="flex-1 bg-orange-500 hover:bg-orange-600 text-white gap-1.5"
+                disabled={!payRef.trim() || boosting}
+                onClick={() => doBoost(payRef.trim())}
+                data-testid="btn-confirm-boost-pay"
+              >
+                {boosting ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CreditCard className="w-4 h-4" /> تأكيد الدفع وتعزيز</>}
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground text-center">
+              بعد الدفع، سيتم مراجعة رقم العملية وإرسال الإشعار لجميع المستخدمين
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 }

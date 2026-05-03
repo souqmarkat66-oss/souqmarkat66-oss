@@ -1,0 +1,66 @@
+ممكن تحل مشكةة شاشة الترمن بتكتب احرف مفراد فقط
+
+Attachment_69e8fbd6af2b41.13506552.jpg
+Kodee
+أحمد، SSH شغال والسيرفر نفسه سليم؛ المشكلة غالبًا من الـ Browser Terminal أو من جلسة الطرفية عندك، وليس من الخدمة على الـ VPS.
+
+جرّب بالترتيب:
+
+افتح اتصال SSH من Terminal/Putty بدل متصفح hPanel.
+إذا دخلت الجلسة وظهر التشويش، اكتب:
+reset
+إذا ما نفع:
+stty sane
+clear
+إذا استمرت الأحرف المبعثرة حتى من SSH الخارجي، أراجع لك إعدادات الطرفية/الترميز أو أي عملية تسبب المشكلة على السيرفر.
+
+
+
+ممكن تحلة من عندك الان ان حولت كتير ومشعوز يشتغل
+
+Kodee
+I will reset the SSH service to its default configuration for your virtual machine (ID: 1602266) to help resolve the connection issues. Please click Confirm to proceed or Deny to cancel.
+
+
+
+Kodee
+تمت إعادة ضبط SSH على الإعدادات الافتراضية للسيرفر 1602266.
+جرّب الآن الدخول مرة ثانية من SSH خارجي أو من Browser Terminal، وإذا بقيت الشاشة تعرض أحرف مبعثرة أقدر أكمل معك بخطوة ثانية لفحص الطرفية نفسها.
+
+
+
+Welcome to Ubuntu 24.04.4 LTS (GNU/Linux 6.8.0-110-generic x86_64)
+
+Documentation: https://help.ubuntu.com
+Management: https://landscape.canonical.com
+Support: https://ubuntu.com/pro
+System information as of Wed Apr 22 16:51:10 UTC 2026
+
+System load: 0.0 Processes: 125
+Usage of /: 3.8% of 95.82GB Users logged in: 1
+Memory usage: 5% IPv4 address for eth0: 72.61.177.222
+Swap usage: 0% IPv6 address for eth0: 2a02:4780:41:9640::1
+
+Strictly confined Kubernetes makes edge and IoT secure. Learn how MicroK8s
+just raised the bar for easy, resilient and secure K8s cluster deployment.
+https://ubuntu.com/engage/secure-kubernetes-at-the-edge
+
+Expanded Security Maintenance for Applications is not enabled.
+
+10 updates can be applied immediately.
+10 of these updates are standard security updates.
+To see these additional updates run: apt list --upgradable
+
+Enable ESM Apps to receiنفس المشكة الك
+
+Kodee
+تمام يا أحمد — السيرفر نفسه سليم: خدمة SSH شغالة، والفايروول غير مفعّل، ورسالة Ubuntu اللي ظهرت عندك تؤكد أن الدخول تم بنجاح.
+إذا المشكلة الآن هي تقطيع/حروف ملخبطة داخل Browser Terminal فالغالب أنها من جلسة الطرفية نفسها، وليس من الـVPS.
+
+جرّب بالترتيب:
+
+اقفل Browser Terminal وافتحه من جديد.
+لو استمر نفس الشكل، استخدم SSH عادي من جهازك بدل المتصفح.
+إذا بقي الخلل، أرسل لي صورة للشاشة أو اكتب أول سطرين من المشكلة كما يظهران، وأنا أكمل التشخيص فورًا.
+
+

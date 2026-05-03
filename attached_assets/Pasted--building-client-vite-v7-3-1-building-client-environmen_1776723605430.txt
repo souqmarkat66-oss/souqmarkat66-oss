@@ -1,0 +1,156 @@
+
+building client...
+vite v7.3.1 building client environment for production...
+transforming (1) src/main.tsxBrowserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+transforming (17) ../node_modules/leaflet/dist/leaflet.css
+warn - The utility `shadow-[0_0_8px_theme(colors.primary)]` contains an invalid theme value and was not generated.
+✓ 2084 modules transformed.
+✗ Build failed in 3.77s
+[vite:esbuild] Transform failed with 1 error:
+/root/client/src/pages/Login.tsx:1:1: ERROR: Expected identifier but found "!"
+file: /root/client/src/pages/Login.tsx:1:1
+
+Expected identifier but found "!"
+1  |  <!DOCTYPE html>
+   |   ^
+2  |  <html lang="ar" dir="rtl">
+3  |    <head>
+
+    at failureErrorWithLog (/root/node_modules/vite/node_modules/esbuild/lib/main.js:1467:15)
+    at /root/node_modules/vite/node_modules/esbuild/lib/main.js:736:50
+    at responseCallbacks.<computed> (/root/node_modules/vite/node_modules/esbuild/lib/main.js:603:9)
+    at handleIncomingPacket (/root/node_modules/vite/node_modules/esbuild/lib/main.js:658:12)
+    at Socket.readFromStdout (/root/node_modules/vite/node_modules/esbuild/lib/main.js:581:7)
+    at Socket.emit (node:events:524:28)
+    at addChunk (node:internal/streams/readable:561:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)
+    at Readable.push (node:internal/streams/readable:392:5)
+    at Pipe.onStreamRead (node:internal/stream_base_commons:191:23) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter],
+  frame: '\n' +
+    '\x1B[33mExpected identifier but found "!"\x1B[39m\n' +
+    '1  |  <!DOCTYPE html>\n' +
+    '   |   ^\n' +
+    '2  |  <html lang="ar" dir="rtl">\n' +
+    '3  |    <head>\n',
+  loc: {
+    column: 1,
+    file: '/root/client/src/pages/Login.tsx',
+    length: 1,
+    line: 1,
+    lineText: '<!DOCTYPE html>',
+    namespace: '',
+    suggestion: ''
+  },
+  code: 'PLUGIN_ERROR',
+  plugin: 'vite:esbuild',
+  hook: 'transform',
+  id: '/root/client/src/pages/Login.tsx',
+  watchFiles: [
+    '/root/client/index.html',
+    '/root/client/src/main.tsx',
+    '/root/package.json',
+    '/root/node_modules/react/jsx-runtime.js',
+    '/root/node_modules/react-dom/client.js',
+    '/root/client/src/App.tsx',
+    '/root/client/src/index.css',
+    '/root/node_modules/leaflet/dist/leaflet.css',
+    '/root/node_modules/react/cjs/react-jsx-runtime.production.min.js',
+    '/root/node_modules/react-dom/index.js',
+    '/root/node_modules/wouter/esm/index.js',
+    '/root/node_modules/@tanstack/react-query/build/modern/index.js',
+    '/root/node_modules/lucide-react/dist/esm/lucide-react.js',
+    '/root/node_modules/react/index.js',
+    '/root/client/src/lib/queryClient.ts',
+    '/root/client/src/components/ui/tooltip.tsx',
+    '/root/client/src/components/LanguageProvider.tsx',
+    '/root/client/src/components/ui/toaster.tsx',
+    '/root/client/src/components/Navbar.tsx',
+    '/root/client/src/hooks/use-auth.ts',
+    '/root/client/src/pages/Home.tsx',
+    '/root/client/src/pages/Ads.tsx',
+    '/root/client/src/pages/AdDetails.tsx',
+    '/root/client/src/pages/CreateAd.tsx',
+    '/root/client/src/pages/Channels.tsx',
+    '/root/client/src/pages/ChannelPage.tsx',
+    '/root/client/src/pages/LiveStream.tsx',
+    '/root/client/src/pages/LiveStreamList.tsx',
+    '/root/client/src/pages/StartStream.tsx',
+    '/root/client/src/pages/Campaigns.tsx',
+    '/root/client/src/pages/AdminPanel.tsx',
+    '/root/client/src/pages/AdminAiControl.tsx',
+    '/root/client/src/pages/Revenue.tsx',
+    '/root/client/src/pages/Payments.tsx',
+    '/root/client/src/pages/Login.tsx',
+    '/root/client/src/pages/MyContent.tsx',
+    '/root/client/src/pages/EmbedGuide.tsx',
+    '/root/client/src/pages/MediaLibrary.tsx',
+    '/root/client/src/pages/Messages.tsx',
+    '/root/client/src/pages/Profile.tsx',
+    '/root/client/src/pages/Help.tsx',
+    '/root/client/src/pages/Consultations.tsx',
+    '/root/client/src/pages/Coupons.tsx',
+    '/root/client/src/pages/MenuGenerator.tsx',
+    '/root/client/src/pages/PublicMenu.tsx',
+    '/root/client/src/pages/Wallet.tsx',
+    '/root/client/src/components/PWAInstallPrompt.tsx',
+    '/root/client/src/components/GlobalAssistant.tsx',
+    '/root/client/src/components/PushSetup.tsx',
+    '/root/client/src/components/InterestOnboarding.tsx',
+    '/root/client/src/components/BottomNav.tsx',
+    '/root/client/src/pages/not-found.tsx',
+    '/root/client/src/pages/Social.tsx',
+    '/root/client/src/pages/Reels.tsx',
+    '/root/client/src/pages/MyDashboard.tsx',
+    '/root/node_modules/leaflet/dist/images/layers.png',
+    '/root/node_modules/leaflet/dist/images/layers-2x.png',
+    '/root/node_modules/leaflet/dist/images/marker-icon.png',
+    '/root/tailwind.config.ts',
+    '/root/client/src/hooks/use-ads.ts',
+    '/root/client/src/hooks/use-toast.ts',
+    '/root/client/src/hooks/use-tts.ts',
+    '/root/client/src/lib/auth-utils.ts',
+    '/root/client/src/lib/utils.ts',
+    '/root/client/src/components/AdCard.tsx',
+    '/root/client/src/components/AdWidget.tsx',
+    '/root/client/src/components/AdminPinLock.tsx',
+    '/root/client/src/components/EditAdDialog.tsx',
+    '/root/client/src/components/EditReelDialog.tsx',
+    '/root/client/src/components/EgyptTargetingMap.tsx',
+    '/root/client/src/components/LikeCommentBar.tsx',
+    '/root/client/src/components/LocationPickerMap.tsx',
+    '/root/client/src/components/MediaPickerModal.tsx',
+    '/root/client/src/components/NotificationBell.tsx',
+    '/root/client/src/components/PayFromAppButton.tsx',
+    '/root/client/src/components/PlatformAssistant.tsx',
+    '/root/client/src/components/SceneComposer.tsx',
+    '/root/client/src/components/ShareEarnButton.tsx',
+    '/root/client/src/components/ShareMenu.tsx',
+    '/root/client/src/components/StoriesBar.tsx',
+    '/root/client/src/components/TrendingStrip.tsx',
+    '/root/client/src/components/UploadZone.tsx',
+    '/root/client/src/components/ui/accordion.tsx',
+    '/root/client/src/components/ui/alert-dialog.tsx',
+    '/root/client/src/components/ui/alert.tsx',
+    '/root/client/src/components/ui/aspect-ratio.tsx',
+    '/root/client/src/components/ui/avatar.tsx',
+    '/root/client/src/components/ui/badge.tsx',
+    '/root/client/src/components/ui/breadcrumb.tsx',
+    '/root/client/src/components/ui/button.tsx',
+    '/root/client/src/components/ui/calendar.tsx',
+    '/root/client/src/components/ui/card.tsx',
+    '/root/client/src/components/ui/carousel.tsx',
+    '/root/client/src/components/ui/chart.tsx',
+    '/root/client/src/components/ui/checkbox.tsx',
+    '/root/client/src/components/ui/collapsible.tsx',
+    '/root/client/src/components/ui/command.tsx',
+    '/root/client/src/components/ui/context-menu.tsx',
+    '/root/client/src/components/ui/dialog.tsx',
+    '/root/client/src/components/ui/drawer.tsx',
+    ... 2087 more items
+  ]
+}
+root@srv1602266:~#

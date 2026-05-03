@@ -1,0 +1,43 @@
+
+Successfully received certificate.
+Certificate is saved at: /etc/letsencrypt/live/ads-as.com/fullchain.pem
+Key is saved at:         /etc/letsencrypt/live/ads-as.com/privkey.pem
+This certificate expires on 2026-07-19.
+These files will be updated when the certificate renews.
+Certbot has set up a scheduled task to automatically renew this certificate in the background.
+
+Deploying certificate
+Successfully deployed certificate for ads-as.com to /etc/nginx/sites-enabled/ads-as
+Successfully deployed certificate for www.ads-as.com to /etc/nginx/sites-enabled/ads-as
+Congratulations! You have successfully enabled HTTPS on https://ads-as.com and https://www.ads-as.com
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+If you like Certbot, please consider supporting our work by:
+ * Donating to ISRG / Let's Encrypt:   https://letsencrypt.org/donate
+ * Donating to EFF:                    https://eff.org/donate-le
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+root@srv1602266:~# ^C
+root@srv1602266:~# pm2 list
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 0  │ ads-as             │ fork     │ 2    │ online    │ 0%       │ 112.3mb  │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+root@srv1602266:~# curl -I https://ads-as.com
+HTTP/1.1 200 OK
+Server: nginx/1.24.0 (Ubuntu)
+Date: Mon, 20 Apr 2026 17:19:52 GMT
+Content-Type: text/html; charset=utf-8
+Content-Length: 10668
+Connection: keep-alive
+X-Powered-By: Express
+X-Content-Type-Options: nosniff
+X-Frame-Options: SAMEORIGIN
+X-XSS-Protection: 1; mode=block
+Referrer-Policy: strict-origin-when-cross-origin
+Accept-Ranges: bytes
+Cache-Control: public, max-age=0
+Last-Modified: Mon, 20 Apr 2026 14:11:01 GMT
+ETag: W/"29ac-19dab3af5d4"
+
+root@srv1602266:~#

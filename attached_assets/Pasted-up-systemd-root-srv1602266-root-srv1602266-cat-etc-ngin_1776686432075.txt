@@ -1,0 +1,45 @@
+up systemd
+root@srv1602266:~#
+root@srv1602266:~# cat > /etc/nginx/sites-available/ads-as << 'EOF'
+> server {
+>     listen 80;
+>     server_name ads-as.com www.ads-as.com 72.61.177.222;
+>     location / {
+>         proxy_pass http://localhost:5000;
+>         proxy_http_version 1.1;
+>         proxy_set_header Upgrade $http_upgrade;
+>         proxy_set_header Connection 'upgrade';
+>         proxy_set_header Host $host;
+>         proxy_set_header X-Real-IP $remote_addr;
+>         proxy_cache_bypass $http_upgrade;
+>     }
+> }
+> EOF
+root@srv1602266:~# ln -s /etc/nginx/sites-available/ads-as /etc/nginx/sites-enabled/ && nginx -t && systemctl restart nginx
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+root@srv1602266:~#
+root@srv1602266:~#
+root@srv1602266:~# pm2 logs ads-as --lines 20
+[TAILING] Tailing last 20 lines for [ads-as] process (change the value with --lines option)
+/root/.pm2/logs/ads-as-out.log last 20 lines:
+/root/.pm2/logs/ads-as-error.log last 20 lines:
+0|ads-as   | Error: DATABASE_URL must be set. Did you forget to provision a database?
+0|ads-as   |     at /root/dist/index.cjs:58:124338
+0|ads-as   |     at /root/dist/index.cjs:1:225
+0|ads-as   |     at Object.<anonymous> (/root/dist/index.cjs:74:1000)
+0|ads-as   |     at Module._compile (node:internal/modules/cjs/loader:1521:14)
+0|ads-as   |     at Module._extensions..js (node:internal/modules/cjs/loader:1623:10)
+0|ads-as   |     at Module.load (node:internal/modules/cjs/loader:1266:32)
+0|ads-as   |     at Module._load (node:internal/modules/cjs/loader:1091:12)
+0|ads-as   |     at cjsLoader (node:internal/modules/esm/translators:298:15)
+0|ads-as   |     at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:240:7)
+0|ads-as   |     at ModuleJob.run (node:internal/modules/esm/module_job:325:25)
+
+pm2 stop ads-as && pm2 delete ads-as
+
+pm2 start dist/index.cjs --name "ads-as" --env-file /root/.env && pm2 save
+
+
+
+

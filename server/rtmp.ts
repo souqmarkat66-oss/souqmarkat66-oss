@@ -2,32 +2,15 @@ import NodeMediaServer from "node-media-server";
 import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
-import net from "net";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-
-function isPortFree(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const server = net.createServer();
-    server.once("error", () => resolve(false));
-    server.once("listening", () => { server.close(); resolve(true); });
-    server.listen(port);
-  });
-}
 
 const HLS_DIR = "/tmp/hls";
 if (!fs.existsSync(HLS_DIR)) fs.mkdirSync(HLS_DIR, { recursive: true });
 
 const activeTranscoders = new Map<string, ReturnType<typeof spawn>>();
 
-export async function startRtmpServer() {
-  const rtmpFree = await isPortFree(1935);
-  const hlsFree  = await isPortFree(8000);
-  if (!rtmpFree || !hlsFree) {
-    console.warn("[RTMP] Port already in use — RTMP/HLS skipped this run.");
-    return null;
-  }
-
+export function startRtmpServer() {
   const nms = new NodeMediaServer({
     rtmp: {
       port: 1935,
@@ -95,17 +78,8 @@ export async function startRtmpServer() {
     }, 30000);
   });
 
-  // Handle port-already-in-use gracefully
-  nms.on('error', (err: any) => {
-    console.warn("[RTMP] Server error (non-fatal):", err?.message || err);
-  });
-
-  try {
-    nms.run();
-    console.log("[RTMP] Server started on port 1935 (RTMP) and 8000 (HLS)");
-  } catch (e: any) {
-    console.warn("[RTMP] Could not start (port may be busy):", e.message);
-  }
+  nms.run();
+  console.log("[RTMP] Server started on port 1935 (RTMP) and 8000 (HLS)");
   return nms;
 }
 

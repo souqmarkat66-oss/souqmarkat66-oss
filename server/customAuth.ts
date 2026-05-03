@@ -1,10 +1,8 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
-import crypto from "crypto";
-import { v4 as uuidv4 } from "uuid";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { emitAdminEvent } from "./adminEvents";
+import { v4 as uuidv4 } from "uuid";
 
 // ── Extend session ────────────────────────────────────────────────
 declare module "express-session" {
@@ -17,35 +15,6 @@ declare module "express-session" {
       lastName: string | null;
       profileImageUrl: string | null;
     };
-  }
-}
-
-// ── Signed reset tokens (stateless, no session needed) ───────────
-function createResetToken(userId: string): string {
-  const secret = process.env.SESSION_SECRET || "ads-as-default-secret-change-in-prod";
-  const expiry = Date.now() + 10 * 60 * 1000; // 10 minutes
-  const payload = `${userId}|${expiry}`;
-  const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
-  return Buffer.from(`${payload}|${sig}`).toString("base64url");
-}
-
-function verifyResetToken(token: string, userId: string): boolean {
-  try {
-    const secret = process.env.SESSION_SECRET || "ads-as-default-secret-change-in-prod";
-    const decoded = Buffer.from(token, "base64url").toString("utf8");
-    const parts = decoded.split("|");
-    if (parts.length !== 3) return false;
-    const [tokenUserId, expiryStr, sig] = parts;
-    if (tokenUserId !== userId) return false;
-    if (Date.now() > parseInt(expiryStr)) return false;
-    const payload = `${tokenUserId}|${expiryStr}`;
-    const expectedSig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
-    const sigBuf = Buffer.from(sig, "hex");
-    const expBuf = Buffer.from(expectedSig, "hex");
-    if (sigBuf.length !== expBuf.length) return false;
-    return crypto.timingSafeEqual(sigBuf, expBuf);
-  } catch {
-    return false;
   }
 }
 
@@ -68,15 +37,6 @@ export function isAuthenticated(req: Request, res: Response, next: NextFunction)
   // Fallback: Replit passport (keeps backward compat during transition)
   if ((req as any).user) return next();
   return res.status(401).json({ message: "Unauthorized" });
-}
-
-// ── Normalize Egyptian phone numbers ─────────────────────────────
-function normalizePhone(raw: string): string {
-  let p = raw.replace(/[\s\-().]/g, "");
-  if (p.startsWith("+20")) p = "0" + p.slice(3);
-  if (p.startsWith("20") && p.length >= 12) p = "0" + p.slice(2);
-  if (/^[17]\d{8}$/.test(p)) p = "0" + p; // 9 digits missing leading 0
-  return /^0[0-9]{9,10}$/.test(p) ? p : "";
 }
 
 // ── Ensure columns exist ──────────────────────────────────────────
@@ -121,33 +81,26 @@ export function registerCustomAuthRoutes(app: Express) {
 
   // ── POST /api/auth/login ────────────────────────────────────────
   app.post("/api/auth/login", async (req: Request, res: Response) => {
-    const { identifier, password } = req.body;
+    const { identifier, password } = req.body; // identifier = email or phone
     if (!identifier || !password)
       return res.status(400).json({ message: "البريد / الهاتف وكلمة المرور مطلوبة" });
-
-    const id = String(identifier).trim();
-    const phone = normalizePhone(id);
 
     try {
       const result = await db.execute(
         sql`SELECT id, email, phone, first_name, last_name, profile_image_url, password_hash
             FROM users
-            WHERE (LOWER(email) = LOWER(${id})
-               OR phone = ${id}
-               OR (${phone} <> '' AND phone = ${phone})
-               OR id = ${id})
+            WHERE (LOWER(email) = LOWER(${identifier}) OR phone = ${identifier} OR id = ${identifier})
             LIMIT 1`
       );
       const user: any = result.rows[0];
       if (!user) return res.status(401).json({ message: "البريد الإلكتروني أو رقم الهاتف أو الـ ID غير موجود" });
 
+      // First-time login for Replit-imported accounts (no password set)
       if (!user.password_hash) {
-        const resetToken = createResetToken(String(user.id));
-        return res.status(403).json({ message: "first_login", userId: user.id, resetToken });
+        return res.status(403).json({ message: "first_login", userId: user.id });
       }
 
       const match = await bcrypt.compare(password, user.password_hash);
-      console.log(`[LOGIN] id=${user.id} hash_len=${user.password_hash?.length} match=${match}`);
       if (!match) return res.status(401).json({ message: "كلمة المرور غير صحيحة" });
 
       (req.session as any).customUser = {
@@ -159,10 +112,7 @@ export function registerCustomAuthRoutes(app: Express) {
         profileImageUrl: user.profile_image_url,
       };
 
-      req.session.save((err) => {
-        if (err) return res.status(500).json({ message: "خطأ في حفظ الجلسة" });
-        res.json({ success: true, user: { id: user.id, email: user.email, firstName: user.first_name, lastName: user.last_name } });
-      });
+      res.json({ success: true, user: { id: user.id, email: user.email, firstName: user.first_name, lastName: user.last_name } });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -202,17 +152,7 @@ export function registerCustomAuthRoutes(app: Express) {
         profileImageUrl: null,
       };
 
-      req.session.save((err) => {
-        if (err) return res.status(500).json({ message: "خطأ في حفظ الجلسة" });
-        emitAdminEvent("admin:user-registered", {
-          userId: newId,
-          name: [firstName, lastName].filter(Boolean).join(" ") || "مستخدم",
-          email: email || null,
-          phone: phone || null,
-          at: new Date().toISOString(),
-        });
-        res.status(201).json({ success: true, user: { id: newId, email, firstName, lastName } });
-      });
+      res.status(201).json({ success: true, user: { id: newId, email, firstName, lastName } });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -220,24 +160,18 @@ export function registerCustomAuthRoutes(app: Express) {
 
   // ── POST /api/auth/set-password (first-login / forgot-password) ─
   app.post("/api/auth/set-password", async (req: Request, res: Response) => {
-    const { userId, password, resetToken } = req.body;
+    const { userId, password } = req.body;
     if (!userId || !password || password.length < 6)
       return res.status(400).json({ message: "بيانات غير صحيحة" });
-
-    const tokenOk = !!resetToken && verifyResetToken(String(resetToken), String(userId));
-    if (!tokenOk) {
-      return res.status(403).json({ message: "انتهت صلاحية طلب إعادة التعيين — ابدأ من جديد" });
-    }
-
     try {
       const hash = await bcrypt.hash(password, 10);
-      const upd = await db.execute(sql`UPDATE users SET password_hash = ${hash} WHERE id = ${userId}`);
+      await db.execute(sql`UPDATE users SET password_hash = ${hash} WHERE id = ${userId}`);
+      // Fetch user and log them in
       const result = await db.execute(
         sql`SELECT id, email, phone, first_name, last_name, profile_image_url FROM users WHERE id = ${userId} LIMIT 1`
       );
       const user: any = result.rows[0];
       if (!user) return res.status(404).json({ message: "المستخدم غير موجود" });
-
       (req.session as any).customUser = {
         id:              user.id,
         email:           user.email,
@@ -246,10 +180,7 @@ export function registerCustomAuthRoutes(app: Express) {
         lastName:        user.last_name,
         profileImageUrl: user.profile_image_url,
       };
-      req.session.save((err) => {
-        if (err) return res.status(500).json({ message: "خطأ في حفظ الجلسة" });
-        res.json({ success: true });
-      });
+      res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -258,24 +189,21 @@ export function registerCustomAuthRoutes(app: Express) {
   // ── POST /api/auth/forgot-password ─────────────────────────────
   app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
     const { email, phone, identifier } = req.body;
-    const raw = (identifier || email || phone || "").trim();
-    if (!raw)
+    const lookup = identifier || email || phone;
+    if (!lookup)
       return res.status(400).json({ message: "البريد الإلكتروني أو رقم الهاتف أو الـ ID مطلوب" });
-    const normalizedPhone = normalizePhone(raw);
     try {
       const result = await db.execute(
         sql`SELECT id, email, phone, first_name FROM users
-            WHERE (LOWER(email) = LOWER(${raw})
-               OR phone = ${raw}
-               OR (${normalizedPhone} <> '' AND phone = ${normalizedPhone})
-               OR id = ${raw})
+            WHERE (LOWER(email) = LOWER(${lookup}) OR phone = ${lookup} OR id = ${lookup})
             LIMIT 1`
       );
       const user: any = result.rows[0];
-      if (!user) return res.status(200).json({ message: "not_found", userId: null, notFound: true });
-
-      const resetToken = createResetToken(String(user.id));
-      return res.json({ message: "ok", userId: user.id, firstName: user.first_name, resetToken });
+      // For security, always respond the same even if user not found
+      if (!user) return res.status(200).json({ message: "first_login", userId: null, notFound: true });
+      // Clear password to force reset
+      await db.execute(sql`UPDATE users SET password_hash = NULL WHERE id = ${user.id}`);
+      return res.json({ message: "first_login", userId: user.id, firstName: user.first_name });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }

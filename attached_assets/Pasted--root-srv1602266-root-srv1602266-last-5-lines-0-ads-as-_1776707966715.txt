@@ -1,0 +1,64 @@
+
+root@srv1602266:~#
+root@srv1602266:~#  last 5 lines:
+0|ads-as   | ":"شبكة سوق للإعلانات","platform_tagline":"أفضل منصة إعلانية في مصر                                                                                                                                                              والعالم العربي","app_play_store":"https://play.google.com/store/apps/details?id                                                                                                                                                             =com.apmo.souqmarket","app_app_store":"https://apps.apple.com/eg/app/as-souqmark                                                                                                                                                             et/id6740153334","app_huawei":"https://app.as-souqmarkat.com/?from-splash=false"                                                                                                                                                             ,"contact_vodafone_cash":"01098559311","contact_instapay":"01285558567","contact                                                                                                                                                             _whatsapp":"","feature_ads":"1","feature_reels":"1","feature_channels":"1","feat                                                                                                                                                             ure_livestream":"1","feature_messages":"1","feature_campaigns":"1","feature_ai":                                                                                                                                                             "1","feature_registration":"1","feature_boost":"1","promo_banner_enabled":"1","p                                                                                                                                                             romo_banner_text":"🎉 قسّط على 18 شهر بدون فوائد | حمّل تطبيق سوق ماركات الآن | عر                                                                                                                                                             وض حصرية لفترة محدودة | ads-as.com","promo_banner_url":"https://play.google.com/                                                                                                                                                             store/apps/details?id=com.apmo.souqmarket"}
+0|ads-as   | 5:09:41 PM [express] GET /api/stories 304 in 2ms :: []
+
+root@srv1602266:~#
+^C
+root@srv1602266:~# apt install certbot python3-certbot-nginx -y && certbot --ngi                                                                                                                                                             nx -d ads-as.com -d www.ads-as.com --non-interactive --agree-tos -m admin@ads-as                                                                                                                                                             .com
+
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+The following additional packages will be installed:
+  python3-acme python3-certbot python3-configargparse python3-icu
+^Cot@srv1602266:~#20 PM [express] serving on port 5000r listening on port undefi
+root@srv1602266:~#
+
+
+
+
+sudo -u postgres psql -d adsas_db -c "ALTER TABLE ads ADD COLUMN IF NOT EXISTS is_boosted BOOLEAN DEFAULT FALSE; ALTER TABLE ads ADD COLUMN IF NOT EXISTS boosted_until TIMESTAMP; CREATE TABLE IF NOT EXISTS boost_orders (id SERIAL PRIMARY KEY, order_number VARCHAR NOT NULL UNIQUE, ad_id INTEGER NOT NULL, user_id VARCHAR NOT NULL, amount NUMERIC(10,2) NOT NULL DEFAULT 0, payment_ref VARCHAR NOT NULL, status VARCHAR NOT NULL DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW()); ALTER TABLE boost_orders ADD COLUMN IF NOT EXISTS payment_screenshot_url TEXT; ALTER TABLE boost_orders ADD COLUMN IF NOT EXISTS payment_method TEXT;"
+NOTICE:  column "is_boosted" of relation "ads" already exists, skipping
+NOTICE:  column "boosted_until" of relation "ads" already exists, skipping
+NOTICE:  relation "boost_orders" already exists, skipping
+ALTER TABLE
+NOTICE:  column "payment_screenshot_url" of relation "boost_orders" already exists, skipping
+ALTER TABLE
+NOTICE:  column "payment_method" of relation "boost_orders" already exists, skipping
+CREATE TABLE
+ALTER TABLE
+ALTER TABLE
+root@srv1602266:~# pm2 restart ads-as && sleep 3 && pm2 logs ads-as --lines 8 --nostream
+
+Use --update-env to update environment variables
+[PM2] Applying action restartProcessId on app [ads-as](ids: [ 0 ])
+[PM2] [ads-as](0) ✓
+┌────┬───────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┬──────────┬──────────┐
+│ id │ name      │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │ user     │ watching │
+├────┼───────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┼──────────┼──────────┤
+│ 0  │ ads-as    │ default     │ 1.0.0   │ fork    │ 4491     │ 0s     │ 4    │ online    │ 0%       │ 18.5mb   │ root     │ disabled │
+└────┴───────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
+[TAILING] Tailing last 8 lines for [ads-as] process (change the value with --lines option)
+/root/.pm2/logs/ads-as-error.log last 8 lines:
+0|ads-as   |     at async q4 (/root/dist/index.cjs:118:161)
+0|ads-as   |     at async /root/dist/index.cjs:1320:509 {
+0|ads-as   |   code: 'ERR_INVALID_ARG_TYPE',
+0|ads-as   |   [cause]: undefined
+0|ads-as   | }
+0|ads-as   | Migration warning: relation "boost_orders" does not exist
+0|ads-as   | Migration warning: must be owner of table boost_orders
+0|ads-as   | Migration warning: must be owner of table boost_orders
+
+/root/.pm2/logs/ads-as-out.log last 8 lines:
+0|ads-as   | [4/20/2026, 5:59:04 PM] [INFO] License: Apache-2.0
+0|ads-as   | [4/20/2026, 5:59:04 PM] [INFO] Author: Chen Mingliang
+0|ads-as   | [RTMP] Server started on port 1935 (RTMP) and 8000 (HLS)
+0|ads-as   | [Auth] Replit OAuth disabled.
+0|ads-as   | [4/20/2026, 5:59:04 PM] [INFO] WebSocket server listening on port undefined:8000
+0|ads-as   | [4/20/2026, 5:59:04 PM] [INFO] HTTP server listening on port undefined:8000
+0|ads-as   | [4/20/2026, 5:59:04 PM] [INFO] Rtmp Server listening on port undefined:1935
+0|ads-as   | 5:59:04 PM [express] serving on port 5000
+
+root@srv1602266:~#

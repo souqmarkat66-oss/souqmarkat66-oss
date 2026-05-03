@@ -21,10 +21,9 @@ import { apiRequest } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
 import { AdCard } from "@/components/AdCard";
 import { QRCodeSVG } from "qrcode.react";
-import { SiFacebook, SiWhatsapp, SiTelegram } from "react-icons/si";
 
 const PLATFORM_PAYMENTS = [
-  { label: "فودافون كاش", number: "01098559311", color: "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900 text-red-700 dark:text-red-400", emoji: "📱" },
+  { label: "فودافون كاش", number: "01098553911", color: "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900 text-red-700 dark:text-red-400", emoji: "📱" },
   { label: "اتصالات e& كاش", number: "01126665741", color: "bg-orange-50 dark:bg-orange-950/20 border-orange-200 dark:border-orange-900 text-orange-700 dark:text-orange-400", emoji: "📲" },
   { label: "InstaPay", number: "01285558567", color: "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900 text-blue-700 dark:text-blue-400", emoji: "💳" },
 ];
@@ -163,8 +162,9 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
       {/* WhatsApp Button */}
       {ad.whatsappNumber && (
         <a
-          href={`/api/go/${ad.id}/whatsapp`}
+          href={`https://wa.me/2${ad.whatsappNumber.replace(/^0/, '')}?text=مرحباً، رأيت إعلانك "${ad.title}" على شبكة سوق للإعلانات`}
           target="_blank" rel="noopener noreferrer"
+          onClick={() => fetch(`/api/ads/${ad.id}/whatsapp-click`, { method: "POST" }).catch(() => {})}
         >
           <Button className="w-full gap-2 bg-green-500 hover:bg-green-600 text-white rounded-2xl h-12" data-testid="btn-whatsapp">
             <MessageCircle className="w-5 h-5" />
@@ -194,7 +194,7 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
             <span className="text-sm font-bold">حمّل التطبيق</span>
           </div>
           {ad.appStoreUrl && (
-            <a href={`/api/go/${ad.id}/appstore`} target="_blank" rel="noopener noreferrer" data-testid="btn-appstore-link">
+            <a href={ad.appStoreUrl} target="_blank" rel="noopener noreferrer" data-testid="btn-appstore-link">
               <button className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-black text-white hover:bg-gray-900 active:scale-[0.98] transition-all shadow-md">
                 <svg viewBox="0 0 24 24" className="w-6 h-6 fill-white flex-shrink-0"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
                 <div className="text-right flex-1">
@@ -206,7 +206,7 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
             </a>
           )}
           {ad.googlePlayUrl && (
-            <a href={`/api/go/${ad.id}/googleplay`} target="_blank" rel="noopener noreferrer" data-testid="btn-googleplay-link">
+            <a href={ad.googlePlayUrl} target="_blank" rel="noopener noreferrer" data-testid="btn-googleplay-link">
               <button className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-[#01875f] text-white hover:bg-[#017a56] active:scale-[0.98] transition-all shadow-md">
                 <svg viewBox="0 0 24 24" className="w-6 h-6 flex-shrink-0" fill="white"><path d="M3.18 23.45a2 2 0 0 1-.93-.87V1.42a2 2 0 0 1 .93-.87l11.47 11.45L3.18 23.45zm13.12-6.92L4.43 23.35l9.1-9.09 2.77 2.27zm2.43-5.14c.4.28.65.72.65 1.21s-.25.93-.65 1.21l-2 1.3-3.06-3.05 3.06-3.06 2 1.39zM4.43.65l11.87 6.82-2.77 2.27L4.43.65z"/></svg>
                 <div className="text-right flex-1">
@@ -218,7 +218,7 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
             </a>
           )}
           {ad.appGalleryUrl && (
-            <a href={`/api/go/${ad.id}/appgallery`} target="_blank" rel="noopener noreferrer" data-testid="btn-appgallery-link">
+            <a href={ad.appGalleryUrl} target="_blank" rel="noopener noreferrer" data-testid="btn-appgallery-link">
               <button className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-[#cf0a2c] text-white hover:bg-[#b50926] active:scale-[0.98] transition-all shadow-md">
                 <svg viewBox="0 0 24 24" className="w-6 h-6 flex-shrink-0" fill="white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
                 <div className="text-right flex-1">
@@ -234,7 +234,7 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
 
       {/* External Payment Link */}
       {ad.paymentLink && (
-        <a href={`/api/go/${ad.id}/payment`} target="_blank" rel="noopener noreferrer">
+        <a href={ad.paymentLink} target="_blank" rel="noopener noreferrer">
           <Button variant="outline" className="w-full gap-2 rounded-2xl h-11 border-primary/30 text-primary hover:bg-primary/5">
             <ExternalLink className="w-4 h-4" />
             {ad.installmentMonths > 0 ? "ادفع بالتقسيط — تطبيق سوق ماركات" : "رابط الدفع المباشر"}
@@ -548,7 +548,7 @@ function VideoPlayer({ src }: { src: string }) {
   );
 }
 
-function ImageSlideshow({ images, fallback }: { images: string[], fallback?: React.ReactNode }) {
+function ImageSlideshow({ images }: { images: string[] }) {
   const [current, setCurrent] = useState(0);
   const [imgErrors, setImgErrors] = useState<Record<number, boolean>>({});
   useEffect(() => {
@@ -559,15 +559,11 @@ function ImageSlideshow({ images, fallback }: { images: string[], fallback?: Rea
   if (images.length === 0) return null;
   const hasCurError = !!imgErrors[current];
   return (
-    <div className={`relative w-full h-full ${hasCurError ? 'bg-gradient-to-br from-primary/10 via-primary/5 to-secondary/10' : 'bg-black'}`}>
+    <div className="relative w-full h-full bg-black">
       {hasCurError ? (
-        <div className="w-full h-full">
-          {fallback ?? (
-            <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground gap-3">
-              <span className="text-4xl">🖼️</span>
-              <span className="text-sm font-medium">تعذّر تحميل الصورة</span>
-            </div>
-          )}
+        <div className="w-full h-full flex flex-col items-center justify-center text-white/30">
+          <span className="text-5xl mb-2">📷</span>
+          <span className="text-sm">تعذّر تحميل الصورة</span>
         </div>
       ) : (
         <img
@@ -658,16 +654,7 @@ export default function AdDetails() {
     let ogUrl = document.querySelector('meta[property="og:url"]') as HTMLMetaElement | null;
     if (!ogUrl) { ogUrl = document.createElement("meta"); ogUrl.setAttribute("property","og:url"); document.head.appendChild(ogUrl); }
     ogUrl.content = `https://ads-as.com${window.location.pathname}`;
-
-    let canonical = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
-    if (!canonical) { canonical = document.createElement("link"); canonical.rel = "canonical"; document.head.appendChild(canonical); }
-    canonical.href = `https://ads-as.com/ads/${id}`;
-
-    return () => {
-      document.title = "شبكة سوق للإعلانات";
-      const can = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
-      if (can) can.href = "https://ads-as.com/";
-    };
+    return () => { document.title = "شبكة سوق للإعلانات"; };
   }, [ad]);
 
   // Fetch boost settings when ad owner is viewing
@@ -801,65 +788,14 @@ export default function AdDetails() {
         <div className="lg:col-span-2">
           <div className="bg-card border rounded-3xl overflow-hidden shadow-sm">
             {/* Media */}
-            <div className={`aspect-video relative overflow-hidden rounded-t-3xl ${ad.mediaUrl ? 'bg-black' : 'bg-gradient-to-br from-primary/10 via-primary/5 to-secondary/10'}`}>
+            <div className="aspect-video bg-black relative overflow-hidden rounded-t-3xl">
               {ad.mediaType === 'video' ? (
                 <VideoPlayer src={ad.mediaUrl} />
               ) : ad.mediaUrl ? (
-                <ImageSlideshow
-                  images={[ad.mediaUrl]}
-                  fallback={
-                    <div className="w-full h-full flex flex-col justify-center items-start p-8 gap-4">
-                      {ad.category && ad.category !== 'general' && (
-                        <span className="bg-white/60 dark:bg-black/30 backdrop-blur-sm text-primary text-xs font-bold px-3 py-1 rounded-full border border-primary/20">
-                          {ad.category}
-                        </span>
-                      )}
-                      <h2 className="text-foreground font-extrabold text-2xl md:text-3xl leading-snug text-right w-full" dir="rtl">
-                        {ad.title}
-                      </h2>
-                      {ad.description && (
-                        <p className="text-muted-foreground text-sm leading-relaxed line-clamp-4 text-right w-full" dir="rtl">
-                          {ad.description}
-                        </p>
-                      )}
-                      {(ad.priceEGP ?? 0) > 0 && (
-                        <div className="bg-green-500 text-white font-extrabold text-lg px-4 py-1.5 rounded-full shadow">
-                          {ad.priceEGP?.toLocaleString()} ج.م
-                        </div>
-                      )}
-                      <div className="absolute -bottom-10 -start-10 w-36 h-36 rounded-full bg-primary/5 pointer-events-none" />
-                      <div className="absolute -top-8 -end-8 w-28 h-28 rounded-full bg-secondary/10 pointer-events-none" />
-                    </div>
-                  }
-                />
+                <ImageSlideshow images={[ad.mediaUrl]} />
               ) : (
-                /* Text-only ad — Facebook-style post card */
-                <div className="w-full h-full flex flex-col justify-center items-start p-8 gap-4">
-                  {/* Category */}
-                  {ad.category && ad.category !== 'general' && (
-                    <span className="bg-white/60 dark:bg-black/30 backdrop-blur-sm text-primary text-xs font-bold px-3 py-1 rounded-full border border-primary/20">
-                      {ad.category}
-                    </span>
-                  )}
-                  {/* Big title */}
-                  <h2 className="text-foreground font-extrabold text-2xl md:text-3xl leading-snug text-right w-full" dir="rtl">
-                    {ad.title}
-                  </h2>
-                  {/* Description */}
-                  {ad.description && (
-                    <p className="text-muted-foreground text-sm leading-relaxed line-clamp-3 text-right w-full" dir="rtl">
-                      {ad.description}
-                    </p>
-                  )}
-                  {/* Price */}
-                  {(ad.priceEGP ?? 0) > 0 && (
-                    <div className="bg-green-500 text-white font-extrabold text-lg px-4 py-1.5 rounded-full shadow">
-                      {ad.priceEGP?.toLocaleString()} ج.م
-                    </div>
-                  )}
-                  {/* Decorative */}
-                  <div className="absolute -bottom-10 -start-10 w-36 h-36 rounded-full bg-primary/5 pointer-events-none" />
-                  <div className="absolute -top-8 -end-8 w-28 h-28 rounded-full bg-secondary/10 pointer-events-none" />
+                <div className="w-full h-full flex items-center justify-center text-muted-foreground/30">
+                  <span className="text-6xl">📷</span>
                 </div>
               )}
             </div>
@@ -935,34 +871,6 @@ export default function AdDetails() {
 
               <h1 className="text-2xl md:text-3xl font-bold mb-4 leading-tight">{ad.title}</h1>
               <p className="text-muted-foreground whitespace-pre-wrap leading-relaxed">{ad.description}</p>
-
-              {/* ── Google Maps ── */}
-              {ad.targetLat && ad.targetLng && (
-                <div className="mt-5 rounded-2xl overflow-hidden border border-border/50">
-                  <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border/40">
-                    <span className="text-sm font-semibold text-foreground">📍 موقع الإعلان</span>
-                    <a
-                      href={`https://www.google.com/maps?q=${ad.targetLat},${ad.targetLng}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mr-auto text-xs text-primary hover:underline flex items-center gap-1"
-                      data-testid="link-open-maps"
-                    >
-                      <ExternalLink className="w-3 h-3" /> فتح في خرائط Google
-                    </a>
-                  </div>
-                  <iframe
-                    title="موقع الإعلان على الخريطة"
-                    src={`https://www.google.com/maps?q=${ad.targetLat},${ad.targetLng}&z=15&output=embed`}
-                    width="100%"
-                    height="220"
-                    style={{ border: 0, display: "block" }}
-                    loading="lazy"
-                    referrerPolicy="no-referrer-when-downgrade"
-                    data-testid="iframe-google-map"
-                  />
-                </div>
-              )}
 
               {/* Like/Comment */}
               <div className="mt-6">
@@ -1101,65 +1009,6 @@ export default function AdDetails() {
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {similarAds.map((sad, i) => <AdCard key={sad.id} ad={sad} index={i} />)}
           </div>
-        </div>
-      )}
-
-      {/* ── 📢 SHARE BAR ── */}
-      {ad && (
-        <div className="mt-8 rounded-2xl overflow-hidden border border-blue-200 dark:border-blue-900 bg-gradient-to-l from-blue-600 to-blue-700 dark:from-blue-800 dark:to-blue-900 p-5 text-white">
-          <div className="flex items-center gap-3 mb-4">
-            <Share2 className="w-6 h-6 text-white opacity-90" />
-            <div>
-              <p className="font-bold text-lg leading-tight">شارك الإعلان وساعد صاحبه!</p>
-              <p className="text-blue-100 text-sm">كل مشاركة بتزيد فرصة ظهور الإعلان على Google 🚀</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <a
-              href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(`https://ads-as.com/ads/${ad.id}`)}&quote=${encodeURIComponent(`شوف الإعلان ده: "${ad.title}" على شبكة سوق للإعلانات`)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex flex-col items-center justify-center gap-2 bg-white/20 hover:bg-white/30 active:bg-white/40 rounded-xl py-3 px-2 transition-all font-bold text-sm"
-              data-testid="btn-share-facebook"
-            >
-              <SiFacebook className="w-7 h-7" />
-              <span>فيسبوك</span>
-            </a>
-            <a
-              href={`https://wa.me/?text=${encodeURIComponent(`شوف الإعلان ده: "${ad.title}" على شبكة سوق للإعلانات 🛒\nhttps://ads-as.com/ads/${ad.id}`)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex flex-col items-center justify-center gap-2 bg-white/20 hover:bg-white/30 active:bg-white/40 rounded-xl py-3 px-2 transition-all font-bold text-sm"
-              data-testid="btn-share-whatsapp"
-            >
-              <SiWhatsapp className="w-7 h-7" />
-              <span>واتساب</span>
-            </a>
-            <a
-              href={`https://t.me/share/url?url=${encodeURIComponent(`https://ads-as.com/ads/${ad.id}`)}&text=${encodeURIComponent(`شوف الإعلان ده: "${ad.title}" على شبكة سوق للإعلانات`)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex flex-col items-center justify-center gap-2 bg-white/20 hover:bg-white/30 active:bg-white/40 rounded-xl py-3 px-2 transition-all font-bold text-sm"
-              data-testid="btn-share-telegram"
-            >
-              <SiTelegram className="w-7 h-7" />
-              <span>تيليجرام</span>
-            </a>
-          </div>
-          <button
-            onClick={() => {
-              const url = `https://ads-as.com/ads/${ad.id}`;
-              navigator.clipboard.writeText(url).then(() => {
-                const btn = document.getElementById("copy-share-btn");
-                if (btn) { btn.textContent = "✅ تم النسخ!"; setTimeout(() => { btn.textContent = "📋 نسخ الرابط"; }, 2000); }
-              });
-            }}
-            id="copy-share-btn"
-            className="mt-3 w-full bg-white/15 hover:bg-white/25 rounded-xl py-2.5 text-sm font-bold transition-all"
-            data-testid="btn-share-copy-link"
-          >
-            📋 نسخ الرابط
-          </button>
         </div>
       )}
 

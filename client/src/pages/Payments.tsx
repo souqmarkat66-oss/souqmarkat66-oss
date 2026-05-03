@@ -8,21 +8,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon, Tag, CheckSquare, Square, Calculator, Download, Apple, Coins, Wallet, ArrowUpCircle, ArrowDownCircle, Copy, Loader2, Gift } from "lucide-react";
+import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon, Tag, CheckSquare, Square, Calculator, Download, Apple } from "lucide-react";
 import { SiGoogleplay, SiHuawei } from "react-icons/si";
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {
-  ad_boost:      "⚡ تعزيز إعلان",
-  campaign:      "📣 حملة إعلانية",
-  renewal:       "🔄 تجديد إعلان 7 أيام",
-  renewal_30:    "🔄 تجديد إعلان 30 يوم",
-  ai_image:      "🖼️ ذكاء: صورة",
-  ai_video:      "🎬 ذكاء: فيديو",
-  ai_content:    "✍️ ذكاء: محتوى",
-  ai_credits:    "🤖 رصيد ذكاء",
-  talking_photo: "🗣️ فيديو متكلم بصوت طبيعي",
-  withdrawal:    "🏧 سحب أرباح",
-  other:         "📦 أخرى",
+  ad_boost:   "⚡ تعزيز إعلان",
+  campaign:   "📣 حملة إعلانية",
+  renewal:    "🔄 تجديد إعلان",
+  ai_image:   "🖼️ ذكاء: صورة",
+  ai_video:   "🎬 ذكاء: فيديو",
+  ai_content: "✍️ ذكاء: محتوى",
+  ai_credits: "🤖 رصيد ذكاء",
+  withdrawal: "🏧 سحب أرباح",
+  other:      "📦 أخرى",
 };
 
 function buildServiceTypes(p: Record<string, string>) {
@@ -32,14 +30,12 @@ function buildServiceTypes(p: Record<string, string>) {
     top_up: [
       { value: "ad_boost",   label: "⚡ تعزيز إعلان",    price: fmt(p.boost_price_egp),         desc: "ظهور مميز لإعلانك",        amount: num(p.boost_price_egp) },
       { value: "campaign",   label: "📣 حملة إعلانية",    price: `من ${fmt(p.campaign_min_budget_egp)}`, desc: "CPM=" + fmt(p.cpm_rate_egp) + " / نقرة=" + fmt(p.cpc_rate_egp), amount: num(p.campaign_min_budget_egp) },
-      { value: "renewal",    label: "🔄 تجديد 7 أيام",    price: fmt(p.renewal_price_7 || "50"),  desc: "7 أيام ← الأكثر طلباً 🔥",  amount: num(p.renewal_price_7 || "50") },
-      { value: "renewal_30", label: "🔄 تجديد 30 يوم",   price: fmt(p.renewal_price_30),         desc: "تمديد صلاحية إعلانك شهر",   amount: num(p.renewal_price_30) },
-      { value: "ai_image",      label: "🖼️ ذكاء: صورة",          price: fmt(p.ai_price_image),          desc: "توليد صورة بالذكاء",                    amount: num(p.ai_price_image) },
-      { value: "ai_video",      label: "🎬 ذكاء: فيديو",          price: fmt(p.ai_price_video),          desc: "إنشاء مقطع فيديو",                      amount: num(p.ai_price_video) },
-      { value: "ai_content",    label: "✍️ ذكاء: محتوى",         price: fmt(p.ai_price_content),        desc: "كتابة نص إعلاني",                       amount: num(p.ai_price_content) },
-      { value: "ai_credits",    label: "🤖 رصيد ذكاء",            price: fmt(p.ai_price_per_credit_egp) + "/كريدت", desc: `${p.ai_free_credits || 3} مجاناً`, amount: num(p.ai_price_per_credit_egp) },
-      { value: "talking_photo", label: "🗣️ فيديو متكلم بصوت طبيعي", price: "100 ج.م",                  desc: "خضار، منتج، شخص — أي صورة تتكلم 🔥",   amount: 100 },
-      { value: "other",         label: "📦 أخرى",                  price: "",                              desc: "أي خدمة أخرى",                          amount: 0 },
+      { value: "renewal",    label: "🔄 تجديد 30 يوم",    price: fmt(p.renewal_price_30),        desc: "تمديد صلاحية إعلانك",       amount: num(p.renewal_price_30) },
+      { value: "ai_image",   label: "🖼️ ذكاء: صورة",     price: fmt(p.ai_price_image),          desc: "توليد صورة بالذكاء",        amount: num(p.ai_price_image) },
+      { value: "ai_video",   label: "🎬 ذكاء: فيديو",     price: fmt(p.ai_price_video),          desc: "إنشاء مقطع فيديو",          amount: num(p.ai_price_video) },
+      { value: "ai_content", label: "✍️ ذكاء: محتوى",    price: fmt(p.ai_price_content),        desc: "كتابة نص إعلاني",           amount: num(p.ai_price_content) },
+      { value: "ai_credits", label: "🤖 رصيد ذكاء",      price: fmt(p.ai_price_per_credit_egp) + "/كريدت", desc: `${p.ai_free_credits || 3} مجاناً`, amount: num(p.ai_price_per_credit_egp) },
+      { value: "other",      label: "📦 أخرى",            price: "",                              desc: "أي خدمة أخرى",              amount: 0 },
     ],
     withdrawal: [
       { value: "withdrawal", label: "🏧 سحب أرباح",  price: `أدنى ${fmt(p.wallet_min_withdrawal_egp || "100")}`, desc: "تحويل أرباحك", amount: 0 },
@@ -62,7 +58,7 @@ const STATUS_MAP: Record<string, { label: string; icon: any; color: string }> = 
 };
 
 const PAYMENT_METHODS = [
-  { value: "vodafone",  label: "📱 فودافون كاش",    number: "01098559311" },
+  { value: "vodafone",  label: "📱 فودافون كاش",    number: "01098553911" },
   { value: "etisalat",  label: "📲 اتصالات e& كاش", number: "01126665741" },
   { value: "instapay",  label: "💳 InstaPay",        number: "01285558567" },
   { value: "souq",      label: "🛒 سوق ماركات",      number: "" },
@@ -71,18 +67,12 @@ const PAYMENT_METHODS = [
 export default function Payments() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState<"payments" | "coins" | "wallet">("payments");
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({ type: "top_up", method: "vodafone", phoneNumber: "", adId: "" });
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [manualAmount, setManualAmount] = useState("");
   const [amountOverride, setAmountOverride] = useState(false);
-  const [paymentRef, setPaymentRef] = useState("");
-  // Withdrawal-specific fields
-  const [withdrawalName, setWithdrawalName]               = useState("");
-  const [withdrawalAccountType, setWithdrawalAccountType] = useState("vodafone");
-  const [withdrawalAccountNumber, setWithdrawalAccountNumber] = useState("");
   const [screenshotUrl, setScreenshotUrl] = useState("");
   const [screenshotPreview, setScreenshotPreview] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -99,50 +89,7 @@ export default function Payments() {
 
   const { data: pricing = {} } = useQuery<Record<string, string>>({
     queryKey: ["/api/pricing"],
-    staleTime: 0,
-    refetchInterval: 60000,
   });
-
-  const { data: coinWallet } = useQuery<{ balance: number }>({
-    queryKey: ["/api/coins/wallet"],
-    queryFn: () => fetch("/api/coins/wallet", { credentials: "include" }).then(r => r.json()),
-  });
-
-  const { data: walletData } = useQuery<{ balance: number; transactions: any[] }>({
-    queryKey: ["/api/wallet/balance"],
-    queryFn: () => fetch("/api/wallet/balance", { credentials: "include" }).then(r => r.json()),
-  });
-
-  const { data: coinHistory = [] } = useQuery<any[]>({
-    queryKey: ["/api/coins/transactions"],
-    queryFn: () => fetch("/api/coins/transactions", { credentials: "include" }).then(r => r.json()),
-  });
-
-  const [redeemCode, setRedeemCode] = useState("");
-  const [redeemLoading, setRedeemLoading] = useState(false);
-  const redeemCoin = async () => {
-    if (!redeemCode.trim()) return;
-    setRedeemLoading(true);
-    try {
-      const res = await fetch("/api/coins/redeem", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ code: redeemCode.trim() }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        toast({ title: `✅ تم شحن ${data.coins || ''} عملة بنجاح!` });
-        setRedeemCode("");
-        queryClient.invalidateQueries({ queryKey: ["/api/coins/wallet"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/coins/transactions"] });
-      } else {
-        toast({ title: "❌ " + (data.message || "كود غير صالح"), variant: "destructive" });
-      }
-    } catch {
-      toast({ title: "❌ خطأ في الشحن", variant: "destructive" });
-    } finally { setRedeemLoading(false); }
-  };
 
   const serviceList = buildServiceTypes(pricing)[formData.type === "top_up" ? "top_up" : "withdrawal"];
 
@@ -201,10 +148,6 @@ export default function Payments() {
       setSelectedServices(new Set());
       setManualAmount("");
       setAmountOverride(false);
-      setPaymentRef("");
-      setWithdrawalName("");
-      setWithdrawalAccountType("vodafone");
-      setWithdrawalAccountNumber("");
       setScreenshotUrl("");
       setScreenshotPreview("");
     },
@@ -253,214 +196,19 @@ export default function Payments() {
   const selectedWithPrices = serviceList.filter(s => selectedServices.has(s.value) && s.amount > 0);
   const hasZeroPriceSelected = serviceList.some(s => selectedServices.has(s.value) && s.amount === 0);
 
-  const COIN_PACKAGES = [
-    { coins: 100, price: 10 },
-    { coins: 500, price: 45 },
-    { coins: 1000, price: 85 },
-    { coins: 5000, price: 400 },
-    { coins: 10000, price: 750 },
-  ];
-
-  const COIN_TX_LABELS: Record<string, { label: string; icon: string; color: string }> = {
-    recharge: { label: "شحن", icon: "🔋", color: "text-green-600" },
-    gift_sent: { label: "هدية مرسلة", icon: "🎁", color: "text-red-500" },
-    gift_received: { label: "هدية مستلمة", icon: "🎁", color: "text-green-600" },
-    purchase: { label: "شراء", icon: "🛒", color: "text-blue-600" },
-    admin_grant: { label: "منحة إدارية", icon: "⭐", color: "text-yellow-600" },
-    coin_withdrawal: { label: "سحب", icon: "🏧", color: "text-red-600" },
-    coin_transfer_out: { label: "تحويل صادر", icon: "📤", color: "text-red-500" },
-    coin_transfer_in: { label: "تحويل وارد", icon: "📥", color: "text-green-500" },
-    refund: { label: "استرداد", icon: "↩️", color: "text-blue-500" },
-  };
-
   return (
     <div className="max-w-4xl mx-auto px-4 py-6" dir="rtl">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-            <CreditCard className="w-5 h-5 text-primary" />
+            <Receipt className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-xl font-extrabold">المدفوعات والمحفظة</h1>
-            <p className="text-xs text-muted-foreground">إدارة شاملة للمدفوعات والعملات والمحفظة</p>
+            <h1 className="text-xl font-extrabold">جدول المدفوعات</h1>
+            <p className="text-xs text-muted-foreground">تتبّع طلبات الدفع والتحميل</p>
           </div>
         </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 mb-5 bg-muted/30 rounded-xl p-1 border">
-        {[
-          { key: "payments" as const, label: "طلبات الدفع", icon: Receipt },
-          { key: "coins" as const, label: "العملات والشحن", icon: Coins },
-          { key: "wallet" as const, label: "المحفظة (ج.م)", icon: Wallet },
-        ].map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-bold transition-all ${
-              activeTab === tab.key
-                ? "bg-background text-primary shadow-sm border border-border/50"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-            data-testid={`tab-${tab.key}`}
-          >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* ══════════════ TAB: COINS ══════════════ */}
-      {activeTab === "coins" && (
-        <div className="space-y-5">
-          {/* Coin Balance */}
-          <div className="border rounded-2xl p-5 bg-gradient-to-l from-yellow-50 to-amber-50 dark:from-yellow-950/20 dark:to-amber-950/20 text-center">
-            <div className="flex items-center justify-center gap-2 mb-2">
-              <Coins className="w-6 h-6 text-yellow-600" />
-              <span className="text-sm font-bold text-muted-foreground">رصيد العملات</span>
-            </div>
-            <div className="text-4xl font-black text-yellow-700 dark:text-yellow-400">{coinWallet?.balance || 0} <span className="text-lg">عملة</span></div>
-            <p className="text-xs text-muted-foreground mt-1">1 عملة = 0.05 ج.م</p>
-          </div>
-
-          {/* Redeem Code */}
-          <div className="border rounded-xl p-4">
-            <h3 className="font-bold text-sm mb-3 flex items-center gap-2"><Gift className="w-4 h-4 text-primary" /> شحن بكود</h3>
-            <div className="flex gap-2">
-              <Input
-                placeholder="أدخل كود الشحن مثل SOUQ-XXXXX-XXXXX"
-                value={redeemCode}
-                onChange={e => setRedeemCode(e.target.value.toUpperCase())}
-                className="text-sm font-mono"
-                dir="ltr"
-                data-testid="input-redeem-code"
-              />
-              <Button onClick={redeemCoin} disabled={redeemLoading || !redeemCode.trim()} size="sm" className="gap-1 whitespace-nowrap" data-testid="btn-redeem">
-                {redeemLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "شحن"}
-              </Button>
-            </div>
-          </div>
-
-          {/* Coin Packages */}
-          <div className="border rounded-xl p-4">
-            <h3 className="font-bold text-sm mb-3 flex items-center gap-2"><ArrowUpCircle className="w-4 h-4 text-green-600" /> باقات الشحن</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {COIN_PACKAGES.map(pkg => (
-                <button
-                  key={pkg.coins}
-                  onClick={() => {
-                    setActiveTab("payments");
-                    setShowForm(true);
-                    setManualAmount(String(pkg.price));
-                    setAmountOverride(true);
-                  }}
-                  className="border rounded-xl p-3 text-center hover:border-primary hover:bg-primary/5 transition-all group"
-                  data-testid={`coin-pkg-${pkg.coins}`}
-                >
-                  <div className="text-2xl font-black text-yellow-600 group-hover:text-primary">{pkg.coins}</div>
-                  <div className="text-[10px] text-muted-foreground">عملة</div>
-                  <div className="text-sm font-bold mt-1">{pkg.price} ج.م</div>
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-2 text-center">اضغط على الباقة وسيتم تحويلك لصفحة الدفع</p>
-          </div>
-
-          {/* Coin Transaction History */}
-          <div className="border rounded-xl p-4">
-            <h3 className="font-bold text-sm mb-3">سجل حركات العملات</h3>
-            {coinHistory.length === 0 ? (
-              <p className="text-center text-muted-foreground text-xs py-6">لا توجد حركات بعد</p>
-            ) : (
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {coinHistory.slice(0, 30).map((tx: any) => {
-                  const info = COIN_TX_LABELS[tx.type] || { label: tx.type, icon: "💰", color: "text-foreground" };
-                  const isPositive = ["recharge", "gift_received", "coin_transfer_in", "admin_grant", "refund"].includes(tx.type);
-                  return (
-                    <div key={tx.id} className="flex items-center justify-between border-b border-border/30 py-2 last:border-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">{info.icon}</span>
-                        <div>
-                          <span className={`text-xs font-bold ${info.color}`}>{info.label}</span>
-                          {tx.description && <p className="text-[10px] text-muted-foreground truncate max-w-[180px]">{tx.description}</p>}
-                        </div>
-                      </div>
-                      <div className="text-left">
-                        <span className={`font-bold text-sm ${isPositive ? "text-green-600" : "text-red-500"}`}>
-                          {isPositive ? "+" : "-"}{Math.abs(tx.coins)}
-                        </span>
-                        <p className="text-[9px] text-muted-foreground">{tx.created_at ? new Date(tx.created_at).toLocaleDateString("ar-EG") : ""}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ══════════════ TAB: WALLET ══════════════ */}
-      {activeTab === "wallet" && (
-        <div className="space-y-5">
-          {/* EGP Balance */}
-          <div className="border rounded-2xl p-5 bg-gradient-to-l from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 text-center">
-            <div className="flex items-center justify-center gap-2 mb-2">
-              <Wallet className="w-6 h-6 text-green-600" />
-              <span className="text-sm font-bold text-muted-foreground">رصيد المحفظة</span>
-            </div>
-            <div className="text-4xl font-black text-green-700 dark:text-green-400">{walletData?.balance || 0} <span className="text-lg">ج.م</span></div>
-          </div>
-
-          <div className="flex gap-2">
-            <Button className="flex-1 gap-2" onClick={() => { setActiveTab("payments"); setShowForm(true); setFormData(f => ({ ...f, type: "top_up" })); }} data-testid="btn-wallet-topup">
-              <ArrowUpCircle className="w-4 h-4" /> إيداع رصيد
-            </Button>
-            <Button variant="outline" className="flex-1 gap-2" onClick={() => { setActiveTab("payments"); setShowForm(true); setFormData(f => ({ ...f, type: "withdrawal" })); }} data-testid="btn-wallet-withdraw">
-              <ArrowDownCircle className="w-4 h-4" /> سحب أرباح
-            </Button>
-          </div>
-
-          {/* Wallet Transaction History */}
-          <div className="border rounded-xl p-4">
-            <h3 className="font-bold text-sm mb-3">سجل حركات المحفظة</h3>
-            {(walletData?.transactions || []).length === 0 ? (
-              <p className="text-center text-muted-foreground text-xs py-6">لا توجد حركات بعد</p>
-            ) : (
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {(walletData?.transactions || []).slice(0, 30).map((tx: any, i: number) => (
-                  <div key={tx.id || i} className="flex items-center justify-between border-b border-border/30 py-2 last:border-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">{tx.type === "credit" || tx.amount > 0 ? "📥" : "📤"}</span>
-                      <div>
-                        <span className="text-xs font-bold">{tx.description || tx.type}</span>
-                        {tx.status && (
-                          <Badge variant="outline" className="mr-1 text-[9px]">
-                            {tx.status === "approved" ? "✅" : tx.status === "pending" ? "⏳" : "❌"} {tx.status}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                    <div className="text-left">
-                      <span className={`font-bold text-sm ${(tx.type === "credit" || tx.amount > 0) ? "text-green-600" : "text-red-500"}`}>
-                        {tx.amount > 0 ? "+" : ""}{tx.amount} ج.م
-                      </span>
-                      <p className="text-[9px] text-muted-foreground">{tx.created_at ? new Date(tx.created_at).toLocaleDateString("ar-EG") : ""}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ══════════════ TAB: PAYMENTS ══════════════ */}
-      {activeTab === "payments" && (<>
-      {/* Payment Tab Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="font-bold text-sm">طلبات الدفع والخدمات</h2>
         <Button size="sm" onClick={() => setShowForm(true)} data-testid="btn-new-payment" className="gap-2">
           <Plus className="w-4 h-4" />
           طلب دفع جديد
@@ -501,10 +249,10 @@ export default function Payments() {
               <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
                 <th className="text-right px-4 py-3 font-bold">رقم الطلب</th>
                 <th className="text-right px-4 py-3 font-bold">رقم الإعلان</th>
+                <th className="text-right px-4 py-3 font-bold">النوع</th>
                 <th className="text-right px-4 py-3 font-bold">الخدمة</th>
                 <th className="text-right px-4 py-3 font-bold">المبلغ (ج.م)</th>
                 <th className="text-right px-4 py-3 font-bold">طريقة الدفع</th>
-                <th className="text-right px-4 py-3 font-bold">رقم العملية</th>
                 <th className="text-right px-4 py-3 font-bold">الحالة</th>
                 <th className="text-right px-4 py-3 font-bold">الإيصال</th>
                 <th className="text-right px-4 py-3 font-bold">التاريخ</th>
@@ -553,12 +301,17 @@ export default function Payments() {
                       )}
                     </td>
                     <td className="px-4 py-3">
+                      <span className="text-xs font-bold">
+                        {p.type === "withdrawal" ? "🏧 سحب" : "💰 إيداع"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
                       {svcLabels ? (
                         <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold whitespace-nowrap">
                           {svcLabels}
                         </span>
                       ) : (
-                        <span className="text-muted-foreground text-xs">{p.type === "withdrawal" ? "🏧 سحب" : "—"}</span>
+                        <span className="text-muted-foreground text-xs">—</span>
                       )}
                     </td>
                     <td className="px-4 py-3 font-bold text-green-600">
@@ -568,15 +321,6 @@ export default function Payments() {
                       <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-bold ${method.color}`}>
                         {method.emoji} {method.label}
                       </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {p.paymentRef ? (
-                        <span className="font-mono text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-0.5 rounded font-bold" data-testid={`ref-${p.id}`}>
-                          {p.paymentRef}
-                        </span>
-                      ) : (
-                        <span className="text-red-400 text-xs font-bold">غير مُدخل</span>
-                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-bold ${status.color}`}>
@@ -800,132 +544,7 @@ export default function Payments() {
               )}
             </div>
 
-            {/* ===== WITHDRAWAL DETAILS ===== */}
-            {formData.type === "withdrawal" && (
-              <div className="space-y-4 rounded-2xl border-2 border-blue-400/50 bg-blue-50 dark:bg-blue-950/20 p-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">🏧</span>
-                  <div>
-                    <p className="font-extrabold text-sm text-blue-800 dark:text-blue-300">بيانات حساب الاستلام</p>
-                    <p className="text-[10px] text-blue-600 dark:text-blue-400">سيحول لك الأدمن المبلغ على هذا الحساب</p>
-                  </div>
-                </div>
-
-                {/* ── تحذير شرط السحب ── */}
-                <div className="rounded-xl border-2 border-red-400/60 bg-red-50 dark:bg-red-950/20 px-3 py-3 space-y-1">
-                  <p className="text-[11px] font-extrabold text-red-700 dark:text-red-400 flex items-center gap-1">
-                    🚨 شرط إلزامي — يجب الالتزام به:
-                  </p>
-                  <p className="text-[11px] text-red-600 dark:text-red-400 leading-relaxed">
-                    يجب أن يكون رقم محفظتك أو حسابك البنكي
-                    <strong> فعالاً </strong>
-                    و<strong>مسجلاً باسمك أنت</strong> في الشبكة أو البنك.
-                  </p>
-                  <p className="text-[10px] text-red-500 dark:text-red-400 font-bold">
-                    ❌ أي طلب بحساب مسجل باسم شخص آخر سيتم رفضه تلقائياً.
-                  </p>
-                </div>
-
-                {/* اسم صاحب الحساب */}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-blue-900 dark:text-blue-200">
-                    👤 اسمك الكامل (كما في الكارت أو المحفظة)
-                    <span className="text-red-500 mr-1">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="مثال: أحمد محمد علي"
-                    value={withdrawalName}
-                    onChange={e => setWithdrawalName(e.target.value)}
-                    className={`w-full rounded-xl border-2 px-3 py-2.5 text-sm outline-none transition-colors bg-white dark:bg-black/40 ${
-                      withdrawalName.trim()
-                        ? "border-green-400"
-                        : "border-red-300 dark:border-red-700"
-                    }`}
-                    data-testid="input-withdrawal-name"
-                  />
-                </div>
-
-                {/* نوع الحساب */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-blue-900 dark:text-blue-200">
-                    💳 نوع حساب الاستلام
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { value: "vodafone",  label: "📱 فودافون كاش",      hint: "رقم المحفظة" },
-                      { value: "instapay",  label: "⚡ InstaPay",          hint: "رقم الموبايل" },
-                      { value: "bank",      label: "🏦 حساب بنكي",        hint: "رقم الحساب" },
-                      { value: "visa",      label: "💳 كارت فيزا / بنكي", hint: "رقم الكارت" },
-                    ].map(opt => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => setWithdrawalAccountType(opt.value)}
-                        className={`flex flex-col items-start p-2.5 rounded-xl border-2 text-xs font-bold transition-all ${
-                          withdrawalAccountType === opt.value
-                            ? "border-blue-500 bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200"
-                            : "border-blue-200 dark:border-blue-800/50 bg-white dark:bg-black/30 hover:border-blue-400"
-                        }`}
-                        data-testid={`btn-wtype-${opt.value}`}
-                      >
-                        <span>{opt.label}</span>
-                        <span className="text-[9px] font-normal text-muted-foreground mt-0.5">{opt.hint}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* رقم الحساب / الكارت / المحفظة */}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-blue-900 dark:text-blue-200">
-                    {withdrawalAccountType === "vodafone"
-                      ? "📱 رقم محفظة فودافون كاش"
-                      : withdrawalAccountType === "instapay"
-                      ? "⚡ رقم الموبايل (InstaPay)"
-                      : withdrawalAccountType === "bank"
-                      ? "🏦 رقم الحساب البنكي"
-                      : "💳 رقم الكارت البنكي (فيزا / ماستر)"}
-                    <span className="text-red-500 mr-1">*</span>
-                  </label>
-                  <input
-                    type={withdrawalAccountType === "vodafone" || withdrawalAccountType === "instapay" ? "tel" : "text"}
-                    placeholder={
-                      withdrawalAccountType === "bank"
-                        ? "مثال: 1234567890123456"
-                        : withdrawalAccountType === "visa"
-                        ? "مثال: 4111 1111 1111 1111"
-                        : "01XXXXXXXXX"
-                    }
-                    value={withdrawalAccountNumber}
-                    onChange={e => setWithdrawalAccountNumber(e.target.value)}
-                    className={`w-full rounded-xl border-2 px-3 py-2.5 text-sm font-mono outline-none transition-colors bg-white dark:bg-black/40 ${
-                      withdrawalAccountNumber.trim()
-                        ? "border-green-400 bg-green-50 dark:bg-green-950/20"
-                        : "border-red-300 dark:border-red-700"
-                    }`}
-                    dir="ltr"
-                    data-testid="input-withdrawal-account"
-                  />
-                  {withdrawalAccountNumber.trim().length >= 4 && (
-                    <div className="flex items-center gap-2 bg-white dark:bg-black/30 rounded-xl border border-blue-200 dark:border-blue-800 px-3 py-2 mt-1">
-                      <span className="text-[10px] text-muted-foreground">الأرقام الأخيرة:</span>
-                      <span className="font-mono font-extrabold text-sm text-primary tracking-widest">
-                        {"•".repeat(Math.max(0, withdrawalAccountNumber.trim().length - 4))}
-                        {withdrawalAccountNumber.trim().slice(-4)}
-                      </span>
-                      <span className="text-[9px] text-green-600 font-bold mr-auto">✓ سيظهر للأدمن</span>
-                    </div>
-                  )}
-                  {!withdrawalAccountNumber.trim() && (
-                    <p className="text-[10px] text-red-500 font-bold">⚠️ رقم الحساب إلزامي</p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Method — للإيداع فقط */}
-            {formData.type !== "withdrawal" && (
+            {/* Method */}
             <div className="space-y-1">
               <label className="text-xs font-bold">💳 طريقة الدفع</label>
               <div className="grid grid-cols-2 gap-2">
@@ -943,40 +562,13 @@ export default function Payments() {
                 ))}
               </div>
             </div>
-            )}
 
-            {/* بطاقة الدفع — أرقام التحويل */}
-            {formData.type !== "withdrawal" && formData.method !== "souq" && selectedMethod?.number && (
-              <div className="rounded-2xl border-2 border-amber-400/60 bg-amber-50 dark:bg-amber-950/20 p-4 space-y-2">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xl">💸</span>
-                  <p className="font-extrabold text-sm text-amber-800 dark:text-amber-300">حوّل المبلغ على هذا الرقم</p>
-                </div>
-                <div className="flex items-center justify-between bg-white dark:bg-black/30 rounded-xl px-4 py-3 border border-amber-300/50">
-                  <div>
-                    <p className="text-[10px] text-muted-foreground mb-0.5">{selectedMethod.label}</p>
-                    <p className="font-mono font-extrabold text-lg tracking-widest text-primary" dir="ltr">{selectedMethod.number}</p>
-                  </div>
-                  {effectiveAmount && Number(effectiveAmount) > 0 && (
-                    <div className="text-right">
-                      <p className="text-[10px] text-muted-foreground">المبلغ</p>
-                      <p className="font-extrabold text-lg text-green-600">{Number(effectiveAmount).toLocaleString()} ج.م</p>
-                    </div>
-                  )}
-                </div>
-                <p className="text-[10px] text-amber-700 dark:text-amber-400 flex items-start gap-1">
-                  <span>⚠️</span>
-                  بعد إتمام التحويل، ستجد <strong>رقم العملية</strong> في رسالة التأكيد — أدخله أدناه
-                </p>
-              </div>
-            )}
-
-            {/* Phone — للإيداع فقط، وللطرق غير سوق ماركات */}
-            {formData.type !== "withdrawal" && formData.method !== "souq" && (
+            {/* Phone — للطرق غير سوق ماركات */}
+            {formData.method !== "souq" && (
               <div className="space-y-1">
                 <label className="text-xs font-bold flex items-center gap-1">
                   <Smartphone className="w-3 h-3" />
-                  رقم محفظتك (الذي دفعت منه)
+                  رقم المحفظة الخاصة بك
                 </label>
                 <Input
                   type="tel"
@@ -987,32 +579,10 @@ export default function Payments() {
                   dir="ltr"
                   data-testid="input-phone"
                 />
-              </div>
-            )}
-
-            {/* رقم العملية — للإيداع فقط */}
-            {formData.type !== "withdrawal" && (
-              <div className="space-y-1">
-                <label className="text-xs font-bold flex items-center gap-1.5">
-                  <Receipt className="w-3 h-3 text-primary" />
-                  رقم العملية / رقم الإيداع
-                  <span className="text-red-500 font-extrabold">*</span>
-                  <span className="text-[10px] text-muted-foreground font-normal">(مطلوب)</span>
-                </label>
-                <Input
-                  type="text"
-                  placeholder="مثال: 20241231123456 أو TXN-ABC123"
-                  value={paymentRef}
-                  onChange={e => setPaymentRef(e.target.value)}
-                  className={`text-sm h-10 font-mono border-2 ${paymentRef.trim() ? "border-green-400 bg-green-50 dark:bg-green-950/20" : "border-red-300"}`}
-                  dir="ltr"
-                  data-testid="input-payment-ref"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  🔍 هذا الرقم يظهر في رسالة التأكيد من فودافون / InstaPay / البنك بعد إتمام التحويل
-                </p>
-                {!paymentRef.trim() && (
-                  <p className="text-[10px] text-red-500 font-bold">⚠️ رقم العملية إلزامي — الطلب لن يُقبل بدونه</p>
+                {selectedMethod?.number && (
+                  <p className="text-[10px] text-muted-foreground">
+                    حوّل المبلغ على: <span className="font-mono font-bold">{selectedMethod.number}</span>
+                  </p>
                 )}
               </div>
             )}
@@ -1119,69 +689,37 @@ export default function Payments() {
 
 
             {/* Submit */}
-            <div className="space-y-2">
-              {formData.type === "withdrawal" ? (
-                (!screenshotUrl || !withdrawalName.trim() || !withdrawalAccountNumber.trim()) && (
-                  <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 p-3 text-xs text-red-700 dark:text-red-400 space-y-1">
-                    {!withdrawalName.trim() && <p>❌ أدخل <strong>اسمك الكامل</strong> كما في الكارت أو المحفظة</p>}
-                    {!withdrawalAccountNumber.trim() && <p>❌ أدخل <strong>رقم الحساب</strong> المراد التحويل عليه</p>}
-                    {!screenshotUrl && <p>❌ ارفع <strong>صورة</strong> (اختياري — تساعد في التحقق)</p>}
-                  </div>
-                )
-              ) : (
-                (!screenshotUrl || !paymentRef.trim()) && (
-                  <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 p-3 text-xs text-red-700 dark:text-red-400 space-y-1">
-                    {!paymentRef.trim() && <p>❌ أدخل <strong>رقم العملية</strong> الذي وصلك بعد التحويل</p>}
-                    {!screenshotUrl && <p>❌ ارفع <strong>صورة إيصال الدفع</strong> لإثبات التحويل</p>}
-                  </div>
-                )
+            <Button
+              className="w-full gap-2"
+              disabled={!effectiveAmount || Number(effectiveAmount) <= 0 || !screenshotUrl || uploading || createMutation.isPending}
+              onClick={() => createMutation.mutate({
+                type: formData.type,
+                amountEGP: Number(effectiveAmount),
+                method: formData.method,
+                phoneNumber: formData.phoneNumber || undefined,
+                adId: formData.adId && formData.adId !== "none" ? Number(formData.adId) : undefined,
+                serviceType: selectedServices.size > 0 ? Array.from(selectedServices).join(",") : undefined,
+                screenshotUrl: screenshotUrl || undefined,
+              })}
+              data-testid="btn-submit-payment"
+            >
+              {createMutation.isPending ? "جاري الإرسال..." : (
+                <>
+                  📤 إرسال الطلب
+                  {effectiveAmount && Number(effectiveAmount) > 0 && (
+                    <span className="mr-1 bg-white/20 px-2 py-0.5 rounded-lg font-mono text-sm">
+                      {Number(effectiveAmount).toLocaleString()} ج.م
+                    </span>
+                  )}
+                </>
               )}
-              <Button
-                className="w-full gap-2"
-                disabled={
-                  !effectiveAmount || Number(effectiveAmount) <= 0 || uploading || createMutation.isPending ||
-                  (formData.type === "withdrawal"
-                    ? !withdrawalName.trim() || !withdrawalAccountNumber.trim()
-                    : !screenshotUrl || !paymentRef.trim()
-                  )
-                }
-                onClick={() => {
-                  const isWithdrawal = formData.type === "withdrawal";
-                  const withdrawalRef = isWithdrawal
-                    ? `${withdrawalName.trim()} || ${withdrawalAccountType} || ${withdrawalAccountNumber.trim()}`
-                    : undefined;
-                  createMutation.mutate({
-                    type: formData.type,
-                    amountEGP: Number(effectiveAmount),
-                    method: isWithdrawal ? withdrawalAccountType : formData.method,
-                    phoneNumber: isWithdrawal ? withdrawalAccountNumber : (formData.phoneNumber || undefined),
-                    paymentRef: isWithdrawal ? withdrawalRef : (paymentRef.trim() || undefined),
-                    adId: formData.adId && formData.adId !== "none" ? Number(formData.adId) : undefined,
-                    serviceType: selectedServices.size > 0 ? Array.from(selectedServices).join(",") : undefined,
-                    screenshotUrl: screenshotUrl || undefined,
-                  });
-                }}
-                data-testid="btn-submit-payment"
-              >
-                {createMutation.isPending ? "جاري الإرسال..." : (
-                  <>
-                    📤 إرسال الطلب
-                    {effectiveAmount && Number(effectiveAmount) > 0 && (
-                      <span className="mr-1 bg-white/20 px-2 py-0.5 rounded-lg font-mono text-sm">
-                        {Number(effectiveAmount).toLocaleString()} ج.م
-                      </span>
-                    )}
-                  </>
-                )}
-              </Button>
-              <p className="text-[10px] text-center text-muted-foreground">
-                سيصلك إشعار فور مراجعة الطلب · التفعيل فوري عند القبول
-              </p>
-            </div>
+            </Button>
+            <p className="text-[10px] text-center text-muted-foreground">
+              سيصلك إشعار فور مراجعة الطلب · التفعيل فوري عند القبول
+            </p>
           </div>
         </DialogContent>
       </Dialog>
-      </>)}
     </div>
   );
 }

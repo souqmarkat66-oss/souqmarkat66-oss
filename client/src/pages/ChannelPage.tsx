@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Users, Radio, CheckCircle, Plus, Bell, Megaphone, Film, Play, Copy, CheckCheck, TrendingUp, DollarSign, Code2, ChevronDown, ChevronUp, Globe, Monitor } from "lucide-react";
-import { ShareEarnButton } from "@/components/ShareEarnButton";
 import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
@@ -144,7 +143,6 @@ export default function ChannelPage() {
 
           {/* Action Buttons */}
           <div className="flex gap-3 items-center flex-wrap">
-            <ShareEarnButton contentLabel="القناة" />
             {liveStream && (
               <Link href={`/streams/${liveStream.id}`}>
                 <Button className="gap-2 bg-red-500 hover:bg-red-600 text-white animate-pulse">

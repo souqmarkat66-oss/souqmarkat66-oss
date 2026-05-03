@@ -1,0 +1,432 @@
+
+root@srv1602266:~# ^C
+root@srv1602266:~# sed -i 's/apiKey: process\.env\.OPENAI_API_KEY || process\.env\.AI_INTEGRATIONS_OPENAI_API_KEY,/apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY || "placeholder",/g' /root/server/replit_integrations/chat/routes.ts /root/server/replit_integrations/image/client.ts /root/server/replit_integrations/audio/client.ts && npm run build && pm2 restart ads-as
+
+> rest-express@1.0.0 build
+> tsx script/build.ts
+
+building client...
+vite v7.3.1 building client environment for production...
+transforming (1) src/main.tsxBrowserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+transforming (5) ../node_modules/leaflet/dist/leaflet.css
+warn - The utility `shadow-[0_0_8px_theme(colors.primary)]` contains an invalid theme value and was not generated.
+✓ 3750 modules transformed.
+../dist/public/index.html                    10.67 kB │ gzip:   2.91 kB
+../dist/public/assets/index-Bfp6eRck.css    209.16 kB │ gzip:  33.44 kB
+../dist/public/assets/hls-D02re3bK.js       521.93 kB │ gzip: 161.74 kB
+../dist/public/assets/index-BboJFFxX.js   2,507.50 kB │ gzip: 673.94 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 11.78s
+building server...
+
+  dist/index.cjs  1.7mb ⚠️
+
+⚡ Done in 245ms
+Use --update-env to update environment variables
+[PM2] Applying action restartProcessId on app [ads-as](ids: [ 0 ])
+[PM2] [ads-as](0) ✓
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 0  │ ads-as             │ fork     │ 1    │ online    │ 0%       │ 18.4mb   │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+root@srv1602266:~# ^C
+root@srv1602266:~# pm2 logs ads-as --lines 10 --nostream
+
+[TAILING] Tailing last 10 lines for [ads-as] process (change the value with --lines option)
+/root/.pm2/logs/ads-as-out.log last 10 lines:
+0|ads-as   | [4/20/2026, 2:05:36 PM] [INFO] Node-Media-Server v4.2.4
+0|ads-as   | [4/20/2026, 2:05:36 PM] [INFO] Homepage: https://github.com/illuspas/Node-Media-Server
+0|ads-as   | [4/20/2026, 2:05:36 PM] [INFO] License: Apache-2.0
+0|ads-as   | [4/20/2026, 2:05:36 PM] [INFO] Author: Chen Mingliang
+0|ads-as   | [RTMP] Server started on port 1935 (RTMP) and 8000 (HLS)
+0|ads-as   | [4/20/2026, 2:05:36 PM] [INFO] WebSocket server listening on port undefined:8000
+0|ads-as   | [4/20/2026, 2:05:36 PM] [INFO] HTTP server listening on port undefined:8000
+0|ads-as   | [4/20/2026, 2:05:36 PM] [INFO] Rtmp Server listening on port undefined:1935
+
+/root/.pm2/logs/ads-as-error.log last 10 lines:
+0|ads-as   |     at new Configuration (file:///root/node_modules/openid-client/build/index.js:463:19)
+0|ads-as   |     at Object.discovery (file:///root/node_modules/openid-client/build/index.js:244:22)
+0|ads-as   |     at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+0|ads-as   |     at async yW.maxAge (/root/dist/index.cjs:79:4475)
+0|ads-as   |     at async d0 (/root/dist/index.cjs:79:5293)
+0|ads-as   |     at async q4 (/root/dist/index.cjs:118:161)
+0|ads-as   |     at async /root/dist/index.cjs:1320:509 {
+0|ads-as   |   code: 'ERR_INVALID_ARG_TYPE',
+0|ads-as   |   [cause]: undefined
+0|ads-as   | }
+
+root@srv1602266:~# -error.log last 10 lines:
+0|ads-as   |     at new Configuration (file:///root/node_modules/openid-client/build/index.js:463:19)
+0|ads-as   |     at Object.discovery (file:///root/node_modules/openid-client/build/index.js:244:22)
+0|ads-as   |     at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+0|ads-as   |     at async yW.maxAge (/root/dist/index.cjs:79:4475)
+0|ads-as   |     at async d0 (/root/dist/index.cjs:79:5293)
+0|ads-as   |     at async q4 (/root/dist/index.cjs:118:161)
+0|ads-as   |     at async /root/dist/index.cjs:1320:509 {
+0|ads-as   |   code: 'ERR_INVALID_ARG_TYPE',
+0|ads-as   |   [cause]: undefined
+0|ads-as   | }
+
+root@srv1602266:~#
+-error.log last 10 lines:
+0|ads-as   |     at new Configuration (file:///root/node_modules/openid-client/build/index.js:463:19)
+0|ads-as   |     at Object.discovery (file:///root/node_modules/openid-client/build/index.js:244:22)
+0|ads-as   |     at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+0|ads-as   |     at async yW.maxAge (/root/dist/index.cjs:79:4475)
+^Cot@srv1602266:~#use]: undefined_ARG_TYPE',js:1320:509 {1)
+root@srv1602266:~# python3 << 'EOF'
+with open('/root/server/replit_integrations/auth/replitAuth.ts', 'r') as f:
+    c = f.read()
+c = c.replace("process.env.SESSION_SECRET!", 'process.env.SESSION_SECRET || "ads-as-secret"')
+c = c.replace("createTableIfMissing: false", "createTableIfMissing: true")
+old = "  app.use(passport.session());\n\n  const config = await getOidcConfig();"
+new = """  app.use(passport.session());\n\n  if (!process.env.REPL_ID) {\n    console.log("[Auth] Replit OAuth disabled.");\n    app.get("/api/login", (_, res) => res.status(503).json({message: "Auth not available"}));\n    app.get("/api/callback", (_, res) => res.status(503).json({message: "Auth not available"}));\n    app.get("/api/logout", (_, res) => res.redirect("/"));\n    return;\n  }\n\n  const config = await getOidcConfig();"""
+c = c.replace(old, new)
+with open('/root/server/replit_integrations/auth/replitAuth.ts', 'w') as f:
+    f.write(c)
+with open('/root/server/routes.ts', 'r') as f:
+    c = f.read()
+c = c.replace("  await setupAuth(app);", '  try {\n    await setupAuth(app);\n  } catch(e) {\n    console.error("[Auth] failed:", e);\n  }')
+with open('/root/server/routes.ts', 'w') as f:
+    f.write(c)
+print("Done!")
+EOF
+Done!
+root@srv1602266:~# npm run build && pm2 restart ads-as
+
+
+> rest-express@1.0.0 build
+> tsx script/build.ts
+
+building client...
+vite v7.3.1 building client environment for production...
+transforming (1) src/main.tsxBrowserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+
+warn - The utility `shadow-[0_0_8px_theme(colors.primary)]` contains an invalid theme value and was not generated.
+✓ 3750 modules transformed.
+../dist/public/index.html                    10.67 kB │ gzip:   2.91 kB
+../dist/public/assets/index-Bfp6eRck.css    209.16 kB │ gzip:  33.44 kB
+../dist/public/assets/hls-D02re3bK.js       521.93 kB │ gzip: 161.74 kB
+../dist/public/assets/index-BboJFFxX.js   2,507.50 kB │ gzip: 673.94 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 12.14s
+building server...
+
+  dist/index.cjs  1.7mb ⚠️
+
+⚡ Done in 248ms
+Use --update-env to update environment variables
+[PM2] Applying action restartProcessId on app [ads-as](ids: [ 0 ])
+[PM2] [ads-as](0) ✓
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 0  │ ads-as             │ fork     │ 2    │ online    │ 0%       │ 25.4mb   │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+root@srv1602266:~# ^C
+root@srv1602266:~# pm2 logs ads-as --lines 5 --nostream
+[TAILING] Tailing last 5 lines for [ads-as] process (change the value with --lines option)
+/root/.pm2/logs/ads-as-error.log last 5 lines:
+0|ads-as   |     at async /root/dist/index.cjs:1320:509 {
+0|ads-as   |   code: 'ERR_INVALID_ARG_TYPE',
+0|ads-as   |   [cause]: undefined
+0|ads-as   | }
+0|ads-as   | Migration warning: relation "boost_orders" does not exist
+
+/root/.pm2/logs/ads-as-out.log last 5 lines:
+0|ads-as   | ":"شبكة سوق للإعلانات","platform_tagline":"أفضل منصة إعلانية في مصر والعالم العربي","app_play_store":"https://play.google.com/store/apps/details?id=com.apmo.souqmarket","app_app_store":"https://apps.apple.com/eg/app/as-souqmarket/id6740153334","app_huawei":"https://app.as-souqmarkat.com/?from-splash=false","contact_vodafone_cash":"01098559311","contact_instapay":"01285558567","contact_whatsapp":"","feature_ads":"1","feature_reels":"1","feature_channels":"1","feature_livestream":"1","feature_messages":"1","feature_campaigns":"1","feature_ai":"1","feature_registration":"1","feature_boost":"1","promo_banner_enabled":"1","promo_banner_text":"🎉 قسّط على 18 شهر بدون فوائد | حمّل تطبيق سوق ماركات الآن | عروض حصرية لفترة محدودة | ads-as.com","promo_banner_url":"https://play.google.com/store/apps/details?id=com.apmo.souqmarket"}
+0|ads-as   | 5:09:41 PM [express] GET /api/stories 304 in 2ms :: []
+
+root@srv1602266:~#  last 5 lines:
+0|ads-as   | ":"شبكة سوق للإعلانات","platform_tagline":"أفضل منصة إعلانية في مصر والعالم العربي","app_play_store":"https://play.google.com/store/apps/details?id=com.apmo.souqmarket","app_app_store":"https://apps.apple.com/eg/app/as-souqmarket/id6740153334","app_huawei":"https://app.as-souqmarkat.com/?from-splash=false","contact_vodafone_cash":"01098559311","contact_instapay":"01285558567","contact_whatsapp":"","feature_ads":"1","feature_reels":"1","feature_channels":"1","feature_livestream":"1","feature_messages":"1","feature_campaigns":"1","feature_ai":"1","feature_registration":"1","feature_boost":"1","promo_banner_enabled":"1","promo_banner_text":"🎉 قسّط على 18 شهر بدون فوائد | حمّل تطبيق سوق ماركات الآن | عروض حصرية لفترة محدودة | ads-as.com","promo_banner_url":"https://play.google.com/store/apps/details?id=com.apmo.souqmarket"}
+0|ads-as   | 5:09:41 PM [express] GET /api/stories 304 in 2ms :: []
+
+root@srv1602266:~#
+^C
+root@srv1602266:~# apt install certbot python3-certbot-nginx -y && certbot --nginx -d ads-as.com -d www.ads-as.com --non-interactive --agree-tos -m admin@ads-as.com
+
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+The following additional packages will be installed:
+  python3-acme python3-certbot python3-configargparse python3-icu
+  python3-josepy python3-parsedatetime python3-rfc3339
+Suggested packages:
+  python-certbot-doc python3-certbot-apache python-acme-doc
+  python-certbot-nginx-doc
+The following NEW packages will be installed:
+  certbot python3-acme python3-certbot python3-certbot-nginx
+  python3-configargparse python3-icu python3-josepy python3-parsedatetime
+  python3-rfc3339
+0 upgraded, 9 newly installed, 0 to remove and 1 not upgraded.
+Need to get 1097 kB of archives.
+After this operation, 5699 kB of additional disk space will be used.
+Get:1 http://archive.ubuntu.com/ubuntu noble/universe amd64 python3-josepy all 1.14.0-1 [22.1 kB]
+Get:2 http://archive.ubuntu.com/ubuntu noble/universe amd64 python3-rfc3339 all 1.1-4 [6744 B]
+Get:3 http://archive.ubuntu.com/ubuntu noble/universe amd64 python3-acme all 2.9.0-1 [48.5 kB]
+Get:4 http://archive.ubuntu.com/ubuntu noble/universe amd64 python3-configargparse all 1.7-1 [31.7 kB]
+Get:5 http://archive.ubuntu.com/ubuntu noble/universe amd64 python3-parsedatetime all 2.6-3 [32.8 kB]
+Get:6 http://archive.ubuntu.com/ubuntu noble/universe amd64 python3-certbot all 2.9.0-1 [267 kB]
+Get:7 http://archive.ubuntu.com/ubuntu noble/universe amd64 certbot all 2.9.0-1 [89.2 kB]
+Get:8 http://archive.ubuntu.com/ubuntu noble/universe amd64 python3-certbot-nginx all 2.9.0-1 [66.0 kB]
+Get:9 http://archive.ubuntu.com/ubuntu noble/main amd64 python3-icu amd64 2.12-1build2 [534 kB]
+Fetched 1097 kB in 0s (4107 kB/s)
+Preconfiguring packages ...
+Selecting previously unselected package python3-josepy.
+(Reading database ... 114113 files and directories currently installed.)
+Preparing to unpack .../0-python3-josepy_1.14.0-1_all.deb ...
+Unpacking python3-josepy (1.14.0-1) ...
+Selecting previously unselected package python3-rfc3339.
+Preparing to unpack .../1-python3-rfc3339_1.1-4_all.deb ...
+Unpacking python3-rfc3339 (1.1-4) ...
+Selecting previously unselected package python3-acme.
+Preparing to unpack .../2-python3-acme_2.9.0-1_all.deb ...
+Unpacking python3-acme (2.9.0-1) ...
+Selecting previously unselected package python3-configargparse.
+Preparing to unpack .../3-python3-configargparse_1.7-1_all.deb ...
+Unpacking python3-configargparse (1.7-1) ...
+Selecting previously unselected package python3-parsedatetime.
+Preparing to unpack .../4-python3-parsedatetime_2.6-3_all.deb ...
+Unpacking python3-parsedatetime (2.6-3) ...
+Selecting previously unselected package python3-certbot.
+Preparing to unpack .../5-python3-certbot_2.9.0-1_all.deb ...
+Unpacking python3-certbot (2.9.0-1) ...
+Selecting previously unselected package certbot.
+Preparing to unpack .../6-certbot_2.9.0-1_all.deb ...
+Unpacking certbot (2.9.0-1) ...
+Selecting previously unselected package python3-certbot-nginx.
+Preparing to unpack .../7-python3-certbot-nginx_2.9.0-1_all.deb ...
+Unpacking python3-certbot-nginx (2.9.0-1) ...
+Selecting previously unselected package python3-icu.
+Preparing to unpack .../8-python3-icu_2.12-1build2_amd64.deb ...
+Unpacking python3-icu (2.12-1build2) ...
+Setting up python3-configargparse (1.7-1) ...
+Setting up python3-parsedatetime (2.6-3) ...
+Setting up python3-icu (2.12-1build2) ...
+Setting up python3-josepy (1.14.0-1) ...
+Setting up python3-rfc3339 (1.1-4) ...
+Setting up python3-acme (2.9.0-1) ...
+Setting up python3-certbot (2.9.0-1) ...
+Setting up certbot (2.9.0-1) ...
+Created symlink /etc/systemd/system/timers.target.wants/certbot.timer → /usr/lib/systemd/system/certbot.timer.
+Setting up python3-certbot-nginx (2.9.0-1) ...
+Processing triggers for man-db (2.12.0-4build2) ...
+Scanning processes...
+Scanning linux images...
+
+Running kernel seems to be up-to-date.
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+Saving debug log to /var/log/letsencrypt/letsencrypt.log
+Account registered.
+Requesting a certificate for ads-as.com and www.ads-as.com
+
+Successfully received certificate.
+Certificate is saved at: /etc/letsencrypt/live/ads-as.com/fullchain.pem
+Key is saved at:         /etc/letsencrypt/live/ads-as.com/privkey.pem
+This certificate expires on 2026-07-19.
+These files will be updated when the certificate renews.
+Certbot has set up a scheduled task to automatically renew this certificate in the background.
+
+Deploying certificate
+Successfully deployed certificate for ads-as.com to /etc/nginx/sites-enabled/ads-as
+Successfully deployed certificate for www.ads-as.com to /etc/nginx/sites-enabled/ads-as
+Congratulations! You have successfully enabled HTTPS on https://ads-as.com and https://www.ads-as.com
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+If you like Certbot, please consider supporting our work by:
+ * Donating to ISRG / Let's Encrypt:   https://letsencrypt.org/donate
+ * Donating to EFF:                    https://eff.org/donate-le
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+root@srv1602266:~# ^C
+root@srv1602266:~# pm2 list
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 0  │ ads-as             │ fork     │ 2    │ online    │ 0%       │ 112.3mb  │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+root@srv1602266:~# curl -I https://ads-as.com
+HTTP/1.1 200 OK
+Server: nginx/1.24.0 (Ubuntu)
+Date: Mon, 20 Apr 2026 17:19:52 GMT
+Content-Type: text/html; charset=utf-8
+Content-Length: 10668
+Connection: keep-alive
+X-Powered-By: Express
+X-Content-Type-Options: nosniff
+X-Frame-Options: SAMEORIGIN
+X-XSS-Protection: 1; mode=block
+Referrer-Policy: strict-origin-when-cross-origin
+Accept-Ranges: bytes
+Cache-Control: public, max-age=0
+Last-Modified: Mon, 20 Apr 2026 14:11:01 GMT
+ETag: W/"29ac-19dab3af5d4"
+
+root@srv1602266:~# ^C
+root@srv1602266:~# cat /etc/nginx/sites-available/ads-as
+
+server {
+    server_name ads-as.com www.ads-as.com 72.61.177.222;
+    location / {
+        proxy_pass http://localhost:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/ads-as.com/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/ads-as.com/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+
+}
+server {
+    if ($host = www.ads-as.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    if ($host = ads-as.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    listen 80;
+    server_name ads-as.com www.ads-as.com 72.61.177.222;
+    return 404; # managed by Certbot
+
+
+
+
+}root@srv1602266:~# ^C
+root@srv1602266:~# nginx -t && sed -i '/proxy_cache_bypass/a\        proxy_set_header Accept-Encoding "gzip";' /etc/nginx/sites-available/ads-as && nginx -s reload
+
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+2026/04/20 17:49:03 [notice] 4393#4393: signal process started
+root@srv1602266:~# pm2 logs ads-as --lines 20 --nostream
+[TAILING] Tailing last 20 lines for [ads-as] process (change the value with --lines option)
+/root/.pm2/logs/ads-as-error.log last 20 lines:
+0|ads-as   |     at Module._load (node:internal/modules/cjs/loader:1091:12)
+0|ads-as   |     at cjsLoader (node:internal/modules/esm/translators:298:15)
+0|ads-as   |     at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:240:7)
+0|ads-as   |     at ModuleJob.run (node:internal/modules/esm/module_job:325:25)
+0|ads-as   |     at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+0|ads-as   | Migration warning: relation "boost_orders" does not exist
+0|ads-as   | Mon, 20 Apr 2026 14:05:36 GMT express-session deprecated req.secret; provide secret option at node:internal/process/task_queues:95:5
+0|ads-as   | TypeError: "clientId" must be a non-empty string
+0|ads-as   |     at CodedTypeError (file:///root/node_modules/openid-client/build/index.js:89:17)
+0|ads-as   |     at new Configuration (file:///root/node_modules/openid-client/build/index.js:463:19)
+0|ads-as   |     at Object.discovery (file:///root/node_modules/openid-client/build/index.js:244:22)
+0|ads-as   |     at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+0|ads-as   |     at async yW.maxAge (/root/dist/index.cjs:79:4475)
+0|ads-as   |     at async d0 (/root/dist/index.cjs:79:5293)
+0|ads-as   |     at async q4 (/root/dist/index.cjs:118:161)
+0|ads-as   |     at async /root/dist/index.cjs:1320:509 {
+0|ads-as   |   code: 'ERR_INVALID_ARG_TYPE',
+0|ads-as   |   [cause]: undefined
+0|ads-as   | }
+0|ads-as   | Migration warning: relation "boost_orders" does not exist
+
+/root/.pm2/logs/ads-as-out.log last 20 lines:
+0|ads-as   | pmo.souqmarket","app_app_store":"https://apps.apple.com/eg/app/as-souqmarket/id6740153334","app_huawei":"https://app.as-souqmarkat.com/?from-splash=false","contact_vodafone_cash":"01098559311","contact_instapay":"01285558567","contact_whatsapp":"","feature_ads":"1","feature_reels":"1","feature_channels":"1","feature_livestream":"1","feature_messages":"1","feature_campaigns":"1","feature_ai":"1","feature_registration":"1","feature_boost":"1","promo_banner_enabled":"1","promo_banner_text":"🎉 قسّط على 18 شهر بدون فوائد | حمّل تطبيق سوق ماركات الآن | عروض حصرية لفترة محدودة | ads-as.com","promo_banner_url":"https://play.google.com/store/apps/details?id=com.apmo.souqmarket"}
+0|ads-as   | 5:38:21 PM [express] GET /api/stories 304 in 1ms :: []
+0|ads-as   | 5:38:21 PM [express] GET /api/trending/channels 304 in 1ms :: []
+0|ads-as   | 5:38:21 PM [express] GET /api/streams 304 in 2ms :: []
+0|ads-as   | 5:38:21 PM [express] GET /api/trending/ads 500 in 1ms :: {"message":"column \"is_boosted\" does not exist"}
+0|ads-as   | 5:38:21 PM [express] GET /api/ads 304 in 18ms :: {"ads":[],"total":0,"page":1,"limit":0,"pages":1,"hasMore":false}
+0|ads-as   | 5:38:21 PM [express] GET /api/channels 304 in 15ms :: []
+0|ads-as   | 5:38:21 PM [express] GET /api/streams 304 in 3ms :: []
+0|ads-as   | 5:39:53 PM [express] GET /api/auth/user 401 in 0ms :: {"message":"Unauthorized"}
+0|ads-as   | 5:39:54 PM [express] GET /api/settings 200 in 10ms :: {"coupon_price_egp":"15","platform_name":"شبكة سوق للإعلانات","platform_tagline":"أفضل منصة إعلانية في مصر والعالم العربي","app_play_store":"https://play.google.com/store/apps/details?id=com.apmo.souqmarket","app_app_store":"https://apps.apple.com/eg/app/as-souqmarket/id6740153334","app_huawei":"https://app.as-souqmarkat.com/?from-splash=false","contact_vodafone_cash":"01098559311","contact_instapay":"01285558567","contact_whatsapp":"","feature_ads":"1","feature_reels":"1","feature_channels":"1","feature_livestream":"1","feature_messages":"1","feature_campaigns":"1","feature_ai":"1","feature_registration":"1","feature_boost":"1","promo_banner_enabled":"1","promo_banner_text":"🎉 قسّط على 18 شهر بدون فوائد | حمّل تطبيق سوق ماركات الآن | عروض حصرية لفترة محدودة | ads-as.com","promo_banner_url":"https://play.google.com/store/apps/details?id=com.apmo.souqmarket"}
+0|ads-as   | 5:39:54 PM [express] GET /api/stories 200 in 4ms :: []
+0|ads-as   | 5:39:54 PM [express] GET /api/trending/ads 500 in 2ms :: {"message":"column \"is_boosted\" does not exist"}
+0|ads-as   | 5:39:54 PM [express] GET /api/trending/channels 200 in 9ms :: []
+0|ads-as   | 5:39:54 PM [express] GET /api/streams 200 in 10ms :: []
+0|ads-as   | 5:39:54 PM [express] GET /api/ads 200 in 3ms :: {"ads":[],"total":0,"page":1,"limit":0,"pages":1,"hasMore":false}
+0|ads-as   | 5:39:54 PM [express] GET /api/channels 200 in 2ms :: []
+0|ads-as   | 5:39:54 PM [express] GET /api/streams 200 in 1ms :: []
+0|ads-as   | 5:44:44 PM [express] GET /api/auth/user 401 in 1ms :: {"message":"Unauthorized"}
+0|ads-as   | 5:44:44 PM [express] GET /api/settings 200 in 10ms :: {"coupon_price_egp":"15","platform_name":"شبكة سوق للإعلانات","platform_tagline":"أفضل منصة إعلانية في مصر والعالم العربي","app_play_store":"https://play.google.com/store/apps/details?id=com.apmo.souqmarket","app_app_store":"https://apps.apple.com/eg/app/as-souqmarket/id6740153334","app_huawei":"https://app.as-souqmarkat.com/?from-splash=false","contact_vodafone_cash":"01098559311","contact_instapay":"01285558567","contact_whatsapp":"","feature_ads":"1","feature_reels":"1","feature_channels":"1","feature_livestream":"1","feature_messages":"1","feature_campaigns":"1","feature_ai":"1","feature_registration":"1","feature_boost":"1","promo_banner_enabled":"1","promo_banner_text":"🎉 قسّط على 18 شهر بدون فوائد | حمّل تطبيق سوق ماركات الآن | عروض حصرية لفترة محدودة | ads-as.com","promo_banner_url":"https://play.google.com/store/apps/details?id=com.apmo.souqmarket"}
+
+root@srv1602266:~# ^C
+root@srv1602266:~# sudo -u postgres psql -d adsas_db -c "ALTER TABLE ads ADD COLUMN IF NOT EXISTS is_boosted BOOLEAN DEFAULT FALSE; ALTER TABLE ads ADD COLUMN IF NOT EXISTS boosted_until TIMESTAMP; CREATE TABLE IF NOT EXISTS boost_orders (id SERIAL PRIMARY KEY, order_number VARCHAR NOT NULL UNIQUE, ad_id INTEGER NOT NULL, user_id VARCHAR NOT NULL, amount NUMERIC(10,2) NOT NULL DEFAULT 0, payment_ref VARCHAR NOT NULL, status VARCHAR NOT NULL DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW()); ALTER TABLE boost_orders ADD COLUMN IF NOT EXISTS payment_screenshot_url TEXT; ALTER TABLE boost_orders ADD COLUMN IF NOT EXISTS payment_method TEXT;"
+ALTER TABLE
+ALTER TABLE
+CREATE TABLE
+ALTER TABLE
+ALTER TABLE
+root@srv1602266:~# pm2 restart ads-as
+Use --update-env to update environment variables
+[PM2] Applying action restartProcessId on app [ads-as](ids: [ 0 ])
+[PM2] [ads-as](0) ✓
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 0  │ ads-as             │ fork     │ 3    │ online    │ 0%       │ 18.8mb   │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+root@srv1602266:~# pm2 logs ads-as --lines 10 --nostream
+[TAILING] Tailing last 10 lines for [ads-as] process (change the value with --lines option)
+/root/.pm2/logs/ads-as-error.log last 10 lines:
+0|ads-as   |     at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+0|ads-as   |     at async yW.maxAge (/root/dist/index.cjs:79:4475)
+0|ads-as   |     at async d0 (/root/dist/index.cjs:79:5293)
+0|ads-as   |     at async q4 (/root/dist/index.cjs:118:161)
+0|ads-as   |     at async /root/dist/index.cjs:1320:509 {
+0|ads-as   |   code: 'ERR_INVALID_ARG_TYPE',
+0|ads-as   |   [cause]: undefined
+0|ads-as   | }
+0|ads-as   | Migration warning: relation "boost_orders" does not exist
+0|ads-as   | Migration warning: must be owner of table boost_orders
+
+/root/.pm2/logs/ads-as-out.log last 10 lines:
+0|ads-as   | [4/20/2026, 5:55:20 PM] [INFO] Node-Media-Server v4.2.4
+0|ads-as   | [4/20/2026, 5:55:20 PM] [INFO] Homepage: https://github.com/illuspas/Node-Media-Server
+0|ads-as   | [4/20/2026, 5:55:20 PM] [INFO] License: Apache-2.0
+0|ads-as   | [4/20/2026, 5:55:20 PM] [INFO] Author: Chen Mingliang
+0|ads-as   | [RTMP] Server started on port 1935 (RTMP) and 8000 (HLS)
+0|ads-as   | [Auth] Replit OAuth disabled.
+0|ads-as   | [4/20/2026, 5:55:20 PM] [INFO] WebSocket server listening on port undefined:8000
+0|ads-as   | [4/20/2026, 5:55:20 PM] [INFO] HTTP server listening on port undefined:8000
+0|ads-as   | [4/20/2026, 5:55:20 PM] [INFO] Rtmp Server listening on port undefined:1935
+0|ads-as   | 5:55:20 PM [express] serving on port 5000
+
+root@srv1602266:~#
+root@srv1602266:~#  last 5 lines:
+0|ads-as   | ":"شبكة سوق للإعلانات","platform_tagline":"أفضل منصة إعلانية في مصر والعالم العربي","app_play_store":"https://play.google.com/store/apps/details?id=com.apmo.souqmarket","app_app_store":"https://apps.apple.com/eg/app/as-souqmarket/id6740153334","app_huawei":"https://app.as-souqmarkat.com/?from-splash=false","contact_vodafone_cash":"01098559311","contact_instapay":"01285558567","contact_whatsapp":"","feature_ads":"1","feature_reels":"1","feature_channels":"1","feature_livestream":"1","feature_messages":"1","feature_campaigns":"1","feature_ai":"1","feature_registration":"1","feature_boost":"1","promo_banner_enabled":"1","promo_banner_text":"🎉 قسّط على 18 شهر بدون فوائد | حمّل تطبيق سوق ماركات الآن | عروض حصرية لفترة محدودة | ads-as.com","promo_banner_url":"https://play.google.com/store/apps/details?id=com.apmo.souqmarket"}
+0|ads-as   | 5:09:41 PM [express] GET /api/stories 304 in 2ms :: []
+
+root@srv1602266:~#
+^C
+root@srv1602266:~# apt install certbot python3-certbot-nginx -y && certbot --nginx -d ads-as.com -d www.ads-as.com --non-interactive --agree-tos -m admin@ads-as.com
+
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+The following additional packages will be installed:
+  python3-acme python3-certbot python3-configargparse python3-icu
+root@srv1602266:~#20 PM [express] serving on port 5000r listening on port undefi

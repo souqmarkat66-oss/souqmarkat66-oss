@@ -1,0 +1,58 @@
+Welcome to Ubuntu 24.04.4 LTS (GNU/Linux 6.8.0-110-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+
+ System information as of Tue Apr 21 23:36:48 UTC 2026
+
+  System load:  0.03              Processes:             118
+  Usage of /:   3.8% of 95.82GB   Users logged in:       0
+  Memory usage: 4%                IPv4 address for eth0: 72.61.177.222
+  Swap usage:   0%                IPv6 address for eth0: 2a02:4780:41:9640::1
+
+ * Strictly confined Kubernetes makes edge and IoT secure. Learn how MicroK8s
+   just raised the bar for easy, resilient and secure K8s cluster deployment.
+
+   https://ubuntu.com/engage/secure-kubernetes-at-the-edge
+
+Expanded Security Maintenance for Applications is not enabled.
+
+0 updates can be applied immediately.
+
+Enable ESM Apps to receive additional future security updates.
+See https://ubuntu.com/esm or run: sudo pro status
+
+
+1 updates could not be installed automatically. For more details,
+see /var/log/unattended-upgrades/unattended-upgrades.log
+
+Last login: Tue Apr 21 23:36:48 2026 from 169.254.0.1
+root@srv1602266:~# find / -maxdepth 4 -name ".git" -type d 2>/dev/null | head -5
+root@srv1602266:~# ^C
+root@srv1602266:~# APP=$(find / -maxdepth 5 -name "package.json" -path "*/ads*" 2>/dev/null | head -1 | xargs dirname); echo "الكود في: $APP"; pm2 delete all; cd "$APP" && pm2 start npm --name "ads-as" -- start && pm2 save && sleep 3 && pm2 status && curl -s -o /dev/null -w "HTTP: %{http_code}\n" https://ads-as.com
+
+dirname: missing operand
+Try 'dirname --help' for more information.
+الكود في: 
+[PM2] Applying action deleteProcessId on app [all](ids: [ 0, 1 ])
+[PM2] [all](1) ✓
+[PM2] [ads-as](0) ✓
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+[PM2] Starting /usr/bin/npm in fork_mode (1 instance)
+[PM2] Done.
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 0  │ ads-as             │ fork     │ 0    │ online    │ 0%       │ 18.6mb   │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+[PM2] Saving current process list...
+[PM2] Successfully saved in /root/.pm2/dump.pm2
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 0  │ ads-as             │ fork     │ 9    │ online    │ 0%       │ 59.3mb   │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+HTTP: 502

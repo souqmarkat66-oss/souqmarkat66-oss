@@ -71,22 +71,6 @@ export type Ad = typeof ads.$inferSelect;
 export type InsertAd = z.infer<typeof insertAdSchema>;
 
 // ============================================================
-// AD LINK CLICKS — تتبع النقرات على روابط الإعلانات
-// ============================================================
-export const adLinkClicks = pgTable("ad_link_clicks", {
-  id:            serial("id").primaryKey(),
-  adId:          integer("ad_id").notNull(),
-  linkType:      text("link_type").notNull(), // googleplay | appstore | appgallery | whatsapp | payment | website | facebook | other
-  destUrl:       text("dest_url"),
-  ip:            varchar("ip", { length: 60 }),
-  userAgent:     text("user_agent"),
-  userId:        varchar("user_id", { length: 100 }),
-  isFraud:       boolean("is_fraud").default(false),
-  fraudReason:   text("fraud_reason"),
-  createdAt:     timestamp("created_at").defaultNow(),
-});
-
-// ============================================================
 // REELS TABLE
 // ============================================================
 export const reels = pgTable("reels", {
@@ -219,7 +203,7 @@ export type Comment = typeof comments.$inferSelect;
 export type InsertComment = z.infer<typeof insertCommentSchema>;
 
 // ============================================================
-// FOLLOWS TABLE (channel follows)
+// FOLLOWS TABLE
 // ============================================================
 export const follows = pgTable("follows", {
   id: serial("id").primaryKey(),
@@ -229,18 +213,6 @@ export const follows = pgTable("follows", {
 });
 
 export type Follow = typeof follows.$inferSelect;
-
-// ============================================================
-// USER FOLLOWS TABLE (user-to-user follows)
-// ============================================================
-export const userFollows = pgTable("user_follows", {
-  id: serial("id").primaryKey(),
-  followerId: varchar("follower_id").references(() => users.id).notNull(),
-  followingId: varchar("following_id").references(() => users.id).notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-export type UserFollow = typeof userFollows.$inferSelect;
 
 // ============================================================
 // AD CAMPAIGNS TABLE (Meta/AdSense-like)
@@ -334,13 +306,10 @@ export const paymentRequests = pgTable("payment_requests", {
   adId: integer("ad_id"),
   type: text("type", { enum: ["withdrawal", "top_up"] }).notNull(),
   amountEGP: real("amount_egp").notNull(),
-  method: text("method", { enum: ["vodafone", "etisalat", "instapay", "souq", "visa_bank"] }).notNull(),
+  method: text("method", { enum: ["vodafone", "etisalat", "instapay", "souq"] }).notNull(),
   phoneNumber: text("phone_number"),
-  paymentRef: text("payment_ref"),
   serviceType: text("service_type"),
   screenshotUrl: text("screenshot_url"),
-  nationalId: text("national_id"),
-  cardNumber: text("card_number"),
   status: text("status", { enum: ["pending", "approved", "rejected"] }).default("pending"),
   adminNote: text("admin_note"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -490,27 +459,6 @@ export type CoinPackage = typeof coinPackages.$inferSelect;
 export type InsertCoinPackage = z.infer<typeof insertCoinPackageSchema>;
 
 // ============================================================
-// WALLET TOP-UP ORDERS — طلبات شحن المحفظة بالجنيه المصري
-// ============================================================
-export const walletTopUpOrders = pgTable("wallet_top_up_orders", {
-  id: serial("id").primaryKey(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
-  amountEGP: real("amount_egp").notNull(),
-  paymentMethod: text("payment_method").notNull(),
-  paymentRef: text("payment_ref"),
-  screenshotUrl: text("screenshot_url"),
-  status: text("status").default("pending").notNull(),
-  adminNote: text("admin_note"),
-  orderNumber: text("order_number"),
-  reviewedAt: timestamp("reviewed_at"),
-  reviewedBy: varchar("reviewed_by"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-export const insertWalletTopUpSchema = createInsertSchema(walletTopUpOrders).omit({ id: true, createdAt: true, reviewedAt: true, reviewedBy: true });
-export type WalletTopUpOrder = typeof walletTopUpOrders.$inferSelect;
-export type InsertWalletTopUpOrder = z.infer<typeof insertWalletTopUpSchema>;
-
-// ============================================================
 // COIN RECHARGE CODES TABLE — admin generates codes for offline payment
 // ============================================================
 export const coinRechargeCodes = pgTable("coin_recharge_codes", {
@@ -531,7 +479,7 @@ export type CoinRechargeCode = typeof coinRechargeCodes.$inferSelect;
 export const coinTransactions = pgTable("coin_transactions", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").references(() => users.id).notNull(),
-  type: text("type", { enum: ["recharge", "gift_sent", "gift_received", "purchase", "refund", "admin_grant", "coin_withdrawal", "coin_transfer_out", "coin_transfer_in"] }).notNull(),
+  type: text("type", { enum: ["recharge", "gift_sent", "gift_received", "purchase", "refund", "admin_grant"] }).notNull(),
   coins: integer("coins").notNull(),
   description: text("description"),
   relatedStreamId: integer("related_stream_id"),
@@ -540,18 +488,3 @@ export const coinTransactions = pgTable("coin_transactions", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 export type CoinTransaction = typeof coinTransactions.$inferSelect;
-
-// ============================================================
-// STORIES TABLE — 24-hour disappearing stories
-// ============================================================
-export const stories = pgTable("stories", {
-  id: serial("id").primaryKey(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
-  mediaUrl: text("media_url").notNull(),
-  mediaType: text("media_type", { enum: ["image", "video"] }).default("image").notNull(),
-  caption: text("caption"),
-  viewsCount: integer("views_count").default(0),
-  expiresAt: timestamp("expires_at").notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-export type Story = typeof stories.$inferSelect;

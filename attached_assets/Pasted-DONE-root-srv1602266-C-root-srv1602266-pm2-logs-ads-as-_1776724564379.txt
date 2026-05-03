@@ -1,0 +1,27 @@
+DONE!
+root@srv1602266:~# ^C
+root@srv1602266:~# pm2 logs ads-as --lines 30 --nostream 2>&1 | grep -E "LOGIN|login|401|set-password"
+0|ads-as   | [LOGIN] id=63e504aa-da74-4272-9b86-b840f9581d38 hash_len=60 match=true
+0|ads-as   | 10:34:11 PM [express] POST /api/auth/login 200 in 75ms :: {"success":true,"user":{"id":"63e504aa-da74-4272-9b86-b840f9581d38","email":"01285558567","firstName":"احمد ","lastName":"محمد"}}
+0|ads-as   | 10:34:12 PM [express] GET /api/auth/user 401 in 1ms :: {"message":"Unauthorized"}
+0|ads-as   | [LOGIN] id=63e504aa-da74-4272-9b86-b840f9581d38 hash_len=60 match=true
+0|ads-as   | 10:34:12 PM [express] POST /api/auth/login 200 in 73ms :: {"success":true,"user":{"id":"63e504aa-da74-4272-9b86-b840f9581d38","email":"01285558567","firstName":"احمد ","lastName":"محمد"}}
+0|ads-as   | 10:34:12 PM [express] GET /api/auth/user 401 in 1ms :: {"message":"Unauthorized"}
+0|ads-as   | [LOGIN] id=63e504aa-da74-4272-9b86-b840f9581d38 hash_len=60 match=true
+0|ads-as   | 10:34:13 PM [express] POST /api/auth/login 200 in 74ms :: {"success":true,"user":{"id":"63e504aa-da74-4272-9b86-b840f9581d38","email":"01285558567","firstName":"احمد ","lastName":"محمد"}}
+0|ads-as   | 10:34:13 PM [express] GET /api/auth/user 401 in 1ms :: {"message":"Unauthorized"}
+0|ads-as   | [LOGIN] id=63e504aa-da74-4272-9b86-b840f9581d38 hash_len=60 match=true
+0|ads-as   | 10:34:14 PM [express] POST /api/auth/login 200 in 75ms :: {"success":true,"user":{"id":"63e504aa-da74-4272-9b86-b840f9581d38","email":"01285558567","firstName":"احمد ","lastName":"محمد"}}
+0|ads-as   | 10:34:14 PM [express] GET /api/auth/user 401 in 0ms :: {"message":"Unauthorized"}
+0|ads-as   | 10:34:18 PM [express] GET /api/auth/user 401 in 1ms :: {"message":"Unauthorized"}
+0|ads-as   | 10:34:18 PM [express] GET /api/settings 304 in 1ms :: {"coupon_price_egp":"15","platform_name":"شبكة سوق للإعلانات","platform_tagline":"أفضل منصة إعلانية في مصر والعالم العربي","app_play_store":"https://play.google.com/store/apps/details?id=com.apmo.souqmarket","app_app_store":"https://apps.apple.com/eg/app/as-souqmarket/id6740153334","app_huawei":"https://app.as-souqmarkat.com/?from-splash=false","contact_vodafone_cash":"01098559311","contact_instapay":"01285558567","contact_whatsapp":"","feature_ads":"1","feature_reels":"1","feature_channels":"1","feature_livestream":"1","feature_messages":"1","feature_campaigns":"1","feature_ai":"1","feature_registration":"1","feature_boost":"1","promo_banner_enabled":"1","promo_banner_text":"🎉 قسّط على 18 شهر بدون فوائد | حمّل تطبيق سوق ماركات الآن | عروض حصرية لفترة محدودة | ads-as.com","promo_banner_url":"https://play.google.com/store/apps/details?id=com.apmo.souqmarket"}
+0|ads-as   | [LOGIN] id=63e504aa-da74-4272-9b86-b840f9581d38 hash_len=60 match=true
+0|ads-as   | 10:34:35 PM [express] POST /api/auth/login 200 in 81ms :: {"success":true,"user":{"id":"63e504aa-da74-4272-9b86-b840f9581d38","email":"01285558567","firstName":"احمد ","lastName":"محمد"}}
+0|ads-as   | 10:34:35 PM [express] GET /api/auth/user 401 in 1ms :: {"message":"Unauthorized"}
+0|ads-as   | [LOGIN] id=63e504aa-da74-4272-9b86-b840f9581d38 hash_len=60 match=true
+0|ads-as   | 10:34:36 PM [express] POST /api/auth/login 200 in 74ms :: {"success":true,"user":{"id":"63e504aa-da74-4272-9b86-b840f9581d38","email":"01285558567","firstName":"احمد ","lastName":"محمد"}}
+0|ads-as   | 10:34:36 PM [express] GET /api/auth/user 401 in 1ms :: {"message":"Unauthorized"}
+0|ads-as   | [LOGIN] id=63e504aa-da74-4272-9b86-b840f9581d38 hash_len=60 match=true
+0|ads-as   | 10:34:37 PM [express] POST /api/auth/login 200 in 74ms :: {"success":true,"user":{"id":"63e504aa-da74-4272-9b86-b840f9581d38","email":"01285558567","firstName":"احمد ","lastName":"محمد"}}
+0|ads-as   | 10:34:37 PM [express] GET /api/auth/user 401 in 1ms :: {"message":"Unauthorized"}
+root@srv1602266:~#

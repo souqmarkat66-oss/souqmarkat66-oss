@@ -9,8 +9,7 @@ import {
   WifiOff, Volume2, VolumeX, FlipHorizontal,
   Copy, Check, Radio, Monitor, UserPlus, Users,
   Loader2, X, CheckCircle, XCircle,
-  Share2, Gift, Flag, AlertTriangle, ShieldOff,
-  Camera, Sparkles, ZoomIn, ZoomOut,
+  Share2, Gift,
 } from "lucide-react";
 import { SiWhatsapp, SiFacebook, SiX, SiTelegram, SiInstagram, SiTiktok, SiSnapchat } from "react-icons/si";
 import { Button } from "@/components/ui/button";
@@ -21,18 +20,11 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 
 /* ─── ICE servers ─────────────────────────────────────── */
 const ICE: RTCIceServer[] = [
-  { urls: "stun:stun.l.google.com:19302"  },
+  { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
-  { urls: "stun:stun2.l.google.com:19302" },
-  { urls: "stun:stun3.l.google.com:19302" },
-  { urls: "stun:stun4.l.google.com:19302" },
-  { urls: "stun:stun.cloudflare.com:3478" },
-  { urls: "stun:stun.nextcloud.com:443"   },
   { urls: "turn:openrelay.metered.ca:80",    username: "openrelayproject", credential: "openrelayproject" },
   { urls: "turn:openrelay.metered.ca:443",   username: "openrelayproject", credential: "openrelayproject" },
   { urls: "turns:openrelay.metered.ca:443",  username: "openrelayproject", credential: "openrelayproject" },
-  { urls: "turn:openrelay.metered.ca:80?transport=tcp",  username: "openrelayproject", credential: "openrelayproject" },
-  { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
 ];
 
 interface ChatMsg { userName: string; message: string; isOwner?: boolean; }
@@ -61,7 +53,6 @@ export default function LiveStream() {
   const [camFacing,       setCamFacing]       = useState<"user"|"environment">("user");
   const [cameraError,     setCameraError]     = useState("");
   const [facingSupported, setFacingSupported] = useState(false);
-  const [needsPermTap,    setNeedsPermTap]    = useState(false);
 
   // Co-host state
   type CoHostStatus = "idle"|"choosing"|"requesting"|"accepted"|"rejected";
@@ -73,23 +64,14 @@ export default function LiveStream() {
   const [forceMuted,        setForceMuted]         = useState(false);
   const [guestHasCamera,    setGuestHasCamera]     = useState(true);
 
-  // Viewer-side co-host display (names/avatars of active guests visible to all)
-  const [viewerCohostBadges, setViewerCohostBadges] = useState<{id: string; name: string}[]>([]);
-
   // In-stream ads state
   const [streamAds,       setStreamAds]       = useState<any[]>([]);
   const [currentAdIdx,    setCurrentAdIdx]    = useState(0);
   const [adVisible,       setAdVisible]       = useState(false);
-  const [adExpanded,      setAdExpanded]      = useState(false); // expanded bottom-sheet view
 
   // Video swap state (tap PiP to swap with main screen)
   const [swappedCohostId, setSwappedCohostId] = useState<string>(""); // broadcaster: which cohost is full-screen
   const [selfCamSwapped,  setSelfCamSwapped]  = useState(false);       // viewer: own cam is full-screen
-
-  // Viewer pinch/double-tap zoom
-  const [zoomScale,   setZoomScale]   = useState(1);
-  const [zoomOffset,  setZoomOffset]  = useState({ x: 0, y: 0 });
-  const zoomRef = useRef({ scale: 1, startDist: 0, startScale: 1, lastTap: 0, originX: 0, originY: 0 });
 
   // Share & Gift state
   const [showShare,       setShowShare]       = useState(false);
@@ -100,14 +82,12 @@ export default function LiveStream() {
   // Purchase flow states
   const [purchaseStep,    setPurchaseStep]    = useState<"packages"|"pay"|"done">("packages");
   const [selectedPkg,     setSelectedPkg]     = useState<any>(null);
-  const [payMethod,       setPayMethod]       = useState<"vodafone"|"etisalat"|"instapay"|"bank"|"souq"|"installment">("vodafone");
+  const [payMethod,       setPayMethod]       = useState<"vodafone"|"instapay"|"bank">("vodafone");
   const [payRef,          setPayRef]          = useState("");
   const [payLoading,      setPayLoading]      = useState(false);
   interface FlyingGift { id: number; emoji: string; x: number; }
   const [flyingGifts,     setFlyingGifts]     = useState<FlyingGift[]>([]);
   const [myCoins,         setMyCoins]         = useState(0); // loaded from DB
-  interface GiftBanner { id: number; emoji: string; name: string; coins: number; received: number; userName: string; }
-  const [giftBanners,     setGiftBanners]     = useState<GiftBanner[]>([]);
 
   // Hand raise state (viewer)
   const [handRaised,      setHandRaised]      = useState(false);
@@ -115,94 +95,6 @@ export default function LiveStream() {
   // Hand raise state (broadcaster — list of raised hands)
   const [raisedHands,     setRaisedHands]     = useState<{socketId:string; userName:string; userId:string}[]>([]);
   const [showHandsList,   setShowHandsList]   = useState(false);
-
-  // Confetti state
-  interface ConfettiParticle { id: number; x: number; color: string; emoji: string; delay: number; }
-  const [confettiParticles, setConfettiParticles] = useState<ConfettiParticle[]>([]);
-  const confettiIdRef = useRef(0);
-
-  // Beauty filter state
-  const BEAUTY_FILTERS = [
-    { name: "عادي", filter: "none", icon: "🎥" },
-    { name: "جمال", filter: "brightness(1.1) contrast(0.9) saturate(0.85)", icon: "✨" },
-    { name: "دافئ", filter: "sepia(0.3) saturate(1.2) brightness(1.05)", icon: "🌅" },
-    { name: "بارد", filter: "hue-rotate(200deg) saturate(0.8) brightness(1.05)", icon: "❄️" },
-    { name: "خمور", filter: "sepia(0.5) saturate(0.9) brightness(0.9)", icon: "🎞️" },
-  ];
-  const [filterIdx, setFilterIdx] = useState(0);
-  const [showFilterMenu, setShowFilterMenu] = useState(false);
-
-  // Screenshot
-  const videoRef2 = useRef<HTMLVideoElement | null>(null);
-
-  const triggerConfetti = useCallback((count = 20) => {
-    const colors = ["#ff6b6b","#ffd93d","#6bcb77","#4d96ff","#c77dff","#ff9f43"];
-    const emojis = ["🌹","💐","⭐","✨","🎉","💫","🔥","💎"];
-    const particles: ConfettiParticle[] = Array.from({ length: count }, (_, i) => ({
-      id: ++confettiIdRef.current,
-      x: Math.random() * 90 + 5,
-      color: colors[Math.floor(Math.random() * colors.length)],
-      emoji: emojis[Math.floor(Math.random() * emojis.length)],
-      delay: Math.random() * 0.5,
-    }));
-    setConfettiParticles(prev => [...prev, ...particles]);
-    setTimeout(() => {
-      setConfettiParticles(prev => prev.filter(p => !particles.find(n => n.id === p.id)));
-    }, 3000);
-  }, []);
-
-  const takeScreenshot = useCallback(() => {
-    const video = document.querySelector("video[data-testid='video-stream']") as HTMLVideoElement;
-    if (!video) return;
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0);
-    const link = document.createElement("a");
-    link.download = `souqads-live-${Date.now()}.jpg`;
-    link.href = canvas.toDataURL("image/jpeg", 0.9);
-    link.click();
-  }, []);
-
-  // Cross-stream Battle state
-  interface BattleState {
-    active: boolean;
-    battleId: string;
-    streamIdA: string;
-    streamIdB: string;
-    nameA: string;
-    nameB: string;
-    timeLeft: number;
-    totalA: number;
-    totalB: number;
-    winner: string|null;
-    ended: boolean;
-  }
-  const [battle, setBattle] = useState<BattleState|null>(null);
-  const [showBattleSetup, setShowBattleSetup] = useState(false);
-  const [battleInvite, setBattleInvite] = useState<{inviteId:string; fromStreamId:string; fromName:string}|null>(null);
-  const [battleInviteSent, setBattleInviteSent] = useState(false);
-  const [liveStreamsForBattle, setLiveStreamsForBattle] = useState<any[]>([]);
-  const opponentVideoRef   = useRef<HTMLVideoElement>(null);
-  const opponentStreamRef  = useRef<MediaStream|null>(null);   // saved stream → retry attach
-  const battlePeer         = useRef<RTCPeerConnection|null>(null);
-
-  // Kicked state
-  const [kicked, setKicked] = useState(false);
-
-  // Viewer list (broadcaster)
-  const [showViewerList, setShowViewerList] = useState(false);
-  const [viewersList, setViewersList] = useState<{socketId:string; userName:string; userId:string}[]>([]);
-
-  // Content moderation (viewer report + broadcaster warning)
-  const [showReportDialog, setShowReportDialog] = useState(false);
-  const [reportReason,     setReportReason]     = useState("");
-  const [reportSubmitting, setReportSubmitting] = useState(false);
-  const [reportDone,       setReportDone]       = useState(false);
-  const [contentWarning,   setContentWarning]   = useState<string|null>(null); // shown to broadcaster
-  const [forceEndReason,   setForceEndReason]   = useState<string|null>(null); // force-close overlay
 
   // RTMP mode state
   const [broadcastMode,   setBroadcastMode]   = useState<"webrtc"|"rtmp">("webrtc");
@@ -317,13 +209,8 @@ export default function LiveStream() {
       const devices = await navigator.mediaDevices.enumerateDevices();
       setFacingSupported(devices.filter(d => d.kind === "videoinput").length > 1);
       const ms = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: facing,
-          width:     { ideal: 1280, min: 640 },
-          height:    { ideal: 720,  min: 480 },
-          frameRate: { ideal: 30,   min: 15  },
-        },
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 48000 },
+        video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
       if (localStream.current) {
         const newVTrack = ms.getVideoTracks()[0];
@@ -343,12 +230,8 @@ export default function LiveStream() {
       return ms;
     } catch (err: any) {
       const msg = err.name === "NotAllowedError"
-        ? "PERMISSION_DENIED"
-        : err.name === "NotFoundError"
-          ? "NO_DEVICE"
-          : err.name === "NotReadableError"
-            ? "DEVICE_BUSY"
-            : "GENERIC";
+        ? "الرجاء السماح للمتصفح بالوصول للكاميرا والميكروفون"
+        : "تعذّر فتح الكاميرا — تأكد من عدم استخدامها في تطبيق آخر";
       setCameraError(msg);
       return null;
     }
@@ -425,7 +308,7 @@ export default function LiveStream() {
         coHostNamesMap.current.set(data.socketId, data.userName);
         setCoHostRequests(prev => [...prev.filter(r => r.socketId !== data.socketId), data]);
         const mode = data.withCamera === false ? "🎙️ صوت فقط" : "📷 صوت وصورة";
-        toast({ title: "طلب كاميرا", description: `${data.userName} يريد الانضمام (${mode})` });
+        toast({ title: "طلب مشاركة", description: `${data.userName} يريد الانضمام (${mode})` });
       });
 
       socket.on("cohost-auto-joined", (data: { socketId: string; userName: string; withCamera?: boolean }) => {
@@ -476,7 +359,7 @@ export default function LiveStream() {
         coHostStreams.current.delete(socketId);
         coHostVideoRefs.current.delete(socketId);
         coHostNamesMap.current.delete(socketId);
-        toast({ title: "انتهى الانضمام", description: "غادر أحد الضيوف البث" });
+        toast({ title: "انتهت المشاركة", description: "غادر أحد الضيوف البث" });
       });
     }
 
@@ -524,17 +407,6 @@ export default function LiveStream() {
         setStreaming(false);
         setEnded(true);
         if (hlsInstance.current) { hlsInstance.current.destroy(); hlsInstance.current = null; }
-      });
-
-      // ── Viewer: track active co-hosts by name ──
-      socket.on("cohost-active", (socketId: string, name: string) => {
-        setViewerCohostBadges(prev => {
-          if (prev.find(b => b.id === socketId)) return prev;
-          return [...prev, { id: socketId, name: name || "ضيف" }];
-        });
-      });
-      socket.on("cohost-left", (socketId: string) => {
-        setViewerCohostBadges(prev => prev.filter(b => b.id !== socketId));
       });
 
       // ── Co-host events (viewer/guest side) ──
@@ -635,218 +507,8 @@ export default function LiveStream() {
       setFlyingGifts(prev => [...prev, { id: flyId, emoji: data.giftEmoji, x }]);
       setTimeout(() => setFlyingGifts(prev => prev.filter(g => g.id !== flyId)), 3000);
       if (isBroadcast) {
-        const receivedCoins = Math.floor(data.giftCoins * 0.6);
-        const bannerId = Date.now() + Math.random();
-        setGiftBanners(prev => [...prev.slice(-3), { id: bannerId, emoji: data.giftEmoji, name: data.giftName, coins: data.giftCoins, received: receivedCoins, userName: data.userName }]);
-        setTimeout(() => setGiftBanners(prev => prev.filter(b => b.id !== bannerId)), 5000);
-        try {
-          const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.type = "sine";
-          gain.gain.setValueAtTime(0.3, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
-          osc.frequency.setValueAtTime(880, ctx.currentTime);
-          osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.1);
-          osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.2);
-          osc.start(ctx.currentTime);
-          osc.stop(ctx.currentTime + 0.4);
-          setTimeout(() => {
-            const osc2 = ctx.createOscillator();
-            const gain2 = ctx.createGain();
-            osc2.connect(gain2);
-            gain2.connect(ctx.destination);
-            osc2.type = "sine";
-            gain2.gain.setValueAtTime(0.25, ctx.currentTime);
-            gain2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-            osc2.frequency.setValueAtTime(1320, ctx.currentTime);
-            osc2.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.15);
-            osc2.start(ctx.currentTime);
-            osc2.stop(ctx.currentTime + 0.3);
-          }, 200);
-        } catch {}
+        toast({ title: `🎁 هدية من ${data.userName}!`, description: `${data.giftEmoji} ${data.giftName} — ${data.giftCoins} عملة` });
       }
-    });
-
-    // ── Content moderation events ──────────────────────────────────
-    socket.on("stream-content-warning", (data: { count: number; message: string }) => {
-      setContentWarning(data.message);
-      // Auto-dismiss after 15 seconds
-      setTimeout(() => setContentWarning(null), 15000);
-    });
-
-    socket.on("stream-force-ended", (data: { reason: string }) => {
-      setForceEndReason(data.reason);
-      localStream.current?.getTracks().forEach(t => t.stop());
-    });
-
-    socket.on("kicked-from-stream", () => {
-      setKicked(true);
-      localStream.current?.getTracks().forEach(t => t.stop());
-      coHostStream.current?.getTracks().forEach(t => t.stop());
-      if (coHostPeer.current) { coHostPeer.current.close(); coHostPeer.current = null; }
-    });
-
-    socket.on("viewer-list", (list: {socketId:string; userName:string; userId:string}[]) => {
-      setViewersList(list);
-    });
-
-    socket.on("battle-invite-received", (data: { inviteId: string; fromStreamId: string; fromName: string }) => {
-      setBattleInvite(data);
-    });
-
-    socket.on("battle-invite-sent", () => {
-      setBattleInviteSent(true);
-    });
-
-    socket.on("battle-invite-expired", () => {
-      setBattleInviteSent(false);
-      toast({ title: "انتهت مهلة الدعوة", description: "لم يرد المذيع الآخر في الوقت المحدد", variant: "destructive" });
-    });
-
-    socket.on("battle-invite-declined", () => {
-      setBattleInviteSent(false);
-      toast({ title: "تم رفض التحدي", description: "المذيع الآخر رفض الجولة", variant: "destructive" });
-    });
-
-    socket.on("battle-started", (data: any) => {
-      setBattleInvite(null);
-      setBattleInviteSent(false);
-      setShowBattleSetup(false);
-      setBattle({
-        active: true, battleId: data.battleId,
-        streamIdA: data.streamIdA, streamIdB: data.streamIdB,
-        nameA: data.nameA, nameB: data.nameB,
-        timeLeft: data.duration || 300, totalA: 0, totalB: 0,
-        winner: null, ended: false,
-      });
-      const opponentStreamId = data.streamIdA === id ? data.streamIdB : data.streamIdA;
-      socket.emit("battle-watch-opponent", { myStreamId: id, opponentStreamId });
-    });
-
-    socket.on("battle-score-update", (data: { totalA: number; totalB: number }) => {
-      setBattle(prev => prev ? { ...prev, totalA: data.totalA, totalB: data.totalB } : prev);
-    });
-
-    socket.on("battle-timer", (data: { timeLeft: number }) => {
-      setBattle(prev => prev ? { ...prev, timeLeft: data.timeLeft } : prev);
-    });
-
-    socket.on("battle-ended", (data: { winner: string; totalA: number; totalB: number; nameA: string; nameB: string }) => {
-      setBattle(prev => prev ? { ...prev, active: false, ended: true, winner: data.winner, totalA: data.totalA, totalB: data.totalB } : prev);
-      triggerConfetti(60);
-      if (battlePeer.current) { battlePeer.current.close(); battlePeer.current = null; }
-      setTimeout(() => setBattle(null), 10000);
-    });
-
-    socket.on("battle-watcher", async (watcherId: string) => {
-      if (!localStream.current) return;
-      // Close existing peer for this watcher to avoid duplicate connections
-      const existing = peers.current.get(`battle_${watcherId}`);
-      if (existing) { existing.close(); peers.current.delete(`battle_${watcherId}`); }
-
-      const pc = new RTCPeerConnection({
-        iceServers: ICE,
-        iceTransportPolicy: "all",
-        bundlePolicy: "max-bundle",
-      });
-      peers.current.set(`battle_${watcherId}`, pc);
-      pc.onicecandidate = e => { if (e.candidate) socket.emit("battle-candidate", watcherId, e.candidate); };
-
-      // Add all tracks with high-quality encoding
-      localStream.current.getTracks().forEach(track => {
-        const sender = pc.addTrack(track, localStream.current!);
-        // Set high bitrate for video
-        if (track.kind === "video") {
-          const params = sender.getParameters();
-          if (!params.encodings || params.encodings.length === 0) {
-            params.encodings = [{}];
-          }
-          params.encodings[0].maxBitrate = 2_500_000; // 2.5 Mbps
-          params.encodings[0].maxFramerate = 30;
-          sender.setParameters(params).catch(() => {});
-        }
-      });
-
-      try {
-        const offer = await pc.createOffer({
-          offerToReceiveAudio: false,
-          offerToReceiveVideo: false,
-          voiceActivityDetection: false,
-        });
-        await pc.setLocalDescription(offer);
-        socket.emit("battle-offer", watcherId, pc.localDescription);
-      } catch {}
-    });
-
-    socket.on("battle-offer", async (fromId: string, offer: RTCSessionDescriptionInit) => {
-      // Close old peer if exists
-      if (battlePeer.current) {
-        battlePeer.current.close();
-        battlePeer.current = null;
-      }
-      opponentStreamRef.current = null;
-
-      const pc = new RTCPeerConnection({
-        iceServers: ICE,
-        iceTransportPolicy: "all",
-        bundlePolicy: "max-bundle",
-      });
-      battlePeer.current = pc;
-
-      pc.onicecandidate = e => {
-        if (e.candidate) socket.emit("battle-candidate", fromId, e.candidate);
-      };
-
-      // Monitor ICE state — attempt reconnect on failure
-      pc.oniceconnectionstatechange = () => {
-        if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
-          // Force attach stream once connected
-          const el = opponentVideoRef.current;
-          const ms = opponentStreamRef.current;
-          if (el && ms) {
-            el.srcObject = ms;
-            el.play().catch(() => {});
-          }
-        }
-        if (pc.iceConnectionState === "failed") {
-          pc.restartIce?.();
-        }
-      };
-
-      pc.ontrack = e => {
-        const stream = e.streams[0] || new MediaStream([e.track]);
-        // Save to ref so useEffect can retry attach
-        opponentStreamRef.current = stream;
-        const el = opponentVideoRef.current;
-        if (el) {
-          el.srcObject = stream;
-          el.play().catch(() => {});
-        }
-      };
-
-      await pc.setRemoteDescription(offer).catch(() => {});
-      const answer = await pc.createAnswer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-      }).catch(() => null);
-      if (!answer) return;
-      await pc.setLocalDescription(answer);
-      socket.emit("battle-answer", fromId, pc.localDescription);
-    });
-
-    socket.on("battle-answer", async (fromId: string, answer: RTCSessionDescriptionInit) => {
-      const pc = peers.current.get(`battle_${fromId}`) || battlePeer.current;
-      if (pc && pc.signalingState === "have-local-offer") {
-        await pc.setRemoteDescription(answer).catch(() => {});
-      }
-    });
-
-    socket.on("battle-candidate", async (fromId: string, candidate: RTCIceCandidateInit) => {
-      const pc = peers.current.get(`battle_${fromId}`) || battlePeer.current;
-      if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
     });
 
     return () => {
@@ -861,40 +523,10 @@ export default function LiveStream() {
       coHostStreams.current.clear();
       peers.current.forEach(pc => pc.close());
       peers.current.clear();
-      if (battlePeer.current) { battlePeer.current.close(); battlePeer.current = null; }
       if (hlsInstance.current) { hlsInstance.current.destroy(); hlsInstance.current = null; }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isBroadcast]);
-
-  /* ─── Battle: retry attaching opponent stream to video element ── */
-  useEffect(() => {
-    if (!battle) return;
-    // Immediately try to attach if we already have a stream
-    const tryAttach = () => {
-      const el = opponentVideoRef.current;
-      const ms = opponentStreamRef.current;
-      if (!el || !ms) return;
-      if (el.srcObject !== ms) {
-        el.srcObject = ms;
-      }
-      if (el.paused) {
-        el.play().catch(() => {});
-      }
-    };
-    tryAttach();
-    // Keep retrying every 800ms until video is playing
-    const interval = setInterval(() => {
-      const el = opponentVideoRef.current;
-      if (!el) return;
-      if (el.readyState >= 2 && !el.paused) {
-        clearInterval(interval); // playing fine
-        return;
-      }
-      tryAttach();
-    }, 800);
-    return () => clearInterval(interval);
-  }, [battle]);
 
   /* ─── In-stream ads ─────────────────────────────────── */
   useEffect(() => {
@@ -939,32 +571,18 @@ export default function LiveStream() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adVisible, streamAds]);
 
-  /* ─── start broadcast (shared function) ─────────────────── */
-  const startBroadcast = async () => {
-    if (streamStarted.current) return;
-    streamStarted.current = true;
-    const ms = await startCamera(camFacing);
-    if (!ms) { streamStarted.current = false; return; }
-    setStreaming(true);
-    socketRef.current?.emit("broadcaster", id);
-    await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
-    toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
-  };
-
-  /* ─── auto-start WebRTC camera (only if already granted) ─── */
+  /* ─── auto-start WebRTC camera ──────────────────────── */
   useEffect(() => {
-    if (!isBroadcast || broadcastMode !== "webrtc") return;
-    navigator.permissions.query({ name: "camera" as PermissionName })
-      .then(perm => {
-        if (perm.state === "granted") {
-          startBroadcast();
-        } else {
-          setNeedsPermTap(true);
-        }
-      })
-      .catch(() => {
-        startBroadcast();
-      });
+    if (!isBroadcast || broadcastMode !== "webrtc" || streamStarted.current) return;
+    streamStarted.current = true;
+    (async () => {
+      const ms = await startCamera(camFacing);
+      if (!ms) return;
+      setStreaming(true);
+      socketRef.current?.emit("broadcaster", id);
+      await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
+      toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
+    })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [broadcastMode]);
 
@@ -1095,7 +713,7 @@ export default function LiveStream() {
     const newVal = !autoAccept;
     setAutoAccept(newVal);
     socketRef.current?.emit("set-auto-accept", { streamId: id, enabled: newVal });
-    toast({ title: newVal ? "✅ القبول التلقائي مفعّل" : "القبول التلقائي معطّل", description: newVal ? "كل من يطلب سيدخل مباشرة" : "ستراجع طلبات الكاميرا يدوياً" });
+    toast({ title: newVal ? "✅ القبول التلقائي مفعّل" : "القبول التلقائي معطّل", description: newVal ? "كل من يطلب سيدخل مباشرة" : "ستراجع طلبات المشاركة يدوياً" });
   };
 
   /* ─── Hand Raise helpers ─────────────────────────────── */
@@ -1118,80 +736,6 @@ export default function LiveStream() {
   const dismissHand = (socketId: string) => {
     socketRef.current?.emit("dismiss-hand", { streamId: id, guestSocketId: socketId });
     setRaisedHands(prev => prev.filter(h => h.socketId !== socketId));
-  };
-
-  /* ─── Kick viewer helper (broadcaster) ──────────────── */
-  const kickViewer = (socketId: string) => {
-    socketRef.current?.emit("kick-viewer", { streamId: id, viewerSocketId: socketId });
-    setViewersList(prev => prev.filter(v => v.socketId !== socketId));
-    toast({ title: "تم طرد المشاهد" });
-  };
-
-  const requestViewerList = () => {
-    socketRef.current?.emit("get-viewer-list", { streamId: id });
-    setShowViewerList(true);
-  };
-
-  /* ─── Cross-Stream Battle helpers ──────────────────── */
-  const MAX_COHOSTS = 8;
-
-  const fetchLiveStreamsForBattle = async () => {
-    try {
-      const res = await fetch("/api/streams?status=live", { credentials: "include" });
-      const streams = await res.json();
-      setLiveStreamsForBattle((streams || []).filter((s: any) => String(s.id) !== String(id)));
-    } catch { setLiveStreamsForBattle([]); }
-  };
-
-  const sendBattleInvite = (targetStreamId: string) => {
-    if (!user) return;
-    const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "المذيع";
-    socketRef.current?.emit("battle-invite", {
-      fromStreamId: id, toStreamId: String(targetStreamId),
-      fromName: userName, fromUserId: (user as any).id,
-    });
-  };
-
-  const acceptBattleInvite = () => {
-    if (!battleInvite || !user) return;
-    const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "المذيع";
-    socketRef.current?.emit("battle-accept", {
-      inviteId: battleInvite.inviteId, myName: userName, myUserId: (user as any).id,
-    });
-    setBattleInvite(null);
-  };
-
-  const declineBattleInvite = () => {
-    if (!battleInvite) return;
-    socketRef.current?.emit("battle-decline", { inviteId: battleInvite.inviteId });
-    setBattleInvite(null);
-  };
-
-  const endBattleEarly = () => {
-    socketRef.current?.emit("battle-end-early", { streamId: id });
-  };
-
-  const BATTLE_MULTIPLIERS = [
-    { label: "x2", value: 2, color: "bg-blue-500", emoji: "⚡" },
-    { label: "x3", value: 3, color: "bg-purple-500", emoji: "🔥" },
-    { label: "x5", value: 5, color: "bg-yellow-500", emoji: "💥" },
-  ];
-
-  const sendBattleGift = (gift: typeof GIFTS[0], multiplier: number) => {
-    if (!user) return;
-    if (myCoins < gift.coins) {
-      toast({ title: "عملاتك غير كافية", description: `تحتاج ${gift.coins} عملة — رصيدك ${myCoins}`, variant: "destructive" });
-      return;
-    }
-    const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مستخدم";
-    socketRef.current?.emit("battle-gift", {
-      streamId: id, giftType: gift.type, giftEmoji: gift.emoji,
-      giftName: gift.name, giftCoins: gift.coins, userName, userId: (user as any).id,
-      multiplier,
-    });
-    setMyCoins(prev => prev - gift.coins);
-    setTimeout(() => refetchWallet(), 1500);
-    triggerConfetti(gift.coins >= 50 ? 35 : 15);
   };
 
   /* ─── Coin recharge helper ────────────────────────────── */
@@ -1229,13 +773,7 @@ export default function LiveStream() {
         packageId: selectedPkg.id,
         coins: selectedPkg.coins + (selectedPkg.bonus_coins || 0),
         amountEGP: selectedPkg.price_egp,
-        paymentMethod:
-          payMethod === "vodafone" ? "فودافون كاش"
-          : payMethod === "etisalat" ? "اتصالات كاش"
-          : payMethod === "instapay" ? "إنستاباي"
-          : payMethod === "souq" ? "سوق ماركات"
-          : payMethod === "installment" ? "تقسيط فيزا"
-          : "تحويل بنكي",
+        paymentMethod: payMethod === "vodafone" ? "فودافون كاش" : payMethod === "instapay" ? "إنستاباي" : "تحويل بنكي",
         paymentRef: payRef.trim(),
         userName,
       });
@@ -1276,32 +814,21 @@ export default function LiveStream() {
       broadcasterUserId: stream?.userId,
     });
     setMyCoins(prev => prev - gift.coins);
+    // Sync wallet from server after a short delay
     setTimeout(() => refetchWallet(), 1500);
-    if (gift.coins >= 20) triggerConfetti(gift.coins >= 100 ? 40 : 20);
   };
 
   /* ─── Share helpers ───────────────────────────────────── */
-  const { data: myReferralData } = useQuery<{ code: string }>({
-    queryKey: ["/api/auth/me/referral"],
-    queryFn: () => fetch("/api/auth/me/referral", { credentials: "include" }).then(r => r.json()),
-    enabled: !!user,
-    staleTime: 10 * 60 * 1000,
-  });
-  const myRefCode = myReferralData?.code;
   const streamUrl = typeof window !== "undefined" ? `${window.location.origin}/streams/${id}` : "";
-  const streamShareUrl = myRefCode ? `${streamUrl}?ref=${myRefCode}` : streamUrl;
-  const shareText = encodeURIComponent(
-    `شاهد البث المباشر على شبكة سوق! ${streamShareUrl}` +
-    (myRefCode ? ` 🎁 كود الإحالة: ${myRefCode}` : "")
-  );
+  const shareText = encodeURIComponent(`شاهد البث المباشر على شبكة سوق! ${streamUrl}`);
   const shareLinks = [
     { icon: SiWhatsapp,   label: "واتساب",    color: "#25D366", href: `https://wa.me/?text=${shareText}` },
-    { icon: SiFacebook,   label: "فيسبوك",    color: "#1877F2", href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(streamShareUrl)}` },
+    { icon: SiFacebook,   label: "فيسبوك",    color: "#1877F2", href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(streamUrl)}` },
     { icon: SiX,          label: "تويتر X",   color: "#000000", href: `https://twitter.com/intent/tweet?text=${shareText}` },
-    { icon: SiTelegram,   label: "تيليغرام",  color: "#26A5E4", href: `https://t.me/share/url?url=${encodeURIComponent(streamShareUrl)}&text=${encodeURIComponent("شاهد البث المباشر على شبكة سوق!")}` },
+    { icon: SiTelegram,   label: "تيليغرام",  color: "#26A5E4", href: `https://t.me/share/url?url=${encodeURIComponent(streamUrl)}&text=${encodeURIComponent("شاهد البث المباشر على شبكة سوق!")}` },
     { icon: SiInstagram,  label: "انستجرام",  color: "#E1306C", href: null, copy: true },
     { icon: SiTiktok,     label: "تيك توك",   color: "#010101", href: null, copy: true },
-    { icon: SiSnapchat,   label: "سناب شات",  color: "#FFFC00", href: `https://www.snapchat.com/scan?attachmentUrl=${encodeURIComponent(streamShareUrl)}`, textDark: true },
+    { icon: SiSnapchat,   label: "سناب شات",  color: "#FFFC00", href: `https://www.snapchat.com/scan?attachmentUrl=${encodeURIComponent(streamUrl)}`, textDark: true },
   ];
 
   const unlockAudio = () => {
@@ -1499,57 +1026,61 @@ export default function LiveStream() {
     );
   }
 
+  /* ═══ MODE PICKER for broadcaster ═══════════════════════ */
+  if (isBroadcast && !streamStarted.current && broadcastMode === "webrtc" && !streaming) {
+    return (
+      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-50 p-6 gap-5" dir="rtl">
+        <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mb-2">
+          <Video className="w-8 h-8 text-red-400" />
+        </div>
+        <h2 className="text-white text-xl font-bold">اختر طريقة البث</h2>
+        <div className="flex flex-col gap-3 w-full max-w-xs">
+          <button
+            onClick={() => {
+              streamStarted.current = true;
+              setBroadcastMode("webrtc");
+              // trigger camera start
+              (async () => {
+                const ms = await startCamera(camFacing);
+                if (!ms) return;
+                setStreaming(true);
+                socketRef.current?.emit("broadcaster", id);
+                await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
+                toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء الآن" });
+              })();
+            }}
+            className="w-full py-4 rounded-2xl bg-white text-black font-bold text-base flex items-center justify-center gap-2"
+            data-testid="btn-start-webrtc"
+          >
+            <Monitor className="w-5 h-5" />
+            بث من المتصفح (كاميرا)
+          </button>
+          <button
+            onClick={() => setBroadcastMode("rtmp")}
+            className="w-full py-4 rounded-2xl bg-red-600 text-white font-bold text-base flex items-center justify-center gap-2"
+            data-testid="btn-start-rtmp"
+          >
+            <Radio className="w-5 h-5" />
+            بث من OBS / برنامج خارجي
+          </button>
+          <button
+            onClick={() => setLocation("/livestream")}
+            className="w-full py-3 rounded-2xl bg-white/5 text-white/60 text-sm"
+            data-testid="btn-cancel-mode"
+          >
+            إلغاء
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   /* ═══ MAIN STREAM VIEW (WebRTC or HLS viewer) ════════════ */
   return (
     <div className="relative w-full h-[100dvh] bg-black flex flex-col overflow-hidden select-none" dir="rtl">
 
       {/* VIDEO AREA */}
-      <div
-        className="relative flex-1 overflow-hidden bg-black"
-        onTouchStart={e => {
-          if (isBroadcast) return;
-          if (e.touches.length === 2) {
-            // Pinch start
-            const dx = e.touches[0].clientX - e.touches[1].clientX;
-            const dy = e.touches[0].clientY - e.touches[1].clientY;
-            zoomRef.current.startDist  = Math.hypot(dx, dy);
-            zoomRef.current.startScale = zoomRef.current.scale;
-            zoomRef.current.originX    = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-            zoomRef.current.originY    = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-          } else if (e.touches.length === 1) {
-            // Double-tap detection
-            const now = Date.now();
-            if (now - zoomRef.current.lastTap < 300) {
-              // Double-tap: toggle 1x ↔ 2.5x
-              const next = zoomRef.current.scale > 1.1 ? 1 : 2.5;
-              zoomRef.current.scale = next;
-              if (next === 1) setZoomOffset({ x: 0, y: 0 });
-              setZoomScale(next);
-            }
-            zoomRef.current.lastTap = now;
-          }
-        }}
-        onTouchMove={e => {
-          if (isBroadcast || e.touches.length !== 2) return;
-          e.preventDefault();
-          const dx = e.touches[0].clientX - e.touches[1].clientX;
-          const dy = e.touches[0].clientY - e.touches[1].clientY;
-          const dist = Math.hypot(dx, dy);
-          const next = Math.min(5, Math.max(1, zoomRef.current.startScale * (dist / zoomRef.current.startDist)));
-          zoomRef.current.scale = next;
-          setZoomScale(next);
-          if (next <= 1) setZoomOffset({ x: 0, y: 0 });
-        }}
-        onTouchEnd={e => {
-          if (isBroadcast) return;
-          if (zoomRef.current.scale <= 1) {
-            zoomRef.current.scale = 1;
-            setZoomScale(1);
-            setZoomOffset({ x: 0, y: 0 });
-          }
-        }}
-      >
+      <div className="relative flex-1 overflow-hidden bg-black">
         <video
           ref={videoRef}
           autoPlay
@@ -1557,137 +1088,25 @@ export default function LiveStream() {
           muted={isBroadcast}
           data-testid="video-stream"
           className="absolute inset-0 w-full h-full object-cover"
-          style={{
-            backgroundColor: "#000",
-            transform: `${(isBroadcast && camFacing === "user") ? "scaleX(-1) " : ""}scale(${zoomScale}) translate(${zoomOffset.x}px, ${zoomOffset.y}px)`,
-            filter: isBroadcast ? BEAUTY_FILTERS[filterIdx].filter : "none",
-            transition: zoomScale === 1 ? "transform 0.25s ease" : "none",
-            transformOrigin: "center center",
-            willChange: "transform",
-          }}
+          style={{ backgroundColor: "#000", transform: (isBroadcast && camFacing === "user") ? "scaleX(-1)" : "none" }}
         />
 
         {/* Camera error */}
-        {isBroadcast && cameraError && (() => {
-          const ua = navigator.userAgent;
-          const isIOS = /iPad|iPhone|iPod/.test(ua);
-          const isAndroid = /Android/.test(ua);
-          const isSafari = /^((?!chrome|android).)*safari/i.test(ua);
-          const isChrome = /Chrome/.test(ua) && !/Edg/.test(ua);
-
-          if (cameraError === "PERMISSION_DENIED") {
-            return (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-5 gap-5 z-20 overflow-y-auto py-8" dir="rtl">
-                {/* Icon */}
-                <div className="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center ring-4 ring-red-500/30">
-                  <VideoOff className="w-10 h-10 text-red-400" />
-                </div>
-
-                <div>
-                  <h2 className="text-white font-bold text-xl mb-1">الكاميرا محظورة في المتصفح</h2>
-                  <p className="text-white/60 text-sm">لازم تسمح لـ ads-as.com باستخدام الكاميرا من إعدادات المتصفح</p>
-                </div>
-
-                {/* Visual steps */}
-                {isIOS && isSafari ? (
-                  <div className="w-full max-w-sm space-y-3">
-                    {[
-                      { icon: "⚙️", text: "افتح إعدادات الجهاز (Settings)" },
-                      { icon: "🌐", text: "اختار Safari" },
-                      { icon: "📷", text: "اختار \"الكاميرا\" → السماح" },
-                      { icon: "🎙️", text: "اختار \"الميكروفون\" → السماح" },
-                      { icon: "🔄", text: "ارجع هنا واضغط \"تم، حاول تاني\"" },
-                    ].map((s, i) => (
-                      <div key={i} className="flex items-center gap-3 bg-white/8 rounded-xl px-4 py-3 text-right">
-                        <span className="text-xl flex-shrink-0">{s.icon}</span>
-                        <span className="text-white text-sm flex-1">{s.text}</span>
-                        <span className="w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center flex-shrink-0 font-bold">{i + 1}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="w-full max-w-sm space-y-3">
-                    {/* Browser bar illustration */}
-                    <div className="bg-zinc-800 rounded-xl overflow-hidden border border-white/10">
-                      <div className="bg-zinc-700 px-3 py-2 flex items-center gap-2 text-xs">
-                        <span className="text-yellow-300 font-bold text-base">🔒</span>
-                        <span className="flex-1 bg-zinc-600 rounded px-2 py-1 text-white/70 text-xs text-left">ads-as.com</span>
-                      </div>
-                      <div className="px-4 py-2 text-white/50 text-xs text-right">← اضغط على القفل 🔒 هنا</div>
-                    </div>
-
-                    {[
-                      { icon: "🔒", text: "اضغط على القفل بجانب اسم الموقع في الأعلى" },
-                      { icon: "📋", text: "اختار: \"أذونات الموقع\" أو \"Permissions\"" },
-                      { icon: "📷", text: "اضغط على الكاميرا → اختار السماح" },
-                      { icon: "🎙️", text: "اضغط على الميكروفون → اختار السماح" },
-                      { icon: "🔄", text: "بعدين اضغط الزرار اللي تحت ⬇️" },
-                    ].map((s, i) => (
-                      <div key={i} className="flex items-center gap-3 bg-white/8 rounded-xl px-4 py-3 text-right">
-                        <span className="text-xl flex-shrink-0">{s.icon}</span>
-                        <span className="text-white text-sm flex-1">{s.text}</span>
-                        <span className="w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center flex-shrink-0 font-bold">{i + 1}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* After fixing permissions, reload */}
-                <button
-                  onClick={() => window.location.reload()}
-                  className="flex items-center gap-2 px-8 py-4 rounded-full bg-green-500 text-white font-bold text-base shadow-xl active:scale-95 transition"
-                  data-testid="btn-retry-camera"
-                >
-                  <RotateCcw className="w-5 h-5" /> تم، حاول تاني
-                </button>
-                <p className="text-white/30 text-xs">اضغط الزرار بعد تفعيل الإذن فوق</p>
-              </div>
-            );
-          }
-
-          if (cameraError === "NO_DEVICE") {
-            return (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-6 gap-4 z-20">
-                <div className="w-20 h-20 rounded-full bg-orange-500/20 flex items-center justify-center">
-                  <VideoOff className="w-10 h-10 text-orange-400" />
-                </div>
-                <h2 className="text-white font-bold text-xl">مفيش كاميرا متوصلة</h2>
-                <p className="text-white/60 text-sm">تأكد إن جهازك فيه كاميرا وإنها شغالة</p>
-                <button onClick={() => { setCameraError(""); streamStarted.current = false; setNeedsPermTap(true); }} className="flex items-center gap-2 px-8 py-3 rounded-full bg-white text-black font-bold text-sm" data-testid="btn-retry-camera">
-                  <RotateCcw className="w-4 h-4" /> حاول مجدداً
-                </button>
-              </div>
-            );
-          }
-
-          if (cameraError === "DEVICE_BUSY") {
-            return (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-6 gap-4 z-20">
-                <div className="w-20 h-20 rounded-full bg-yellow-500/20 flex items-center justify-center">
-                  <VideoOff className="w-10 h-10 text-yellow-400" />
-                </div>
-                <h2 className="text-white font-bold text-xl">الكاميرا مشغولة</h2>
-                <p className="text-white/60 text-sm">اقفل أي تطبيق تاني بيستخدم الكاميرا (Zoom, WhatsApp, إلخ) وحاول تاني</p>
-                <button onClick={() => { setCameraError(""); streamStarted.current = false; setNeedsPermTap(true); }} className="flex items-center gap-2 px-8 py-3 rounded-full bg-white text-black font-bold text-sm" data-testid="btn-retry-camera">
-                  <RotateCcw className="w-4 h-4" /> حاول مجدداً
-                </button>
-              </div>
-            );
-          }
-
-          return (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-6 gap-4 z-20">
-              <div className="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center">
-                <VideoOff className="w-10 h-10 text-red-400" />
-              </div>
-              <h2 className="text-white font-bold text-xl">تعذّر فتح الكاميرا</h2>
-              <p className="text-white/60 text-sm">حاول تعيد فتح الصفحة أو استخدم متصفح تاني</p>
-              <button onClick={() => window.location.reload()} className="flex items-center gap-2 px-8 py-3 rounded-full bg-white text-black font-bold text-sm" data-testid="btn-retry-camera">
-                <RotateCcw className="w-4 h-4" /> حدّث الصفحة
-              </button>
+        {isBroadcast && cameraError && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-6 gap-5 z-20">
+            <div className="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center">
+              <VideoOff className="w-10 h-10 text-red-400" />
             </div>
-          );
-        })()}
+            <p className="text-white font-bold text-base">{cameraError}</p>
+            <button
+              onClick={() => startCamera(camFacing)}
+              className="flex items-center gap-2 px-6 py-3 rounded-full bg-white text-black font-bold text-sm"
+              data-testid="btn-retry-camera"
+            >
+              <RotateCcw className="w-4 h-4" /> حاول مجدداً
+            </button>
+          </div>
+        )}
 
         {/* Waiting overlay */}
         {!streaming && !cameraError && !ended && (
@@ -1695,28 +1114,11 @@ export default function LiveStream() {
             <div className="w-20 h-20 rounded-full border-4 border-red-500/30 flex items-center justify-center animate-pulse">
               <Video className="w-10 h-10 text-red-400" />
             </div>
-            {isBroadcast && needsPermTap ? (
-              <>
-                <p className="text-white font-bold text-lg">اضغط لتشغيل الكاميرا</p>
-                <p className="text-white/50 text-sm text-center max-w-xs">سيطلب المتصفح إذن الكاميرا — اضغط <strong className="text-white">السماح</strong></p>
-                <button
-                  data-testid="btn-tap-to-start"
-                  onClick={() => { setNeedsPermTap(false); startBroadcast(); }}
-                  className="mt-2 flex items-center gap-3 px-10 py-4 rounded-full bg-red-600 active:bg-red-500 text-white font-bold text-lg shadow-2xl active:scale-95 transition-all"
-                >
-                  <span className="w-3 h-3 rounded-full bg-white animate-pulse" />
-                  ابدأ البث الآن
-                </button>
-              </>
-            ) : (
-              <>
-                <p className="text-white font-semibold text-lg opacity-80">
-                  {isBroadcast ? "جاري تشغيل الكاميرا..." : "في انتظار البث المباشر..."}
-                </p>
-                {!isBroadcast && (
-                  <p className="text-white/40 text-sm">سيبدأ الفيديو تلقائياً عندما يبدأ المضيف البث</p>
-                )}
-              </>
+            <p className="text-white font-semibold text-lg opacity-80">
+              {isBroadcast ? "جاري تشغيل الكاميرا..." : "في انتظار البث المباشر..."}
+            </p>
+            {!isBroadcast && (
+              <p className="text-white/40 text-sm">سيبدأ الفيديو تلقائياً عندما يبدأ المضيف البث</p>
             )}
           </div>
         )}
@@ -1802,28 +1204,6 @@ export default function LiveStream() {
         {/* VIEWER ACTIONS */}
         {!isBroadcast && streaming && !ended && (
           <div className="absolute end-3 z-10 flex flex-col items-center gap-4" style={{ bottom: "88px" }}>
-
-            {/* ZOOM BUTTON — always visible */}
-            <button
-              onClick={() => {
-                const levels = [1, 2, 3];
-                const cur = zoomRef.current.scale;
-                const next = levels.find(l => l > cur + 0.1) ?? 1;
-                zoomRef.current.scale = next;
-                setZoomScale(next);
-                if (next === 1) setZoomOffset({ x: 0, y: 0 });
-              }}
-              className="flex flex-col items-center gap-0.5"
-              data-testid="btn-zoom-video"
-            >
-              <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg backdrop-blur transition-all ${zoomScale > 1.05 ? "bg-green-500/90 ring-2 ring-green-400" : "bg-black/60"}`}>
-                {zoomScale > 1.05 ? <ZoomOut className="w-6 h-6 text-white" /> : <ZoomIn className="w-6 h-6 text-white" />}
-              </div>
-              <span className="text-white text-[10px] font-bold drop-shadow">
-                {zoomScale > 1.05 ? `${zoomScale.toFixed(0)}×` : "تكبير"}
-              </span>
-            </button>
-
             <button onClick={handleLike} className="flex flex-col items-center gap-0.5" data-testid="btn-stream-like">
               <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all ${liked ? "bg-red-500 scale-110" : "bg-black/60"}`}>
                 <Heart className={`w-6 h-6 ${liked ? "text-white fill-white" : "text-white"}`} />
@@ -1842,36 +1222,13 @@ export default function LiveStream() {
                 <Volume2 className="w-6 h-6 text-white" />
               </div>
             </button>
-            <button
-              onClick={() => {
-                const v = videoRef.current;
-                if (v) { v.muted = false; v.volume = 1; v.play().catch(() => {}); }
-              }}
-              className="flex flex-col items-center gap-0.5"
-              data-testid="btn-viewer-play-video"
-            >
-              <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-blue-600/80 backdrop-blur">
-                <Video className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-white text-[10px] font-bold drop-shadow">شغّل</span>
-            </button>
-            <button
-              onClick={() => setShowShare(true)}
-              className="flex flex-col items-center gap-0.5"
-              data-testid="btn-request-camera"
-            >
-              <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-purple-600/80 backdrop-blur">
-                <UserPlus className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-white text-[10px] font-bold drop-shadow">اطلب كاميرا</span>
-            </button>
 
             {/* SHARE BUTTON */}
             <button onClick={() => { setShowShare(true); setShowGiftPanel(false); }} className="flex flex-col items-center gap-0.5" data-testid="btn-share-stream">
               <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-blue-600/80 backdrop-blur">
                 <Share2 className="w-6 h-6 text-white" />
               </div>
-              <span className="text-white text-[10px] font-bold drop-shadow">كاميرا</span>
+              <span className="text-white text-[10px] font-bold drop-shadow">مشاركة</span>
             </button>
 
             {/* GIFT BUTTON */}
@@ -1893,28 +1250,6 @@ export default function LiveStream() {
                 </div>
                 <span className="text-white text-[10px] font-bold drop-shadow">شحن</span>
               </button>
-            )}
-
-            {/* REPORT STREAM BUTTON (viewer only) */}
-            {user && !reportDone && (
-              <button
-                onClick={() => setShowReportDialog(true)}
-                className="flex flex-col items-center gap-0.5"
-                data-testid="btn-report-stream"
-              >
-                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-red-700/60 backdrop-blur">
-                  <Flag className="w-5 h-5 text-white" />
-                </div>
-                <span className="text-white text-[10px] font-bold drop-shadow">بلاغ</span>
-              </button>
-            )}
-            {user && reportDone && (
-              <div className="flex flex-col items-center gap-0.5">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-green-600/60">
-                  <CheckCircle className="w-5 h-5 text-white" />
-                </div>
-                <span className="text-white text-[10px] font-bold drop-shadow">تم</span>
-              </div>
             )}
 
             {/* RAISE HAND BUTTON */}
@@ -1949,7 +1284,7 @@ export default function LiveStream() {
                 <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-purple-600/80 backdrop-blur">
                   <UserPlus className="w-6 h-6 text-white" />
                 </div>
-                <span className="text-white text-[10px] font-bold drop-shadow">كاميرا</span>
+                <span className="text-white text-[10px] font-bold drop-shadow">مشاركة</span>
               </button>
             )}
             {user && coHostStatus === "requesting" && (
@@ -2039,20 +1374,6 @@ export default function LiveStream() {
           </>
         )}
 
-        {/* ── VIEWER: Active co-hosts badge strip (bottom-left) ── */}
-        {!isBroadcast && viewerCohostBadges.length > 0 && (
-          <div className="absolute bottom-32 start-2 z-20 flex flex-col gap-1 pointer-events-none">
-            <span className="text-[8px] text-white/50 px-1">على الهواء الآن</span>
-            {viewerCohostBadges.map((b, i) => (
-              <div key={b.id} className="flex items-center gap-1.5 bg-black/70 backdrop-blur-sm rounded-full px-2 py-1 border border-purple-500/40">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
-                <span className="text-white text-[9px] font-bold max-w-[70px] truncate">{b.name}</span>
-                <span className="text-purple-300 text-[7px]">ضيف</span>
-              </div>
-            ))}
-          </div>
-        )}
-
         {/* RAISED HANDS PANEL (broadcaster) */}
         {isBroadcast && raisedHands.length > 0 && showHandsList && (
           <div className="absolute top-16 inset-x-4 z-20 bg-black/85 backdrop-blur-lg rounded-2xl border border-orange-500/40 overflow-hidden">
@@ -2104,10 +1425,6 @@ export default function LiveStream() {
         {/* CO-HOST REQUESTS PANEL (broadcaster) */}
         {isBroadcast && coHostRequests.length > 0 && (
           <div className="absolute top-32 inset-x-4 z-20 flex flex-col gap-2">
-            <div className="rounded-2xl bg-black/70 backdrop-blur px-3 py-2 border border-white/10">
-              <p className="text-white text-xs font-bold">طلبات الضيوف</p>
-              <p className="text-white/50 text-[10px] mt-0.5">هذه الطلبات تظهر للمذيع فقط، والجمهور يقدر يرسل طلب من زر الانضمام.</p>
-            </div>
             {coHostRequests.map(req => (
               <div key={req.socketId} className="flex items-center gap-2 bg-black/80 backdrop-blur rounded-2xl px-3 py-2.5 border border-purple-500/40">
                 <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center flex-shrink-0">
@@ -2165,8 +1482,6 @@ export default function LiveStream() {
 
             {activeCoHosts.map((ch, idx) => {
               const isSwapped = swappedCohostId === ch.socketId;
-              const col = idx % 2;
-              const row = Math.floor(idx / 2);
               return (
                 <div
                   key={ch.socketId}
@@ -2175,8 +1490,8 @@ export default function LiveStream() {
                     : "absolute z-20"
                   }
                   style={isSwapped ? {} : {
-                    bottom: `${9 + row * 8}rem`,
-                    [document.documentElement.dir === "rtl" ? "left" : "right"]: `${0.75 + col * 6.5}rem`,
+                    bottom: `${9 + idx * 10}rem`,
+                    [document.documentElement.dir === "rtl" ? "left" : "right"]: "0.75rem",
                   }}
                 >
                   {/* Hidden audio element for audio-only guests */}
@@ -2280,170 +1595,31 @@ export default function LiveStream() {
           </div>
         ))}
 
-        {/* CONFETTI PARTICLES */}
-        {confettiParticles.map(p => (
-          <div
-            key={p.id}
-            className="absolute top-0 z-50 pointer-events-none text-2xl"
-            style={{
-              left: `${p.x}%`,
-              animationDelay: `${p.delay}s`,
-              animation: "confettiFall 2.8s ease-in forwards",
-            }}
-          >
-            {p.emoji}
-          </div>
-        ))}
-
-        {/* FILTER MENU (broadcaster only) */}
-        {isBroadcast && showFilterMenu && (
-          <div className="absolute top-20 left-2 z-40 bg-black/90 backdrop-blur-xl rounded-2xl border border-white/10 p-2 flex flex-col gap-1">
-            {BEAUTY_FILTERS.map((f, i) => (
-              <button
-                key={i}
-                onClick={() => { setFilterIdx(i); setShowFilterMenu(false); }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-bold text-white transition-all ${i === filterIdx ? "bg-white/20 ring-1 ring-white/40" : "hover:bg-white/10"}`}
-                data-testid={`filter-${f.name}`}
-              >
-                <span>{f.icon}</span>
-                <span>{f.name}</span>
-                {i === filterIdx && <Check className="w-3 h-3 text-green-400 mr-auto" />}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* BROADCASTER GIFT BANNER (shows who sent, what, and how much received) */}
-        {isBroadcast && giftBanners.length > 0 && (
-          <div className="absolute top-16 start-3 z-30 pointer-events-none flex flex-col gap-1.5" style={{ maxWidth: "75%" }}>
-            {giftBanners.map(b => (
-              <div key={b.id} className="bg-gradient-to-l from-yellow-600/90 to-orange-600/90 backdrop-blur-xl rounded-2xl px-3 py-2 flex items-center gap-2.5 shadow-2xl border border-yellow-400/40" style={{ animation: "slideInRight 0.4s ease-out" }}>
-                <span className="text-3xl">{b.emoji}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-white font-bold text-sm truncate">{b.userName}</p>
-                  <p className="text-yellow-100 text-[10px]">
-                    أرسل {b.name} — <span className="font-bold text-white">وصلك {b.received} 🪙</span>
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* IN-STREAM AD — mini banner + expanded bottom-sheet (stream stays alive) */}
+        {/* IN-STREAM AD BANNER */}
         {streaming && adVisible && streamAds.length > 0 && stream?.showAds !== false && (() => {
           const ad = streamAds[currentAdIdx];
-
-          /* ── EXPANDED bottom-sheet (stream continues behind it) ── */
-          if (adExpanded) return (
-            <div
-              className="absolute inset-x-0 bottom-0 z-30 rounded-t-3xl overflow-hidden shadow-2xl"
-              style={{ animation: "slideInUp 0.35s ease-out" }}
-            >
-              {/* translucent backdrop so viewer can still see stream above */}
-              <div className="bg-black/92 backdrop-blur-xl pb-8 pt-1">
-                {/* drag handle */}
-                <div className="flex justify-center mb-3 pt-2">
-                  <div className="w-10 h-1 bg-white/30 rounded-full" />
-                </div>
-
-                {/* ad label + close */}
-                <div className="flex items-center justify-between px-4 mb-3">
-                  <span className="text-[10px] text-yellow-400 font-bold bg-yellow-400/15 rounded px-2 py-1">
-                    إعلان ممول
-                  </span>
-                  <button
-                    onClick={() => { setAdVisible(false); setAdExpanded(false); }}
-                    className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white/60"
-                    data-testid="btn-ad-close-expanded"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* ad image */}
-                <div className="px-4 mb-3">
-                  <img
-                    src={ad.media_url}
-                    alt={ad.title}
-                    className="w-full h-44 object-cover rounded-2xl border border-white/10"
-                  />
-                </div>
-
-                {/* title + price */}
-                <div className="px-4 mb-4">
-                  <p className="text-white font-bold text-base leading-snug mb-1">{ad.title}</p>
-                  {ad.description && (
-                    <p className="text-white/60 text-xs leading-relaxed line-clamp-2">{ad.description}</p>
-                  )}
-                  {ad.price_egp && (
-                    <p className="text-green-400 font-bold text-lg mt-2">
-                      {Number(ad.price_egp).toLocaleString("ar-EG")} <span className="text-sm">ج.م</span>
-                    </p>
-                  )}
-                </div>
-
-                {/* CTA buttons — all open new tab, stream stays alive */}
-                <div className="px-4 flex gap-2">
-                  {ad.whatsapp_number && (
-                    <a
-                      href={`https://wa.me/${ad.whatsapp_number.replace(/\D/g, "")}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-1 flex items-center justify-center gap-2 bg-green-500 text-white text-sm font-bold py-3 rounded-2xl"
-                      data-testid="btn-ad-whatsapp-expanded"
-                    >
-                      <SiWhatsapp className="w-4 h-4" />
-                      تواصل واتساب
-                    </a>
-                  )}
-                  <a
-                    href={`/ads/${ad.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 flex items-center justify-center gap-2 bg-white/15 border border-white/20 text-white text-sm font-bold py-3 rounded-2xl"
-                    data-testid="btn-ad-view-expanded"
-                  >
-                    عرض الإعلان
-                  </a>
-                </div>
-
-                {/* back to stream hint */}
-                <button
-                  onClick={() => setAdExpanded(false)}
-                  className="w-full mt-3 text-white/40 text-[11px] text-center py-1"
-                  data-testid="btn-ad-back-to-stream"
-                >
-                  ← العودة للبث المباشر
-                </button>
-              </div>
-            </div>
-          );
-
-          /* ── MINI banner (default) ── */
           return (
-            <button
-              onClick={() => setAdExpanded(true)}
-              className="absolute inset-x-3 z-20 flex items-center gap-3 bg-black/85 backdrop-blur-md rounded-2xl p-2.5 border border-white/10 shadow-2xl text-start"
+            <div className="absolute inset-x-3 z-20 flex items-center gap-3 bg-black/85 backdrop-blur-md rounded-2xl p-2.5 border border-white/10 shadow-2xl"
               style={{ bottom: "92px", animation: "slideInLeft 0.4s ease-out" }}
-              data-testid="btn-ad-expand"
             >
-              {/* thumbnail */}
+              {/* Ad thumbnail */}
               <img
                 src={ad.media_url}
                 alt={ad.title}
                 className="w-14 h-14 rounded-xl object-cover flex-shrink-0 border border-white/10"
               />
-              {/* info */}
+              {/* Ad info */}
               <div className="flex-1 min-w-0">
-                <span className="text-[9px] text-yellow-400 font-bold bg-yellow-400/15 rounded px-1 py-0.5">إعلان</span>
-                <p className="text-white text-xs font-bold truncate leading-tight mt-0.5">{ad.title}</p>
+                <div className="flex items-center gap-1 mb-0.5">
+                  <span className="text-[9px] text-yellow-400 font-bold bg-yellow-400/15 rounded px-1 py-0.5">إعلان</span>
+                </div>
+                <p className="text-white text-xs font-bold truncate leading-tight">{ad.title}</p>
                 {ad.price_egp && (
                   <p className="text-green-400 text-[11px] font-bold">{Number(ad.price_egp).toLocaleString("ar-EG")} ج.م</p>
                 )}
               </div>
-              {/* actions */}
-              <div className="flex flex-col gap-1.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
+              {/* CTA button */}
+              <div className="flex flex-col gap-1.5 flex-shrink-0">
                 {ad.whatsapp_number ? (
                   <a
                     href={`https://wa.me/${ad.whatsapp_number.replace(/\D/g, "")}`}
@@ -2458,8 +1634,6 @@ export default function LiveStream() {
                 ) : (
                   <a
                     href={`/ads/${ad.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
                     className="bg-white/20 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-xl"
                     data-testid="btn-ad-view"
                   >
@@ -2467,14 +1641,14 @@ export default function LiveStream() {
                   </a>
                 )}
                 <button
-                  onClick={() => { setAdVisible(false); setAdExpanded(false); }}
+                  onClick={() => setAdVisible(false)}
                   className="text-white/40 text-[9px] text-center"
                   data-testid="btn-ad-dismiss"
                 >
                   إغلاق
                 </button>
               </div>
-            </button>
+            </div>
           );
         })()}
 
@@ -2492,262 +1666,6 @@ export default function LiveStream() {
             <Users className="w-3.5 h-3.5" />
             {autoAccept ? "قبول تلقائي" : "قبول يدوي"}
           </button>
-        )}
-
-        {/* ── CONTENT WARNING overlay (shown to broadcaster when flagged) ── */}
-        {contentWarning && (
-          <div className="absolute inset-x-4 z-40 rounded-2xl overflow-hidden shadow-2xl border-2 border-orange-500"
-            style={{ top: "60px", animation: "slideInLeft 0.4s ease-out" }}
-          >
-            <div className="bg-orange-950/95 backdrop-blur-md p-4">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center flex-shrink-0">
-                  <AlertTriangle className="w-5 h-5 text-white" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-orange-300 text-xs font-bold mb-1">تحذير من الإدارة</p>
-                  <p className="text-white text-sm leading-relaxed">{contentWarning}</p>
-                </div>
-                <button onClick={() => setContentWarning(null)} className="text-white/40 flex-shrink-0">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── KICKED overlay ── */}
-        {kicked && (
-          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/95 gap-6 text-white px-8 text-center">
-            <div className="w-20 h-20 rounded-full bg-red-600/30 flex items-center justify-center">
-              <ShieldOff className="w-10 h-10 text-red-400" />
-            </div>
-            <div>
-              <p className="font-bold text-xl mb-3">تم طردك من البث</p>
-              <p className="text-white/70 text-sm leading-relaxed">قام المذيع بإخراجك من هذا البث</p>
-            </div>
-            <button onClick={() => setLocation("/livestream")} className="px-8 py-3 rounded-full bg-white text-black font-bold text-sm" data-testid="btn-after-kicked">
-              العودة للبثوث
-            </button>
-          </div>
-        )}
-
-        {/* ── BATTLE INVITE POPUP (broadcaster receives invite) ── */}
-        {battleInvite && isBroadcast && (
-          <div className="absolute top-20 inset-x-4 z-40 pointer-events-auto">
-            <div className="bg-black/90 backdrop-blur-xl rounded-2xl border-2 border-yellow-500/60 p-4 shadow-2xl animate-pulse">
-              <div className="flex items-center gap-3 mb-3">
-                <span className="text-3xl">⚔️</span>
-                <div>
-                  <p className="text-yellow-400 font-bold text-base">دعوة تحدي!</p>
-                  <p className="text-white/70 text-sm">{battleInvite.fromName} يتحداك في جولة</p>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={acceptBattleInvite} className="flex-1 py-2.5 rounded-xl bg-green-600 text-white font-bold text-sm" data-testid="btn-accept-battle">
-                  ✅ قبول التحدي
-                </button>
-                <button onClick={declineBattleInvite} className="flex-1 py-2.5 rounded-xl bg-red-600/50 text-white font-bold text-sm" data-testid="btn-decline-battle">
-                  ❌ رفض
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── CROSS-STREAM BATTLE OVERLAY ── TikTok Style ── */}
-        {battle && (() => {
-          const iAmA    = battle.streamIdA === id;
-          const myScore = iAmA ? battle.totalA : battle.totalB;
-          const oppScore= iAmA ? battle.totalB : battle.totalA;
-          const myName  = iAmA ? battle.nameA  : battle.nameB;
-          const oppName = iAmA ? battle.nameB  : battle.nameA;
-          const total   = myScore + oppScore;
-          const myWin   = myScore > oppScore;
-          const oppWin  = oppScore > myScore;
-
-          return (
-            <div className="absolute inset-0 z-30 pointer-events-none flex flex-col">
-
-              {/* ── ONE-BAR HEADER: pink | timer | cyan (exactly like TikTok) ── */}
-              <div className="flex h-9 items-stretch overflow-hidden">
-                {/* LEFT: pink — opponent score */}
-                <div className={`flex items-center justify-start gap-1.5 px-3 flex-1
-                  ${oppWin && battle.ended ? "bg-yellow-400" : "bg-rose-500"}`}>
-                  <span className="text-white font-black text-base leading-none tracking-tight">
-                    {oppScore.toLocaleString()}
-                  </span>
-                  {oppWin && !battle.ended && (
-                    <span className="text-white/80 text-[10px] font-bold">●</span>
-                  )}
-                </div>
-
-                {/* CENTER: timer — dark pill */}
-                <div className="bg-black/80 flex flex-col items-center justify-center px-3 min-w-[70px] gap-0">
-                  {battle.active ? (
-                    <>
-                      <span className="text-white font-black text-sm font-mono leading-tight">
-                        {Math.floor(battle.timeLeft / 60)}:{(battle.timeLeft % 60).toString().padStart(2, "0")}
-                      </span>
-                      <span className="text-[9px]">💗</span>
-                    </>
-                  ) : (
-                    <span className="text-yellow-400 text-xs font-black">
-                      {battle.winner === "draw" ? "🤝" : "🏆"}
-                    </span>
-                  )}
-                </div>
-
-                {/* RIGHT: cyan — my score */}
-                <div className={`flex items-center justify-end gap-1.5 px-3 flex-1
-                  ${myWin && battle.ended ? "bg-yellow-400" : "bg-cyan-500"}`}>
-                  {myWin && !battle.ended && (
-                    <span className="text-white/80 text-[10px] font-bold">●</span>
-                  )}
-                  <span className="text-white font-black text-base leading-none tracking-tight">
-                    {myScore.toLocaleString()}
-                  </span>
-                </div>
-              </div>
-
-              {/* ── PROGRESS BAR (1px, tight) ── */}
-              {total > 0 && (
-                <div className="h-1 flex w-full">
-                  <div className="bg-rose-600 transition-all duration-700"
-                    style={{ width: `${100 * oppScore / total}%` }} />
-                  <div className="bg-cyan-600 flex-1 transition-all duration-700" />
-                </div>
-              )}
-
-              {/* ── SPLIT VIDEOS ── */}
-              <div className="relative flex-1 flex overflow-hidden">
-
-                {/* LEFT: opponent video */}
-                <div className="relative w-1/2 h-full overflow-hidden border-r border-white/15">
-                  <video
-                    ref={el => {
-                      (opponentVideoRef as any).current = el;
-                      // Immediately attach if stream already received
-                      if (el && opponentStreamRef.current) {
-                        el.srcObject = opponentStreamRef.current;
-                        el.play().catch(() => {});
-                      }
-                    }}
-                    autoPlay playsInline
-                    className="w-full h-full object-cover bg-black"
-                    style={{ background: "#111" }}
-                  />
-
-                  {/* Opponent name badge bottom */}
-                  <div className="absolute bottom-2 left-1.5">
-                    <div className="bg-black/60 rounded-full px-2 py-0.5 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
-                      <span className="text-white text-[9px] font-bold truncate max-w-[65px]">{oppName}</span>
-                    </div>
-                  </div>
-
-                  {battle.ended && oppWin && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                      <div className="bg-yellow-400/95 rounded-2xl px-4 py-2.5 text-center shadow-2xl">
-                        <p className="text-2xl">🏆</p>
-                        <p className="text-black font-black text-sm">فاز!</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* RIGHT: my video (main broadcaster video fills this) */}
-                <div className="relative w-1/2 h-full overflow-hidden">
-                  {/* My name badge bottom */}
-                  <div className="absolute bottom-2 right-1.5">
-                    <div className="bg-black/60 rounded-full px-2 py-0.5 flex items-center gap-1">
-                      <span className="text-white text-[9px] font-bold truncate max-w-[65px]">{myName}</span>
-                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                    </div>
-                  </div>
-
-                  {battle.ended && myWin && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                      <div className="bg-yellow-400/95 rounded-2xl px-4 py-2.5 text-center shadow-2xl">
-                        <p className="text-2xl">🏆</p>
-                        <p className="text-black font-black text-sm">فاز!</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* ── LIKE BUTTON during battle (free — no coins) ── */}
-              {!isBroadcast && battle.active && (
-                <div className="pointer-events-auto absolute top-10 right-2 z-10 flex flex-col items-center gap-0.5">
-                  <button
-                    onClick={handleLike}
-                    className={`w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-90
-                      ${liked ? "bg-red-500 scale-110" : "bg-black/60 backdrop-blur"}`}
-                    data-testid="btn-battle-like"
-                  >
-                    <Heart className={`w-5 h-5 ${liked ? "text-white fill-white" : "text-white"}`} />
-                  </button>
-                  <span className="text-white text-[10px] font-black drop-shadow">{likesCount}</span>
-                </div>
-              )}
-
-              {/* ── GIFT PANEL for viewers ── */}
-              {!isBroadcast && battle.active && user && (
-                <div className="pointer-events-auto bg-black/90 backdrop-blur-xl border-t border-white/10 px-2 py-2">
-                  <p className="text-white/40 text-[8px] text-center mb-1.5">🎁 ادعم مذيعك</p>
-                  <div className="flex gap-2 overflow-x-auto pb-0.5">
-                    {GIFTS.slice(0, 6).map(gift => (
-                      <div key={gift.type} className="flex flex-col items-center gap-0.5 min-w-[2.8rem]">
-                        <span className="text-xl">{gift.emoji}</span>
-                        <span className="text-[8px] text-yellow-400 font-bold">{gift.coins}🪙</span>
-                        <div className="flex gap-0.5">
-                          {BATTLE_MULTIPLIERS.map(m => (
-                            <button key={m.value} onClick={() => sendBattleGift(gift, m.value)}
-                              className={`${m.color} text-white text-[7px] font-bold px-1 py-0.5 rounded active:scale-90`}
-                              data-testid={`battle-gift-${gift.type}-${m.value}`}>
-                              {m.emoji}{m.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* ── End battle (broadcaster only) ── */}
-              {isBroadcast && battle.active && (
-                <div className="pointer-events-auto bg-black/90 px-3 py-1.5">
-                  <button onClick={endBattleEarly}
-                    className="w-full py-1.5 rounded-xl bg-red-600/50 border border-red-500/30 text-red-300 text-xs font-bold"
-                    data-testid="btn-end-battle-early">
-                    ⏹ إنهاء الجولة مبكراً
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
-        {/* ── FORCE-END overlay (stream closed by admin or auto-system) ── */}
-        {forceEndReason && (
-          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/95 gap-6 text-white px-8 text-center">
-            <div className="w-20 h-20 rounded-full bg-red-600/30 flex items-center justify-center">
-              <ShieldOff className="w-10 h-10 text-red-400" />
-            </div>
-            <div>
-              <p className="font-bold text-xl mb-3">أُغلق البث</p>
-              <p className="text-white/70 text-sm leading-relaxed">{forceEndReason}</p>
-            </div>
-            <button
-              onClick={() => setLocation("/livestream")}
-              className="px-8 py-3 rounded-full bg-white text-black font-bold text-sm"
-              data-testid="btn-after-force-end"
-            >
-              العودة للبثوث
-            </button>
-          </div>
         )}
 
         {/* BROADCASTER CONTROLS (WebRTC) */}
@@ -2776,34 +1694,6 @@ export default function LiveStream() {
                 <FlipHorizontal className="w-6 h-6 text-white" />
               </button>
             )}
-            {/* FILTER button */}
-            <button
-              onClick={() => setShowFilterMenu(v => !v)}
-              data-testid="btn-beauty-filter"
-              className={`w-14 h-14 rounded-full flex flex-col items-center justify-center shadow-xl border-2 gap-0.5 ${filterIdx > 0 ? "bg-purple-600 border-purple-400" : "bg-black/70 border-white/20"}`}
-              title="فلتر الوجه"
-            >
-              <Sparkles className="w-5 h-5 text-white" />
-              <span className="text-white text-[8px] font-bold">{BEAUTY_FILTERS[filterIdx].icon}</span>
-            </button>
-            {/* SCREENSHOT button */}
-            <button
-              onClick={takeScreenshot}
-              data-testid="btn-screenshot"
-              className="w-14 h-14 rounded-full flex items-center justify-center shadow-xl bg-black/70 border-2 border-white/20"
-              title="تصوير سيلفي"
-            >
-              <Camera className="w-6 h-6 text-white" />
-            </button>
-            {/* SHARE button for broadcaster */}
-            <button
-              onClick={() => setShowShare(true)}
-              data-testid="btn-broadcast-share"
-              className="w-14 h-14 rounded-full flex items-center justify-center shadow-xl bg-blue-600 border-2 border-blue-400"
-              title="شارك البث"
-            >
-              <Share2 className="w-6 h-6 text-white" />
-            </button>
             <button
               onClick={endStream}
               data-testid="btn-end-stream"
@@ -2811,30 +1701,6 @@ export default function LiveStream() {
             >
               <PhoneOff className="w-5 h-5" />
               إنهاء البث
-            </button>
-          </div>
-        )}
-
-        {/* BROADCASTER FLOATING BUTTONS (right side) */}
-        {isBroadcast && streaming && (
-          <div className="absolute end-3 z-10 flex flex-col items-center gap-2.5" style={{ bottom: "160px" }}>
-            <button onClick={() => setShowShare(true)} data-testid="btn-broadcast-share-float" className="flex flex-col items-center gap-0.5">
-              <div className="w-11 h-11 rounded-full bg-blue-600/90 backdrop-blur flex items-center justify-center shadow-lg border-2 border-blue-400/50">
-                <Share2 className="w-5 h-5 text-white" />
-              </div>
-              <span className="text-white text-[9px] font-bold drop-shadow">شارك</span>
-            </button>
-            <button onClick={requestViewerList} data-testid="btn-viewer-list" className="flex flex-col items-center gap-0.5">
-              <div className="w-11 h-11 rounded-full bg-zinc-700/90 backdrop-blur flex items-center justify-center shadow-lg border-2 border-white/20">
-                <Users className="w-5 h-5 text-white" />
-              </div>
-              <span className="text-white text-[9px] font-bold drop-shadow">الجمهور</span>
-            </button>
-            <button onClick={() => { fetchLiveStreamsForBattle(); setShowBattleSetup(true); }} data-testid="btn-battle-setup" className="flex flex-col items-center gap-0.5">
-              <div className="w-11 h-11 rounded-full bg-yellow-600/90 backdrop-blur flex items-center justify-center shadow-lg border-2 border-yellow-400/50">
-                <span className="text-lg">⚔️</span>
-              </div>
-              <span className="text-white text-[9px] font-bold drop-shadow">تحدي</span>
             </button>
           </div>
         )}
@@ -2898,7 +1764,7 @@ export default function LiveStream() {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-white font-bold text-lg">
-                  {purchaseStep === "packages" && "شحن المحفظة 🪙"}
+                  {purchaseStep === "packages" && "شحن العملات 🪙"}
                   {purchaseStep === "pay" && "إتمام الدفع 💳"}
                   {purchaseStep === "done" && "تم استلام الطلب ✅"}
                 </h3>
@@ -2946,7 +1812,7 @@ export default function LiveStream() {
                     </button>
                   ))}
                 </div>
-                <p className="text-white/20 text-[10px] text-center">سيتم إضافة العملات إلى محفظتك بعد مراجعة الدفع • للمساعدة تواصل معنا</p>
+                <p className="text-white/20 text-[10px] text-center">المدفوع لا يُسترد • للمساعدة تواصل معنا</p>
               </>
             )}
 
@@ -2969,12 +1835,10 @@ export default function LiveStream() {
                 <p className="text-white/60 text-xs font-bold mb-2">اختر طريقة الدفع</p>
                 <div className="grid grid-cols-2 gap-2 mb-4">
                   {[
-                    { key: "vodafone",     label: "فودافون كاش",   sub: "01098559311",      emoji: "📱", color: "border-red-500/50 bg-red-500/10" },
-                    { key: "etisalat",     label: "اتصالات كاش",    sub: "01126665741",      emoji: "📱", color: "border-emerald-500/50 bg-emerald-500/10" },
-                    { key: "instapay",     label: "إنستاباي",       sub: "01285558567",      emoji: "💳", color: "border-blue-500/50 bg-blue-500/10" },
-                    { key: "bank",         label: "تحويل بنكي",     sub: "البنك الأهلي",     emoji: "🏦", color: "border-green-500/50 bg-green-500/10" },
-                    { key: "souq",         label: "سوق ماركات",     sub: "تطبيق الدفع",      emoji: "🛍️", color: "border-purple-500/50 bg-purple-500/10" },
-                    { key: "installment",  label: "تقسيط فيزا",     sub: "55 يوم بدون فوائد", emoji: "💰", color: "border-yellow-500/50 bg-yellow-500/10" },
+                    { key: "vodafone",  label: "فودافون كاش",   sub: "01126665741",  emoji: "📱", color: "border-red-500/50 bg-red-500/10" },
+                    { key: "vodafone2", label: "فودافون كاش",   sub: "01098553911",  emoji: "📱", color: "border-red-400/50 bg-red-400/10" },
+                    { key: "instapay",  label: "إنستاباي",       sub: "01285558567",  emoji: "💳", color: "border-blue-500/50 bg-blue-500/10" },
+                    { key: "bank",      label: "تحويل بنكي",     sub: "البنك الأهلي", emoji: "🏦", color: "border-green-500/50 bg-green-500/10" },
                   ].map(m => (
                     <button key={m.key}
                       onClick={() => setPayMethod(m.key as any)}
@@ -2993,14 +1857,14 @@ export default function LiveStream() {
                   {payMethod === "vodafone" && (
                     <>
                       <p className="text-white/60 text-xs mb-1">حوّل المبلغ لفودافون كاش:</p>
-                      <p className="text-white font-bold text-2xl tracking-widest" dir="ltr">01098559311</p>
+                      <p className="text-white font-bold text-2xl tracking-widest" dir="ltr">01126665741</p>
                       <p className="text-white/40 text-xs mt-1">سوق ماركات للإعلانات</p>
                     </>
                   )}
-                  {payMethod === "etisalat" && (
+                  {payMethod === "vodafone2" && (
                     <>
-                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ لاتصالات كاش:</p>
-                      <p className="text-white font-bold text-2xl tracking-widest" dir="ltr">01126665741</p>
+                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ لفودافون كاش:</p>
+                      <p className="text-white font-bold text-2xl tracking-widest" dir="ltr">01098553911</p>
                       <p className="text-white/40 text-xs mt-1">سوق ماركات للإعلانات</p>
                     </>
                   )}
@@ -3019,85 +1883,17 @@ export default function LiveStream() {
                       <p className="text-white/40 text-xs mt-1">باسم: سوق ماركات للإعلانات</p>
                     </>
                   )}
-                  {payMethod === "souq" && (
-                    <div>
-                      <div className="text-center mb-3">
-                        <div className="text-3xl mb-1">🛍️</div>
-                        <p className="text-white font-bold text-sm">حمّل تطبيق سوق ماركات وادفع منه</p>
-                        <p className="text-white/50 text-[11px]">ثم أرسل رقم إيصال الدفع أدناه</p>
-                      </div>
-                      <div className="grid grid-cols-3 gap-1.5">
-                        <a href="https://play.google.com/store/apps/details?id=com.apmo.souqmarket" target="_blank" rel="noreferrer"
-                          className="flex flex-col items-center gap-1 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl px-2 py-2.5 transition-all"
-                          data-testid="btn-download-android">
-                          <span className="text-xl">▶</span>
-                          <p className="text-white/60 text-[9px]">احصل عليه من</p>
-                          <p className="text-white text-[10px] font-bold">Google Play</p>
-                        </a>
-                        <a href="https://apps.apple.com/eg/app/as-souqmarket/id6740153334" target="_blank" rel="noreferrer"
-                          className="flex flex-col items-center gap-1 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl px-2 py-2.5 transition-all"
-                          data-testid="btn-download-ios">
-                          <span className="text-xl"></span>
-                          <p className="text-white/60 text-[9px]">متاح على</p>
-                          <p className="text-white text-[10px] font-bold">App Store</p>
-                        </a>
-                        <a href="https://app.as-souqmarkat.com/?from-splash=false" target="_blank" rel="noreferrer"
-                          className="flex flex-col items-center gap-1 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl px-2 py-2.5 transition-all"
-                          data-testid="btn-download-huawei">
-                          <span className="text-xl">📱</span>
-                          <p className="text-white/60 text-[9px]">متاح على</p>
-                          <p className="text-white text-[10px] font-bold">App Gallery</p>
-                        </a>
-                      </div>
-                    </div>
-                  )}
-                  {payMethod === "installment" && (
-                    <>
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-2xl">💰</span>
-                        <div>
-                          <p className="text-white font-bold text-sm">تقسيط بدون فوائد أو رسوم</p>
-                          <p className="text-yellow-400 text-xs font-bold">55 يوم فترة سماح مجانية</p>
-                        </div>
-                      </div>
-                      <div className="space-y-1.5 mb-2">
-                        <div className="flex items-center gap-2 bg-white/5 rounded-lg px-2 py-1.5">
-                          <span className="text-sm">🏦</span>
-                          <p className="text-white/80 text-xs">فيزا البنك الأهلي المصري</p>
-                        </div>
-                        <div className="flex items-center gap-2 bg-white/5 rounded-lg px-2 py-1.5">
-                          <span className="text-sm">💳</span>
-                          <p className="text-white/80 text-xs">أي بطاقة فيزا أو ماستر كارد أخرى</p>
-                        </div>
-                      </div>
-                      <p className="text-white/40 text-[10px] border-t border-white/10 pt-2">
-                        بعد الدفع أرسل صورة إيصال التقسيط لإتمام الشحن
-                      </p>
-                    </>
-                  )}
-                  {payMethod !== "souq" && (
                   <div className="mt-3 pt-3 border-t border-white/10">
                     <p className="text-yellow-400 font-bold text-base">المبلغ: {selectedPkg.price_egp} ج.م</p>
                     <p className="text-white/40 text-[10px]">اكتب في ملاحظة التحويل: "شحن عملات"</p>
                   </div>
-                  )}
                 </div>
 
                 {/* Payment reference input */}
                 <div className="mb-4">
-                  <label className="text-white/60 text-xs font-bold mb-1.5 block">
-                    {payMethod === "souq" ? "أدخل رقم إيصال الدفع من التطبيق"
-                    : payMethod === "installment" ? "أدخل رقم إيصال التقسيط / رقم العملية"
-                    : "أدخل رقم مرجع التحويل / رقم العملية"}
-                  </label>
+                  <label className="text-white/60 text-xs font-bold mb-1.5 block">أدخل رقم مرجع التحويل / رقم العملية</label>
                   <input type="text" value={payRef} onChange={e => setPayRef(e.target.value)}
-                    placeholder={
-                      payMethod === "vodafone" || payMethod === "vodafone2" ? "مثال: 123456789"
-                      : payMethod === "instapay" ? "مثال: INST-2024-XXXX"
-                      : payMethod === "souq" ? "رقم الإيصال من تطبيق سوق ماركات"
-                      : payMethod === "installment" ? "رقم إيصال التقسيط"
-                      : "رقم المرجع من البنك"
-                    }
+                    placeholder={payMethod === "vodafone" ? "مثال: 123456789" : payMethod === "instapay" ? "مثال: INST-2024-XXXX" : "رقم المرجع من البنك"}
                     className="w-full bg-white/10 border border-white/20 text-white placeholder:text-white/30 rounded-xl px-4 py-3 text-sm"
                     data-testid="input-pay-ref" dir="ltr"
                   />
@@ -3107,7 +1903,7 @@ export default function LiveStream() {
                 <div className="flex gap-2">
                   <button onClick={() => setPurchaseStep("packages")} className="flex-1 py-3 rounded-2xl bg-white/10 text-white font-bold text-sm">رجوع</button>
                   <button onClick={submitPurchaseOrder} disabled={payLoading || !payRef.trim()} className="flex-1 py-3 rounded-2xl bg-yellow-500 text-black font-bold text-sm disabled:opacity-50" data-testid="btn-submit-purchase">
-                    {payLoading ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "تأكيد الطلب ✓"}
+                    {payLoading ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "تأكيد الطلب"}
                   </button>
                 </div>
                 <p className="text-white/20 text-[10px] text-center mt-3">سيتم مراجعة الطلب وإضافة العملات خلال دقائق</p>
@@ -3119,133 +1915,13 @@ export default function LiveStream() {
               <div className="text-center py-6">
                 <div className="text-6xl mb-4">✅</div>
                 <h4 className="text-white font-bold text-xl mb-2">تم استلام طلبك!</h4>
-                <p className="text-white/60 text-sm mb-1">سيتم مراجعة الدفع وإضافة العملات إلى محفظتك</p>
+                <p className="text-white/60 text-sm mb-1">سيتم مراجعة الدفع وإضافة العملات لمحفظتك</p>
                 <p className="text-yellow-400 text-sm font-bold mb-6">خلال بضع دقائق ⚡</p>
                 <button onClick={() => { setShowRechargeModal(false); setPurchaseStep("packages"); setSelectedPkg(null); setPayRef(""); }}
                   className="px-8 py-3 rounded-2xl bg-yellow-500 text-black font-bold">
                   حسناً
                 </button>
               </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* VIEWER LIST MODAL (broadcaster can kick) */}
-      {showViewerList && isBroadcast && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowViewerList(false)}>
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-safe max-h-[70vh] overflow-y-auto" onClick={e => e.stopPropagation()} dir="rtl">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Users className="w-5 h-5 text-white" />
-                <h3 className="text-white font-bold text-lg">الجمهور ({viewersList.length})</h3>
-              </div>
-              <button onClick={() => setShowViewerList(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
-                <X className="w-4 h-4 text-white" />
-              </button>
-            </div>
-            {viewersList.length === 0 ? (
-              <p className="text-white/50 text-sm text-center py-6">لا يوجد مشاهدين حالياً</p>
-            ) : (
-              <div className="space-y-2">
-                {viewersList.map(v => (
-                  <div key={v.socketId} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-xl px-3 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-full bg-purple-600/30 flex items-center justify-center">
-                        <span className="text-white text-sm font-bold">{v.userName.charAt(0)}</span>
-                      </div>
-                      <span className="text-white text-sm font-medium">{v.userName}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => kickViewer(v.socketId)}
-                        className="flex items-center gap-1 bg-red-600/20 border border-red-500/30 text-red-400 text-xs font-bold px-2.5 py-1.5 rounded-lg hover:bg-red-600/40 transition-colors"
-                        data-testid={`btn-kick-${v.socketId}`}
-                      >
-                        <ShieldOff className="w-3 h-3" />
-                        طرد
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* BATTLE SETUP MODAL (broadcaster — invite another live stream) */}
-      {showBattleSetup && isBroadcast && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowBattleSetup(false)}>
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-safe" onClick={e => e.stopPropagation()} dir="rtl">
-            <div className="flex items-center justify-between mb-5">
-              <div className="flex items-center gap-2">
-                <span className="text-2xl">⚔️</span>
-                <div>
-                  <h3 className="text-white font-bold text-lg">تحدي مذيع آخر</h3>
-                  <p className="text-white/50 text-xs">اختر مذيعاً مباشراً لتحديه!</p>
-                </div>
-              </div>
-              <button onClick={() => setShowBattleSetup(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
-                <X className="w-4 h-4 text-white" />
-              </button>
-            </div>
-
-            {battleInviteSent ? (
-              <div className="text-center py-8">
-                <Loader2 className="w-8 h-8 text-yellow-400 animate-spin mx-auto mb-3" />
-                <p className="text-white font-bold">في انتظار رد المذيع...</p>
-                <p className="text-white/50 text-xs mt-1">ينتهي الطلب خلال 30 ثانية</p>
-              </div>
-            ) : (
-              <>
-                <div className="bg-white/5 border border-white/10 rounded-xl p-3 mb-4 space-y-1.5">
-                  <div className="flex items-center gap-2 text-white/60 text-xs">
-                    <span>⏱️</span><span>مدة الجولة: <span className="text-white font-bold">5 دقائق</span></span>
-                  </div>
-                  <div className="flex items-center gap-2 text-white/60 text-xs">
-                    <span>📺</span><span>شاشة مقسومة: <span className="text-white font-bold">بثك + بث الخصم</span></span>
-                  </div>
-                  <div className="flex items-center gap-2 text-white/60 text-xs">
-                    <span>🎁</span><span>جمهور كل مذيع يرسل هدايا لمذيعه</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-white/60 text-xs">
-                    <span>⚡</span><span>مضاعفات: <span className="text-blue-400 font-bold">x2</span> <span className="text-purple-400 font-bold">x3</span> <span className="text-yellow-400 font-bold">x5</span> — للسكور فقط</span>
-                  </div>
-                </div>
-
-                <p className="text-white/60 text-xs font-bold mb-2">البثوث المباشرة الآن:</p>
-                {liveStreamsForBattle.length === 0 ? (
-                  <div className="text-center py-6">
-                    <p className="text-white/40 text-sm">لا يوجد بثوث مباشرة أخرى حالياً</p>
-                    <button onClick={fetchLiveStreamsForBattle} className="mt-2 text-yellow-400 text-xs underline" data-testid="btn-refresh-streams">
-                      تحديث القائمة
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
-                    {liveStreamsForBattle.map((s: any) => (
-                      <button
-                        key={s.id}
-                        onClick={() => sendBattleInvite(String(s.id))}
-                        className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-yellow-500/10 hover:border-yellow-500/30 transition-all"
-                        data-testid={`btn-invite-stream-${s.id}`}
-                      >
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-red-500 to-pink-600 flex items-center justify-center">
-                          <Radio className="w-5 h-5 text-white" />
-                        </div>
-                        <div className="flex-1 text-start">
-                          <p className="text-white font-bold text-sm truncate">{s.title || `بث #${s.id}`}</p>
-                          <p className="text-white/50 text-[10px]">{s.viewerCount || 0} مشاهد</p>
-                        </div>
-                        <span className="text-yellow-400 text-xs font-bold">⚔️ تحدي</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </>
             )}
           </div>
         </div>
@@ -3293,102 +1969,16 @@ export default function LiveStream() {
                 )
               ))}
             </div>
-            {myRefCode && (
-              <div className="bg-amber-500/20 border border-amber-400/30 rounded-xl px-3 py-2 mb-3 text-center">
-                <p className="text-amber-300 text-xs font-bold">💰 شارك واكسب! كل مستخدم جديد يسجّل من رابطك = مكافأة</p>
-                <p className="text-amber-400/70 text-xs mt-0.5">كودك: <span className="font-mono font-bold">{myRefCode}</span></p>
-              </div>
-            )}
             <div className="flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
-              <span className="text-white/70 text-xs flex-1 truncate">{streamShareUrl}</span>
+              <span className="text-white/70 text-xs flex-1 truncate">{streamUrl}</span>
               <button
-                onClick={() => { navigator.clipboard.writeText(streamShareUrl); toast({ title: "✅ تم نسخ الرابط" }); }}
+                onClick={() => { navigator.clipboard.writeText(streamUrl); toast({ title: "✅ تم نسخ الرابط" }); }}
                 className="bg-white/20 text-white text-xs px-3 py-1.5 rounded-lg font-bold flex-shrink-0"
                 data-testid="btn-copy-stream-link"
               >
                 نسخ
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* REPORT DIALOG */}
-      {showReportDialog && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowReportDialog(false)}>
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-8" onClick={e => e.stopPropagation()}>
-            {/* Header */}
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-red-600/30 flex items-center justify-center">
-                  <Flag className="w-4 h-4 text-red-400" />
-                </div>
-                <h3 className="text-white font-bold text-base">الإبلاغ عن البث</h3>
-              </div>
-              <button onClick={() => setShowReportDialog(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
-                <X className="w-4 h-4 text-white" />
-              </button>
-            </div>
-
-            <p className="text-white/60 text-xs mb-4 leading-relaxed">
-              اختر سبب البلاغ. عند تجاوز عدد البلاغات الحد المسموح به، سيتم تحذير المذيع أو إيقاف البث تلقائياً.
-            </p>
-
-            {/* Reason options */}
-            <div className="flex flex-col gap-2 mb-5">
-              {[
-                { value: "revealing_clothes",  label: "ملابس غير لائقة أو إباحية" },
-                { value: "sexual_content",     label: "محتوى جنسي أو حديث مخل" },
-                { value: "drugs_alcohol",      label: "مخدرات أو كحول أو تدخين" },
-                { value: "mixed_conversation", label: "خلطة بين رجال ونساء بطريقة مخالفة" },
-                { value: "hate_speech",        label: "إهانة أو تحريض أو خطاب كراهية" },
-                { value: "fraud",              label: "احتيال أو نصب" },
-                { value: "other",              label: "سبب آخر" },
-              ].map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => setReportReason(opt.value)}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all text-start ${
-                    reportReason === opt.value
-                      ? "border-red-500 bg-red-600/20 text-white"
-                      : "border-white/10 bg-white/5 text-white/70"
-                  }`}
-                  data-testid={`report-reason-${opt.value}`}
-                >
-                  <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${reportReason === opt.value ? "border-red-400 bg-red-400" : "border-white/30"}`} />
-                  <span className="text-sm">{opt.label}</span>
-                </button>
-              ))}
-            </div>
-
-            {/* Submit */}
-            <button
-              onClick={async () => {
-                if (!reportReason || reportSubmitting) return;
-                setReportSubmitting(true);
-                try {
-                  await fetch(`/api/streams/${id}/report`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ reason: reportReason }),
-                  });
-                  setReportDone(true);
-                  setShowReportDialog(false);
-                  toast({ title: "✅ تم إرسال البلاغ", description: "شكراً لمساعدتنا في الحفاظ على بيئة آمنة." });
-                } catch {
-                  toast({ title: "خطأ", description: "فشل إرسال البلاغ. حاول مجدداً.", variant: "destructive" });
-                } finally {
-                  setReportSubmitting(false);
-                }
-              }}
-              disabled={!reportReason || reportSubmitting}
-              className="w-full py-3 rounded-2xl bg-red-600 text-white font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2"
-              data-testid="btn-submit-stream-report"
-            >
-              {reportSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Flag className="w-4 h-4" />}
-              إرسال البلاغ
-            </button>
           </div>
         </div>
       )}

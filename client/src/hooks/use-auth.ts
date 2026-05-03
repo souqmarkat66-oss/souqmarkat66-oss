@@ -62,7 +62,7 @@ export function useAuth() {
     }
   }, [queryClient]);
 
-  const setPassword = useCallback(async (data: { userId: string; password: string; resetToken?: string }) => {
+  const setPassword = useCallback(async (data: { userId: string; password: string }) => {
     setSetPwLoading(true);
     try {
       const res = await fetch("/api/auth/set-password", {

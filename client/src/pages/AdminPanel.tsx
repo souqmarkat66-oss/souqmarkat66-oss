@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { io, type Socket } from "socket.io-client";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
@@ -9,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -27,8 +25,6 @@ import {
   Sparkles, Image, Video, Wand2, FileText, Gift, Check, Globe, Plus
 } from "lucide-react";
 
-import AdminAiControl from "./AdminAiControl";
-
 const ADMIN_ID = "54219806";
 const ADMIN_EMAIL = "souqmarkat66@gmail.com";
 
@@ -41,23 +37,19 @@ const NAV = [
   { key: "channels",       label: "القنوات",              icon: Tv,              color: "text-indigo-400" },
   { key: "streams",        label: "البث المباشر",          icon: Radio,           color: "text-red-400" },
   { key: "campaigns",      label: "الحملات الإعلانية",    icon: BarChart2,       color: "text-teal-400" },
-  { key: "walletcharges",  label: "طلبات شحن المحفظة",    icon: Banknote,        color: "text-emerald-400" },
-  { key: "payments",       label: "المدفوعات",             icon: Banknote,        color: "text-green-400" },
+  { key: "payments",       label: "طلبات السحب",          icon: Banknote,        color: "text-green-400" },
   { key: "boostorders",    label: "طلبات التعزيز",         icon: Zap,             color: "text-orange-400" },
   { key: "payreceipts",    label: "إيصالات الدفع",          icon: Banknote,        color: "text-emerald-500" },
   { key: "renewalorders",  label: "طلبات التجديد",           icon: RefreshCw,       color: "text-blue-400" },
   { key: "reports",        label: "البلاغات",             icon: Flag,            color: "text-yellow-400" },
-  { key: "ratings",        label: "تقييمات البائعين",      icon: Star,            color: "text-yellow-400" },
   { key: "fraud",          label: "كشف الاحتيال",         icon: ShieldX,         color: "text-red-500" },
   { key: "analytics",      label: "تقرير الأداء",          icon: PieChart,        color: "text-sky-400" },
   { key: "revenue",        label: "الإيرادات",            icon: DollarSign,      color: "text-emerald-400" },
   { key: "broadcast",      label: "إشعارات جماعية",       icon: Bell,            color: "text-cyan-400" },
   { key: "media",          label: "مكتبة الملفات",         icon: FolderOpen,      color: "text-lime-400" },
   { key: "pricing",        label: "إدارة الأسعار",          icon: DollarSign,      color: "text-yellow-400" },
-  { key: "ai_control",     label: "تحكم الذكاء الاصطناعي",  icon: Sparkles,        color: "text-violet-400" },
   { key: "aipricing",      label: "أسعار الذكاء الاصطناعي", icon: Sparkles,       color: "text-violet-400" },
   { key: "coins",          label: "نظام العملات",          icon: Gift,            color: "text-yellow-400" },
-  { key: "admins",         label: "إدارة الأدمن",          icon: Shield,          color: "text-red-400" },
   { key: "settings",       label: "إعدادات المنصة",       icon: Settings,        color: "text-gray-400" },
   { key: "activity",       label: "سجل النشاط",           icon: Activity,        color: "text-slate-400" },
 ];
@@ -99,15 +91,6 @@ function StatCard({ icon: Icon, label, value, color, sub }: any) {
 }
 
 // ── Main Component ─────────────────────────────────────────────
-type LiveEvent = {
-  id: string;
-  type: "stream" | "user";
-  title: string;
-  sub: string;
-  link?: string;
-  at: string;
-};
-
 export default function AdminPanel() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -115,9 +98,6 @@ export default function AdminPanel() {
   const [pinUnlocked, setPinUnlocked] = useState(false);
   const [section, setSection] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
-  const [newEventCount, setNewEventCount] = useState(0);
-  const socketRef = useRef<Socket | null>(null);
 
   const isAdmin = user?.id === ADMIN_ID || user?.email === ADMIN_EMAIL;
 
@@ -129,54 +109,6 @@ export default function AdminPanel() {
       body: JSON.stringify({ action, target, details }),
     }).catch(() => {});
   }, []);
-
-  // ── Socket.io — real-time admin events ──
-  useEffect(() => {
-    if (!pinUnlocked) return;
-    const socket = io({ path: "/socket.io", transports: ["websocket", "polling"] });
-    socketRef.current = socket;
-    socket.emit("admin-join");
-
-    const addEvent = (ev: Omit<LiveEvent, "id">) => {
-      const eventWithId: LiveEvent = { ...ev, id: Math.random().toString(36).slice(2) };
-      setLiveEvents(prev => [eventWithId, ...prev].slice(0, 50));
-      setNewEventCount(c => c + 1);
-      toast({
-        title: ev.title,
-        description: ev.sub,
-        duration: 5000,
-      });
-    };
-
-    socket.on("admin:user-registered", (data: any) => {
-      addEvent({
-        type: "user",
-        title: `👤 تسجيل جديد`,
-        sub: data.name || data.email || "مستخدم",
-        at: data.at,
-      });
-    });
-
-    socket.on("admin:stream-started", (data: any) => {
-      addEvent({
-        type: "stream",
-        title: `📡 بث مباشر جديد`,
-        sub: `${data.broadcasterName} — ${data.title}`,
-        link: data.link,
-        at: data.at,
-      });
-    });
-
-    return () => { socket.disconnect(); };
-  }, [pinUnlocked]);
-
-  // Must be called before any conditional returns (Rules of Hooks)
-  const { data: pendingCounts = { payments: 0, walletcharges: 0, ads: 0, boostorders: 0, renewalorders: 0 } } = useQuery<any>({
-    queryKey: ["/api/admin/pending-counts"],
-    queryFn: () => fetch("/api/admin/pending-counts", { credentials: "include" }).then(r => r.json()),
-    refetchInterval: 20000,
-    enabled: !!isAdmin && pinUnlocked,
-  });
 
   if (isAdmin && !pinUnlocked) {
     return <AdminPinLock onUnlocked={() => setPinUnlocked(true)} />;
@@ -218,29 +150,21 @@ export default function AdminPanel() {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-2">
-          {NAV.map(item => {
-            const badge = (pendingCounts as any)[item.key];
-            return (
-              <button
-                key={item.key}
-                onClick={() => setSection(item.key)}
-                data-testid={`nav-${item.key}`}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 text-right
-                  ${section === item.key
-                    ? "bg-primary/10 text-primary font-semibold"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-              >
-                <item.icon className={`w-4 h-4 flex-shrink-0 ${section === item.key ? "text-primary" : item.color}`} />
-                {sidebarOpen && <span className="flex-1 truncate text-right">{item.label}</span>}
-                {badge > 0 && (
-                  <span className="flex-shrink-0 min-w-[20px] h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center px-1">
-                    {badge > 99 ? "99+" : badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+          {NAV.map(item => (
+            <button
+              key={item.key}
+              onClick={() => setSection(item.key)}
+              data-testid={`nav-${item.key}`}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 text-right
+                ${section === item.key
+                  ? "bg-primary/10 text-primary font-semibold"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
+            >
+              <item.icon className={`w-4 h-4 flex-shrink-0 ${section === item.key ? "text-primary" : item.color}`} />
+              {sidebarOpen && <span className="truncate">{item.label}</span>}
+            </button>
+          ))}
         </nav>
 
         {/* Footer */}
@@ -260,21 +184,7 @@ export default function AdminPanel() {
             <h1 className="font-bold text-lg">{NAV.find(n => n.key === section)?.label}</h1>
             <p className="text-xs text-muted-foreground">شبكة سوق للإعلانات — لوحة الإدارة</p>
           </div>
-          <div className="flex items-center gap-3">
-            {/* Live events notification bell */}
-            <button
-              onClick={() => { setSection("dashboard"); setNewEventCount(0); }}
-              className="relative p-2 rounded-xl bg-muted hover:bg-muted/80 transition-colors"
-              title="النشاط المباشر"
-              data-testid="btn-admin-live-events"
-            >
-              <Activity className="w-4 h-4 text-muted-foreground" />
-              {newEventCount > 0 && (
-                <span className="absolute -top-1 -end-1 min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center px-1 animate-bounce">
-                  {newEventCount > 9 ? "9+" : newEventCount}
-                </span>
-              )}
-            </button>
+          <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             <span className="text-xs text-muted-foreground">متصل</span>
           </div>
@@ -282,20 +192,18 @@ export default function AdminPanel() {
 
         {/* Sections */}
         <div className="p-6">
-          {section === "dashboard"  && <DashboardSection liveEvents={liveEvents} onClearEvents={() => setNewEventCount(0)} />}
+          {section === "dashboard"  && <DashboardSection />}
           {section === "users"      && <UsersSection logAction={logAction} />}
           {section === "ads"        && <AdsSection logAction={logAction} />}
           {section === "reels"      && <ReelsSection logAction={logAction} />}
           {section === "channels"   && <ChannelsSection logAction={logAction} />}
           {section === "streams"    && <StreamsSection logAction={logAction} />}
           {section === "campaigns"  && <CampaignsSection logAction={logAction} />}
-          {section === "walletcharges" && <WalletChargesSection logAction={logAction} />}
           {section === "payments"   && <PaymentsSection logAction={logAction} />}
           {section === "boostorders" && <BoostOrdersSection logAction={logAction} />}
           {section === "payreceipts"   && <PayReceiptsSection />}
           {section === "renewalorders" && <RenewalOrdersSection />}
           {section === "reports"       && <ReportsSection logAction={logAction} />}
-          {section === "ratings"       && <RatingsSection logAction={logAction} />}
           {section === "fraud"      && <FraudSection />}
           {section === "analytics"  && <AnalyticsSection />}
           {section === "revenue"    && <RevenueSection />}
@@ -303,9 +211,7 @@ export default function AdminPanel() {
           {section === "media"      && <MediaSection logAction={logAction} />}
           {section === "pricing"    && <PricingSection />}
           {section === "aipricing"  && <AiPricingSection />}
-          {section === "ai_control" && <AdminAiControl />}
           {section === "coins"      && <CoinsSection logAction={logAction} />}
-          {section === "admins"     && <AdminsSection />}
           {section === "settings"   && <SettingsSection logAction={logAction} />}
           {section === "activity"   && <ActivitySection />}
         </div>
@@ -317,7 +223,7 @@ export default function AdminPanel() {
 // ═══════════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════════
-function DashboardSection({ liveEvents = [], onClearEvents }: { liveEvents?: LiveEvent[]; onClearEvents?: () => void }) {
+function DashboardSection() {
   const { toast } = useToast();
   const { data: stats } = useQuery<any>({
     queryKey: ["/api/admin/stats"],
@@ -328,24 +234,9 @@ function DashboardSection({ liveEvents = [], onClearEvents }: { liveEvents?: Liv
     queryKey: ["/api/admin/revenue"],
     queryFn: () => fetch("/api/admin/revenue", { credentials: "include" }).then(r => r.json()),
   });
-  const { data: walletStats } = useQuery<any>({
-    queryKey: ["/api/admin/wallet-stats"],
-    queryFn: () => fetch("/api/admin/wallet-stats", { credentials: "include" }).then(r => r.json()),
-    refetchInterval: 30000,
-  });
-  const { data: bcEarnings } = useQuery<any>({
-    queryKey: ["/api/admin/broadcaster-earnings"],
-    queryFn: () => fetch("/api/admin/broadcaster-earnings", { credentials: "include" }).then(r => r.json()),
-    refetchInterval: 30000,
-  });
   const { data: settings, refetch: refetchSettings } = useQuery<Record<string, string>>({
     queryKey: ["/api/settings"],
     queryFn: () => fetch("/api/settings").then(r => r.json()),
-  });
-  const { data: fraudStats } = useQuery<any>({
-    queryKey: ["/api/admin/fraud-stats"],
-    queryFn: () => fetch("/api/admin/fraud-stats", { credentials: "include" }).then(r => r.json()),
-    refetchInterval: 60000,
   });
 
   const publish = useMutation({
@@ -387,66 +278,6 @@ function DashboardSection({ liveEvents = [], onClearEvents }: { liveEvents?: Liv
         </Button>
       </div>
 
-      {/* ── LIVE ACTIVITY FEED ─────────────────────────────────── */}
-      <div className="rounded-2xl border border-border bg-card p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-            <span className="font-bold text-sm">النشاط المباشر</span>
-          </div>
-          {liveEvents.length > 0 && (
-            <button
-              onClick={onClearEvents}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-              data-testid="btn-clear-live-events"
-            >
-              مسح العداد
-            </button>
-          )}
-        </div>
-        {liveEvents.length === 0 ? (
-          <div className="flex items-center gap-2 py-3 text-muted-foreground text-sm">
-            <Activity className="w-4 h-4 opacity-40" />
-            <span>في انتظار الأحداث... ستظهر هنا تسجيلات المستخدمين والبثوث الجديدة</span>
-          </div>
-        ) : (
-          <div className="space-y-2 max-h-48 overflow-y-auto">
-            {liveEvents.map(ev => (
-              <div
-                key={ev.id}
-                className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm ${
-                  ev.type === "stream"
-                    ? "bg-red-500/10 border border-red-500/20"
-                    : "bg-purple-500/10 border border-purple-500/20"
-                }`}
-              >
-                <span className="text-base flex-shrink-0">
-                  {ev.type === "stream" ? "📡" : "👤"}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-xs">{ev.title}</p>
-                  <p className="text-muted-foreground text-[11px] truncate">{ev.sub}</p>
-                </div>
-                {ev.link && (
-                  <a
-                    href={ev.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[10px] text-primary hover:underline flex-shrink-0"
-                    data-testid={`link-live-event-${ev.id}`}
-                  >
-                    مشاهدة
-                  </a>
-                )}
-                <span className="text-[10px] text-muted-foreground flex-shrink-0">
-                  {new Date(ev.at).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
       {/* Primary stats */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
@@ -462,36 +293,6 @@ function DashboardSection({ liveEvents = [], onClearEvents }: { liveEvents?: Liv
           <StatCard icon={Clock}      label="طلبات سحب معلقة"  value={stats.pendingPayments}          color="text-amber-500" />
         </div>
       )}
-
-      {/* Fraud Detection Card */}
-      <Card className="rounded-2xl border-red-500/20 bg-gradient-to-l from-red-500/5 to-transparent">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <ShieldX className="w-5 h-5 text-red-500" />
-              <span className="font-bold text-sm">كشف الاحتيال والنفرات الوهمية</span>
-            </div>
-            <span className="flex items-center gap-1.5 text-xs bg-green-500/10 text-green-600 border border-green-500/20 px-2.5 py-1 rounded-full font-bold">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
-              مشغّل
-            </span>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="bg-background rounded-xl p-3 text-center border border-border/50">
-              <div className="text-xl font-bold text-red-500">{Number(fraudStats?.fraud_impressions || 0).toLocaleString()}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">مشاهدات وهمية</div>
-            </div>
-            <div className="bg-background rounded-xl p-3 text-center border border-border/50">
-              <div className="text-xl font-bold text-orange-500">{Number(fraudStats?.fraud_clicks || 0).toLocaleString()}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">نقرات وهمية</div>
-            </div>
-            <div className="bg-background rounded-xl p-3 text-center border border-border/50">
-              <div className="text-xl font-bold text-green-500">{Number(fraudStats?.total_legit || 0).toLocaleString()}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">تفاعل حقيقي</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Revenue quick view */}
       {adminRevenue && (
@@ -511,170 +312,6 @@ function DashboardSection({ liveEvents = [], onClearEvents }: { liveEvents?: Liv
               </CardContent>
             </Card>
           ))}
-        </div>
-      )}
-
-      {/* Wallet Revenue Panel */}
-      {walletStats && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Banknote className="w-5 h-5 text-emerald-500" />
-            <h3 className="font-bold text-base">إيرادات المحافظ من العملاء</h3>
-            {walletStats.pendingCount > 0 && (
-              <span className="bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{walletStats.pendingCount} معلق</span>
-            )}
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Card className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-gradient-to-br from-emerald-500/10 to-transparent">
-              <CardContent className="p-4">
-                <div className="text-xs text-muted-foreground mb-1">💰 إجمالي ما استلمته</div>
-                <div className="text-xl font-bold text-emerald-600">{walletStats.totalCollectedEGP.toFixed(2)}</div>
-                <div className="text-xs text-muted-foreground">ج.م من {walletStats.totalApprovedCount} عملية شحن</div>
-              </CardContent>
-            </Card>
-            <Card className="rounded-2xl border border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-500/10 to-transparent">
-              <CardContent className="p-4">
-                <div className="text-xs text-muted-foreground mb-1">🏦 رصيد في محافظ العملاء</div>
-                <div className="text-xl font-bold text-blue-600">{walletStats.totalCurrentBalanceEGP.toFixed(2)}</div>
-                <div className="text-xs text-muted-foreground">ج.م لدى {walletStats.usersWithBalance} مستخدم</div>
-              </CardContent>
-            </Card>
-            <Card className="rounded-2xl border border-purple-200 dark:border-purple-800 bg-gradient-to-br from-purple-500/10 to-transparent">
-              <CardContent className="p-4">
-                <div className="text-xs text-muted-foreground mb-1">⚡ أُنفق على الخدمات</div>
-                <div className="text-xl font-bold text-purple-600">{walletStats.totalSpentEGP.toFixed(2)}</div>
-                <div className="text-xs text-muted-foreground">ج.م (تعزيز + تجديد + AI)</div>
-              </CardContent>
-            </Card>
-            <Card className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-gradient-to-br from-amber-500/10 to-transparent">
-              <CardContent className="p-4">
-                <div className="text-xs text-muted-foreground mb-1">⏳ طلبات شحن معلقة</div>
-                <div className="text-xl font-bold text-amber-600">{walletStats.pendingAmountEGP.toFixed(2)}</div>
-                <div className="text-xs text-muted-foreground">ج.م بانتظار مراجعتك</div>
-              </CardContent>
-            </Card>
-          </div>
-          {walletStats.recentApproved?.length > 0 && (
-            <Card className="rounded-2xl">
-              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><CheckCircle className="w-4 h-4 text-emerald-500" /> آخر عمليات الشحن المقبولة</CardTitle></CardHeader>
-              <CardContent className="pt-0">
-                <div className="space-y-1.5 max-h-52 overflow-y-auto">
-                  {walletStats.recentApproved.map((r: any, i: number) => (
-                    <div key={i} className="flex items-center justify-between px-3 py-1.5 rounded-xl hover:bg-muted/30 text-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full bg-emerald-500/10 flex items-center justify-center">
-                          <ArrowUpRight className="w-3 h-3 text-emerald-500" />
-                        </div>
-                        <div>
-                          <span className="font-medium text-xs">{r.first_name} {r.last_name}</span>
-                          <span className="text-[10px] text-muted-foreground mr-1">— {r.payment_method}</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-xs text-emerald-600">+{Number(r.amount_egp).toFixed(2)} ج.م</span>
-                        <span className="text-[10px] text-muted-foreground">{r.created_at ? format(new Date(r.created_at), "dd/MM HH:mm", { locale: ar }) : ""}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {/* Broadcaster Gift Earnings Panel */}
-      {bcEarnings && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Gift className="w-5 h-5 text-pink-500" />
-            <h3 className="font-bold text-base">تقرير هدايا البث المباشر</h3>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Card className="rounded-2xl border border-pink-200 dark:border-pink-800 bg-gradient-to-br from-pink-500/10 to-transparent">
-              <CardContent className="p-4">
-                <div className="text-xs text-muted-foreground mb-1">🎁 إجمالي الهدايا</div>
-                <div className="text-xl font-bold text-pink-600">{bcEarnings.totalCoinsGifted?.toLocaleString()} 🪙</div>
-                <div className="text-xs text-muted-foreground">{bcEarnings.totalCoinsGiftedEGP} ج.م — {bcEarnings.totalGiftsSent} هدية</div>
-              </CardContent>
-            </Card>
-            <Card className="rounded-2xl border border-yellow-200 dark:border-yellow-800 bg-gradient-to-br from-yellow-500/10 to-transparent">
-              <CardContent className="p-4">
-                <div className="text-xs text-muted-foreground mb-1">💰 حصة المنصة (40%)</div>
-                <div className="text-xl font-bold text-yellow-600">{bcEarnings.platformCutCoins?.toLocaleString()} 🪙</div>
-                <div className="text-xs text-muted-foreground">{bcEarnings.platformCutEGP} ج.م إيراد صافي</div>
-              </CardContent>
-            </Card>
-            <Card className="rounded-2xl border border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-500/10 to-transparent">
-              <CardContent className="p-4">
-                <div className="text-xs text-muted-foreground mb-1">💸 مسحوبات المذيعين</div>
-                <div className="text-xl font-bold text-blue-600">{bcEarnings.totalWithdrawnCoins?.toLocaleString()} 🪙</div>
-                <div className="text-xs text-muted-foreground">{bcEarnings.totalWithdrawnEGP} ج.م — {bcEarnings.withdrawalCount} طلب</div>
-              </CardContent>
-            </Card>
-            <Card className="rounded-2xl border border-purple-200 dark:border-purple-800 bg-gradient-to-br from-purple-500/10 to-transparent">
-              <CardContent className="p-4">
-                <div className="text-xs text-muted-foreground mb-1">🔄 تحويلات بين المستخدمين</div>
-                <div className="text-xl font-bold text-purple-600">{bcEarnings.totalTransferredCoins?.toLocaleString()} 🪙</div>
-                <div className="text-xs text-muted-foreground">{bcEarnings.transferCount} عملية تحويل</div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {bcEarnings.topBroadcasters?.length > 0 && (
-            <Card className="rounded-2xl">
-              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2">🏆 أعلى المذيعين ربحاً</CardTitle></CardHeader>
-              <CardContent className="pt-0">
-                <div className="space-y-1.5 max-h-60 overflow-y-auto">
-                  {bcEarnings.topBroadcasters.map((b: any, i: number) => (
-                    <div key={b.userId} className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-muted/30 text-sm" data-testid={`top-bc-${i}`}>
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-sm font-bold text-muted-foreground w-5">{i + 1}</span>
-                        {b.profileImage ? (
-                          <img src={b.profileImage} alt="" className="w-8 h-8 rounded-full object-cover" />
-                        ) : (
-                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-pink-400 to-purple-500 flex items-center justify-center text-white text-xs font-bold">{(b.name || '?')[0]}</div>
-                        )}
-                        <div>
-                          <div className="font-medium text-xs">{b.name}</div>
-                          <div className="text-[10px] text-muted-foreground">رصيد حالي: {b.currentBalance?.toLocaleString()} 🪙</div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-bold text-xs text-pink-600">{b.totalEarned?.toLocaleString()} 🪙</div>
-                        <div className="text-[10px] text-muted-foreground">{b.totalEarnedEGP} ج.م</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {bcEarnings.recentGifts?.length > 0 && (
-            <Card className="rounded-2xl">
-              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2">🎁 آخر الهدايا المُستلمة</CardTitle></CardHeader>
-              <CardContent className="pt-0">
-                <div className="space-y-1 max-h-52 overflow-y-auto">
-                  {bcEarnings.recentGifts.map((g: any, i: number) => (
-                    <div key={i} className="flex items-center justify-between px-3 py-1.5 rounded-xl hover:bg-muted/30 text-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full bg-pink-500/10 flex items-center justify-center text-xs">🎁</div>
-                        <div>
-                          <span className="font-medium text-xs">{g.receiver_name || '—'}</span>
-                          <span className="text-[10px] text-muted-foreground mr-1"> ← {g.sender_name || '—'}</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-xs text-green-600">+{g.coins} 🪙</span>
-                        <span className="text-[10px] text-muted-foreground">{g.created_at ? format(new Date(g.created_at), "dd/MM HH:mm", { locale: ar }) : ""}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </div>
       )}
 
@@ -1304,31 +941,14 @@ function ChannelsSection({ logAction }: { logAction: any }) {
 // ═══════════════════════════════════════════════════════════════
 // STREAMS
 // ═══════════════════════════════════════════════════════════════
-const STREAM_REPORT_LABELS: Record<string, string> = {
-  revealing_clothes:  "ملابس غير لائقة",
-  sexual_content:     "محتوى جنسي",
-  drugs_alcohol:      "مخدرات / كحول",
-  mixed_conversation: "خلطة غير لائقة",
-  hate_speech:        "خطاب كراهية",
-  fraud:              "احتيال",
-  other:              "أخرى",
-};
-
 function StreamsSection({ logAction }: { logAction: any }) {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const [streamTab, setStreamTab] = useState<"live"|"reports">("live");
 
   const { data: streams = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/admin/streams"],
     queryFn: () => fetch("/api/admin/streams", { credentials: "include" }).then(r => r.json()),
     refetchInterval: 15000,
-  });
-
-  const { data: streamReports = [], isLoading: reportsLoading } = useQuery<any[]>({
-    queryKey: ["/api/admin/stream-reports"],
-    queryFn: () => fetch("/api/admin/stream-reports", { credentials: "include" }).then(r => r.json()),
-    refetchInterval: 30000,
   });
 
   const updateStream = useMutation({
@@ -1337,152 +957,48 @@ function StreamsSection({ logAction }: { logAction: any }) {
     onSuccess: (_, vars) => { qc.invalidateQueries({ queryKey: ["/api/admin/streams"] }); toast({ title: vars.status === "ended" ? "🛑 تم إيقاف البث" : "✅ تم تحديث البث" }); logAction("update_stream", `stream#${vars.id}`, vars.status); },
   });
 
-  const warnStream = useMutation({
-    mutationFn: (streamId: number) =>
-      fetch(`/api/admin/streams/${streamId}/warn`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }).then(r => r.json()),
-    onSuccess: () => { toast({ title: "⚠️ تم إرسال التحذير للمذيع" }); },
-  });
-
-  const forceEndStream = useMutation({
-    mutationFn: (streamId: number) =>
-      fetch(`/api/admin/streams/${streamId}/force-end`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "أُغلق البث من قِبَل الإدارة بسبب محتوى مخالف لسياسة المنصة." }) }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/admin/streams"] }); qc.invalidateQueries({ queryKey: ["/api/admin/stream-reports"] }); toast({ title: "🛑 تم إغلاق البث" }); },
-  });
-
   const liveCount = streams.filter((s: any) => s.status === "live").length;
-  const pendingReports = streamReports.filter((r: any) => r.status === "pending");
-
-  // Group reports by stream_id
-  const reportsByStream = pendingReports.reduce((acc: Record<number, any[]>, r: any) => {
-    const sid = r.stream_id;
-    if (!acc[sid]) acc[sid] = [];
-    acc[sid].push(r);
-    return acc;
-  }, {} as Record<number, any[]>);
 
   return (
     <div className="space-y-4">
-      {/* Tab header */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => setStreamTab("live")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${streamTab === "live" ? "bg-red-500/10 border-red-500/30 text-red-500" : "border-border text-muted-foreground"}`}
-          data-testid="tab-streams-live"
-        >
-          <Radio className="w-3.5 h-3.5" />
-          البثوث {liveCount > 0 && <span className="bg-red-500 text-white rounded-full px-1.5 py-0.5 text-[10px]">{liveCount}</span>}
-        </button>
-        <button
-          onClick={() => setStreamTab("reports")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${streamTab === "reports" ? "bg-orange-500/10 border-orange-500/30 text-orange-500" : "border-border text-muted-foreground"}`}
-          data-testid="tab-streams-reports"
-        >
-          <Flag className="w-3.5 h-3.5" />
-          بلاغات البث {Object.keys(reportsByStream).length > 0 && <span className="bg-orange-500 text-white rounded-full px-1.5 py-0.5 text-[10px]">{Object.keys(reportsByStream).length}</span>}
-        </button>
+      <div className="flex items-center gap-3">
+        {liveCount > 0 && <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-full">
+          <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          <span className="text-xs text-red-600 font-medium">{liveCount} بث مباشر حالياً</span>
+        </div>}
+        <span className="text-sm text-muted-foreground">إجمالي {streams.length} بث</span>
       </div>
 
-      {/* LIVE STREAMS TAB */}
-      {streamTab === "live" && (
-        isLoading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : (
-          <div className="space-y-2">
-            {streams.map((s: any) => (
-              <Card key={s.id} className="rounded-xl" data-testid={`stream-${s.id}`}>
-                <CardContent className="p-4 flex items-center gap-4">
-                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${s.status === "live" ? "bg-red-500/10" : "bg-muted"}`}>
-                    <Radio className={`w-5 h-5 ${s.status === "live" ? "text-red-500" : "text-muted-foreground"}`} />
+      {isLoading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : (
+        <div className="space-y-2">
+          {streams.map((s: any) => (
+            <Card key={s.id} className="rounded-xl" data-testid={`stream-${s.id}`}>
+              <CardContent className="p-4 flex items-center gap-4">
+                <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${s.status === "live" ? "bg-red-500/10" : "bg-muted"}`}>
+                  <Radio className={`w-5 h-5 ${s.status === "live" ? "text-red-500" : "text-muted-foreground"}`} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="font-semibold text-sm truncate">{s.title}</span>
+                    <StatusBadge status={s.status} />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="font-semibold text-sm truncate">{s.title}</span>
-                      <StatusBadge status={s.status} />
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      👁️ {s.viewerCount || 0} مشاهد · ❤️ {s.likesCount || 0} · {s.startedAt ? format(new Date(s.startedAt), "dd/MM HH:mm", { locale: ar }) : ""}
-                    </div>
+                  <div className="text-xs text-muted-foreground">
+                    👁️ {s.viewerCount || 0} مشاهد · ❤️ {s.likesCount || 0} · {s.startedAt ? format(new Date(s.startedAt), "dd/MM HH:mm", { locale: ar }) : ""}
                   </div>
-                  {s.status === "live" && (
-                    <div className="flex gap-1.5">
-                      <Button size="sm" variant="outline" className="text-xs border-orange-500/30 text-orange-500 hover:bg-orange-500/10 flex-shrink-0"
-                        onClick={() => warnStream.mutate(s.id)}>
-                        <AlertTriangle className="w-3 h-3 me-1" /> تحذير
-                      </Button>
-                      <Button size="sm" variant="destructive" className="text-xs flex-shrink-0"
-                        onClick={() => { if (confirm("إيقاف البث المباشر نهائياً بسبب انتهاك؟")) forceEndStream.mutate(s.id); }}>
-                        <VideoOff className="w-3 h-3 me-1" /> إيقاف
-                      </Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-            {streams.length === 0 && !isLoading && (
-              <div className="text-center py-16 text-muted-foreground"><Radio className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد بثوث</p></div>
-            )}
-          </div>
-        )
-      )}
-
-      {/* STREAM REPORTS TAB */}
-      {streamTab === "reports" && (
-        reportsLoading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : (
-          <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">البثوث التي تلقّت بلاغات من المشاهدين بسبب محتوى مخالف</p>
-            {Object.entries(reportsByStream).length === 0 && (
-              <div className="text-center py-16 text-muted-foreground"><Flag className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد بلاغات</p></div>
-            )}
-            {Object.entries(reportsByStream).map(([streamIdStr, reps]: [string, any[]]) => {
-              const streamId = Number(streamIdStr);
-              const firstRep = reps[0];
-              const streamInfo = streams.find((s: any) => s.id === streamId);
-              const isLive = firstRep.stream_status === "live" || streamInfo?.status === "live";
-              const title = firstRep.stream_title || `بث #${streamId}`;
-              const reasons = [...new Set(reps.map((r: any) => STREAM_REPORT_LABELS[r.reason] || r.reason))];
-              return (
-                <Card key={streamId} className={`rounded-xl border-2 ${reps.length >= 5 ? "border-red-500/50" : reps.length >= 3 ? "border-orange-500/40" : "border-border"}`} data-testid={`stream-report-${streamId}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-start gap-3 mb-3">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isLive ? "bg-red-500/10" : "bg-muted"}`}>
-                        <Radio className={`w-5 h-5 ${isLive ? "text-red-500" : "text-muted-foreground"}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap mb-1">
-                          <span className="font-semibold text-sm">{title}</span>
-                          {isLive && <span className="text-[10px] bg-red-500 text-white px-1.5 py-0.5 rounded-full font-bold">مباشر</span>}
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${reps.length >= 5 ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"}`}>
-                            {reps.length} بلاغ
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          {reasons.map((r, i) => (
-                            <span key={i} className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded">{r}</span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                    {isLive && (
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="outline" className="flex-1 text-xs border-orange-500/30 text-orange-600 hover:bg-orange-500/10"
-                          onClick={() => warnStream.mutate(streamId)}
-                          data-testid={`btn-warn-stream-${streamId}`}>
-                          <AlertTriangle className="w-3 h-3 me-1" /> إرسال تحذير
-                        </Button>
-                        <Button size="sm" variant="destructive" className="flex-1 text-xs"
-                          onClick={() => { if (confirm(`إغلاق البث "${title}" بسبب بلاغات؟`)) forceEndStream.mutate(streamId); }}
-                          data-testid={`btn-force-end-stream-${streamId}`}>
-                          <VideoOff className="w-3 h-3 me-1" /> إغلاق البث
-                        </Button>
-                      </div>
-                    )}
-                    {!isLive && (
-                      <p className="text-xs text-muted-foreground text-center py-1">البث منتهٍ</p>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )
+                </div>
+                {s.status === "live" && (
+                  <Button size="sm" variant="destructive" className="text-xs flex-shrink-0"
+                    onClick={() => { if (confirm("إيقاف البث المباشر نهائياً؟")) updateStream.mutate({ id: s.id, status: "ended" }); }}>
+                    <VideoOff className="w-3 h-3 me-1" /> إيقاف
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+          {streams.length === 0 && !isLoading && (
+            <div className="text-center py-16 text-muted-foreground"><Radio className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد بثوث</p></div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1533,78 +1049,37 @@ function CampaignsSection({ logAction }: { logAction: any }) {
 }
 
 function CampaignCard({ c, updateCampaign }: any) {
-  const spent  = Number(c.spent_egp  || c.spentEGP  || 0);
-  const budget = Number(c.budget_egp || c.budgetEGP || 1);
-  const pct    = Math.min(100, (spent / budget) * 100);
-  const mediaUrl = c.media_url || c.mediaUrl;
-  const advertiserName = c.advertiser_name || c.advertiserName || c.first_name || c.advertiser_id;
-  const createdAt = c.created_at ? new Date(c.created_at).toLocaleDateString("ar-EG") : "";
-  const categories = Array.isArray(c.target_categories) ? c.target_categories : [];
-  const regions = Array.isArray(c.target_regions) ? c.target_regions : [];
-
+  const spent = Number(c.spentEGP || 0);
+  const budget = Number(c.budgetEGP || 1);
+  const pct = Math.min(100, (spent / budget) * 100);
   return (
-    <Card className="rounded-xl border-border/60" data-testid={`camp-${c.id}`}>
+    <Card className="rounded-xl" data-testid={`camp-${c.id}`}>
       <CardContent className="p-4">
-        <div className="flex items-start gap-4">
-          {/* Media */}
-          {mediaUrl && (
-            <img src={mediaUrl} alt="" className="w-16 h-16 rounded-xl object-cover bg-muted flex-shrink-0 border border-border/40" />
-          )}
-          {/* Details */}
-          <div className="flex-1 min-w-0">
-            {/* Row 1: name + status */}
-            <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <span className="font-bold text-sm">{c.name}</span>
-              <StatusBadge status={c.status} />
-              {createdAt && <span className="text-[10px] text-muted-foreground">{createdAt}</span>}
-            </div>
-
-            {/* Row 2: Advertiser info */}
-            <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground/80">👤 {advertiserName}</span>
-              {(c.phone || c.phone_number) && <span>📱 {c.phone || c.phone_number}</span>}
-              {c.email && <span className="truncate max-w-[160px]">✉️ {c.email}</span>}
-            </div>
-
-            {/* Row 3: Stats */}
-            <div className="flex gap-4 text-xs text-muted-foreground flex-wrap mb-2">
-              <span>👁️ {(c.impressions || 0).toLocaleString("ar-EG")} مشاهدة</span>
-              <span>🖱️ {(c.clicks || 0).toLocaleString("ar-EG")} نقرة</span>
-              <span className="font-semibold">💸 {spent.toFixed(0)} / {budget.toFixed(0)} ج.م</span>
-              <span>⚡ {(c.cpm_rate_egp || 15).toFixed(0)} ج.م CPM</span>
-            </div>
-
-            {/* Progress bar */}
-            <div className="mb-2 h-1.5 bg-muted rounded-full overflow-hidden w-full max-w-xs">
-              <div className={`h-full rounded-full transition-all ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-yellow-500" : "bg-primary"}`} style={{ width: `${pct}%` }} />
-            </div>
-
-            {/* Row 4: Targeting tags */}
-            {(categories.length > 0 || regions.length > 0 || c.description) && (
-              <div className="flex flex-wrap gap-1 mt-1">
-                {categories.map((cat: string) => <Badge key={cat} variant="secondary" className="text-[10px] h-5">{cat}</Badge>)}
-                {regions.map((r: string) => <Badge key={r} variant="outline" className="text-[10px] h-5">📍{r}</Badge>)}
-                {c.description && <span className="text-[10px] text-muted-foreground italic truncate max-w-[200px]">{c.description}</span>}
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            {c.mediaUrl && <img src={c.mediaUrl} alt="" className="w-12 h-12 rounded-xl object-cover bg-muted flex-shrink-0" />}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className="font-semibold text-sm">{c.name}</span>
+                <StatusBadge status={c.status} />
               </div>
-            )}
-
-            {/* Row 5: Target URL */}
-            {(c.target_url || c.targetUrl) && (
-              <a href={c.target_url || c.targetUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:underline mt-1 block truncate max-w-xs">
-                🔗 {c.target_url || c.targetUrl}
-              </a>
-            )}
+              <div className="flex gap-3 text-xs text-muted-foreground flex-wrap">
+                <span>👁️ {c.impressions?.toLocaleString()}</span>
+                <span>🖱️ {c.clicks?.toLocaleString()}</span>
+                <span>💸 {spent.toFixed(2)} / {budget.toFixed(2)} ج.م</span>
+              </div>
+              <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden w-48">
+                <div className={`h-full rounded-full ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-yellow-500" : "bg-primary"}`} style={{ width: `${pct}%` }} />
+              </div>
+            </div>
           </div>
-
-          {/* Actions */}
-          <div className="flex flex-col gap-1.5 flex-shrink-0">
+          <div className="flex gap-1.5 flex-shrink-0 flex-wrap justify-end">
             {c.status === "pending" && <>
-              <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "active" })} data-testid={`btn-approve-camp-${c.id}`}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
-              <Button size="sm" variant="destructive" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "rejected" })} data-testid={`btn-reject-camp-${c.id}`}><XCircle className="w-3 h-3 me-1" />رفض</Button>
+              <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "active" })}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
+              <Button size="sm" variant="destructive" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "rejected" })}><XCircle className="w-3 h-3 me-1" />رفض</Button>
             </>}
-            {c.status === "active"  && <Button size="sm" variant="outline" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "paused" })} data-testid={`btn-pause-camp-${c.id}`}>⏸️ إيقاف</Button>}
-            {c.status === "paused"  && <Button size="sm" variant="outline" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "active" })} data-testid={`btn-resume-camp-${c.id}`}>▶️ تفعيل</Button>}
-            {["active","paused"].includes(c.status) && <Button size="sm" variant="ghost" className="text-xs text-red-500 hover:bg-red-500/10" onClick={() => updateCampaign.mutate({ id: c.id, status: "rejected" })} data-testid={`btn-stop-camp-${c.id}`}>🛑 إيقاف نهائي</Button>}
+            {c.status === "active"  && <Button size="sm" variant="outline" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "paused" })}>⏸️ إيقاف</Button>}
+            {c.status === "paused"  && <Button size="sm" variant="outline" className="text-xs" onClick={() => updateCampaign.mutate({ id: c.id, status: "active" })}>▶️ تفعيل</Button>}
           </div>
         </div>
       </CardContent>
@@ -1634,7 +1109,6 @@ function PaymentsSection({ logAction }: { logAction: any }) {
   const { data: payments = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/admin/payments"],
     queryFn: () => fetch("/api/admin/payments", { credentials: "include" }).then(r => r.json()),
-    refetchInterval: 20000,
   });
 
   const updatePayment = useMutation({
@@ -1644,183 +1118,76 @@ function PaymentsSection({ logAction }: { logAction: any }) {
   });
 
   const pending = payments.filter((p: any) => p.status === "pending");
-  const pendingPayments = pending.filter((p: any) => p.type !== "withdrawal");
-  const pendingWithdrawals = pending.filter((p: any) => p.type === "withdrawal");
   const done = payments.filter((p: any) => p.status !== "pending");
 
   const methodLabel: Record<string, string> = { vodafone: "فودافون كاش", etisalat: "اتصالات كاش", instapay: "إنستاباي", souq: "محفظة سوق" };
 
-  // ── PaymentCard helper (inline component) ──────────────────
-  const renderCard = (p: any) => {
-    const isWithdrawal = p.type === "withdrawal";
-    const isWithdrawalRef = isWithdrawal && p.paymentRef?.includes("||");
-    let withdrawalInfo = null;
-    if (isWithdrawalRef) {
-      const parts = p.paymentRef.split("||").map((s: string) => s.trim());
-      const holderName  = parts[0] || "—";
-      const accountType = parts[1] || "—";
-      const accountNum  = parts[2] || "—";
-      const maskedNum   = accountNum.length >= 4
-        ? "•".repeat(Math.max(0, accountNum.length - 4)) + accountNum.slice(-4)
-        : accountNum;
-      const typeLabel: Record<string, string> = {
-        vodafone: "📱 فودافون كاش",
-        instapay: "⚡ InstaPay",
-        bank:     "🏦 حساب بنكي",
-        visa:     "💳 كارت فيزا / بنكي",
-      };
-      withdrawalInfo = (
-        <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border-2 border-red-400/50 px-4 py-3 space-y-2">
-          <p className="text-[10px] font-bold text-red-700 dark:text-red-400">🏧 بيانات حساب الاستلام — حوّل لهذا الحساب</p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            <div><p className="text-[10px] text-muted-foreground">صاحب الحساب</p><p className="font-bold">{holderName}</p></div>
-            <div><p className="text-[10px] text-muted-foreground">نوع الحساب</p><p className="font-bold">{typeLabel[accountType] || accountType}</p></div>
-          </div>
-          <div className="bg-white dark:bg-black/30 rounded-lg border border-red-200 dark:border-red-800 px-3 py-2 flex items-center gap-3">
-            <div className="flex-1">
-              <p className="text-[10px] text-muted-foreground">رقم الحساب (مخفي)</p>
-              <p className="font-mono font-extrabold text-base tracking-widest text-red-700 dark:text-red-300" dir="ltr">{maskedNum}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-[10px] text-muted-foreground">الرقم الكامل</p>
-              <p className="font-mono text-xs text-foreground/60 select-all" dir="ltr">{accountNum}</p>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <Card
-        key={p.id}
-        className={`rounded-xl ${isWithdrawal ? "border-red-500/30 bg-red-50/20 dark:bg-red-950/10" : "border-green-500/20 bg-green-50/20 dark:bg-green-950/10"}`}
-        data-testid={`payment-${p.id}`}
-      >
-        <CardContent className="p-4 space-y-3">
-          <div className="flex items-center gap-4">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1 flex-wrap">
-                <span className={`font-bold text-lg ${isWithdrawal ? "text-red-600" : "text-green-600"}`}>{p.amountEGP} ج.م</span>
-                <StatusBadge status={p.status} />
-                <span className={`text-xs px-2 py-0.5 rounded font-mono font-bold ${isWithdrawal ? "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" : "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"}`}>
-                  {isWithdrawal ? "🏧 سحب أرباح" : "💳 دفع مقابل خدمة"}
-                </span>
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {methodLabel[p.method] || p.method} · {p.phoneNumber} · {p.createdAt ? format(new Date(p.createdAt), "dd MMM yyyy", { locale: ar }) : ""}
-              </div>
-              {p.serviceType && (
-                <span className="inline-block mt-1 text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold">
-                  🎯 {SERVICE_TYPE_LABELS[p.serviceType] || p.serviceType}
-                </span>
-              )}
-              <div className="text-xs text-muted-foreground opacity-60 mt-0.5">ORD: {p.orderNumber || p.id} · ID: {p.userId}</div>
-            </div>
-            <div className="flex gap-1.5 flex-shrink-0">
-              <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "approved" })}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
-              <Button size="sm" variant="destructive" className="text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "rejected" })}><XCircle className="w-3 h-3 me-1" />رفض</Button>
-            </div>
-          </div>
-
-          {/* بيانات السحب أو رقم العملية */}
-          {withdrawalInfo}
-          {!isWithdrawalRef && p.paymentRef && (
-            <div className="rounded-xl bg-green-50 dark:bg-green-950/20 border-2 border-green-400/50 px-4 py-2.5 flex items-center gap-2">
-              <span className="text-green-600 text-lg">✅</span>
-              <div>
-                <p className="text-[10px] text-muted-foreground">رقم العملية / رقم الإيداع</p>
-                <p className="font-mono font-extrabold text-sm text-green-700 dark:text-green-400 tracking-wider" dir="ltr">{p.paymentRef}</p>
-              </div>
-            </div>
-          )}
-          {!p.paymentRef && !isWithdrawal && (
-            <div className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-300 dark:border-red-800 px-4 py-2 text-xs text-red-600 dark:text-red-400 font-bold">
-              ⚠️ المستخدم لم يُدخل رقم العملية — تحقق من الإيصال قبل الموافقة
-            </div>
-          )}
-
-          {/* بيانات التحقق — الرقم القومي + رقم البطاقة */}
-          {(p.nationalId || p.cardNumber) && (
-            <div className="rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-300 dark:border-purple-800 px-4 py-3 space-y-2">
-              <p className="text-[10px] font-bold text-purple-700 dark:text-purple-400">🪪 بيانات التحقق من الهوية</p>
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                {p.nationalId && <div><p className="text-[10px] text-muted-foreground">الرقم القومي</p><p className="font-mono font-bold" dir="ltr">{p.nationalId}</p></div>}
-                {p.cardNumber && <div><p className="text-[10px] text-muted-foreground">رقم البطاقة البنكية</p><p className="font-mono font-bold" dir="ltr">{p.cardNumber}</p></div>}
-              </div>
-            </div>
-          )}
-
-          {p.screenshotUrl && (
-            <a href={p.screenshotUrl} target="_blank" rel="noopener noreferrer" className="block">
-              <img src={p.screenshotUrl} alt="إيصال الدفع" className="w-full max-h-52 object-contain rounded-xl border bg-muted/20 cursor-zoom-in hover:opacity-90 transition-opacity" data-testid={`screenshot-payment-${p.id}`} />
-              <p className="text-[10px] text-primary mt-1 text-center">📎 صورة إيصال الدفع — اضغط للتكبير</p>
-            </a>
-          )}
-        </CardContent>
-      </Card>
-    );
-  };
-
   return (
-    <div className="space-y-6">
-      {/* ── قسم طلبات الدفع مقابل الخدمات ── */}
-      {pendingPayments.length > 0 && (
+    <div className="space-y-5">
+      {pending.length > 0 && (
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-sm font-bold text-green-700 dark:text-green-400 flex items-center gap-2">
-              <CheckCircle className="w-4 h-4" /> 💳 طلبات الدفع مقابل خدمة ({pendingPayments.length})
-            </h3>
-          </div>
-          <p className="text-xs text-muted-foreground mb-3">مستخدم دفع مقابل تعزيز / تجديد / حملة — تحقق من رقم العملية وأكّد</p>
-          <div className="space-y-2">{pendingPayments.map(renderCard)}</div>
-        </div>
-      )}
-
-      {/* ── قسم طلبات السحب ── */}
-      {pendingWithdrawals.length > 0 && (
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-sm font-bold text-red-700 dark:text-red-400 flex items-center gap-2">
-              <ArrowDownLeft className="w-4 h-4" /> 🏧 طلبات سحب الأرباح ({pendingWithdrawals.length})
-            </h3>
-          </div>
-          <p className="text-xs text-muted-foreground mb-3">مستخدم يريد سحب أرباحه — حوّل المبلغ للحساب الموضّح ثم أكّد</p>
-          <div className="space-y-2">{pendingWithdrawals.map(renderCard)}</div>
-        </div>
-      )}
-
-      {pending.length === 0 && !isLoading && (
-        <div className="text-center py-10 text-muted-foreground">
-          <CheckCircle className="w-10 h-10 mx-auto mb-2 text-green-400 opacity-50" />
-          <p className="text-sm">لا توجد طلبات معلقة</p>
-        </div>
-      )}
-
-      {/* ── سجل الطلبات المنجزة ── */}
-      {done.length > 0 && (
-        <div>
-          <h3 className="text-sm font-semibold text-muted-foreground mb-3">سجل الطلبات المنجزة ({done.length})</h3>
+          <h3 className="text-sm font-semibold text-yellow-600 mb-3 flex items-center gap-2"><Clock className="w-4 h-4" /> معلقة ({pending.length})</h3>
           <div className="space-y-2">
-            {done.map((p: any) => (
-              <Card key={p.id} className="rounded-xl opacity-75">
-                <CardContent className="p-4 flex items-center gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <span className="font-semibold">{p.amountEGP} ج.م</span>
-                      <StatusBadge status={p.status} />
-                      <span className={`text-xs px-1.5 py-0.5 rounded text-[10px] font-bold ${p.type === "withdrawal" ? "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" : "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"}`}>
-                        {p.type === "withdrawal" ? "🏧 سحب" : "💳 دفع"}
-                      </span>
+            {pending.map((p: any) => (
+              <Card key={p.id} className="rounded-xl border-yellow-500/20" data-testid={`payment-${p.id}`}>
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className="font-bold text-lg text-green-600">{p.amountEGP} ج.م</span>
+                        <StatusBadge status={p.status} />
+                        <span className="text-xs bg-muted px-2 py-0.5 rounded font-mono">{p.type === 'top_up' ? '💰 شحن' : '🏧 سحب'}</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {methodLabel[p.method] || p.method} · {p.phoneNumber} · {p.createdAt ? format(new Date(p.createdAt), "dd MMM yyyy", { locale: ar }) : ""}
+                      </div>
+                      {p.serviceType && (
+                        <span className="inline-block mt-1 text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold">
+                          🎯 {SERVICE_TYPE_LABELS[p.serviceType] || p.serviceType}
+                        </span>
+                      )}
+                      <div className="text-xs text-muted-foreground opacity-60 mt-0.5">ORD: {p.orderNumber || p.id} · ID: {p.userId}</div>
                     </div>
-                    <div className="text-xs text-muted-foreground">{methodLabel[p.method] || p.method} · {p.phoneNumber}</div>
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "approved" })}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
+                      <Button size="sm" variant="destructive" className="text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "rejected" })}><XCircle className="w-3 h-3 me-1" />رفض</Button>
+                    </div>
                   </div>
+                  {p.screenshotUrl && (
+                    <a href={p.screenshotUrl} target="_blank" rel="noopener noreferrer" className="block">
+                      <img
+                        src={p.screenshotUrl}
+                        alt="إيصال الدفع"
+                        className="w-full max-h-52 object-contain rounded-xl border bg-muted/20 cursor-zoom-in hover:opacity-90 transition-opacity"
+                        data-testid={`screenshot-payment-${p.id}`}
+                      />
+                      <p className="text-[10px] text-primary mt-1 text-center">📎 صورة إيصال الدفع — اضغط للتكبير</p>
+                    </a>
+                  )}
                 </CardContent>
               </Card>
             ))}
           </div>
         </div>
       )}
-
+      <div>
+        <h3 className="text-sm font-semibold text-muted-foreground mb-3">سجل الطلبات ({done.length})</h3>
+        <div className="space-y-2">
+          {done.map((p: any) => (
+            <Card key={p.id} className="rounded-xl opacity-80">
+              <CardContent className="p-4 flex items-center gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-semibold">{p.amountEGP} ج.م</span>
+                    <StatusBadge status={p.status} />
+                  </div>
+                  <div className="text-xs text-muted-foreground">{methodLabel[p.method] || p.method} · {p.phoneNumber}</div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
       {payments.length === 0 && !isLoading && (
         <div className="text-center py-16 text-muted-foreground"><Banknote className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد طلبات</p></div>
       )}
@@ -2167,7 +1534,7 @@ function SettingsSection({ logAction }: { logAction: any }) {
     { key: "feature_registration",  label: "التسجيل",         desc: "السماح بإنشاء حسابات جديدة",            icon: UserCheck },
     { key: "feature_ads",           label: "الإعلانات",        desc: "عرض ونشر الإعلانات على المنصة",        icon: Megaphone },
     { key: "feature_campaigns",     label: "الحملات الإعلانية", desc: "إنشاء وتشغيل الحملات المدفوعة",      icon: BarChart2 },
-    { key: "boost_enabled",         label: "تعزيز الإعلانات 🚀", desc: "السماح لأصحاب الإعلانات بتعزيز إعلاناتهم بالمدة المحددة في الإعدادات", icon: Zap },
+    { key: "boost_enabled",         label: "تعزيز الإعلانات 🚀", desc: "السماح لأصحاب الإعلانات بتعزيز إعلاناتهم (مرة كل 30 يوم)", icon: Zap },
   ];
 
   const numFields = [
@@ -2182,107 +1549,8 @@ function SettingsSection({ logAction }: { logAction: any }) {
 
   const groups = Array.from(new Set(numFields.map(f => f.group)));
 
-  // ── What's New publisher state ──
-  const [wVersion, setWVersion] = useState("");
-  const [wTitle,   setWTitle]   = useState("");
-  const [wItems,   setWItems]   = useState("");
-  const [wSaving,  setWSaving]  = useState(false);
-
-  const publishUpdate = async () => {
-    if (!wVersion.trim() || !wItems.trim()) {
-      toast({ title: "تأكد من الإصدار والتفاصيل", variant: "destructive" }); return;
-    }
-    setWSaving(true);
-    const items = wItems.split("\n").map(s => s.trim()).filter(Boolean);
-    await fetch("/api/settings/bulk", {
-      method: "PUT", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        app_version: wVersion.trim(),
-        app_whatsnew: JSON.stringify(items),
-        app_whatsnew_title: wTitle.trim() || "تحديث جديد! 🎉",
-        whatsnew_seen_count: "0",
-      }),
-    });
-    setWSaving(false);
-    setWVersion(""); setWTitle(""); setWItems("");
-    refetch();
-    toast({ title: "✅ تم نشر التحديث", description: `الإصدار ${wVersion} — ظهر لجميع المستخدمين` });
-    logAction("publish_update", "app_version", wVersion);
-  };
-
   return (
     <div className="max-w-2xl space-y-6">
-
-      {/* ── نشر تحديث جديد ── */}
-      <Card className="rounded-2xl border-primary/30 bg-primary/5">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-primary" />
-            نشر إشعار تحديث للمستخدمين
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">
-            بعد النشر سيظهر بانر "الجديد" لكل مستخدم لم يراه — تلقائياً
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">رقم الإصدار *</label>
-              <input
-                value={wVersion}
-                onChange={e => setWVersion(e.target.value)}
-                placeholder="مثال: 2.5 أو 23 أبريل"
-                className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-primary"
-                data-testid="input-whatsnew-version"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">عنوان البانر (اختياري)</label>
-              <input
-                value={wTitle}
-                onChange={e => setWTitle(e.target.value)}
-                placeholder="تحديث جديد! 🎉"
-                className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-primary"
-                data-testid="input-whatsnew-title"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">الميزات والتحديثات (سطر لكل نقطة) *</label>
-            <textarea
-              value={wItems}
-              onChange={e => setWItems(e.target.value)}
-              placeholder={"تحقق من إيصالات الدفع بالذكاء الاصطناعي تلقائياً\nإضافة قسم قيد المراجعة في لوحتي\nتحسين باقات الشحن في لوحة التحكم\nإصلاح عرض تفاصيل الحملات الإعلانية"}
-              rows={4}
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary resize-none"
-              data-testid="input-whatsnew-items"
-            />
-            <p className="text-[10px] text-muted-foreground mt-1">كل سطر = نقطة تظهر للمستخدم في القائمة</p>
-          </div>
-          {settings?.app_version && (
-            <div className="flex items-center gap-2">
-              <div className="flex-1 text-xs text-muted-foreground bg-muted/40 px-3 py-2 rounded-lg">
-                آخر إصدار منشور: <span className="font-bold text-foreground">{settings.app_version}</span>
-              </div>
-              <div className="text-xs bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 px-3 py-2 rounded-lg flex items-center gap-1 font-medium whitespace-nowrap">
-                <span>👁</span>
-                <span>{settings?.whatsnew_seen_count || "0"}</span>
-                <span className="text-[10px] text-muted-foreground">شاهد</span>
-              </div>
-            </div>
-          )}
-          <Button
-            onClick={publishUpdate}
-            disabled={wSaving}
-            className="w-full gap-2"
-            data-testid="btn-publish-update"
-          >
-            {wSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            نشر التحديث لجميع المستخدمين
-          </Button>
-        </CardContent>
-      </Card>
 
       {/* ── Feature Toggles ── */}
       <Card className="rounded-2xl">
@@ -2412,7 +1680,7 @@ function SettingsSection({ logAction }: { logAction: any }) {
             </div>
             <div>
               <label className="text-xs font-medium block mb-1">رقم فودافون كاش</label>
-              <Input dir="ltr" value={get("contact_vodafone_cash", "01098559311")} onChange={e => set("contact_vodafone_cash", e.target.value)} placeholder="01xxxxxxxxx" data-testid="setting-contact-vodafone" />
+              <Input dir="ltr" value={get("contact_vodafone_cash", "01098553911")} onChange={e => set("contact_vodafone_cash", e.target.value)} placeholder="01xxxxxxxxx" data-testid="setting-contact-vodafone" />
             </div>
             <div>
               <label className="text-xs font-medium block mb-1">رقم إنستاباي</label>
@@ -2664,188 +1932,6 @@ function ActivitySection() {
   );
 }
 
-// ── 💰 Wallet Charges Section — طلبات شحن المحفظة ───────────────
-function WalletChargesSection({ logAction }: { logAction: any }) {
-  const { toast } = useToast();
-  const qc = useQueryClient();
-  const [note, setNote] = useState<Record<number, string>>({});
-
-  const { data: orders = [], isLoading } = useQuery<any[]>({
-    queryKey: ["/api/admin/wallet-topups"],
-    queryFn: () => fetch("/api/admin/wallet-topups", { credentials: "include" }).then(r => r.json()),
-    refetchInterval: 30_000,
-  });
-
-  const { data: ws } = useQuery<any>({
-    queryKey: ["/api/admin/wallet-stats"],
-    queryFn: () => fetch("/api/admin/wallet-stats", { credentials: "include" }).then(r => r.json()),
-    refetchInterval: 30_000,
-  });
-
-  const pending = orders.filter((o: any) => o.status === "pending");
-  const done    = orders.filter((o: any) => o.status !== "pending");
-
-  const handleAction = async (id: number, action: "approve" | "reject") => {
-    try {
-      const res = await fetch(`/api/admin/wallet-topups/${id}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, adminNote: note[id] || undefined }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        qc.invalidateQueries({ queryKey: ["/api/admin/wallet-topups"] });
-        toast({ title: action === "approve" ? "✅ تمت الموافقة وإضافة الرصيد" : "✅ تم الرفض" });
-        logAction?.(`wallet_topup_${action}`, `طلب #${id}`);
-      } else {
-        toast({ variant: "destructive", title: data.message || "خطأ" });
-      }
-    } catch {
-      toast({ variant: "destructive", title: "خطأ في الاتصال" });
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <h2 className="font-bold text-lg">طلبات شحن المحفظة</h2>
-        {pending.length > 0 && (
-          <span className="bg-emerald-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pending.length} معلق</span>
-        )}
-      </div>
-
-      {/* Wallet financial summary */}
-      {ws && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-gradient-to-br from-emerald-500/10 to-transparent p-4">
-            <div className="text-xs text-muted-foreground mb-0.5">💰 إجمالي ما استلمته</div>
-            <div className="text-2xl font-bold text-emerald-600">{Number(ws.totalCollectedEGP).toFixed(2)}</div>
-            <div className="text-xs text-muted-foreground">ج.م · {ws.totalApprovedCount} عملية مقبولة</div>
-          </div>
-          <div className="rounded-2xl border border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-500/10 to-transparent p-4">
-            <div className="text-xs text-muted-foreground mb-0.5">🏦 رصيد في المحافظ</div>
-            <div className="text-2xl font-bold text-blue-600">{Number(ws.totalCurrentBalanceEGP).toFixed(2)}</div>
-            <div className="text-xs text-muted-foreground">ج.م لدى {ws.usersWithBalance} مستخدم</div>
-          </div>
-          <div className="rounded-2xl border border-purple-200 dark:border-purple-800 bg-gradient-to-br from-purple-500/10 to-transparent p-4">
-            <div className="text-xs text-muted-foreground mb-0.5">⚡ أُنفق على الخدمات</div>
-            <div className="text-2xl font-bold text-purple-600">{Number(ws.totalSpentEGP).toFixed(2)}</div>
-            <div className="text-xs text-muted-foreground">ج.م (تعزيز + تجديد + AI)</div>
-          </div>
-          <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-gradient-to-br from-amber-500/10 to-transparent p-4">
-            <div className="text-xs text-muted-foreground mb-0.5">⏳ طلبات معلقة</div>
-            <div className="text-2xl font-bold text-amber-600">{Number(ws.pendingAmountEGP).toFixed(2)}</div>
-            <div className="text-xs text-muted-foreground">ج.م · {ws.pendingCount} طلب</div>
-          </div>
-        </div>
-      )}
-
-      {isLoading && <div className="text-center py-12 text-muted-foreground">جارٍ التحميل...</div>}
-
-      {!isLoading && pending.length === 0 && done.length === 0 && (
-        <Card className="rounded-2xl border border-border/50">
-          <CardContent className="py-12 text-center text-muted-foreground">
-            <Banknote className="w-10 h-10 mx-auto mb-3 opacity-30" />
-            لا يوجد طلبات شحن محفظة حتى الآن
-          </CardContent>
-        </Card>
-      )}
-
-      {pending.length > 0 && (
-        <Card className="rounded-2xl border border-emerald-200 dark:border-emerald-800">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base text-emerald-600">🕐 طلبات قيد المراجعة ({pending.length})</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {pending.map((o: any) => (
-              <div key={o.id} className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 space-y-2">
-                <div className="flex items-start gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs font-bold text-emerald-700 dark:text-emerald-400" data-testid={`text-wallet-order-${o.id}`}>{o.order_number}</span>
-                      <span className="text-xs font-bold text-green-600">{o.amount_egp} ج.م</span>
-                      <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded-full font-bold">{o.payment_method}</span>
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-0.5">
-                      {o.first_name} {o.last_name}
-                      {o.email && <span className="ml-1">({o.email})</span>}
-                      {o.payment_ref && <span> — مرجع: <span className="font-mono font-bold">{o.payment_ref}</span></span>}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      رصيد حالي: <span className="font-bold text-primary">{o.balance_egp || 0} ج.م</span>
-                      {" | "}{o.created_at ? new Date(o.created_at).toLocaleString("ar-EG") : ""}
-                    </div>
-                    <input
-                      value={note[o.id] || ""}
-                      onChange={e => setNote(n => ({ ...n, [o.id]: e.target.value }))}
-                      placeholder="ملاحظة للمستخدم (اختياري)"
-                      className="mt-1.5 w-full text-xs border rounded-lg px-2 py-1 bg-background"
-                      data-testid={`input-wallet-note-${o.id}`}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5 flex-shrink-0">
-                    <button
-                      onClick={() => handleAction(o.id, "approve")}
-                      className="px-3 py-1.5 rounded-lg bg-green-500 hover:bg-green-600 text-white text-xs font-bold transition-all flex items-center gap-1"
-                      data-testid={`btn-approve-wallet-${o.id}`}
-                    >
-                      <CheckCircle className="w-3 h-3" /> قبول ✓
-                    </button>
-                    <button
-                      onClick={() => handleAction(o.id, "reject")}
-                      className="px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-bold transition-all flex items-center gap-1"
-                      data-testid={`btn-reject-wallet-${o.id}`}
-                    >
-                      <XCircle className="w-3 h-3" /> رفض ✗
-                    </button>
-                  </div>
-                </div>
-                {o.screenshot_url && (
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1 font-semibold">📸 صورة الإيصال:</p>
-                    <a href={o.screenshot_url} target="_blank" rel="noopener noreferrer">
-                      <img
-                        src={o.screenshot_url}
-                        alt="إيصال الدفع"
-                        className="w-full max-h-48 object-contain rounded-lg border border-emerald-200 dark:border-emerald-800 cursor-pointer hover:opacity-90 transition-opacity"
-                        data-testid={`img-wallet-receipt-${o.id}`}
-                      />
-                    </a>
-                  </div>
-                )}
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {done.length > 0 && (
-        <Card className="rounded-2xl border border-border/50">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base text-muted-foreground">سجل الطلبات المكتملة</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {done.slice(0, 30).map((o: any) => (
-              <div key={o.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-muted/30 border border-border/40">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono text-xs">{o.order_number}</span>
-                    <span className="font-bold text-xs text-green-600">{o.amount_egp} ج.م</span>
-                    <span className="text-xs text-muted-foreground">{o.payment_method}</span>
-                  </div>
-                  <div className="text-xs text-muted-foreground">{o.first_name} {o.last_name}</div>
-                </div>
-                <StatusBadge status={o.status === "approved" ? "approved" : o.status === "rejected" ? "rejected" : "pending"} />
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
-}
-
 // ── 🚀 Boost Orders Section ──────────────────────────────────────
 function BoostOrdersSection({ logAction }: { logAction: any }) {
   const { toast } = useToast();
@@ -2854,7 +1940,6 @@ function BoostOrdersSection({ logAction }: { logAction: any }) {
   const { data: orders = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/boost/orders"],
     queryFn: () => fetch("/api/boost/orders", { credentials: "include" }).then(r => r.json()),
-    refetchInterval: 20000,
   });
 
   const updateOrder = async (id: number, status: string) => {
@@ -3355,17 +2440,7 @@ function PricingSection() {
           <Zap className="w-4 h-4 text-orange-500" /> تعزيز الإعلان (Boost)
         </h3>
         <PriceCard icon={Zap} color="bg-orange-500" label="إعدادات التعزيز" desc="سعر وتفعيل خاصية تعزيز الإعلانات">
-          <NumInput k="boost_price_egp" label="سعر التعزيز الإجمالي" unit="ج.م" def="200" step="5" />
-          <NumInput k="boost_duration_days" label="مدة التعزيز" unit="يوم" def="30" step="1" />
-          <NumInput k="boost_share_reward_egp" label="مكافأة المشاركة (للشخص الذي يشارك الإعلان)" unit="ج.م" def="50" step="5" />
-          <div className="mt-1 p-2 bg-amber-50 dark:bg-amber-950/20 rounded-lg text-xs text-amber-700 dark:text-amber-400">
-            💡 صافي المنصة = سعر التعزيز − مكافأة المشاركة
-            {(() => {
-              const price = parseFloat(v("boost_price_egp","200"));
-              const reward = parseFloat(v("boost_share_reward_egp","50"));
-              return ` (${price} − ${reward} = ${price - reward} ج.م)`;
-            })()}
-          </div>
+          <NumInput k="boost_price_egp" label="سعر التعزيز" unit="ج.م" def="0" step="5" />
           <div className="flex items-center justify-between mt-2">
             <span className="text-xs text-muted-foreground">تفعيل التعزيز</span>
             <button
@@ -3486,7 +2561,6 @@ function AiPricingSection() {
     { key: "ai_price_content", label: "كتابة وصف إعلان (كريديت)", icon: Wand2, unit: "كريديت", desc: "توليد وصف احترافي للمنتج أو الخدمة" },
     { key: "ai_price_video", label: "توليد فيديو سينمائي (كريديت)", icon: Video, unit: "كريديت", desc: "فيديو إعلاني سينمائي بصوت وصورة عالية الجودة" },
     { key: "ai_price_animation", label: "إنشاء أنيميشن متحرك (كريديت)", icon: Sparkles, unit: "كريديت", desc: "محتوى متحرك صوت وصورة — أنيميشن احترافي" },
-    { key: "ai_price_talking_photo", label: "🗣️ الإعلان المتكلم (D-ID) — ج.م مباشر", icon: Video, unit: "ج.م", desc: "سعر إنشاء فيديو ناطق بصوت حقيقي عبر D-ID — يُخصم من محفظة المستخدم مباشرة" },
     { key: "ai_referral_bonus_egp", label: "مكافأة الإحالة (جنيه)", icon: Gift, unit: "ج.م", desc: "المبلغ الذي يحصل عليه المُحيل عند انضمام صديقه" },
   ];
 
@@ -3933,48 +3007,10 @@ function CoinsSection({ logAction }: { logAction: any }) {
     queryFn: () => fetch(`/api/admin/coins/codes?page=${codesPage}&limit=20`).then(r => r.json()),
   });
 
-  const { data: packagesData, refetch: refetchPackages } = useQuery<any[]>({
-    queryKey: ["/api/admin/coins/packages/all"],
-    queryFn: () => fetch("/api/admin/coins/packages/all", { credentials: "include" }).then(r => r.json()),
+  const { data: packagesData } = useQuery<any[]>({
+    queryKey: ["/api/coins/packages"],
+    queryFn: () => fetch("/api/coins/packages").then(r => r.json()),
   });
-
-  const [pkgSearch, setPkgSearch] = useState("");
-  const [showNewPkgForm, setShowNewPkgForm] = useState(false);
-  const [editingPkg, setEditingPkg] = useState<any | null>(null);
-  const [pkgForm, setPkgForm] = useState({ name: "", coins: "", priceEGP: "", bonusCoins: "0", sortOrder: "0", description: "", badge: "" });
-  const [pkgLoading, setPkgLoading] = useState(false);
-
-  const savePkg = async (isNew: boolean) => {
-    const { name, coins, priceEGP, bonusCoins, sortOrder, description, badge } = pkgForm;
-    if (!name || !coins || !priceEGP) return toast({ title: "تحقق من البيانات", description: "الاسم والعملات والسعر مطلوبة", variant: "destructive" });
-    setPkgLoading(true);
-    try {
-      const body = { name, coins: Number(coins), priceEGP: Number(priceEGP), bonusCoins: Number(bonusCoins) || 0, sortOrder: Number(sortOrder) || 0, description: description || null, badge: badge || null };
-      const url  = isNew ? "/api/admin/coins/packages" : `/api/admin/coins/packages/${editingPkg.id}`;
-      const meth = isNew ? "POST" : "PATCH";
-      const res  = await fetch(url, { method: meth, credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      if (!res.ok) throw new Error((await res.json()).message);
-      toast({ title: isNew ? "✅ تم إضافة الباقة" : "✅ تم تحديث الباقة" });
-      setShowNewPkgForm(false);
-      setEditingPkg(null);
-      setPkgForm({ name: "", coins: "", priceEGP: "", bonusCoins: "0", sortOrder: "0", description: "", badge: "" });
-      refetchPackages();
-    } catch (e: any) {
-      toast({ title: "خطأ", description: e.message, variant: "destructive" });
-    } finally { setPkgLoading(false); }
-  };
-
-  const deletePkg = async (id: number) => {
-    if (!confirm("تأكيد الحذف؟")) return;
-    await fetch(`/api/admin/coins/packages/${id}`, { method: "DELETE", credentials: "include" });
-    toast({ title: "✅ تم الحذف" });
-    refetchPackages();
-  };
-
-  const togglePkgActive = async (pkg: any) => {
-    await fetch(`/api/admin/coins/packages/${pkg.id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isActive: !pkg.is_active }) });
-    refetchPackages();
-  };
 
   const { data: purchaseOrders, isLoading: ordersLoading, refetch: refetchOrders } = useQuery<any[]>({
     queryKey: ["/api/admin/coins/purchase-orders", ordersFilter],
@@ -4016,7 +3052,6 @@ function CoinsSection({ logAction }: { logAction: any }) {
     try {
       const res = await fetch("/api/admin/coins/generate-codes", {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ count, coins }),
       });
@@ -4308,120 +3343,23 @@ function CoinsSection({ logAction }: { logAction: any }) {
 
       {/* ── TAB: Packages ── */}
       {coinTab === "packages" && (
-        <div className="space-y-4" dir="rtl">
-          {/* Header + Search + New Package */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <input
-              value={pkgSearch}
-              onChange={e => setPkgSearch(e.target.value)}
-              placeholder="🔍 بحث في الباقات..."
-              className="flex-1 min-w-[160px] bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-yellow-500"
-              data-testid="input-pkg-search"
-            />
-            <Button
-              size="sm"
-              className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold gap-1"
-              onClick={() => { setShowNewPkgForm(v => !v); setEditingPkg(null); setPkgForm({ name: "", coins: "", priceEGP: "", bonusCoins: "0", sortOrder: "0", description: "", badge: "" }); }}
-              data-testid="btn-new-package"
-            >
-              <PlusCircle className="w-4 h-4" /> باقة جديدة
-            </Button>
-          </div>
-
-          {/* New / Edit Form */}
-          {(showNewPkgForm || editingPkg) && (
-            <Card className="bg-zinc-900 border-yellow-500/40">
-              <CardHeader className="pb-3 pt-4 px-4">
-                <CardTitle className="text-yellow-400 text-sm">{editingPkg ? "✏️ تعديل الباقة" : "➕ إضافة باقة جديدة"}</CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-4">
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-white/50 text-xs mb-1 block">اسم الباقة *</label>
-                    <input value={pkgForm.name} onChange={e => setPkgForm(f => ({ ...f, name: e.target.value }))} placeholder="مثال: باقة البداية" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-500" data-testid="input-pkg-name" />
-                  </div>
-                  <div>
-                    <label className="text-white/50 text-xs mb-1 block">عدد العملات *</label>
-                    <input type="number" value={pkgForm.coins} onChange={e => setPkgForm(f => ({ ...f, coins: e.target.value }))} placeholder="100" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-500" data-testid="input-pkg-coins" />
-                  </div>
-                  <div>
-                    <label className="text-white/50 text-xs mb-1 block">السعر (ج.م) *</label>
-                    <input type="number" value={pkgForm.priceEGP} onChange={e => setPkgForm(f => ({ ...f, priceEGP: e.target.value }))} placeholder="10" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-500" data-testid="input-pkg-price" />
-                  </div>
-                  <div>
-                    <label className="text-white/50 text-xs mb-1 block">عملات مجانية (بونص)</label>
-                    <input type="number" value={pkgForm.bonusCoins} onChange={e => setPkgForm(f => ({ ...f, bonusCoins: e.target.value }))} placeholder="0" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-500" data-testid="input-pkg-bonus" />
-                  </div>
-                  <div>
-                    <label className="text-white/50 text-xs mb-1 block">شارة (مثال: 🔥 الأكثر مبيعاً)</label>
-                    <input value={pkgForm.badge} onChange={e => setPkgForm(f => ({ ...f, badge: e.target.value }))} placeholder="🔥 الأكثر مبيعاً" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-500" data-testid="input-pkg-badge" />
-                  </div>
-                  <div>
-                    <label className="text-white/50 text-xs mb-1 block">ترتيب العرض</label>
-                    <input type="number" value={pkgForm.sortOrder} onChange={e => setPkgForm(f => ({ ...f, sortOrder: e.target.value }))} placeholder="0" className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-500" data-testid="input-pkg-sort" />
-                  </div>
-                  <div className="col-span-2 md:col-span-3">
-                    <label className="text-white/50 text-xs mb-1 block">وصف (اختياري)</label>
-                    <input value={pkgForm.description} onChange={e => setPkgForm(f => ({ ...f, description: e.target.value }))} placeholder="وصف قصير للباقة..." className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-yellow-500" data-testid="input-pkg-desc" />
-                  </div>
-                </div>
-                <div className="flex gap-2 mt-4">
-                  <Button size="sm" className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold" onClick={() => savePkg(!editingPkg)} disabled={pkgLoading} data-testid="btn-save-pkg">
-                    {pkgLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingPkg ? "💾 حفظ التعديلات" : "➕ إضافة الباقة")}
-                  </Button>
-                  <Button size="sm" variant="ghost" className="text-white/60" onClick={() => { setShowNewPkgForm(false); setEditingPkg(null); }}>إلغاء</Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Packages List */}
+        <div className="space-y-4">
           <Card className="bg-zinc-900 border-zinc-700">
-            <CardHeader className="pb-2 pt-4 px-4">
-              <CardTitle className="text-white text-sm flex items-center justify-between">
-                <span>باقات الشحن ({(packagesData || []).length})</span>
-                <span className="text-xs text-white/40">نشط: {(packagesData || []).filter((p: any) => p.is_active).length} / متوقف: {(packagesData || []).filter((p: any) => !p.is_active).length}</span>
-              </CardTitle>
+            <CardHeader>
+              <CardTitle className="text-white text-base">باقات الشحن الحالية</CardTitle>
             </CardHeader>
-            <CardContent className="px-4 pb-4">
+            <CardContent>
               {!packagesData || packagesData.length === 0 ? (
-                <p className="text-white/40 text-center py-8">لا توجد باقات — أضف باقة جديدة</p>
+                <p className="text-white/40 text-center py-4">لا توجد باقات</p>
               ) : (
-                <div className="space-y-2">
-                  {(packagesData || [])
-                    .filter((p: any) => !pkgSearch || p.name?.includes(pkgSearch) || String(p.coins).includes(pkgSearch) || String(p.price_egp).includes(pkgSearch))
-                    .map((pkg: any) => (
-                    <div key={pkg.id} className={`flex items-center gap-3 p-3 rounded-xl border transition-colors ${pkg.is_active ? "bg-zinc-800 border-zinc-700" : "bg-zinc-950 border-zinc-800 opacity-60"}`} data-testid={`pkg-row-${pkg.id}`}>
-                      {/* Icon */}
-                      <div className="w-10 h-10 rounded-xl bg-yellow-500/15 flex items-center justify-center flex-shrink-0">
-                        <span className="text-yellow-400 font-bold text-sm">🪙</span>
-                      </div>
-                      {/* Info */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-white font-bold text-sm">{pkg.name}</span>
-                          {pkg.badge && <span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded-full border border-yellow-500/30">{pkg.badge}</span>}
-                          {!pkg.is_active && <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full">متوقف</span>}
-                        </div>
-                        <div className="flex items-center gap-3 mt-0.5 text-xs text-white/50">
-                          <span className="text-yellow-400 font-semibold">{pkg.coins + (pkg.bonus_coins || 0)} عملة</span>
-                          {pkg.bonus_coins > 0 && <span className="text-green-400">+{pkg.bonus_coins} مجاناً</span>}
-                          <span className="text-white font-bold">{pkg.price_egp} ج.م</span>
-                          {pkg.description && <span className="truncate max-w-[120px]">{pkg.description}</span>}
-                        </div>
-                      </div>
-                      {/* Actions */}
-                      <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-blue-400 hover:bg-blue-500/10"
-                          onClick={() => { setEditingPkg(pkg); setShowNewPkgForm(false); setPkgForm({ name: pkg.name, coins: String(pkg.coins), priceEGP: String(pkg.price_egp), bonusCoins: String(pkg.bonus_coins || 0), sortOrder: String(pkg.sort_order || 0), description: pkg.description || "", badge: pkg.badge || "" }); }}
-                          data-testid={`btn-edit-pkg-${pkg.id}`}>✏️ تعديل</Button>
-                        <Button size="sm" variant="ghost" className={`h-7 px-2 text-xs ${pkg.is_active ? "text-orange-400 hover:bg-orange-500/10" : "text-green-400 hover:bg-green-500/10"}`}
-                          onClick={() => togglePkgActive(pkg)}
-                          data-testid={`btn-toggle-pkg-${pkg.id}`}>{pkg.is_active ? "⏸ إيقاف" : "▶ تفعيل"}</Button>
-                        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-red-400 hover:bg-red-500/10"
-                          onClick={() => deletePkg(pkg.id)}
-                          data-testid={`btn-delete-pkg-${pkg.id}`}>🗑 حذف</Button>
-                      </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                  {packagesData.map((pkg: any) => (
+                    <div key={pkg.id} className="bg-gradient-to-b from-yellow-500/10 to-zinc-800 border border-yellow-500/20 rounded-2xl p-3 text-center" data-testid={`pkg-${pkg.id}`}>
+                      <p className="text-yellow-400 font-bold text-lg">{pkg.coins + (pkg.bonus_coins || 0)}</p>
+                      <p className="text-white/40 text-xs">عملة</p>
+                      {pkg.bonus_coins > 0 && <p className="text-green-400 text-xs">+{pkg.bonus_coins} مجانًا</p>}
+                      <p className="text-white font-bold mt-2">{pkg.price_egp} ج.م</p>
+                      <p className="text-white/30 text-[10px] mt-1">{pkg.name}</p>
                     </div>
                   ))}
                 </div>
@@ -4431,417 +3369,6 @@ function CoinsSection({ logAction }: { logAction: any }) {
         </div>
       )}
 
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// RATINGS SECTION
-// ═══════════════════════════════════════════════════════════════
-function RatingsSection({ logAction }: { logAction: any }) {
-  const { toast } = useToast();
-  const qc = useQueryClient();
-  const [search, setSearch] = useState("");
-  const [filterType, setFilterType] = useState<"all" | "user" | "ad">("all");
-
-  const { data: ratings = [], isLoading } = useQuery<any[]>({
-    queryKey: ["/api/admin/ratings", filterType],
-    queryFn: () => fetch(`/api/admin/ratings?type=${filterType}`, { credentials: "include" }).then(r => r.json()),
-  });
-
-  const deleteRatingMutation = useMutation({
-    mutationFn: (id: number) => fetch(`/api/admin/ratings/${id}`, { method: "DELETE", credentials: "include" }).then(r => r.json()),
-    onSuccess: (_: any, id: number) => {
-      toast({ title: "✅ تم حذف التقييم" });
-      logAction("delete_rating", { id });
-      qc.invalidateQueries({ queryKey: ["/api/admin/ratings"] });
-    },
-  });
-
-  function StarDisplay({ value }: { value: number }) {
-    return (
-      <div className="flex gap-0.5">
-        {[1,2,3,4,5].map(n => (
-          <Star key={n} className={`w-3.5 h-3.5 ${n <= value ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground/20"}`} />
-        ))}
-      </div>
-    );
-  }
-
-  const getName  = (r: any) => r.userName  ?? r.user_name  ?? "";
-  const getType  = (r: any) => r.targetType ?? r.target_type ?? "";
-  const getId    = (r: any) => r.targetId   ?? r.target_id   ?? "";
-  const getDate  = (r: any) => r.createdAt  ?? r.created_at  ?? null;
-
-  const filtered = ratings.filter((r: any) =>
-    !search ||
-    getName(r).toLowerCase().includes(search.toLowerCase()) ||
-    r.review?.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const avgRating = ratings.length > 0
-    ? (ratings.reduce((s: number, r: any) => s + r.rating, 0) / ratings.length).toFixed(1)
-    : "0.0";
-
-  const dist = [5,4,3,2,1].map(star => ({
-    star,
-    count: ratings.filter((r: any) => r.rating === star).length,
-    pct: ratings.length ? Math.round(ratings.filter((r: any) => r.rating === star).length / ratings.length * 100) : 0,
-  }));
-
-  return (
-    <div className="space-y-6" dir="rtl">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="rounded-2xl border-border/50">
-          <CardContent className="p-4 text-center">
-            <Star className="w-6 h-6 mx-auto mb-2 fill-yellow-400 text-yellow-400" />
-            <p className="text-3xl font-black text-yellow-500">{avgRating}</p>
-            <p className="text-xs text-muted-foreground">متوسط التقييم</p>
-          </CardContent>
-        </Card>
-        <Card className="rounded-2xl border-border/50">
-          <CardContent className="p-4 text-center">
-            <MessageSquare className="w-6 h-6 mx-auto mb-2 text-blue-500" />
-            <p className="text-3xl font-black">{ratings.length}</p>
-            <p className="text-xs text-muted-foreground">إجمالي التقييمات</p>
-          </CardContent>
-        </Card>
-        <Card className="rounded-2xl border-border/50">
-          <CardContent className="p-4 text-center">
-            <Users className="w-6 h-6 mx-auto mb-2 text-purple-500" />
-            <p className="text-3xl font-black">{ratings.filter((r: any) => getType(r) === "user").length}</p>
-            <p className="text-xs text-muted-foreground">تقييمات البائعين</p>
-          </CardContent>
-        </Card>
-        <Card className="rounded-2xl border-border/50">
-          <CardContent className="p-4 text-center">
-            <Megaphone className="w-6 h-6 mx-auto mb-2 text-orange-500" />
-            <p className="text-3xl font-black">{ratings.filter((r: any) => getType(r) === "ad").length}</p>
-            <p className="text-xs text-muted-foreground">تقييمات الإعلانات</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {ratings.length > 0 && (
-        <Card className="rounded-2xl border-border/50">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">توزيع التقييمات</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {dist.map(({ star, count, pct }) => (
-                <div key={star} className="flex items-center gap-3">
-                  <div className="flex items-center gap-1 w-12 shrink-0">
-                    <Star className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" />
-                    <span className="text-sm font-bold">{star}</span>
-                  </div>
-                  <div className="flex-1 bg-muted rounded-full h-2.5 overflow-hidden">
-                    <div className="h-full bg-yellow-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                  </div>
-                  <span className="text-xs text-muted-foreground w-16 text-left">{count} ({pct}%)</span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="flex gap-3 flex-wrap items-center">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            placeholder="ابحث في التقييمات..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="pr-9 h-9 rounded-xl"
-            data-testid="input-search-ratings"
-          />
-        </div>
-        <div className="flex gap-2">
-          {(["all","user","ad"] as const).map(type => (
-            <button
-              key={type}
-              onClick={() => setFilterType(type)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
-                filterType === type ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/50"
-              }`}
-              data-testid={`filter-ratings-${type}`}
-            >
-              {type === "all" ? "الكل" : type === "user" ? "تقييمات البائعين" : "تقييمات الإعلانات"}
-            </button>
-          ))}
-        </div>
-        <Badge variant="secondary">{filtered.length} تقييم</Badge>
-      </div>
-
-      {isLoading ? (
-        <div className="space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-16 text-muted-foreground">
-          <Star className="w-12 h-12 mx-auto mb-3 opacity-20" />
-          <p>لا توجد تقييمات</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {filtered.map((r: any) => (
-            <div
-              key={r.id}
-              className="flex items-start gap-4 p-4 bg-card border border-border/60 rounded-2xl hover:shadow-sm transition-all"
-              data-testid={`rating-${r.id}`}
-            >
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/30 to-secondary/30 flex items-center justify-center text-white font-bold text-sm shrink-0">
-                {getName(r)?.[0] || "م"}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <span className="font-semibold text-sm">{getName(r)}</span>
-                  <StarDisplay value={r.rating} />
-                  <Badge variant="outline" className="text-[10px] h-4">
-                    {getType(r) === "user" ? "بائع" : "إعلان"}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {getDate(r) ? (() => { try { return format(new Date(getDate(r)), "d MMM yyyy", { locale: ar }); } catch { return ""; } })() : ""}
-                  </span>
-                </div>
-                {r.review && (
-                  <p className="text-sm text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">{r.review}</p>
-                )}
-                <p className="text-xs text-muted-foreground/60 mt-1">
-                  المستهدف: {getType(r) === "user" ? "مستخدم" : "إعلان"} #{getId(r)}
-                </p>
-              </div>
-              <Button
-                size="sm" variant="ghost"
-                className="text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 h-8 w-8 p-0 shrink-0"
-                onClick={() => deleteRatingMutation.mutate(r.id)}
-                disabled={deleteRatingMutation.isPending}
-                data-testid={`btn-delete-rating-${r.id}`}
-                title="حذف التقييم"
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// ADMINS SECTION
-// ═══════════════════════════════════════════════════════════════
-function AdminsSection() {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const [searchUser, setSearchUser] = useState("");
-  const [selectedUser, setSelectedUser] = useState<any>(null);
-
-  const { data: adminsData, isLoading } = useQuery<any>({
-    queryKey: ["/api/admin/admins"],
-  });
-
-  const { data: allUsers = [] } = useQuery<any[]>({
-    queryKey: ["/api/admin/users", searchUser],
-    queryFn: () => fetch(`/api/admin/users?search=${encodeURIComponent(searchUser)}`, { credentials: "include" }).then(r => r.json()),
-  });
-
-  const addMutation = useMutation({
-    mutationFn: (userId: string) =>
-      fetch("/api/admin/admins/add", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId }) }).then(r => r.json()),
-    onSuccess: () => {
-      toast({ title: "✅ تم منح صلاحية الأدمن" });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/admins"] });
-      setSelectedUser(null);
-      setSearchUser("");
-    },
-    onError: () => toast({ variant: "destructive", title: "خطأ في إضافة الأدمن" }),
-  });
-
-  const removeMutation = useMutation({
-    mutationFn: (userId: string) =>
-      fetch("/api/admin/admins/remove", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId }) }).then(r => r.json()),
-    onSuccess: () => {
-      toast({ title: "✅ تم سحب صلاحية الأدمن" });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/admins"] });
-    },
-    onError: () => toast({ variant: "destructive", title: "خطأ في إزالة الأدمن" }),
-  });
-
-  const extraAdmins: any[] = adminsData?.extra || [];
-  const hardcoded: any[]   = adminsData?.hardcoded || [];
-
-  const filteredUsers = allUsers.filter(u =>
-    !hardcoded.some(h => h.id === u.id) &&
-    !extraAdmins.some(e => e.id === u.id)
-  );
-
-  return (
-    <div className="space-y-6" dir="rtl">
-      <div>
-        <h2 className="text-2xl font-bold flex items-center gap-2">
-          <Shield className="w-6 h-6 text-red-500" />
-          إدارة الأدمن
-        </h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          أضف أو أزل صلاحيات الأدمن لأي مستخدم في المنصة
-        </p>
-      </div>
-
-      {/* Superadmins — hardcoded */}
-      <div className="rounded-2xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 p-5 space-y-3">
-        <div className="flex items-center gap-2 mb-1">
-          <Shield className="w-4 h-4 text-red-500" />
-          <h3 className="font-bold text-red-700 dark:text-red-400">سوبر أدمن (لا يمكن إزالتهم)</h3>
-        </div>
-        {hardcoded.map((h: any) => (
-          <div key={h.id} className="flex items-center gap-3 bg-white dark:bg-black/30 rounded-xl px-4 py-2.5 border border-red-200/50">
-            <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center">
-              <Shield className="w-4 h-4 text-red-500" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-bold text-sm">{h.email}</p>
-              <p className="text-[10px] text-muted-foreground font-mono">{h.id}</p>
-            </div>
-            <span className="text-[10px] bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 font-bold px-2 py-0.5 rounded-full">
-              سوبر أدمن
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {/* Extra admins — dynamic */}
-      <div className="rounded-2xl border bg-card p-5 space-y-3">
-        <div className="flex items-center gap-2">
-          <Users className="w-4 h-4 text-primary" />
-          <h3 className="font-bold">الأدمن المضافون ({extraAdmins.length})</h3>
-        </div>
-        {isLoading ? (
-          <div className="text-sm text-muted-foreground py-4 text-center">جاري التحميل...</div>
-        ) : extraAdmins.length === 0 ? (
-          <div className="text-sm text-muted-foreground py-6 text-center border-2 border-dashed rounded-xl">
-            لا يوجد أدمن مضافون بعد — أضف من القائمة أدناه
-          </div>
-        ) : (
-          extraAdmins.map((u: any) => (
-            <div key={u.id} className="flex items-center gap-3 bg-muted/30 rounded-xl px-4 py-2.5 border">
-              {u.profile_image_url ? (
-                <img src={u.profile_image_url} className="w-9 h-9 rounded-full object-cover" alt="" />
-              ) : (
-                <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Users className="w-4 h-4 text-primary" />
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="font-bold text-sm">{u.first_name} {u.last_name}</p>
-                <p className="text-[10px] text-muted-foreground">{u.email || u.phone || "—"}</p>
-                <p className="text-[10px] text-muted-foreground font-mono">{u.id}</p>
-              </div>
-              <Button
-                size="sm"
-                variant="destructive"
-                className="text-xs h-8 gap-1"
-                onClick={() => removeMutation.mutate(u.id)}
-                disabled={removeMutation.isPending}
-                data-testid={`btn-remove-admin-${u.id}`}
-              >
-                <Trash2 className="w-3 h-3" />
-                إزالة
-              </Button>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Add new admin */}
-      <div className="rounded-2xl border bg-card p-5 space-y-4">
-        <div className="flex items-center gap-2">
-          <Plus className="w-4 h-4 text-green-500" />
-          <h3 className="font-bold">إضافة أدمن جديد</h3>
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-xs font-bold">ابحث عن المستخدم</label>
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="ابحث بالاسم أو الإيميل أو رقم التليفون..."
-              value={searchUser}
-              onChange={e => { setSearchUser(e.target.value); setSelectedUser(null); }}
-              className="w-full rounded-xl border-2 px-3 py-2.5 text-sm outline-none transition-colors bg-background"
-              data-testid="input-admin-search"
-            />
-          </div>
-        </div>
-
-        {/* Search results */}
-        {searchUser.trim().length >= 2 && (
-          <div className="border rounded-xl overflow-hidden divide-y max-h-64 overflow-y-auto">
-            {filteredUsers.length === 0 ? (
-              <p className="text-sm text-muted-foreground p-4 text-center">لا يوجد مستخدمون بهذا الاسم</p>
-            ) : filteredUsers.slice(0, 20).map((u: any) => (
-              <div
-                key={u.id}
-                className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors hover:bg-primary/5 ${selectedUser?.id === u.id ? "bg-primary/10 border-r-2 border-primary" : ""}`}
-                onClick={() => setSelectedUser(u)}
-                data-testid={`user-row-${u.id}`}
-              >
-                {u.profile_image_url ? (
-                  <img src={u.profile_image_url} className="w-8 h-8 rounded-full object-cover" alt="" />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
-                    {(u.first_name?.[0] || "؟")}
-                  </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-sm">{u.first_name} {u.last_name}</p>
-                  <p className="text-[10px] text-muted-foreground">{u.email || u.phone || "—"}</p>
-                </div>
-                <p className="text-[10px] font-mono text-muted-foreground">{u.id}</p>
-                {selectedUser?.id === u.id && (
-                  <Check className="w-4 h-4 text-primary" />
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Selected user preview + confirm */}
-        {selectedUser && (
-          <div className="rounded-xl bg-green-50 dark:bg-green-950/20 border-2 border-green-400/50 p-4 space-y-3">
-            <p className="text-xs font-bold text-green-700 dark:text-green-400">✅ المستخدم المختار:</p>
-            <div className="flex items-center gap-3">
-              {selectedUser.profile_image_url ? (
-                <img src={selectedUser.profile_image_url} className="w-12 h-12 rounded-full object-cover border-2 border-green-400" alt="" />
-              ) : (
-                <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center text-lg font-bold text-green-600">
-                  {selectedUser.first_name?.[0] || "؟"}
-                </div>
-              )}
-              <div>
-                <p className="font-bold">{selectedUser.first_name} {selectedUser.last_name}</p>
-                <p className="text-xs text-muted-foreground">{selectedUser.email || selectedUser.phone || "—"}</p>
-                <p className="text-[10px] font-mono text-muted-foreground">{selectedUser.id}</p>
-              </div>
-            </div>
-            <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-300/50 rounded-lg px-3 py-2 text-xs text-amber-800 dark:text-amber-400">
-              ⚠️ سيحصل هذا المستخدم على <strong>صلاحيات أدمن كاملة</strong> — تأكد من اختيار الشخص الصحيح
-            </div>
-            <Button
-              className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white"
-              onClick={() => addMutation.mutate(selectedUser.id)}
-              disabled={addMutation.isPending}
-              data-testid="btn-confirm-add-admin"
-            >
-              {addMutation.isPending ? (
-                <><RefreshCw className="w-4 h-4 animate-spin" /> جاري الإضافة...</>
-              ) : (
-                <><Shield className="w-4 h-4" /> منح صلاحية الأدمن</>
-              )}
-            </Button>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

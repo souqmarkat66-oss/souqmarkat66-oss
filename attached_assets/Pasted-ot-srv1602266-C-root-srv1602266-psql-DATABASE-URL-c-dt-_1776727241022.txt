@@ -1,0 +1,46 @@
+ot@srv1602266:~# ^C
+root@srv1602266:~# psql $DATABASE_URL -c "\dt"
+
+                 List of relations
+ Schema |         Name         | Type  |   Owner
+--------+----------------------+-------+------------
+ public | ad_campaigns         | table | adsas_user
+ public | ad_link_clicks       | table | adsas_user
+ public | ads                  | table | adsas_user
+ public | ai_usage             | table | adsas_user
+ public | boost_orders         | table | adsas_user
+ public | channels             | table | adsas_user
+ public | chat_messages        | table | adsas_user
+ public | coin_packages        | table | adsas_user
+ public | coin_recharge_codes  | table | adsas_user
+ public | coin_transactions    | table | adsas_user
+ public | coin_wallets         | table | adsas_user
+ public | comments             | table | adsas_user
+ public | consultations        | table | adsas_user
+ public | conversations        | table | adsas_user
+ public | coupons              | table | adsas_user
+ public | direct_messages      | table | adsas_user
+ public | favorites            | table | adsas_user
+ public | follows              | table | adsas_user
+ public | likes                | table | adsas_user
+ public | live_streams         | table | adsas_user
+ public | messages             | table | adsas_user
+ public | notifications        | table | adsas_user
+ public | offers               | table | adsas_user
+ public | payment_requests     | table | adsas_user
+ public | platform_settings    | table | adsas_user
+ public | ratings              | table | adsas_user
+ public | reels                | table | adsas_user
+ public | reports              | table | adsas_user
+ public | revenue_transactions | table | adsas_user
+ public | sessions             | table | adsas_user
+ public | smart_menus          | table | adsas_user
+ public | stories              | table | adsas_user
+ public | story_views          | table | adsas_user
+ public | uploaded_files       | table | adsas_user
+ public | user_follows         | table | adsas_user
+ public | users                | table | adsas_user
+ public | wallet_top_up_orders | table | adsas_user
+(37 rows)
+
+root@srv1602266:~#

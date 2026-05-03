@@ -1,0 +1,51 @@
+└────┴───────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
+DONE - Site Updated!
+root@srv1602266:~# ^C
+root@srv1602266:~# pm2 logs ads-as --lines 20 --nostream
+
+[TAILING] Tailing last 20 lines for [ads-as] process (change the value with --lines option)
+/root/.pm2/logs/ads-as-error.log last 20 lines:
+0|ads-as   |     at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+0|ads-as   | Migration warning: relation "boost_orders" does not exist
+0|ads-as   | Mon, 20 Apr 2026 14:05:36 GMT express-session deprecated req.secret; provide secret option at node:internal/process/task_queues:95:5
+0|ads-as   | TypeError: "clientId" must be a non-empty string
+0|ads-as   |     at CodedTypeError (file:///root/node_modules/openid-client/build/index.js:89:17)
+0|ads-as   |     at new Configuration (file:///root/node_modules/openid-client/build/index.js:463:19)
+0|ads-as   |     at Object.discovery (file:///root/node_modules/openid-client/build/index.js:244:22)
+0|ads-as   |     at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+0|ads-as   |     at async yW.maxAge (/root/dist/index.cjs:79:4475)
+0|ads-as   |     at async d0 (/root/dist/index.cjs:79:5293)
+0|ads-as   |     at async q4 (/root/dist/index.cjs:118:161)
+0|ads-as   |     at async /root/dist/index.cjs:1320:509 {
+0|ads-as   |   code: 'ERR_INVALID_ARG_TYPE',
+0|ads-as   |   [cause]: undefined
+0|ads-as   | }
+0|ads-as   | Migration warning: relation "boost_orders" does not exist
+0|ads-as   | Migration warning: must be owner of table boost_orders
+0|ads-as   | Migration warning: must be owner of table boost_orders
+0|ads-as   | Migration warning: relation "payment_notifications" does not exist
+0|ads-as   | Migration warning: relation "payment_notifications" does not exist
+
+/root/.pm2/logs/ads-as-out.log last 20 lines:
+0|ads-as   | 10:09:33 PM [express] POST /api/auth/forgot-password 200 in 2ms :: {"message":"not_found","userId":null,"notFound":true}
+0|ads-as   | 10:09:46 PM [express] POST /api/auth/forgot-password 200 in 2ms :: {"message":"ok","userId":"63e504aa-da74-4272-9b86-b840f9581d38","firstName":"احمد ","resetToken":"NjNlNTA0YWEtZGE3NC00MjcyLTliODYtYjg0MGY5NTgxZDM4fDE3NzY3MjM1ODYwMzl8MTU3OTdlNjYxM2M0MTIxYWJmZWU2ZTMwMWNlNDU4Nzc5ZGMzYWZkZmFhZWQ1ZjBlOTkyNzQyNDRjZDExMTA4YQ"}
+0|ads-as   | 10:09:50 PM [express] GET /api/streams 304 in 2ms :: []
+0|ads-as   | [SET-PW] userId=63e504aa-da74-4272-9b86-b840f9581d38 tokenOk=true hasToken=true
+0|ads-as   | [SET-PW] DB update rowCount=1 userId=63e504aa-da74-4272-9b86-b840f9581d38
+0|ads-as   | 10:10:10 PM [express] POST /api/auth/set-password 200 in 94ms :: {"success":true}
+0|ads-as   | 10:10:10 PM [express] GET /api/auth/user 401 in 1ms :: {"message":"Unauthorized"}
+0|ads-as   | [SET-PW] userId=63e504aa-da74-4272-9b86-b840f9581d38 tokenOk=true hasToken=true
+0|ads-as   | [SET-PW] DB update rowCount=1 userId=63e504aa-da74-4272-9b86-b840f9581d38
+0|ads-as   | 10:10:13 PM [express] POST /api/auth/set-password 200 in 76ms :: {"success":true}
+0|ads-as   | 10:10:14 PM [express] GET /api/auth/user 401 in 1ms :: {"message":"Unauthorized"}
+0|ads-as   | [SET-PW] userId=63e504aa-da74-4272-9b86-b840f9581d38 tokenOk=true hasToken=true
+0|ads-as   | [SET-PW] DB update rowCount=1 userId=63e504aa-da74-4272-9b86-b840f9581d38
+0|ads-as   | 10:10:15 PM [express] POST /api/auth/set-password 200 in 74ms :: {"success":true}
+0|ads-as   | 10:10:15 PM [express] GET /api/auth/user 401 in 1ms :: {"message":"Unauthorized"}
+0|ads-as   | 10:10:20 PM [express] GET /api/streams 304 in 3ms :: []
+0|ads-as   | 10:10:50 PM [express] GET /api/streams 304 in 9ms :: []
+0|ads-as   | 10:11:21 PM [express] GET /api/streams 304 in 8ms :: []
+0|ads-as   | 10:11:23 PM [express] GET /api/streams 304 in 2ms :: []
+0|ads-as   | 10:11:23 PM [express] GET /api/stories 304 in 2ms :: []
+
+root@srv1602266:~#

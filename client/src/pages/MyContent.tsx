@@ -19,7 +19,7 @@ import { EditAdDialog } from "@/components/EditAdDialog";
 import { EditReelDialog } from "@/components/EditReelDialog";
 
 const BOOST_PAYMENTS = [
-  { label: "فودافون كاش", number: "01098559311", color: "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900 text-red-700 dark:text-red-400", emoji: "📱" },
+  { label: "فودافون كاش", number: "01098553911", color: "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900 text-red-700 dark:text-red-400", emoji: "📱" },
   { label: "اتصالات e& كاش", number: "01126665741", color: "bg-orange-50 dark:bg-orange-950/20 border-orange-200 dark:border-orange-900 text-orange-700 dark:text-orange-400", emoji: "📲" },
   { label: "InstaPay", number: "01285558567", color: "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900 text-blue-700 dark:text-blue-400", emoji: "💳" },
 ];
@@ -64,7 +64,7 @@ function AuthenticatedContent({ user }: { user: any }) {
   const [renewDialog, setRenewDialog] = useState<{ ad: any } | null>(null);
   const [selectedDays, setSelectedDays] = useState<number>(30);
   const [renewLoading, setRenewLoading] = useState(false);
-  const [renewResult, setRenewResult] = useState<{ days: number; amount: number; success: boolean } | null>(null);
+  const [renewResult, setRenewResult] = useState<{ orderNumber: string; days: number; amount: number } | null>(null);
   const [copiedNum, setCopiedNum] = useState<string | null>(null);
 
   const { data: renewalSettings } = useQuery<{ options: { days: number; price: number; label: string }[] }>({
@@ -84,27 +84,18 @@ function AuthenticatedContent({ user }: { user: any }) {
     if (!option) return;
     setRenewLoading(true);
     try {
-      const res = await fetch(`/api/ads/${renewDialog.ad.id}/renew-wallet`, {
+      const res = await fetch(`/api/ads/${renewDialog.ad.id}/renew-order`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ durationDays: selectedDays }),
+        body: JSON.stringify({ durationDays: selectedDays, amount: option.price }),
       });
       const data = await res.json();
       if (res.ok) {
-        setRenewResult({ days: selectedDays, amount: option.price, success: true });
-        qc.invalidateQueries({ queryKey: ["/api/ads/mine"] });
-        toast({ title: "✅ تم تجديد الإعلان بنجاح", description: `تم خصم ${option.price} ج.م من محفظتك` });
-      } else if (res.status === 402 && data.requiresWalletTopup) {
-        toast({
-          variant: "destructive",
-          title: "رصيد غير كافٍ",
-          description: data.message,
-        });
-        setRenewDialog(null);
-        window.location.href = "/wallet";
+        setRenewResult({ orderNumber: data.orderNumber, days: selectedDays, amount: option.price });
+        toast({ title: "✅ تم إنشاء طلب التجديد", description: "ارفع الإيصال للأدمن لتأكيد الدفع" });
       } else {
-        toast({ variant: "destructive", title: data.message || "فشل التجديد" });
+        toast({ variant: "destructive", title: data.message || "فشل إنشاء الطلب" });
       }
     } catch {
       toast({ variant: "destructive", title: "خطأ في الاتصال" });
@@ -191,16 +182,7 @@ function AuthenticatedContent({ user }: { user: any }) {
         body: JSON.stringify({}),
       });
       const data = await res.json();
-      if (res.status === 402 && data.requiresWalletTopup) {
-        // Insufficient wallet balance — redirect to wallet top-up
-        toast({
-          variant: "destructive",
-          title: "رصيد غير كافٍ",
-          description: data.message,
-        });
-        window.location.href = "/wallet";
-        return;
-      } else if (res.status === 402) {
+      if (res.status === 402 && data.requiresPayment) {
         setBoostPayRef("");
         setBoostPayDialog({ adId, msg: data.message });
       } else if (res.status === 429) {
@@ -269,7 +251,7 @@ function AuthenticatedContent({ user }: { user: any }) {
   // renewAdMut kept for backward compat (admin only)
   const renewAdMut = useMutation({
     mutationFn: (id: number) => apiRequest("POST", `/api/ads/${id}/renew`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/ads/mine"] }); toast({ title: "✅ تم تجديد الإعلان 7 أيام إضافية!" }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/ads/mine"] }); toast({ title: "✅ تم تجديد الإعلان 30 يوماً!" }); },
   });
 
   return (
@@ -389,22 +371,6 @@ function AuthenticatedContent({ user }: { user: any }) {
                       <Badge variant={ad.status === "active" ? "default" : "secondary"} className="text-[10px] h-5">
                         {ad.status === "active" ? "✅ نشط" : ad.status}
                       </Badge>
-                      {ad.expires_at && (() => {
-                        const exp = new Date(ad.expires_at);
-                        const now = new Date();
-                        const daysLeft = Math.ceil((exp.getTime() - now.getTime()) / 86400000);
-                        const isExpired = daysLeft <= 0;
-                        const isSoon = daysLeft > 0 && daysLeft <= 2;
-                        return (
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${
-                            isExpired ? "bg-red-50 dark:bg-red-900/20 border-red-200 text-red-600" :
-                            isSoon ? "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 text-yellow-700" :
-                            "bg-green-50 dark:bg-green-900/20 border-green-200 text-green-600"
-                          }`}>
-                            {isExpired ? "⛔ انتهى" : `⏱ ${daysLeft} يوم`}
-                          </span>
-                        );
-                      })()}
                       <button
                         onClick={() => handleRenewClick(ad)}
                         className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-600 hover:bg-blue-100 transition-colors"
@@ -873,33 +839,46 @@ function AuthenticatedContent({ user }: { user: any }) {
         <DialogContent dir="rtl" className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-lg font-bold flex items-center gap-2 text-green-600">
-              ✅ تم تجديد الإعلان بنجاح
+              ✅ تم إنشاء طلب التجديد
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <div className="bg-green-50 dark:bg-green-950/20 rounded-xl p-4 border border-green-200 dark:border-green-800 space-y-3 text-sm">
               <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">رقم الطلب</span>
+                <button
+                  className="font-mono font-black text-green-700 dark:text-green-400 text-sm flex items-center gap-1 hover:opacity-70"
+                  onClick={() => renewResult && copyToClipboard(renewResult.orderNumber)}
+                  data-testid="text-renew-order-number"
+                >
+                  {copiedNum === renewResult?.orderNumber
+                    ? <><Check className="w-3 h-3" /> نُسخ!</>
+                    : <><Copy className="w-3 h-3" />{renewResult?.orderNumber}</>
+                  }
+                </button>
+              </div>
+              <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">مدة التجديد</span>
                 <span className="font-bold">{renewResult?.days} يوماً</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">المبلغ المخصوم من محفظتك</span>
-                <span className="font-bold text-green-700 dark:text-green-400">{renewResult?.amount} ج.م</span>
+                <span className="text-muted-foreground">المبلغ المدفوع</span>
+                <span className="font-bold text-blue-600">{renewResult?.amount} ج.م</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">الحالة</span>
-                <span className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-0.5 rounded-full text-xs font-bold">مُجدَّد فوراً ✓</span>
+                <span className="bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 px-2 py-0.5 rounded-full text-xs font-bold">قيد المراجعة</span>
               </div>
             </div>
             <p className="text-xs text-muted-foreground text-center bg-blue-50 dark:bg-blue-950/20 rounded-lg p-2 border border-blue-200 dark:border-blue-800">
-              🎉 تم تجديد إعلانك مباشرةً من رصيد محفظتك — لا حاجة لانتظار موافقة
+              📬 أُرسل طلبك للإدارة — ستصلك رسالة تأكيد فور مراجعة الدفع
             </p>
             <button
               onClick={() => { setRenewResult(null); setRenewDialog(null); }}
               className="w-full py-2.5 rounded-xl bg-green-500 hover:bg-green-600 text-white font-bold text-sm transition-all"
               data-testid="btn-close-renew-receipt"
             >
-              ممتاز، شكراً 🙏
+              حسناً، شكراً 🙏
             </button>
           </div>
         </DialogContent>

@@ -1,0 +1,120 @@
+THIS ACTION WILL CAUSE DATA LOSS AND CANNOT BE REVERTED
+
+Do you still want to push changes?
+❯ No, abort
+❯ No, abort
+  Yes, I want to remove 2 tables, remove 15 columns,
+^C
+SCHEMA DONE!
+root@srv1602266:~# cat > /etc/nginx/sites-available/ads-as << 'NGINXEOF'
+# Rate limiting zone
+limit_req_zone $binary_remote_addr zone=api:10m rate=30r/m;
+limit_req_zone $binary_remote_addr zone=general:10m rate=100r/m;
+server {
+    listen 443 ssl;
+    server_name ads-as.com www.ads-as.com;
+    ssl_certificate /etc/letsencrypt/live/ads-as.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/ads-as.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml image/svg+xml;
+    # Static files caching
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|webp|mp4|webm)$ {
+        proxy_pass http://localhost:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+    }
+    # API rate limiting
+    location /api/auth/ {
+        limit_req zone=api burst=10 nodelay;
+        proxy_pass http://localhost:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    # Main proxy
+    location / {
+        limit_req zone=general burst=50 nodelay;
+        proxy_pass http://localhost:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+server {
+    listen 80;
+    server_name ads-as.com www.ads-as.com 72.61.177.222;
+    return 301 https://ads-as.com$request_uri;
+}
+NGINXEOF
+nginx -t && systemctl reload nginx && echo "NGINX UPDATED!"
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+NGINX UPDATED!
+root@srv1602266:~# ^C
+root@srv1602266:~# ^C
+root@srv1602266:~# psql $DATABASE_URL << 'SQLEOF'
+CREATE TABLE IF NOT EXISTS wallet_transactions (
+  id SERIAL PRIMARY KEY,
+  user_id VARCHAR NOT NULL,
+  type VARCHAR NOT NULL,
+  amount_egp NUMERIC(10,4) NOT NULL DEFAULT 0,
+  description TEXT,
+  ref_id INTEGER,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS ad_impressions (
+  id SERIAL PRIMARY KEY,
+  campaign_id INTEGER,
+  channel_id INTEGER,
+  user_id VARCHAR,
+  ip_address VARCHAR(45),
+  user_agent TEXT,
+  event_type VARCHAR(20) DEFAULT 'impression',
+  is_fraud BOOLEAN DEFAULT false,
+  fraud_reason TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS renewal_orders (
+  id SERIAL PRIMARY KEY,
+  order_number VARCHAR UNIQUE,
+  ad_id INTEGER,
+  user_id VARCHAR NOT NULL,
+  duration_days INTEGER DEFAULT 30,
+  amount NUMERIC(10,2) DEFAULT 0,
+  status VARCHAR(20) DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT NOW()
+);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(50);
+SELECT 'TABLES CREATED!' as result;
+SQLEOF
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+ALTER TABLE
+     result
+-----------------
+ TABLES CREATED!
+(1 row)
+
+root@srv1602266:~#

@@ -1,0 +1,95 @@
+Download PuTTY: latest release (0.83)
+Home | FAQ | Feedback | Licence | Updates | Mirrors | Keys | Links | Team
+Download: Stable · Snapshot | Docs | Privacy | Changes | Wishlist
+
+This page contains download links for the latest released version of PuTTY. Currently this is 0.83, released on 2025-02-08.
+
+When new releases come out, this page will update to contain the latest, so this is a good page to bookmark or link to. Alternatively, here is a permanent link to the 0.83 release.
+
+Release versions of PuTTY are versions we think are reasonably likely to work well. However, they are often not the most up-to-date version of the code available. If you have a problem with this release, then it might be worth trying out the development snapshots, to see if the problem has already been fixed in those versions.
+
+Package files
+You probably want one of these. They include versions of all the PuTTY utilities (except the new and slightly experimental Windows pterm).
+
+(You probably want the 64-bit x86 version. The 32-bit version is only for backward compatibility with very old PCs / versions of Windows.)
+
+We also publish the latest PuTTY installers for all Windows architectures as a free-of-charge download at the Microsoft Store; they usually take a few days to appear there after we release them.
+
+MSI (‘Windows Installer’)
+64-bit x86: putty-64bit-0.83-installer.msi (signature)
+64-bit Arm: putty-arm64-0.83-installer.msi (signature)
+32-bit x86: putty-0.83-installer.msi (signature)
+Unix source archive
+.tar.gz: putty-0.83.tar.gz (signature)
+Alternative binary files
+The installer packages above will provide versions of all of these (except PuTTYtel and pterm), but you can download standalone binaries one by one if you prefer.
+
+(You probably want the 64-bit x86 version. The 32-bit version is only for backward compatibility with very old PCs / versions of Windows.)
+
+putty.exe (the SSH and Telnet client itself)
+64-bit x86: putty.exe (signature)
+64-bit Arm: putty.exe (signature)
+32-bit x86: putty.exe (signature)
+pscp.exe (an SCP client, i.e. command-line secure file copy)
+64-bit x86: pscp.exe (signature)
+64-bit Arm: pscp.exe (signature)
+32-bit x86: pscp.exe (signature)
+psftp.exe (an SFTP client, i.e. general file transfer sessions much like FTP)
+64-bit x86: psftp.exe (signature)
+64-bit Arm: psftp.exe (signature)
+32-bit x86: psftp.exe (signature)
+puttytel.exe (a Telnet-only client)
+64-bit x86: puttytel.exe (signature)
+64-bit Arm: puttytel.exe (signature)
+32-bit x86: puttytel.exe (signature)
+plink.exe (a command-line interface to the PuTTY back ends)
+64-bit x86: plink.exe (signature)
+64-bit Arm: plink.exe (signature)
+32-bit x86: plink.exe (signature)
+pageant.exe (an SSH authentication agent for PuTTY, PSCP, PSFTP, and Plink)
+64-bit x86: pageant.exe (signature)
+64-bit Arm: pageant.exe (signature)
+32-bit x86: pageant.exe (signature)
+puttygen.exe (a RSA and DSA key generation utility)
+64-bit x86: puttygen.exe (signature)
+64-bit Arm: puttygen.exe (signature)
+32-bit x86: puttygen.exe (signature)
+pterm.exe (a PuTTY-style wrapper for Windows command prompts)
+64-bit x86: pterm.exe (signature)
+64-bit Arm: pterm.exe (signature)
+32-bit x86: pterm.exe (signature)
+putty.zip (a .ZIP archive of all the above except PuTTYtel and pterm)
+64-bit x86: putty.zip (signature)
+64-bit Arm: putty.zip (signature)
+32-bit x86: putty.zip (signature)
+Documentation
+Browse the documentation on the web
+HTML: Contents page
+Downloadable documentation
+Zipped HTML: puttydoc.zip
+Plain text: puttydoc.txt
+Windows HTML Help: putty.chm
+Source code
+Unix source archive
+.tar.gz: putty-0.83.tar.gz (signature)
+Windows source archive
+.zip: putty-src.zip (signature)
+git repository
+Clone: https://git.tartarus.org/simon/putty.git
+gitweb: main | 0.83 release tag
+Downloads for 32-bit Windows on Arm
+Compiled executable files for 32-bit Windows on Arm. We've had reports that these can be useful on Windows IoT Core.
+
+32-bit Windows on Arm installer
+32-bit Arm: putty-arm32-0.83-installer.msi (signature)
+32-bit Windows on Arm individual executables
+32-bit Arm: putty.exe (signature)
+32-bit Arm: pscp.exe (signature)
+32-bit Arm: psftp.exe (signature)
+32-bit Arm: puttytel.exe (signature)
+32-bit Arm: plink.exe (signature)
+32-bit Arm: pageant.exe (signature)
+32-bit Arm: puttygen.exe (signature)
+32-bit Arm: pterm.exe (signature)
+Zip file of all 32-bit Windows on Arm executables
+32-bit Arm: putty.zip (signature)

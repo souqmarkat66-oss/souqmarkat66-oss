@@ -10,9 +10,6 @@ import fs from "fs";
 const app = express();
 const httpServer = createServer(app);
 
-// Trust Replit's reverse proxy so cookies + req.ip work correctly in production
-app.set("trust proxy", 1);
-
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
@@ -28,32 +25,6 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
-
-// ── Security headers ───────────────────────────────────────────
-app.use((_req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  next();
-});
-
-// ── Simple API rate limiter (max 120 req/min per IP) ──────────
-const rateMap = new Map<string, { count: number; reset: number }>();
-app.use('/api', (req, res, next) => {
-  const ip = req.ip || 'unknown';
-  const now = Date.now();
-  const entry = rateMap.get(ip);
-  if (!entry || now > entry.reset) {
-    rateMap.set(ip, { count: 1, reset: now + 60_000 });
-    return next();
-  }
-  entry.count++;
-  if (entry.count > 120) {
-    return res.status(429).json({ message: 'طلبات كثيرة — حاول بعد دقيقة' });
-  }
-  next();
-});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -92,33 +63,29 @@ app.use((req, res, next) => {
   next();
 });
 
-async function m(stmt: ReturnType<typeof sql>) {
-  try { await db.execute(stmt); } catch(e: any) { console.warn('Migration warning:', e.message); }
-}
-
 async function runMigrations() {
   try {
-    await m(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS order_number TEXT UNIQUE`);
-    await m(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS ad_id INTEGER`);
-    await m(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_lat REAL`);
-    await m(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_lng REAL`);
-    await m(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_radius_km REAL`);
-    await m(sql`ALTER TABLE channels ADD COLUMN IF NOT EXISTS publisher_code TEXT UNIQUE`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS order_number TEXT UNIQUE`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS ad_id INTEGER`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_lat REAL`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_lng REAL`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_radius_km REAL`);
+    await db.execute(sql`ALTER TABLE channels ADD COLUMN IF NOT EXISTS publisher_code TEXT UNIQUE`);
     // Auto-generate publisher codes for channels that don't have one
     const channels = await db.execute(sql`SELECT id FROM channels WHERE publisher_code IS NULL`);
     for (const ch of channels.rows as any[]) {
       const code = `PUB-${ch.id}-${Math.random().toString(36).substring(2,6).toUpperCase()}`;
-      await m(sql`UPDATE channels SET publisher_code = ${code} WHERE id = ${ch.id} AND publisher_code IS NULL`);
+      await db.execute(sql`UPDATE channels SET publisher_code = ${code} WHERE id = ${ch.id} AND publisher_code IS NULL`);
     }
     // New tables
-    await m(sql`CREATE TABLE IF NOT EXISTS favorites (
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS favorites (
       id SERIAL PRIMARY KEY,
       user_id VARCHAR NOT NULL,
       ad_id INTEGER NOT NULL,
       created_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(user_id, ad_id)
     )`);
-    await m(sql`CREATE TABLE IF NOT EXISTS ratings (
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS ratings (
       id SERIAL PRIMARY KEY,
       user_id VARCHAR NOT NULL,
       user_name TEXT NOT NULL,
@@ -129,7 +96,7 @@ async function runMigrations() {
       created_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(user_id, target_type, target_id)
     )`);
-    await m(sql`CREATE TABLE IF NOT EXISTS offers (
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS offers (
       id SERIAL PRIMARY KEY,
       from_user_id VARCHAR NOT NULL,
       from_user_name TEXT NOT NULL,
@@ -139,37 +106,26 @@ async function runMigrations() {
       status TEXT DEFAULT 'pending',
       created_at TIMESTAMP DEFAULT NOW()
     )`);
-    await m(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP`);
-    await m(sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS voice_url TEXT`);
-    await m(sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS sender_user_id VARCHAR`);
-    await m(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_voice BOOLEAN DEFAULT FALSE`);
-    await m(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS voice_url TEXT`);
-    await m(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS image_url TEXT`);
-    await m(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_payment_proof BOOLEAN DEFAULT FALSE`);
-    await m(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS governorate TEXT`);
-    await m(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_interests TEXT`);
-    await m(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS interests TEXT`);
-    await m(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_ages TEXT`);
-    await m(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`);
-    await m(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(20)`);
-    // Create boost_orders table FIRST before adding columns to it
-    await m(sql`CREATE TABLE IF NOT EXISTS boost_orders (
-      id SERIAL PRIMARY KEY,
-      order_number VARCHAR NOT NULL UNIQUE,
-      ad_id INTEGER NOT NULL,
-      user_id VARCHAR NOT NULL,
-      amount NUMERIC(10,2) NOT NULL DEFAULT 0,
-      payment_ref VARCHAR NOT NULL,
-      status VARCHAR NOT NULL DEFAULT 'pending',
-      created_at TIMESTAMP DEFAULT NOW()
-    )`);
-    await m(sql`ALTER TABLE boost_orders ADD COLUMN IF NOT EXISTS payment_screenshot_url TEXT`);
-    await m(sql`ALTER TABLE boost_orders ADD COLUMN IF NOT EXISTS payment_method TEXT`);
-    await m(sql`ALTER TABLE payment_notifications ADD COLUMN IF NOT EXISTS screenshot_url TEXT`);
-    await m(sql`ALTER TABLE payment_notifications ADD COLUMN IF NOT EXISTS payer_user_id VARCHAR(100)`);
-    await m(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS is_boosted BOOLEAN DEFAULT FALSE`);
-    await m(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS boosted_until TIMESTAMP`);
-    await m(sql`CREATE TABLE IF NOT EXISTS renewal_orders (
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS voice_url TEXT`);
+    await db.execute(sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS sender_user_id VARCHAR`);
+    await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_voice BOOLEAN DEFAULT FALSE`);
+    await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS voice_url TEXT`);
+    await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS image_url TEXT`);
+    await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_payment_proof BOOLEAN DEFAULT FALSE`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS governorate TEXT`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_interests TEXT`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS interests TEXT`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_ages TEXT`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(20)`);
+    await db.execute(sql`ALTER TABLE boost_orders ADD COLUMN IF NOT EXISTS payment_screenshot_url TEXT`);
+    await db.execute(sql`ALTER TABLE boost_orders ADD COLUMN IF NOT EXISTS payment_method TEXT`);
+    await db.execute(sql`ALTER TABLE payment_notifications ADD COLUMN IF NOT EXISTS screenshot_url TEXT`);
+    await db.execute(sql`ALTER TABLE payment_notifications ADD COLUMN IF NOT EXISTS payer_user_id VARCHAR(100)`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS is_boosted BOOLEAN DEFAULT FALSE`);
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS boosted_until TIMESTAMP`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS renewal_orders (
       id SERIAL PRIMARY KEY,
       order_number VARCHAR NOT NULL UNIQUE,
       ad_id INTEGER NOT NULL,
@@ -179,12 +135,12 @@ async function runMigrations() {
       status VARCHAR NOT NULL DEFAULT 'pending',
       created_at TIMESTAMP DEFAULT NOW()
     )`);
-    await m(sql`INSERT INTO platform_settings (key, value) VALUES
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES
       ('renewal_price_30', '50'),
       ('renewal_price_60', '90'),
       ('renewal_price_90', '130')
       ON CONFLICT (key) DO NOTHING`);
-    await m(sql`CREATE TABLE IF NOT EXISTS referrals (
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS referrals (
       id SERIAL PRIMARY KEY,
       referrer_id VARCHAR NOT NULL,
       referred_id VARCHAR NOT NULL,
@@ -192,33 +148,30 @@ async function runMigrations() {
       status VARCHAR DEFAULT 'pending',
       created_at TIMESTAMP DEFAULT NOW()
     )`);
-    await m(sql`INSERT INTO platform_settings (key, value) VALUES
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES
       ('ai_price_image', '10'),
       ('ai_price_video', '50'),
       ('ai_price_animation', '80'),
       ('ai_price_content', '5'),
       ('ai_price_post', '8'),
-      ('ai_referral_bonus_egp', '5'),
-      ('boost_share_reward_egp', '50')
+      ('ai_referral_bonus_egp', '5')
       ON CONFLICT (key) DO NOTHING`);
-    await m(sql`
+    await db.execute(sql`
       UPDATE users SET referral_code = UPPER(SUBSTRING(MD5(id::text) FROM 1 FOR 8))
       WHERE referral_code IS NULL
     `);
-    await m(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS whatsapp_clicks INTEGER DEFAULT 0`);
-    await m(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS screenshot_url TEXT`);
-    await m(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS service_type TEXT`);
-    await m(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS national_id TEXT`);
-    await m(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS card_number TEXT`);
-    await m(sql`ALTER TABLE live_streams ADD COLUMN IF NOT EXISTS recording_url TEXT`);
-    await m(sql`ALTER TABLE live_streams ADD COLUMN IF NOT EXISTS stream_key TEXT UNIQUE`);
-    await m(sql`ALTER TABLE live_streams ADD COLUMN IF NOT EXISTS stream_mode TEXT DEFAULT 'webrtc'`);
-    await m(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthday DATE`);
-    await m(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title VARCHAR(100)`);
-    await m(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS company VARCHAR(100)`);
-    await m(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS city VARCHAR(100)`);
-    await m(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS relationship_status VARCHAR(30)`);
-    await m(sql`CREATE TABLE IF NOT EXISTS push_subscriptions (
+    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS whatsapp_clicks INTEGER DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS screenshot_url TEXT`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS service_type TEXT`);
+    await db.execute(sql`ALTER TABLE live_streams ADD COLUMN IF NOT EXISTS recording_url TEXT`);
+    await db.execute(sql`ALTER TABLE live_streams ADD COLUMN IF NOT EXISTS stream_key TEXT UNIQUE`);
+    await db.execute(sql`ALTER TABLE live_streams ADD COLUMN IF NOT EXISTS stream_mode TEXT DEFAULT 'webrtc'`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthday DATE`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title VARCHAR(100)`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS company VARCHAR(100)`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS city VARCHAR(100)`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS relationship_status VARCHAR(30)`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS push_subscriptions (
       id SERIAL PRIMARY KEY,
       user_id VARCHAR NOT NULL,
       endpoint TEXT NOT NULL UNIQUE,
@@ -226,20 +179,28 @@ async function runMigrations() {
       auth TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
     )`);
-    // Default platform settings
-    await m(sql`INSERT INTO platform_settings (key, value) VALUES ('boost_duration_days', '30') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS boost_orders (
+      id SERIAL PRIMARY KEY,
+      order_number VARCHAR NOT NULL UNIQUE,
+      ad_id INTEGER NOT NULL,
+      user_id VARCHAR NOT NULL,
+      amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+      payment_ref VARCHAR NOT NULL,
+      status VARCHAR NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
     // Generate VAPID keys for push notifications if not present
     const vapidCheck = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'vapid_public_key' LIMIT 1`);
     if (vapidCheck.rows.length === 0) {
       const wpModule = await import('web-push');
       const webpush = (wpModule as any).default || wpModule;
       const vapidKeys = webpush.generateVAPIDKeys();
-      await m(sql`INSERT INTO platform_settings (key, value) VALUES ('vapid_public_key', ${vapidKeys.publicKey}) ON CONFLICT (key) DO NOTHING`);
-      await m(sql`INSERT INTO platform_settings (key, value) VALUES ('vapid_private_key', ${vapidKeys.privateKey}) ON CONFLICT (key) DO NOTHING`);
+      await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('vapid_public_key', ${vapidKeys.publicKey}) ON CONFLICT (key) DO NOTHING`);
+      await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('vapid_private_key', ${vapidKeys.privateKey}) ON CONFLICT (key) DO NOTHING`);
       console.log('VAPID keys generated');
     }
     // Backfill users.interests from their own ads' target_interests
-    await m(sql`
+    await db.execute(sql`
       UPDATE users u
       SET interests = (
         SELECT STRING_AGG(DISTINCT trim(elem), ',')
@@ -258,7 +219,7 @@ async function runMigrations() {
         )
     `);
     // Backfill users.governorate from their most recent ad's target_region
-    await m(sql`
+    await db.execute(sql`
       UPDATE users u
       SET governorate = (
         SELECT SPLIT_PART(a.target_region, ',', 1)
@@ -277,32 +238,6 @@ async function runMigrations() {
             AND a2.target_region <> ''
         )
     `);
-    // Wallet top-up orders table
-    await m(sql`CREATE TABLE IF NOT EXISTS wallet_top_up_orders (
-      id SERIAL PRIMARY KEY,
-      user_id VARCHAR NOT NULL REFERENCES users(id),
-      amount_egp REAL NOT NULL,
-      payment_method TEXT NOT NULL,
-      payment_ref TEXT,
-      screenshot_url TEXT,
-      status TEXT NOT NULL DEFAULT 'pending',
-      admin_note TEXT,
-      order_number TEXT,
-      reviewed_at TIMESTAMP,
-      reviewed_by VARCHAR,
-      created_at TIMESTAMP DEFAULT NOW()
-    )`);
-    await m(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_egp REAL DEFAULT 0`);
-    // Wallet transactions ledger (all wallet mutations: top-up credits + service debits)
-    await m(sql`CREATE TABLE IF NOT EXISTS wallet_transactions (
-      id SERIAL PRIMARY KEY,
-      user_id VARCHAR NOT NULL REFERENCES users(id),
-      type TEXT NOT NULL,
-      amount_egp REAL NOT NULL,
-      description TEXT,
-      ref_id TEXT,
-      created_at TIMESTAMP DEFAULT NOW()
-    )`);
     console.log("Migrations applied successfully");
   } catch (e: any) {
     console.error("Migration warning:", e.message);
@@ -322,10 +257,10 @@ async function runMigrations() {
     }
   }));
 
-  // Start RTMP server — port availability checked inside startRtmpServer
+  // Start RTMP server (RTMP on 1935, used when deployed on ads-as.com)
   try {
     const { startRtmpServer } = await import("./rtmp");
-    await startRtmpServer();
+    startRtmpServer();
   } catch (e: any) {
     console.warn("[RTMP] Could not start RTMP server:", e.message);
   }

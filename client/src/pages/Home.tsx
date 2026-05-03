@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "wouter";
-import { ArrowRight, Sparkles, Radio, Users, Megaphone, TrendingUp, BarChart2, Search, Play, Eye, Flame } from "lucide-react";
+import { ArrowRight, Sparkles, Radio, Users, Megaphone, TrendingUp, BarChart2, Search } from "lucide-react";
 import { TrendingAdsStrip, TrendingChannelsStrip } from "@/components/TrendingStrip";
 import { Input } from "@/components/ui/input";
 import { useState, useRef, useEffect } from "react";
@@ -12,7 +12,6 @@ import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { AdCard } from "@/components/AdCard";
 import { Skeleton } from "@/components/ui/skeleton";
-import StoriesBar from "@/components/StoriesBar";
 
 function SuggestionThumb({ src }: { src?: string | null }) {
   const [err, setErr] = useState(false);
@@ -63,11 +62,8 @@ export default function Home() {
 
   const { data: adsResp, isLoading: adsLoading } = useQuery({ queryKey: ["/api/ads"], queryFn: () => fetch(`/api/ads?language=${language}&limit=8`).then(r => r.json()) });
   const ads: any[] = adsResp?.ads ?? adsResp ?? [];
-  const { data: streams } = useQuery({ queryKey: ["/api/streams"], queryFn: () => fetch("/api/streams").then(r => r.json()) });
+  const { data: streams, isLoading: streamsLoading } = useQuery({ queryKey: ["/api/streams"], queryFn: () => fetch("/api/streams").then(r => r.json()) });
   const { data: channels } = useQuery({ queryKey: ["/api/channels"], queryFn: () => fetch("/api/channels").then(r => r.json()) });
-  const { data: trendingReels = [] } = useQuery<any[]>({ queryKey: ["/api/reels", "trending"], queryFn: () => fetch("/api/reels?limit=8").then(r => r.json()) });
-  const { data: mostViewedResp } = useQuery({ queryKey: ["/api/ads", "views"], queryFn: () => fetch(`/api/ads?sort=views&limit=4`).then(r => r.json()) });
-  const mostViewedAds: any[] = (mostViewedResp?.ads ?? mostViewedResp ?? []).filter((a: any) => (a.viewsCount || a.views_count || 0) > 0).slice(0, 4);
 
   const liveStreams = (streams || []).filter((s: any) => s.status === 'live').slice(0, 4);
   const featuredAds = (ads || []).slice(0, 4);
@@ -103,11 +99,6 @@ export default function Home() {
           </div>
         </a>
       )}
-      {/* Stories */}
-      <div className="container px-4 pt-4">
-        <StoriesBar />
-      </div>
-
       {/* Hero */}
       <section className="relative overflow-hidden py-20 md:py-32">
         <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(circle at 50% 0%, hsl(174 100% 29% / 0.12) 0%, transparent 60%), radial-gradient(circle at 100% 0%, hsl(38 92% 50% / 0.08) 0%, transparent 50%)" }} />
@@ -226,96 +217,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Trending Reels */}
-      {trendingReels.length > 0 && (
-        <section className="py-8 bg-gradient-to-b from-black/5 to-transparent dark:from-white/5" dir="rtl">
-          <div className="container px-4">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-extrabold flex items-center gap-2">
-                <Play className="w-5 h-5 text-pink-500" />
-                ريلز رائجة
-              </h2>
-              <Link href="/reels">
-                <Button variant="ghost" size="sm" className="gap-1 text-pink-500 hover:text-pink-600">عرض الكل <ArrowRight className="w-4 h-4 rtl:rotate-180" /></Button>
-              </Link>
-            </div>
-            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide" style={{ scrollbarWidth: "none" }}>
-              {trendingReels.slice(0, 8).map((reel: any) => (
-                <Link key={reel.id} href="/reels">
-                  <motion.div
-                    whileHover={{ scale: 1.03 }}
-                    className="relative flex-shrink-0 w-28 aspect-[9/16] rounded-2xl overflow-hidden bg-muted cursor-pointer group"
-                  >
-                    {reel.thumbnailUrl
-                      ? <img src={reel.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform" alt="" />
-                      : <div className="w-full h-full bg-gradient-to-br from-pink-500/30 to-purple-500/30 flex items-center justify-center"><Play className="w-8 h-8 text-white/70" /></div>
-                    }
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-                    <div className="absolute top-2 right-2 bg-pink-500 rounded-full p-1">
-                      <Play className="w-2.5 h-2.5 text-white fill-white" />
-                    </div>
-                    <div className="absolute bottom-2 right-2 left-2">
-                      <p className="text-white text-[10px] font-medium line-clamp-2 leading-tight">{reel.title || reel.channelName || "ريل"}</p>
-                      <div className="flex items-center gap-1 mt-1">
-                        <Eye className="w-2.5 h-2.5 text-white/70" />
-                        <span className="text-white/70 text-[9px]">{(reel.viewsCount || 0).toLocaleString()}</span>
-                      </div>
-                    </div>
-                  </motion.div>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Most Viewed Ads */}
-      {mostViewedAds.length > 0 && (
-        <section className="py-8" dir="rtl">
-          <div className="container px-4">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-extrabold flex items-center gap-2">
-                <Flame className="w-5 h-5 text-orange-500" />
-                الأكثر مشاهدة
-              </h2>
-              <Link href="/ads?sort=views">
-                <Button variant="ghost" size="sm" className="gap-1 text-orange-500 hover:text-orange-600">عرض الكل <ArrowRight className="w-4 h-4 rtl:rotate-180" /></Button>
-              </Link>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {mostViewedAds.map((ad: any, i: number) => (
-                <Link key={ad.id} href={`/ads/${ad.id}`}>
-                  <motion.div whileHover={{ y: -3 }} className="cursor-pointer">
-                    <Card className="rounded-2xl overflow-hidden hover:shadow-lg transition-all border-orange-500/10">
-                      <div className="aspect-[4/3] bg-muted relative overflow-hidden">
-                        {(ad.mediaUrl || ad.media_url)
-                          ? <img src={ad.mediaUrl || ad.media_url} className="w-full h-full object-cover" alt="" />
-                          : <div className="w-full h-full flex items-center justify-center text-3xl">📢</div>
-                        }
-                        <div className="absolute top-2 right-2 bg-orange-500/90 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1">
-                          <Flame className="w-2.5 h-2.5" />
-                          #{i + 1}
-                        </div>
-                        <div className="absolute bottom-2 left-2 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1">
-                          <Eye className="w-2.5 h-2.5" />
-                          {(ad.viewsCount || ad.views_count || 0).toLocaleString()}
-                        </div>
-                      </div>
-                      <CardContent className="p-2.5">
-                        <p className="text-xs font-bold line-clamp-1">{ad.title}</p>
-                        {(ad.priceEgp || ad.price_egp) && (
-                          <p className="text-xs text-primary font-bold mt-0.5">{(ad.priceEgp || ad.price_egp).toLocaleString()} ج.م</p>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
       {/* Features */}
       <section className="py-12 bg-muted/30">
         <div className="container px-4">
@@ -324,7 +225,7 @@ export default function Home() {
               { icon: Radio, title: "بث مباشر", desc: "كاميرا وصوت وصورة مع دردشة حية", color: "text-red-500", bg: "bg-red-500/10", href: "/channels" },
               { icon: Megaphone, title: "إعلانات ذكية", desc: "توليد محتوى بالذكاء الاصطناعي", color: "text-primary", bg: "bg-primary/10", href: "/create" },
               { icon: BarChart2, title: "حملات مستهدفة", desc: "استهداف حقيقي مثل Facebook Ads", color: "text-blue-500", bg: "bg-blue-500/10", href: "/campaigns" },
-              { icon: TrendingUp, title: "لوحة الصدارة", desc: "أبرز البائعين والقنوات والريلز", color: "text-yellow-500", bg: "bg-yellow-500/10", href: "/leaderboard" },
+              { icon: TrendingUp, title: "إيرادات القنوات", desc: "اربح من قناتك مثل YouTube", color: "text-green-500", bg: "bg-green-500/10", href: "/revenue" },
             ].map(f => (
               <Link key={f.title} href={f.href}>
                 <motion.div whileHover={{ y: -4 }} className="cursor-pointer">

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -22,7 +22,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { EgyptTargetingMap } from "@/components/EgyptTargetingMap";
 import LocationPickerMap from "@/components/LocationPickerMap";
 import { useTTS } from "@/hooks/use-tts";
-import SceneComposer from "@/components/SceneComposer";
+import { useRef } from "react";
 
 const formSchema = insertAdSchema.extend({
   title: z.string().min(2, "العنوان مطلوب (2 أحرف على الأقل)"),
@@ -30,7 +30,6 @@ const formSchema = insertAdSchema.extend({
   productName: z.string().optional(),
   targetAudience: z.string().optional(),
   adTitle: z.string().optional(),
-  customPrompt: z.string().optional(),
   userId: z.string().optional(),
   mediaUrl: z.string().optional().default(""),
   appStoreUrl: z.string().optional(),
@@ -79,35 +78,6 @@ export default function CreateAd() {
   const [generatingImage, setGeneratingImage] = useState(false);
   const [generatingCopy, setGeneratingCopy] = useState(false);
   const [aiImageUrl, setAiImageUrl] = useState("");
-  const [talkingPhotoText, setTalkingPhotoText] = useState("");
-  const [talkingPhotoVoice, setTalkingPhotoVoice] = useState("ar-EG-SalmaNeural");
-  const [generatingTalkingPhoto, setGeneratingTalkingPhoto] = useState(false);
-  const [generatingProScript, setGeneratingProScript] = useState(false);
-  const [generatingAll, setGeneratingAll] = useState(false);
-  const [generateAllStep, setGenerateAllStep] = useState("");
-  type StepSt = "idle" | "loading" | "done" | "error";
-  const [allSteps, setAllSteps] = useState<StepSt[]>(["idle","idle","idle","idle"]);
-  const [allPreview, setAllPreview] = useState<{ text?: string; imageUrl?: string; script?: string; videoUrl?: string }>({});
-  const [allFinished, setAllFinished] = useState(false);
-  const setStep = (i: number, st: StepSt) => setAllSteps(prev => { const n=[...prev]; n[i]=st; return n; });
-  const [talkingPhotoVideoUrl, setTalkingPhotoVideoUrl] = useState("");
-  const [talkingPhotoFaceUrl, setTalkingPhotoFaceUrl] = useState("/uploads/avatar-male-1.jpg");
-  const [showTalkingPhotoPanel, setShowTalkingPhotoPanel] = useState(false);
-  const [generatingMascot, setGeneratingMascot] = useState(false);
-  const [showSceneComposer, setShowSceneComposer] = useState(false);
-  const [showPresenterPanel, setShowPresenterPanel] = useState(false);
-  const [presenters, setPresenters] = useState<any[]>([]);
-  const [selectedPresenter, setSelectedPresenter] = useState<any>(null);
-  const [presenterText, setPresenterText] = useState("");
-  const [presenterVoice, setPresenterVoice] = useState("ar-EG-SalmaNeural");
-  const [generatingClip, setGeneratingClip] = useState(false);
-  const [clipVideoUrl, setClipVideoUrl] = useState("");
-  const [showTTS, setShowTTS] = useState(false);
-  const [ttsText, setTtsText] = useState("");
-  const [ttsVoice, setTtsVoice] = useState("nova");
-  const [ttsSpeed, setTtsSpeed] = useState(1.0);
-  const [generatingTTS, setGeneratingTTS] = useState(false);
-  const [ttsAudioUrl, setTtsAudioUrl] = useState("");
   const [speakingScene, setSpeakingScene] = useState<number | null>(null);
   const [cinemaScene, setCinemaScene] = useState(0);
   const [cinemaPlaying, setCinemaPlaying] = useState(false);
@@ -120,13 +90,6 @@ export default function CreateAd() {
   const [couponDiscountValue, setCouponDiscountValue] = useState("");
   const [generatedCouponCode, setGeneratedCouponCode] = useState("");
   const [couponGenerating, setCouponGenerating] = useState(false);
-  // Viral Trending Generator
-  const [trendMode, setTrendMode] = useState(false);
-  const [trendProduct, setTrendProduct] = useState("");
-  const [trendPlatform, setTrendPlatform] = useState("tiktok");
-  const [generatingTrend, setGeneratingTrend] = useState(false);
-  const [trendResult, setTrendResult] = useState<any>(null);
-  const [generatingTrendImage, setGeneratingTrendImage] = useState(false);
   // Targeting map states
   const [targetRegions, setTargetRegions] = useState<string[]>([]);
   const [targetInterests, setTargetInterests] = useState<string[]>([]);
@@ -154,96 +117,36 @@ export default function CreateAd() {
   const [editImagePrompt, setEditImagePrompt] = useState("");
   const [editingImage, setEditingImage] = useState(false);
   const refImgInputRef = useRef<HTMLInputElement>(null);
-  const [cinemaKey, setCinemaKey] = useState(0);
-  const cinemaAudioRef = useRef<HTMLAudioElement | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const gainNodeRef = useRef<GainNode | null>(null);
-
-  // Ken Burns animation variants cycling per scene
-  const kenBurnsVariants = [
-    'kenBurns0', 'kenBurns1', 'kenBurns2', 'kenBurns3'
-  ];
-
-  // Start full-audio (OpenAI TTS) through Web Audio API with +12dB boost
-  const playBoostedAudio = (url: string) => {
-    try {
-      if (cinemaAudioRef.current) {
-        cinemaAudioRef.current.pause();
-        cinemaAudioRef.current = null;
-      }
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      audioCtxRef.current = ctx;
-      const gain = ctx.createGain();
-      gain.gain.value = 3.5;
-      gainNodeRef.current = gain;
-      const audio = new Audio(url);
-      audio.crossOrigin = 'anonymous';
-      cinemaAudioRef.current = audio;
-      const src = ctx.createMediaElementSource(audio);
-      src.connect(gain);
-      gain.connect(ctx.destination);
-      audio.play().catch(() => {});
-      setAudioPlaying(true);
-      audio.onended = () => setAudioPlaying(false);
-    } catch (e) {
-      // fallback: plain audio
-      const audio = new Audio(url);
-      cinemaAudioRef.current = audio;
-      audio.volume = 1;
-      audio.play().catch(() => {});
-      setAudioPlaying(true);
-      audio.onended = () => setAudioPlaying(false);
-    }
-  };
-
-  const stopCinema = () => {
-    setCinemaPlaying(false);
-    window.speechSynthesis?.cancel?.();
-    if (cinemaAudioRef.current) { cinemaAudioRef.current.pause(); cinemaAudioRef.current = null; }
-    if (audioCtxRef.current) { audioCtxRef.current.close().catch(() => {}); audioCtxRef.current = null; }
-  };
+  const [ttsVoice, setTtsVoice] = useState<"nova" | "onyx">("nova");
 
   // Auto-advance cinema slideshow
   useEffect(() => {
     if (!cinemaPlaying || !videoScript?.scenes?.length) return;
     const scenes = videoScript.scenes;
-    setCinemaKey(k => k + 1);
-
-    // If we're at scene 0 and have boosted TTS audio, start it
-    if (cinemaScene === 0 && scriptTtsAudioUrl) {
-      playBoostedAudio(scriptTtsAudioUrl);
-    }
-
-    // Per-scene speech if no full TTS audio
-    if (!scriptTtsAudioUrl && 'speechSynthesis' in window) {
-      const text = scenes[cinemaScene]?.narration || scenes[cinemaScene]?.visual || '';
+    const text = scenes[cinemaScene]?.narration || scenes[cinemaScene]?.visual || '';
+    // Speak
+    setAudioPlaying(true);
+    if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utt = new SpeechSynthesisUtterance(text);
       utt.lang = 'ar-EG';
-      utt.rate = 0.75;
-      utt.pitch = 1.05;
-      utt.volume = 1;
+      utt.rate = 0.85;
+      utt.pitch = 1.1;
       const voices = window.speechSynthesis.getVoices();
       const arVoice = voices.find(v => v.lang.startsWith('ar')) || voices[0];
       if (arVoice) utt.voice = arVoice;
-      utt.onstart = () => setAudioPlaying(true);
       utt.onend = () => setAudioPlaying(false);
       window.speechSynthesis.speak(utt);
     }
-
-    const sceneDuration = scriptTtsAudioUrl
-      ? Math.max(5000, ((cinemaAudioRef.current?.duration || 20) / scenes.length) * 1000)
-      : 6500;
-
     const timer = setTimeout(() => {
       const next = cinemaScene + 1;
       if (next >= scenes.length) {
-        stopCinema();
+        setCinemaPlaying(false);
         setCinemaScene(0);
       } else {
         setCinemaScene(next);
       }
-    }, sceneDuration);
+    }, 6000);
     return () => { clearTimeout(timer); };
   }, [cinemaPlaying, cinemaScene, videoScript]);
 
@@ -265,7 +168,7 @@ export default function CreateAd() {
     defaultValues: {
       title: "", description: "", mediaUrl: "", mediaType: "image",
       language: language as 'ar' | 'en', status: "active",
-      userId: "", productName: "", targetAudience: "", adTitle: "", customPrompt: "", targetRegion: "",
+      userId: "", productName: "", targetAudience: "", adTitle: "", targetRegion: "",
       appStoreUrl: "", googlePlayUrl: "", appGalleryUrl: "",
       paymentLink: "", whatsappNumber: "",
     },
@@ -273,7 +176,7 @@ export default function CreateAd() {
 
   const onSubmit = async (values: FormValues) => {
     try {
-      const { productName, targetAudience, adTitle, customPrompt, ...adData } = values;
+      const { productName, targetAudience, adTitle, ...adData } = values;
       const expiresAt = adDuration > 0
         ? new Date(Date.now() + adDuration * 24 * 60 * 60 * 1000)
         : null;
@@ -290,30 +193,33 @@ export default function CreateAd() {
           targetRadiusKm: locationTarget.radiusKm,
         } : {}),
       });
-      toast({ title: "🎉 تم نشر الإعلان بنجاح! يظهر الآن لجميع المستخدمين.", className: "bg-green-500 text-white border-none" });
+      toast({ title: "🎉 تم نشر الإعلان بنجاح!", className: "bg-green-500 text-white border-none" });
       qc.invalidateQueries({ queryKey: ["/api/ads"] });
-      // Go to ads list sorted by newest so user sees their new ad at the top
-      setLocation("/ads?sort=newest");
+      if (newAd?.id) {
+        setLocation(`/ads/${newAd.id}`);
+      } else {
+        setLocation("/ads");
+      }
     } catch (error: any) {
       toast({ variant: "destructive", title: "خطأ", description: error.message });
     }
   };
 
   const handleGenerateCopy = async () => {
-    const { productName, targetAudience, adTitle, customPrompt, language: lang } = form.getValues();
+    const { productName, targetAudience, adTitle, language: lang } = form.getValues();
     if (!productName) { toast({ variant: "destructive", title: "أدخل اسم المنتج أولاً" }); return; }
     setGeneratingCopy(true);
     try {
       const res = await fetch("/api/ai/generate-copy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productName, targetAudience, adTitle, customPrompt, language: lang }),
+        body: JSON.stringify({ productName, targetAudience, adTitle, language: lang }),
         credentials: "include"
       });
       const data = await res.json();
       if (!res.ok) {
         if (data.message === 'insufficient_credits') {
-          toast({ variant: "destructive", title: "انتهى الرصيد المجاني 🔴", description: `كل طلب إضافي بـ ${data.pricePerCredit} ج — اشحن رصيدك من صفحة الإيرادات` });
+          toast({ variant: "destructive", title: "انتهت الرصيد المجاني", description: `تكلفة الرصيد الإضافي: ${data.pricePerCredit} جنيه` });
           return;
         }
         throw new Error(data.message);
@@ -328,10 +234,8 @@ export default function CreateAd() {
   };
 
   const handleGenerateImage = async () => {
-    const { description, productName, adTitle, title, customPrompt } = form.getValues();
-    const subject = adTitle || productName || title || description || "منتج مصري";
-    const basePrompt = `Ultra-high quality professional Arabic advertisement photo for "${subject}". Egyptian market style. Photorealistic product showcase with premium studio lighting, sharp details, vibrant saturated colors, elegant modern composition. Bold Arabic-style design aesthetics. Eye-catching, premium brand feel. Shot like a professional commercial photographer. 4K quality, perfect focus, no blur, no text overlays.${customPrompt ? ` Extra context: ${customPrompt}` : ""}`;
-    const prompt = basePrompt;
+    const { description, productName, adTitle, title } = form.getValues();
+    const prompt = `Professional Arabic advertisement image for ${adTitle || productName || title || description}. High quality, vibrant colors, suitable for Egyptian market.`;
     setGeneratingImage(true);
     try {
       const res = await fetch("/api/ai/generate-image", {
@@ -343,7 +247,7 @@ export default function CreateAd() {
       const data = await res.json();
       if (!res.ok) {
         if (data.message === 'insufficient_credits') {
-          toast({ variant: "destructive", title: "انتهى الرصيد المجاني 🔴", description: `كل طلب إضافي بـ ${data.pricePerCredit} ج — اشحن رصيدك من صفحة الإيرادات` });
+          toast({ variant: "destructive", title: "انتهت الرصيد المجاني", description: `اشحن رصيدك من صفحة الإيرادات` });
           return;
         }
         throw new Error(data.message);
@@ -358,58 +262,21 @@ export default function CreateAd() {
     } finally { setGeneratingImage(false); }
   };
 
-  const MASCOT_CATEGORIES = [
-    { emoji: "🍅", label: "خضار", prompt: "professional headshot portrait photo of a friendly smiling Egyptian man wearing a white apron holding fresh vegetables, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
-    { emoji: "🍌", label: "فاكهة", prompt: "professional headshot portrait photo of a friendly smiling Egyptian woman holding fresh fruit, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
-    { emoji: "🍔", label: "أكل", prompt: "professional headshot portrait photo of a friendly smiling Egyptian chef wearing white chef hat and uniform, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
-    { emoji: "📱", label: "موبايل", prompt: "professional headshot portrait photo of a friendly smiling young Egyptian man holding a smartphone, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
-    { emoji: "👕", label: "ملابس", prompt: "professional headshot portrait photo of a friendly smiling young Egyptian fashion model wearing modern clothes, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
-    { emoji: "🚗", label: "سيارة", prompt: "professional headshot portrait photo of a friendly smiling Egyptian car salesman in a suit, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
-    { emoji: "🏠", label: "عقارات", prompt: "professional headshot portrait photo of a friendly smiling Egyptian real estate agent in a suit, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
-    { emoji: "☕", label: "مشروبات", prompt: "professional headshot portrait photo of a friendly smiling Egyptian barista holding a coffee cup, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
-    { emoji: "💻", label: "إلكترونيات", prompt: "professional headshot portrait photo of a friendly smiling young Egyptian tech person holding a laptop, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
-    { emoji: "💊", label: "صيدلية", prompt: "professional headshot portrait photo of a friendly smiling Egyptian pharmacist in white coat, looking directly at camera, clean white background, natural lighting, sharp face details, photorealistic" },
-  ];
-
-  const handleGenerateMascot = async (prompt: string) => {
-    setGeneratingMascot(true);
-    try {
-      const res = await fetch("/api/ai/generate-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, size: "1024x1024" }),
-        credentials: "include"
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        if (data.message === 'insufficient_credits') {
-          toast({ variant: "destructive", title: "انتهى الرصيد المجاني 🔴", description: `كل طلب إضافي بـ ${data.pricePerCredit} ج — اشحن رصيدك من صفحة الإيرادات` });
-          return;
-        }
-        throw new Error(data.message);
-      }
-      setTalkingPhotoFaceUrl(data.url);
-      toast({ title: "🎨 تم توليد الماسكوت! جاهز للكلام 🎭", className: "bg-green-600 text-white border-none" });
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "فشل توليد الماسكوت", description: e.message });
-    } finally { setGeneratingMascot(false); }
-  };
-
   const handleGenerateVideoScript = async () => {
-    const { productName, adTitle, customPrompt } = form.getValues();
+    const { productName, adTitle } = form.getValues();
     if (!productName) { toast({ variant: "destructive", title: "أدخل اسم المنتج أولاً" }); return; }
     setGeneratingScript(true);
     try {
       const res = await fetch("/api/ai/generate-video-script", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productName, adTitle, customPrompt, duration: 30, language: form.getValues("language") }),
+        body: JSON.stringify({ productName, adTitle, duration: 30, language: form.getValues("language") }),
         credentials: "include"
       });
       const data = await res.json();
       if (!res.ok) {
         if (data.message === 'insufficient_credits') {
-          toast({ variant: "destructive", title: "انتهى الرصيد المجاني 🔴", description: `كل طلب إضافي بـ ${data.pricePerCredit || 15} ج — اشحن رصيدك من صفحة الإيرادات` });
+          toast({ variant: "destructive", title: "انتهت الرصيد المجاني" });
           return;
         }
         throw new Error(data.message);
@@ -423,218 +290,11 @@ export default function CreateAd() {
     } finally { setGeneratingScript(false); }
   };
 
-  const handleTextToSpeech = async () => {
-    const textToSpeak = ttsText || form.getValues("description") || form.getValues("title");
-    if (!textToSpeak.trim()) { toast({ variant: "destructive", title: "اكتب النص أولاً أو ولّد محتوى الإعلان" }); return; }
-    setTtsText(textToSpeak);
-    setGeneratingTTS(true);
-    try {
-      const res = await fetch("/api/ai/text-to-speech", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: textToSpeak, voice: ttsVoice, speed: ttsSpeed }),
-        credentials: "include"
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
-      setTtsAudioUrl(data.audioUrl);
-      toast({ title: "🎙️ تم توليد الصوت الطبيعي!" });
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "فشل توليد الصوت", description: e.message });
-    } finally { setGeneratingTTS(false); }
-  };
-
-  const handleTalkingPhoto = async () => {
-    if (!talkingPhotoFaceUrl) { toast({ variant: "destructive", title: "اختر شخصية أو ارفع صورة وجه" }); return; }
-    if (!talkingPhotoText.trim()) { toast({ variant: "destructive", title: "اكتب النص الذي سيقوله الشخص" }); return; }
-    setGeneratingTalkingPhoto(true);
-    try {
-      const res = await fetch("/api/ai/talking-photo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl: talkingPhotoFaceUrl, text: talkingPhotoText, voiceId: talkingPhotoVoice }),
-        credentials: "include"
-      });
-      const data = await res.json();
-      if (res.status === 402) {
-        // Insufficient wallet balance — guide user to top up
-        toast({
-          variant: "destructive",
-          title: "🔴 رصيد غير كافٍ",
-          description: `الإعلان المتكلم يكلف ${data.pricePerCredit} ج.م — رصيدك الحالي ${data.balance} ج.م. اشحن محفظتك أولاً من صفحة "محفظتي"`,
-        });
-        return;
-      }
-      if (!res.ok) throw new Error(data.message);
-      setTalkingPhotoVideoUrl(data.videoUrl);
-      form.setValue("mediaUrl", data.videoUrl);
-      form.setValue("mediaType", "video");
-      toast({ title: `🎭 تم توليد الصورة الناطقة! ${data.charged ? `(خُصم ${data.charged} ج.م من محفظتك)` : ""}` });
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "فشل التوليد", description: e.message });
-    } finally { setGeneratingTalkingPhoto(false); }
-  };
-
   const speakScene = (scene: any, idx: number) => {
     setSpeakingScene(idx);
     const text = `${scene.narration || scene.visual}`;
     speakEgyptian(text);
     setTimeout(() => setSpeakingScene(null), 3000);
-  };
-
-  // ─── Viral Trending Generator ──────────────────────────────────────────
-  const handleGenerateTrend = async () => {
-    if (!trendProduct.trim()) { toast({ variant: "destructive", title: "أدخل اسم المنتج أولاً" }); return; }
-    setGeneratingTrend(true);
-    setTrendResult(null);
-    try {
-      const res = await fetch("/api/ai/generate-trending", {
-        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ productName: trendProduct, platform: trendPlatform }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "فشل التوليد");
-      setTrendResult(data);
-      toast({ title: "🔥 حزمة الترند جاهزة!", description: `تقييم الانتشار: ${data.viral_score}/100` });
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "خطأ", description: e.message });
-    } finally { setGeneratingTrend(false); }
-  };
-
-  const applyTrendToForm = () => {
-    if (!trendResult) return;
-    const hook = trendResult.hook || "";
-    const title = trendResult.viral_title || "";
-    const desc = trendResult.viral_description || "";
-    const cta = trendResult.call_to_action || "";
-    const tags = trendResult.hashtags?.map((h: string) => `#${h}`).join(" ") || "";
-    form.setValue("title", `${hook} — ${title}`.slice(0, 120));
-    form.setValue("description", `${desc}\n\n${cta}\n\n${tags}`.trim());
-    toast({ title: "✅ تم التطبيق!", description: "الآن أكمل بقية بيانات الإعلان" });
-  };
-
-  const generateTrendImage = async () => {
-    if (!trendResult?.image_prompt) return;
-    setGeneratingTrendImage(true);
-    try {
-      const res = await fetch("/api/ai/generate-image", {
-        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ prompt: trendResult.image_prompt, size: "1024x1536" }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
-      setAiImageUrl(data.url);
-      form.setValue("mediaUrl", data.url);
-      form.setValue("mediaType", "image");
-      toast({ title: "🖼️ الصورة جاهزة!" });
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "فشل توليد الصورة", description: e.message });
-    } finally { setGeneratingTrendImage(false); }
-  };
-
-  const handleGenerateAll = async () => {
-    const { productName, adTitle, targetAudience, customPrompt, language: lang } = form.getValues();
-    if (!productName) { toast({ variant: "destructive", title: "أدخل اسم المنتج / الخدمة أولاً" }); return; }
-    setGeneratingAll(true);
-    setAllFinished(false);
-    setAllPreview({});
-    setAllSteps(["loading","idle","idle","idle"]);
-    try {
-      // ─── Step 1: Generate copy ────────────────────────────────────
-      setGenerateAllStep("توليد النص التسويقي...");
-      const copyRes = await fetch("/api/ai/generate-copy", {
-        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ productName, targetAudience, adTitle, customPrompt, language: lang }),
-      });
-      const copyData = await copyRes.json();
-      if (!copyRes.ok) { setStep(0,"error"); throw new Error(copyData.message || "فشل توليد النص"); }
-      form.setValue("title", copyData.title || "");
-      form.setValue("description", copyData.description || "");
-      const adDesc = copyData.description || copyData.title || productName;
-      setAllPreview(p => ({ ...p, text: copyData.title }));
-      setStep(0,"done"); setStep(1,"loading");
-
-      // ─── Step 2: Generate image ───────────────────────────────────
-      setGenerateAllStep("توليد صورة الإعلان...");
-      const subject2 = adTitle || productName || "منتج مصري";
-      const imgPrompt = `Ultra-high quality professional Arabic advertisement photo for "${subject2}". Egyptian market style. Photorealistic product showcase with premium studio lighting, sharp details, vibrant saturated colors, elegant modern composition. Bold Arabic-style design aesthetics. Eye-catching, premium brand feel. Shot like a professional commercial photographer. 4K quality, perfect focus, no blur, no text overlays.${customPrompt ? ` Context: ${customPrompt}` : ""}`;
-      const imgRes = await fetch("/api/ai/generate-image", {
-        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ prompt: imgPrompt, size: "1024x1536" }),
-      });
-      const imgData = await imgRes.json();
-      if (!imgRes.ok) { setStep(1,"error"); throw new Error(imgData.message || "فشل توليد الصورة"); }
-      setAiImageUrl(imgData.url);
-      form.setValue("mediaUrl", imgData.url);
-      form.setValue("mediaType", "image");
-      setAllPreview(p => ({ ...p, imageUrl: imgData.url }));
-      setStep(1,"done"); setStep(2,"loading");
-
-      // ─── Step 3: Script ───────────────────────────────────────────
-      setGenerateAllStep("كتابة السكريبت الاحترافي...");
-      const scriptRes = await fetch("/api/ai/generate-copy", {
-        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({
-          productName, targetAudience, adTitle,
-          customPrompt: `حوّل النص التالي إلى سكريبت فيديو تسويقي قصير (30-40 ثانية) باللهجة المصرية العامية. يكون حماسي وجذاب وينتهي بدعوة للتسجيل أو الشراء. النص: ${adDesc}. اكتب السكريبت فقط بدون أي شرح، من 3 إلى 5 جمل قصيرة فقط.`,
-          language: lang,
-        }),
-      });
-      const scriptData = await scriptRes.json();
-      const proScript = scriptData.description || scriptData.title || adDesc;
-      setTalkingPhotoText(proScript);
-      setShowTalkingPhotoPanel(true);
-      setAllPreview(p => ({ ...p, script: proScript }));
-      setStep(2,"done"); setStep(3,"loading");
-
-      // ─── Step 4: Talking photo ────────────────────────────────────
-      setGenerateAllStep("توليد الفيديو الناطق...");
-      const talkRes = await fetch("/api/ai/talking-photo", {
-        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ imageUrl: talkingPhotoFaceUrl, text: proScript, voiceId: talkingPhotoVoice }),
-      });
-      const talkData = await talkRes.json();
-      if (!talkRes.ok) { setStep(3,"error"); throw new Error(talkData.message || "فشل توليد الفيديو"); }
-      setTalkingPhotoVideoUrl(talkData.videoUrl);
-      form.setValue("mediaUrl", talkData.videoUrl);
-      form.setValue("mediaType", "video");
-      setAllPreview(p => ({ ...p, videoUrl: talkData.videoUrl }));
-      setStep(3,"done");
-
-      setGenerateAllStep("done");
-      setAllFinished(true);
-      toast({ title: "🎉 إعلانك الكامل جاهز!", description: "نص + صورة + سكريبت + فيديو ناطق ✅", className: "bg-green-600 text-white border-none" });
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "خطأ في التوليد", description: e.message });
-      setGenerateAllStep("");
-    } finally {
-      setGeneratingAll(false);
-    }
-  };
-
-  const handleImproveScript = async () => {
-    const rawText = talkingPhotoText.trim() || form.getValues("description") || form.getValues("title") || "";
-    if (!rawText) { toast({ variant: "destructive", title: "اكتب بعض الكلمات أولاً ثم اضغط تحسين" }); return; }
-    setGeneratingProScript(true);
-    try {
-      const res = await fetch("/api/ai/generate-copy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: form.getValues("title") || "منصة إعلانات",
-          productName: form.getValues("title") || "شبكة سوق للإعلانات",
-          targetAudience: "المصريين من كل المحافظات",
-          customPrompt: `حوّل النص التالي إلى سكريبت فيديو تسويقي قصير (30-45 ثانية) باللهجة المصرية العامية. يكون حماسي وجذاب وينتهي بدعوة للعمل. النص: ${rawText}. أكتب السكريبت فقط بدون أي شرح إضافي، من 3 إلى 5 جمل قصيرة.`,
-        }),
-        credentials: "include"
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
-      const improved = data.description || data.title || "";
-      if (improved) { setTalkingPhotoText(improved); toast({ title: "✨ تم تحسين السكريبت!", description: "النص أصبح أقوى وأكثر احترافية" }); }
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "فشل التحسين", description: e.message });
-    } finally { setGeneratingProScript(false); }
   };
 
   // Upload reference images for AI analysis
@@ -744,184 +404,102 @@ export default function CreateAd() {
 
   return (
     <div className="container max-w-3xl px-4 py-12">
-    {/* ===== FULLSCREEN CINEMATIC OVERLAY ===== */}
-    <AnimatePresence>
-    {cinemaPlaying && videoScript?.scenes && (() => {
-      const scene = videoScript.scenes[cinemaScene];
-      const bgImg = aiImageUrl || adImageUrls[0] || '';
-      const kbClass = kenBurnsVariants[cinemaScene % kenBurnsVariants.length];
-      return (
-        <motion.div
-          key="cinema-overlay"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.5 }}
-          className="fixed inset-0 z-[9999] bg-black flex flex-col overflow-hidden"
-          dir="rtl"
-        >
-          {/* ── Background image with Ken Burns ── */}
-          {bgImg && (
-            <div className="absolute inset-0 overflow-hidden">
-              <img
-                key={`kb-${cinemaScene}`}
-                src={bgImg}
-                alt=""
-                className={`absolute inset-0 w-full h-full object-cover cinema-kb ${kbClass}`}
-              />
-              {/* Cinematic gradient overlays */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/20" />
-              <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-transparent" />
-            </div>
+    {/* ===== FULLSCREEN CINEMA OVERLAY ===== */}
+    {cinemaPlaying && videoScript?.scenes && (
+      <div className="fixed inset-0 z-[9999] bg-black flex flex-col" dir="rtl">
+        {/* Top bar */}
+        <div className="flex items-center justify-between p-4 bg-black/80 backdrop-blur border-b border-white/10">
+          <div className="flex items-center gap-2">
+            <Film className="w-5 h-5 text-primary" />
+            <span className="text-white font-bold text-sm">{videoScript.title}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-white/60 text-xs">
+              مشهد {cinemaScene + 1} / {videoScript.scenes.length}
+            </span>
+            <button
+              onClick={() => { setCinemaPlaying(false); window.speechSynthesis?.cancel?.(); }}
+              className="text-white/70 hover:text-white text-sm border border-white/20 rounded-full px-3 py-1 hover:bg-white/10 transition-all"
+            >
+              ⏹ إيقاف
+            </button>
+          </div>
+        </div>
+
+        {/* Main scene */}
+        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+          {/* Time badge */}
+          <div className="mb-6">
+            <span className="bg-primary/20 text-primary border border-primary/40 rounded-full px-4 py-1 text-sm font-medium">
+              ⏱ {videoScript.scenes[cinemaScene]?.time}
+            </span>
+          </div>
+
+          {/* Narration — BIG TEXT */}
+          <p className="text-white text-2xl md:text-4xl font-extrabold leading-relaxed mb-6 max-w-3xl">
+            {videoScript.scenes[cinemaScene]?.narration}
+          </p>
+
+          {/* Visual description */}
+          <p className="text-white/50 text-base md:text-lg max-w-2xl leading-relaxed">
+            🎥 {videoScript.scenes[cinemaScene]?.visual}
+          </p>
+
+          {/* Mood */}
+          {videoScript.scenes[cinemaScene]?.mood && (
+            <span className="mt-4 text-white/40 text-sm italic">
+              {videoScript.scenes[cinemaScene].mood}
+            </span>
           )}
-          {!bgImg && (
-            <div className="absolute inset-0 bg-gradient-to-br from-gray-950 via-black to-gray-900" />
-          )}
+        </div>
 
-          {/* ── Letterbox bars ── */}
-          <div className="absolute top-0 left-0 right-0 h-[7vh] bg-black z-10" />
-          <div className="absolute bottom-0 left-0 right-0 h-[7vh] bg-black z-10" />
-
-          {/* ── Floating particles ── */}
-          <div className="absolute inset-0 pointer-events-none z-10 overflow-hidden">
-            {[...Array(12)].map((_, i) => (
-              <div
-                key={i}
-                className="absolute rounded-full bg-white/20 cinema-particle"
-                style={{
-                  width: `${2 + (i % 3)}px`,
-                  height: `${2 + (i % 3)}px`,
-                  left: `${(i * 8.3) % 100}%`,
-                  animationDelay: `${i * 0.4}s`,
-                  animationDuration: `${4 + (i % 4)}s`,
-                }}
-              />
-            ))}
-          </div>
-
-          {/* ── Top HUD bar ── */}
-          <div className="relative z-20 flex items-center justify-between px-5 py-3 mt-[7vh] bg-gradient-to-b from-black/80 to-transparent">
-            <div className="flex items-center gap-2">
-              <Film className="w-4 h-4 text-primary animate-pulse" />
-              <span className="text-white font-bold text-sm tracking-wide line-clamp-1 max-w-[180px]">{videoScript.title}</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-white/50 text-xs bg-white/10 rounded-full px-3 py-0.5">
-                {cinemaScene + 1} / {videoScript.scenes.length}
-              </span>
-              <button
-                onClick={stopCinema}
-                className="text-white/70 hover:text-white text-xs border border-white/20 rounded-full px-3 py-1 hover:bg-red-500/30 hover:border-red-400/50 transition-all"
-              >
-                ⏹ إيقاف
-              </button>
-            </div>
-          </div>
-
-          {/* ── Main scene content ── */}
-          <div className="relative z-20 flex-1 flex flex-col items-center justify-end pb-8 px-6 text-center">
-            {/* Time/mood badge */}
-            <motion.div
-              key={`badge-${cinemaScene}`}
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.1 }}
-              className="mb-4"
-            >
-              <span className="bg-primary/30 text-primary border border-primary/50 backdrop-blur-sm rounded-full px-4 py-1 text-xs font-semibold tracking-widest uppercase">
-                ⏱ {scene?.time}{scene?.mood ? ` · ${scene.mood}` : ''}
-              </span>
-            </motion.div>
-
-            {/* Narration — animated per scene */}
-            <motion.p
-              key={`narration-${cinemaScene}-${cinemaKey}`}
-              initial={{ opacity: 0, y: 40, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, y: -20, filter: 'blur(4px)' }}
-              transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-              className="text-white text-2xl md:text-4xl font-extrabold leading-relaxed mb-4 max-w-3xl drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]"
-              style={{ textShadow: '0 2px 20px rgba(0,0,0,0.8), 0 0 40px rgba(0,0,0,0.5)' }}
-            >
-              {scene?.narration}
-            </motion.p>
-
-            {/* Visual description */}
-            <motion.p
-              key={`visual-${cinemaScene}-${cinemaKey}`}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.25 }}
-              className="text-white/55 text-sm md:text-base max-w-2xl leading-relaxed mb-5 drop-shadow-lg"
-            >
-              🎥 {scene?.visual}
-            </motion.p>
-
-            {/* Audio visualizer */}
-            <div className="flex items-end justify-center gap-[3px] h-7 mb-2">
-              {[...Array(16)].map((_, i) => (
-                <div
-                  key={i}
-                  className="w-[3px] bg-primary rounded-full cinema-bar"
-                  style={{
-                    animationDelay: `${i * 0.07}s`,
-                    animationPlayState: audioPlaying ? 'running' : 'paused',
-                    height: audioPlaying ? undefined : '3px',
-                    opacity: audioPlaying ? 1 : 0.3,
-                  }}
-                />
-              ))}
-              <span className="text-white/40 text-[10px] mr-2 self-center">
-                {audioPlaying ? '🔊' : '🔇'}
-              </span>
-            </div>
-          </div>
-
-          {/* ── Progress bar ── */}
-          <div className="relative z-20 h-[3px] bg-white/10 mb-[7vh]">
-            <motion.div
-              key={`progress-${cinemaScene}`}
-              className="h-full bg-primary"
-              initial={{ width: '0%' }}
-              animate={{ width: '100%' }}
-              transition={{ duration: 6.5, ease: 'linear' }}
+        {/* Audio wave indicator */}
+        <div className="flex items-center justify-center gap-1.5 py-4">
+          {[1,2,3,4,5,6,7].map(i => (
+            <div
+              key={i}
+              className="w-1 bg-primary rounded-full"
+              style={{
+                height: audioPlaying ? `${12 + Math.sin(Date.now()/200 + i) * 10}px` : '4px',
+                animation: audioPlaying ? `audioWave 0.6s ease-in-out ${i * 0.1}s infinite alternate` : 'none',
+                transition: 'height 0.2s'
+              }}
             />
-          </div>
+          ))}
+          <span className="text-white/50 text-xs mr-2 ml-1">
+            {audioPlaying ? '🔊 يتحدث...' : '🔇 في الانتظار'}
+          </span>
+        </div>
 
-          {/* ── Scene dots ── */}
-          <div className="absolute bottom-[7vh] left-0 right-0 z-20 flex items-center justify-center gap-2 py-2">
-            {videoScript.scenes.map((_: any, i: number) => (
-              <button
-                key={i}
-                onClick={() => { window.speechSynthesis?.cancel?.(); setCinemaScene(i); }}
-                className={`rounded-full transition-all duration-300 ${i === cinemaScene ? 'w-6 h-2 bg-primary shadow-[0_0_8px_theme(colors.primary)]' : 'w-2 h-2 bg-white/25 hover:bg-white/50'}`}
-              />
-            ))}
-          </div>
-        </motion.div>
-      );
-    })()}
-    </AnimatePresence>
+        {/* Progress bar */}
+        <div className="h-1 bg-white/10">
+          <div
+            className="h-full bg-primary transition-all"
+            style={{
+              width: `${((cinemaScene + 1) / videoScript.scenes.length) * 100}%`,
+              transitionDuration: '6000ms'
+            }}
+          />
+        </div>
+
+        {/* Scene dots */}
+        <div className="flex items-center justify-center gap-2 py-3 bg-black/50">
+          {videoScript.scenes.map((_: any, i: number) => (
+            <button
+              key={i}
+              onClick={() => { window.speechSynthesis?.cancel?.(); setCinemaScene(i); }}
+              className={`rounded-full transition-all ${i === cinemaScene ? 'w-6 h-2 bg-primary' : 'w-2 h-2 bg-white/30 hover:bg-white/60'}`}
+            />
+          ))}
+        </div>
+      </div>
+    )}
 
     <style>{`
-      /* Ken Burns variants */
-      @keyframes kb0 { from { transform: scale(1.0) translate(0,0); } to { transform: scale(1.18) translate(-2%, -1%); } }
-      @keyframes kb1 { from { transform: scale(1.1) translate(2%, 1%); } to { transform: scale(1.22) translate(-3%, -2%); } }
-      @keyframes kb2 { from { transform: scale(1.05) translate(-3%, 2%); } to { transform: scale(1.2) translate(2%, -1%); } }
-      @keyframes kb3 { from { transform: scale(1.18) translate(1%, -2%); } to { transform: scale(1.0) translate(-1%, 2%); } }
-      .cinema-kb { animation-timing-function: ease-in-out; animation-fill-mode: both; animation-duration: 7s; }
-      .kenBurns0 { animation-name: kb0; }
-      .kenBurns1 { animation-name: kb1; }
-      .kenBurns2 { animation-name: kb2; }
-      .kenBurns3 { animation-name: kb3; }
-
-      /* Floating particles */
-      @keyframes floatUp { 0% { transform: translateY(100vh) scale(0); opacity: 0; } 10% { opacity: 0.6; } 90% { opacity: 0.2; } 100% { transform: translateY(-10vh) scale(1.5); opacity: 0; } }
-      .cinema-particle { animation: floatUp linear infinite; }
-
-      /* Audio bars */
-      @keyframes audioBar { 0%, 100% { height: 3px; } 50% { height: 22px; } }
-      .cinema-bar { animation: audioBar 0.5s ease-in-out infinite; }
+      @keyframes audioWave {
+        from { height: 4px; }
+        to { height: 24px; }
+      }
     `}</style>
       <div className="flex items-center gap-3 mb-8">
         <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
@@ -933,210 +511,25 @@ export default function CreateAd() {
         </div>
       </div>
 
-      <div className="flex gap-3 mb-6 flex-wrap">
-        <Button onClick={() => { setAiMode(false); setTrendMode(false); }} variant={!aiMode && !trendMode ? "default" : "outline"} size="sm" data-testid="btn-manual-mode">✏️ يدوي</Button>
-        <Button onClick={() => { setAiMode(true); setTrendMode(false); }} variant={aiMode && !trendMode ? "default" : "outline"} size="sm" className="gap-2" data-testid="btn-ai-mode">
+      <div className="flex gap-3 mb-6">
+        <Button onClick={() => setAiMode(false)} variant={!aiMode ? "default" : "outline"} size="sm" data-testid="btn-manual-mode">✏️ يدوي</Button>
+        <Button onClick={() => setAiMode(true)} variant={aiMode ? "default" : "outline"} size="sm" className="gap-2" data-testid="btn-ai-mode">
           <Sparkles className="w-4 h-4" /> مساعد AI
-        </Button>
-        <Button onClick={() => { setTrendMode(true); setAiMode(false); }} variant={trendMode ? "default" : "outline"} size="sm" className={`gap-2 ${trendMode ? "bg-gradient-to-r from-red-500 to-orange-500 border-none text-white" : "border-orange-400 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950/30"}`} data-testid="btn-trend-mode">
-          🔥 ترند فيروسي
         </Button>
       </div>
 
-      {/* ─── Viral Trending Generator Panel ─────────────────────────────── */}
-      {trendMode && (
-        <AnimatePresence>
-          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
-            <Card className="rounded-2xl border-orange-400/40 bg-gradient-to-br from-orange-50/80 to-red-50/60 dark:from-orange-950/30 dark:to-red-950/20">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <span className="text-2xl">🔥</span>
-                  <div>
-                    <div className="text-orange-700 dark:text-orange-400 font-extrabold">مولّد الإعلان الفيروسي</div>
-                    <div className="text-xs font-normal text-muted-foreground">يستخدم أحدث تقنيات GPT-4o لإنشاء محتوى يشتعل مثل TikTok وInstagram وReels</div>
-                  </div>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Product Input */}
-                <div>
-                  <label className="text-sm font-bold mb-1.5 block">اسم منتجك أو خدمتك</label>
-                  <Input
-                    placeholder="مثال: كريم تبييض، موبايل سامسونج، مطعم شاورما، حجز فندق..."
-                    value={trendProduct}
-                    onChange={e => setTrendProduct(e.target.value)}
-                    className="bg-white dark:bg-background"
-                    data-testid="input-trend-product"
-                  />
-                </div>
-
-                {/* Platform Selector */}
-                <div>
-                  <label className="text-sm font-bold mb-1.5 block">المنصة المستهدفة</label>
-                  <div className="grid grid-cols-4 gap-2">
-                    {[
-                      { id: "tiktok", label: "TikTok", emoji: "🎵" },
-                      { id: "instagram", label: "Instagram", emoji: "📸" },
-                      { id: "facebook", label: "Facebook", emoji: "👥" },
-                      { id: "youtube", label: "Shorts", emoji: "▶️" },
-                    ].map(p => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => setTrendPlatform(p.id)}
-                        className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all flex flex-col items-center gap-1 ${trendPlatform === p.id ? "bg-orange-500 text-white border-orange-500 shadow-md" : "border-border bg-white dark:bg-background hover:border-orange-400"}`}
-                        data-testid={`btn-platform-${p.id}`}
-                      >
-                        <span className="text-lg">{p.emoji}</span>
-                        {p.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Generate Button */}
-                <Button
-                  type="button"
-                  onClick={handleGenerateTrend}
-                  disabled={generatingTrend}
-                  className="w-full bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 text-white font-extrabold text-base py-6 rounded-xl shadow-lg"
-                  data-testid="btn-generate-trend"
-                >
-                  {generatingTrend ? (
-                    <><Loader2 className="w-5 h-5 animate-spin me-2" /> يولّد الذكاء الاصطناعي إعلانك الترند...</>
-                  ) : (
-                    <>🔥 ولّد إعلان ترند فيروسي الآن</>
-                  )}
-                </Button>
-
-                {/* Results */}
-                {trendResult && (
-                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3 mt-2">
-                    {/* Viral Score */}
-                    <div className="flex items-center gap-3 bg-white dark:bg-background rounded-xl p-3 border border-orange-200 dark:border-orange-800/40">
-                      <div className="text-center">
-                        <div className={`text-3xl font-extrabold ${trendResult.viral_score >= 80 ? 'text-green-600' : trendResult.viral_score >= 60 ? 'text-orange-500' : 'text-red-500'}`}>
-                          {trendResult.viral_score}
-                        </div>
-                        <div className="text-[10px] text-muted-foreground">/ 100</div>
-                      </div>
-                      <div className="flex-1">
-                        <div className="text-sm font-bold">قوة الانتشار الفيروسي</div>
-                        <div className="w-full bg-muted rounded-full h-2 mt-1">
-                          <div className={`h-2 rounded-full transition-all ${trendResult.viral_score >= 80 ? 'bg-green-500' : trendResult.viral_score >= 60 ? 'bg-orange-500' : 'bg-red-500'}`} style={{ width: `${trendResult.viral_score}%` }} />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Hook */}
-                    <div className="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-300 dark:border-yellow-800/40 rounded-xl p-3">
-                      <div className="text-[10px] font-bold text-yellow-700 dark:text-yellow-400 mb-1">⚡ الـ Hook — يشد الانتباه في 3 ثواني</div>
-                      <div className="font-extrabold text-base text-yellow-900 dark:text-yellow-200">{trendResult.hook}</div>
-                    </div>
-
-                    {/* Viral Title */}
-                    <div className="bg-white dark:bg-background rounded-xl p-3 border">
-                      <div className="text-[10px] font-bold text-muted-foreground mb-1">🏆 العنوان الفيروسي</div>
-                      <div className="font-bold text-foreground">{trendResult.viral_title}</div>
-                    </div>
-
-                    {/* Description */}
-                    <div className="bg-white dark:bg-background rounded-xl p-3 border">
-                      <div className="text-[10px] font-bold text-muted-foreground mb-1">📝 الوصف بأسلوب ترند</div>
-                      <div className="text-sm text-foreground whitespace-pre-line">{trendResult.viral_description}</div>
-                    </div>
-
-                    {/* CTA */}
-                    <div className="bg-green-50 dark:bg-green-950/30 border border-green-300 dark:border-green-800/40 rounded-xl p-3">
-                      <div className="text-[10px] font-bold text-green-700 dark:text-green-400 mb-1">📣 دعوة العمل (CTA)</div>
-                      <div className="font-bold text-green-800 dark:text-green-300">{trendResult.call_to_action}</div>
-                    </div>
-
-                    {/* Hashtags */}
-                    {trendResult.hashtags?.length > 0 && (
-                      <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 rounded-xl p-3">
-                        <div className="text-[10px] font-bold text-blue-700 dark:text-blue-400 mb-2">🏷️ هاشتاقات الترند</div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {trendResult.hashtags.map((tag: string, i: number) => (
-                            <span key={i} className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-bold px-2 py-0.5 rounded-full">#{tag}</span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Content Angles */}
-                    {trendResult.content_angles?.length > 0 && (
-                      <div className="bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/40 rounded-xl p-3">
-                        <div className="text-[10px] font-bold text-purple-700 dark:text-purple-400 mb-2">🎯 زوايا تسويقية بديلة</div>
-                        <div className="space-y-1.5">
-                          {trendResult.content_angles.map((angle: string, i: number) => (
-                            <div key={i} className="flex gap-2 text-xs text-foreground">
-                              <span className="text-purple-500 font-bold shrink-0">{i + 1}.</span>
-                              <span>{angle}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Viral Tips */}
-                    {trendResult.viral_tips?.length > 0 && (
-                      <div className="bg-muted/60 rounded-xl p-3">
-                        <div className="text-[10px] font-bold text-muted-foreground mb-2">💡 نصائح لزيادة الانتشار</div>
-                        <div className="space-y-1">
-                          {trendResult.viral_tips.map((tip: string, i: number) => (
-                            <div key={i} className="flex gap-2 text-xs text-foreground">
-                              <span className="text-primary">✓</span>
-                              <span>{tip}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Action Buttons */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <Button type="button" onClick={applyTrendToForm} className="bg-primary text-white font-bold rounded-xl" data-testid="btn-apply-trend">
-                        <CheckCircle2 className="w-4 h-4 me-1" /> طبّق على الإعلان
-                      </Button>
-                      <Button type="button" variant="outline" onClick={generateTrendImage} disabled={generatingTrendImage} className="rounded-xl font-bold border-orange-400 text-orange-600" data-testid="btn-trend-image">
-                        {generatingTrendImage
-                          ? <><Loader2 className="w-4 h-4 animate-spin me-1" /> يولّد الصورة...</>
-                          : <><ImageIcon className="w-4 h-4 me-1" /> ولّد صورة ترند</>}
-                      </Button>
-                    </div>
-
-                    {/* Preview generated image */}
-                    {aiImageUrl && trendMode && (
-                      <div className="rounded-xl overflow-hidden border border-orange-200">
-                        <img src={aiImageUrl} alt="صورة الترند" className="w-full object-cover max-h-64" />
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-              </CardContent>
-            </Card>
-          </motion.div>
-        </AnimatePresence>
-      )}
-
       {/* AI Credits Badge */}
       {aiMode && aiUsage && (
-        <div className={`mb-4 flex items-center gap-3 rounded-xl p-3 border ${aiUsage.remaining > 0 ? 'bg-muted border-transparent' : 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800'}`}>
-          <CreditCard className={`w-5 h-5 ${aiUsage.remaining > 0 ? 'text-primary' : 'text-red-500'}`} />
+        <div className="mb-4 flex items-center gap-3 bg-muted rounded-xl p-3">
+          <CreditCard className="w-5 h-5 text-primary" />
           <div className="flex-1">
-            <span className="text-sm font-medium">رصيد AI: </span>
+            <span className="text-sm font-medium">رصيد AI المجاني: </span>
             <Badge variant={aiUsage.remaining > 0 ? "default" : "destructive"} className="ml-2">
-              {aiUsage.remaining > 0 ? `${aiUsage.remaining} طلب مجاني متبقي` : 'انتهى الرصيد المجاني'}
+              {aiUsage.remaining} متبقي من {aiUsage.freeCredits}
             </Badge>
           </div>
-          {aiUsage.remaining === 0 ? (
-            <a href="/earnings" className="shrink-0 text-xs font-bold bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-full transition-all flex items-center gap-1">
-              <CreditCard className="w-3 h-3" />
-              اشحن {aiUsage.pricePerCredit} ج/طلب
-            </a>
-          ) : (
-            <span className="text-xs text-muted-foreground shrink-0">ثم {aiUsage.pricePerCredit} ج/طلب</span>
+          {aiUsage.remaining === 0 && (
+            <span className="text-xs text-muted-foreground">{aiUsage.pricePerCredit} ج/طلب إضافي</span>
           )}
         </div>
       )}
@@ -1173,25 +566,6 @@ export default function CreateAd() {
                         </FormItem>
                       )} />
                     </div>
-                    <FormField control={form.control} name="customPrompt" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="flex items-center gap-1.5">
-                          <Sparkles className="w-3.5 h-3.5 text-purple-500" />
-                          برومبت مخصص <span className="text-xs text-muted-foreground font-normal">(اختياري — تفاصيل إضافية للذكاء الاصطناعي)</span>
-                        </FormLabel>
-                        <FormControl>
-                          <Textarea
-                            placeholder="مثال: المنتج مصري الصنع 100٪، السعر 299 جنيه فقط، متوفر بجميع المحافظات، نقدم ضمان سنة كاملة. أسلوب الإعلان يكون حماسي وموجّه للشباب المصري."
-                            className="resize-none min-h-[80px] text-sm"
-                            {...field}
-                            data-testid="input-custom-prompt"
-                          />
-                        </FormControl>
-                        <p className="text-[10px] text-muted-foreground">
-                          أضف هنا أي تفاصيل عن منتجك أو خدمتك أو الأسلوب الذي تريده — الذكاء الاصطناعي سيأخذها بعين الاعتبار عند توليد الإعلان.
-                        </p>
-                      </FormItem>
-                    )} />
                     {/* Reference images upload */}
                     <div className="space-y-2">
                       <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
@@ -1242,192 +616,6 @@ export default function CreateAd() {
                       </div>
                     </div>
 
-                    {/* ─── AI Studio: Generate All ─── */}
-                    <div className="rounded-2xl border border-purple-200 dark:border-purple-800 bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 dark:from-purple-950/40 dark:via-blue-950/30 dark:to-indigo-950/30 overflow-hidden shadow-sm">
-                      {/* Header */}
-                      <div className="bg-gradient-to-r from-purple-600 to-blue-600 px-4 py-3 flex items-center gap-2">
-                        <Sparkles className="w-5 h-5 text-white" />
-                        <div>
-                          <p className="text-white font-bold text-sm">استوديو الإعلان الذكي</p>
-                          <p className="text-purple-200 text-xs">نص + صورة + سكريبت + فيديو ناطق — بضغطة واحدة</p>
-                        </div>
-                        {allFinished && <CheckCircle2 className="w-6 h-6 text-green-300 mr-auto" />}
-                      </div>
-
-                      <div className="p-4 space-y-3">
-                        {/* Step tracker */}
-                        <div className="grid grid-cols-4 gap-2">
-                          {[
-                            { icon: "📝", label: "النص", sub: allPreview.text ? allPreview.text.slice(0,20)+"..." : "النص التسويقي" },
-                            { icon: "🎨", label: "الصورة", sub: allPreview.imageUrl ? "تم ✓" : "صورة AI" },
-                            { icon: "✨", label: "السكريبت", sub: allPreview.script ? allPreview.script.slice(0,20)+"..." : "سكريبت الفيديو" },
-                            { icon: "🎭", label: "الفيديو", sub: allPreview.videoUrl ? "جاهز ✓" : "الناطق" },
-                          ].map((s, i) => (
-                            <div key={i} className={`relative rounded-xl p-2 text-center border-2 transition-all duration-300 ${
-                              allSteps[i] === "done" ? "border-green-400 bg-green-50 dark:bg-green-950/30" :
-                              allSteps[i] === "loading" ? "border-purple-400 bg-purple-50 dark:bg-purple-950/30 animate-pulse" :
-                              allSteps[i] === "error" ? "border-red-400 bg-red-50 dark:bg-red-950/30" :
-                              "border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-black/10"
-                            }`}>
-                              <div className="text-xl mb-0.5">{s.icon}</div>
-                              <p className="text-xs font-bold text-foreground">{s.label}</p>
-                              {allSteps[i] === "done" && <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center"><CheckCircle2 className="w-3 h-3 text-white" /></div>}
-                              {allSteps[i] === "loading" && <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-purple-500 rounded-full flex items-center justify-center"><Loader2 className="w-2.5 h-2.5 text-white animate-spin" /></div>}
-                              {allSteps[i] === "idle" && <div className="w-2 h-2 rounded-full bg-gray-300 mx-auto mt-0.5" />}
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Progress bar */}
-                        {(generatingAll || allFinished) && (
-                          <div className="space-y-1">
-                            <div className="flex justify-between text-xs text-muted-foreground">
-                              <span>{generateAllStep === "done" ? "✅ اكتمل!" : generateAllStep}</span>
-                              <span>{allSteps.filter(s => s === "done").length * 25}%</span>
-                            </div>
-                            <div className="w-full bg-purple-100 dark:bg-purple-900/40 rounded-full h-2 overflow-hidden">
-                              <div
-                                className="bg-gradient-to-r from-purple-500 to-blue-500 h-2 rounded-full transition-all duration-700"
-                                style={{ width: `${allSteps.filter(s => s === "done").length * 25}%` }}
-                              />
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Previews */}
-                        {(allPreview.imageUrl || allPreview.videoUrl) && (
-                          <div className="flex gap-2">
-                            {allPreview.imageUrl && (
-                              <div className="flex-1 rounded-lg overflow-hidden border border-purple-200 aspect-square max-h-20">
-                                <img src={allPreview.imageUrl} className="w-full h-full object-cover" alt="صورة الإعلان" />
-                              </div>
-                            )}
-                            {allPreview.videoUrl && (
-                              <div className="flex-1 rounded-lg overflow-hidden border-2 border-green-400">
-                                <video src={allPreview.videoUrl} controls className="w-full h-full max-h-20 object-cover" />
-                              </div>
-                            )}
-                            {allPreview.text && (
-                              <div className="flex-1 rounded-lg p-2 bg-white dark:bg-black/20 border border-purple-200 flex items-center">
-                                <p className="text-xs text-foreground line-clamp-3 text-right">{allPreview.text}</p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Launch / Publish / Share buttons */}
-                        {allFinished ? (
-                          <div className="space-y-2">
-                            {/* Publish now */}
-                            <Button
-                              type="button"
-                              onClick={() => form.handleSubmit(onSubmit)()}
-                              className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white font-bold h-11 rounded-xl text-sm shadow"
-                              data-testid="btn-publish-now"
-                            >
-                              <CheckCircle2 className="w-5 h-5" /> 🚀 انشر الإعلان الآن على المنصة
-                            </Button>
-
-                            {/* Download + Share row */}
-                            <div className="grid grid-cols-2 gap-2">
-                              {/* Download video */}
-                              {allPreview.videoUrl && (
-                                <a
-                                  href={allPreview.videoUrl}
-                                  download="my-ad-video.mp4"
-                                  className="flex items-center justify-center gap-1.5 bg-purple-100 hover:bg-purple-200 text-purple-700 font-medium text-xs rounded-lg py-2.5 border border-purple-300 transition-colors"
-                                  data-testid="btn-download-video"
-                                >
-                                  <Download className="w-3.5 h-3.5" /> تحميل الفيديو
-                                </a>
-                              )}
-                              {/* Download image */}
-                              {allPreview.imageUrl && (
-                                <a
-                                  href={allPreview.imageUrl}
-                                  download="my-ad-image.jpg"
-                                  className="flex items-center justify-center gap-1.5 bg-blue-100 hover:bg-blue-200 text-blue-700 font-medium text-xs rounded-lg py-2.5 border border-blue-300 transition-colors"
-                                  data-testid="btn-download-image"
-                                >
-                                  <Download className="w-3.5 h-3.5" /> تحميل الصورة
-                                </a>
-                              )}
-                            </div>
-
-                            {/* Social share */}
-                            <div className="space-y-1">
-                              <p className="text-xs text-center text-muted-foreground font-medium">شارك على منصاتك</p>
-                              <div className="flex gap-2 justify-center flex-wrap">
-                                {/* WhatsApp */}
-                                <a
-                                  href={`https://wa.me/?text=${encodeURIComponent((allPreview.text || form.getValues("title") || "") + "\n\n" + window.location.origin)}`}
-                                  target="_blank" rel="noopener noreferrer"
-                                  className="flex items-center gap-1 bg-green-500 hover:bg-green-600 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors"
-                                  data-testid="btn-share-whatsapp"
-                                >
-                                  📱 واتساب
-                                </a>
-                                {/* Facebook */}
-                                <a
-                                  href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.origin)}&quote=${encodeURIComponent(allPreview.text || form.getValues("title") || "")}`}
-                                  target="_blank" rel="noopener noreferrer"
-                                  className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors"
-                                  data-testid="btn-share-facebook"
-                                >
-                                  📘 فيسبوك
-                                </a>
-                                {/* Twitter/X */}
-                                <a
-                                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent((allPreview.text || form.getValues("title") || "") + " " + window.location.origin)}`}
-                                  target="_blank" rel="noopener noreferrer"
-                                  className="flex items-center gap-1 bg-black hover:bg-gray-800 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors"
-                                  data-testid="btn-share-twitter"
-                                >
-                                  𝕏 تويتر
-                                </a>
-                                {/* Copy link */}
-                                <button
-                                  type="button"
-                                  onClick={() => { navigator.clipboard.writeText(window.location.origin); toast({ title: "✅ تم نسخ الرابط!" }); }}
-                                  className="flex items-center gap-1 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-foreground text-xs font-medium px-3 py-2 rounded-lg transition-colors"
-                                  data-testid="btn-copy-link"
-                                >
-                                  🔗 نسخ الرابط
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Reset */}
-                            <button
-                              type="button"
-                              onClick={() => { setAllFinished(false); setAllSteps(["idle","idle","idle","idle"]); setAllPreview({}); }}
-                              className="w-full text-xs text-muted-foreground hover:text-foreground text-center py-1 transition-colors"
-                            >
-                              ↩ بدء إعلان جديد من الصفر
-                            </button>
-                          </div>
-                        ) : (
-                          <Button
-                            type="button"
-                            onClick={handleGenerateAll}
-                            disabled={generatingAll}
-                            className="w-full gap-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold h-11 rounded-xl text-sm shadow"
-                            data-testid="btn-generate-all"
-                          >
-                            {generatingAll ? (
-                              <><Loader2 className="w-5 h-5 animate-spin" /> جاري التوليد — انتظر دقيقة واحدة...</>
-                            ) : (
-                              <><Sparkles className="w-5 h-5" /> 🚀 ابدأ التوليد التلقائي — كل شيء بضغطة واحدة</>
-                            )}
-                          </Button>
-                        )}
-
-                        {!generatingAll && !allFinished && (
-                          <p className="text-center text-xs text-muted-foreground">أو استخدم الأدوات منفردة 👇</p>
-                        )}
-                      </div>
-                    </div>
-
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" onClick={handleGenerateCopy} disabled={generatingCopy} size="sm" className="gap-2" data-testid="btn-gen-copy">
                         {generatingCopy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
@@ -1441,28 +629,6 @@ export default function CreateAd() {
                         {generatingScript ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
                         سكريبت فيديو سينمائي
                       </Button>
-                      <Button type="button" onClick={() => setShowSceneComposer(p => !p)} size="sm" variant="outline" className="gap-2 border-amber-500 text-amber-700 hover:bg-amber-50 font-bold" data-testid="btn-scene-composer-open">
-                        🎭 مركّب مشاهد
-                      </Button>
-                      <Button type="button" onClick={async () => {
-                        setShowPresenterPanel(p => !p);
-                        setPresenterText(t => t || form.getValues("description") || form.getValues("title") || "");
-                        if (presenters.length === 0) {
-                          const r = await fetch("/api/ai/presenters", { credentials: "include" });
-                          const data = await r.json();
-                          if (Array.isArray(data)) setPresenters(data);
-                        }
-                      }} size="sm" variant="outline" className="gap-2 border-indigo-500 text-indigo-600 hover:bg-indigo-50 font-bold" data-testid="btn-presenter-open">
-                        🎬 مذيع AI
-                      </Button>
-                      <Button type="button" onClick={() => { setShowTalkingPhotoPanel(true); setTalkingPhotoText(t => t || form.getValues("description") || ""); }} size="sm" variant="outline" className="gap-2 border-purple-400 text-purple-600 hover:bg-purple-50" data-testid="btn-talking-photo-open">
-                        <Camera className="w-4 h-4" />
-                        صورة ناطقة 🎭
-                      </Button>
-                      <Button type="button" onClick={() => { setShowTTS(true); setTtsText(form.getValues("description") || form.getValues("title") || ""); }} size="sm" variant="outline" className="gap-2 border-green-400 text-green-700 hover:bg-green-50" data-testid="btn-tts-open">
-                        <Volume2 className="w-4 h-4" />
-                        صوت طبيعي 🎙️
-                      </Button>
                       <Button type="button" onClick={handleTranslate} disabled={translating} size="sm" variant="outline" className="gap-2" data-testid="btn-translate">
                         {translating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Languages className="w-4 h-4" />}
                         ترجمة النص
@@ -1472,490 +638,6 @@ export default function CreateAd() {
                         تحميل كملف
                       </Button>
                     </div>
-
-                    {/* TTS - Natural Voice Section */}
-                    {showTTS && (
-                      <div className="border-2 border-green-300 rounded-xl p-4 bg-green-50 dark:bg-green-950/20 space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Volume2 className="w-4 h-4 text-green-600" />
-                          <p className="text-sm font-bold text-green-700">🎙️ توليد صوت طبيعي</p>
-                          <Button type="button" size="sm" variant="ghost" className="mr-auto h-6 w-6 p-0" onClick={() => { setShowTTS(false); setTtsAudioUrl(""); }}>
-                            <X className="w-3 h-3" />
-                          </Button>
-                        </div>
-
-                        <div className="space-y-2">
-                          <p className="text-xs font-medium text-green-700">النص الذي سيُقرأ بصوت طبيعي:</p>
-                          <Textarea
-                            value={ttsText}
-                            onChange={e => setTtsText(e.target.value)}
-                            placeholder="اكتب نص الإعلان هنا أو اضغط الزر وسيأخذ وصف الإعلان تلقائياً..."
-                            className="text-sm min-h-[80px] border-green-300 focus:border-green-500"
-                            data-testid="textarea-tts-text"
-                          />
-                          <p className="text-xs text-muted-foreground">{ttsText.length} / 4096 حرف</p>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                            <p className="text-xs font-medium text-green-700">الصوت:</p>
-                            <Select value={ttsVoice} onValueChange={setTtsVoice}>
-                              <SelectTrigger className="h-8 text-xs border-green-300" data-testid="select-tts-voice">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="nova">🎙️ Nova — نسائي ناعم</SelectItem>
-                                <SelectItem value="alloy">🎙️ Alloy — محايد</SelectItem>
-                                <SelectItem value="echo">🎙️ Echo — رجالي</SelectItem>
-                                <SelectItem value="fable">🎙️ Fable — دافئ</SelectItem>
-                                <SelectItem value="onyx">🎙️ Onyx — رجالي عميق</SelectItem>
-                                <SelectItem value="shimmer">🎙️ Shimmer — نسائي حيوي</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-xs font-medium text-green-700">السرعة: {ttsSpeed}x</p>
-                            <input
-                              type="range" min="0.5" max="2.0" step="0.1"
-                              value={ttsSpeed}
-                              onChange={e => setTtsSpeed(parseFloat(e.target.value))}
-                              className="w-full h-2 accent-green-600"
-                              data-testid="range-tts-speed"
-                            />
-                            <div className="flex justify-between text-xs text-muted-foreground">
-                              <span>بطيء</span><span>عادي</span><span>سريع</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <Button
-                          type="button"
-                          onClick={handleTextToSpeech}
-                          disabled={generatingTTS || !ttsText.trim()}
-                          className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white"
-                          data-testid="btn-gen-tts"
-                        >
-                          {generatingTTS ? (
-                            <><Loader2 className="w-4 h-4 animate-spin" /> جاري توليد الصوت...</>
-                          ) : (
-                            <><Volume2 className="w-4 h-4" /> ولّد الصوت الطبيعي</>
-                          )}
-                        </Button>
-
-                        {ttsAudioUrl && (
-                          <div className="space-y-2 p-3 bg-white dark:bg-black/20 rounded-lg border border-green-200">
-                            <p className="text-xs font-bold text-green-600">✅ تم توليد الصوت!</p>
-                            <audio controls src={ttsAudioUrl} className="w-full" data-testid="audio-tts-result" />
-                            <a
-                              href={ttsAudioUrl}
-                              download
-                              className="flex items-center justify-center gap-1 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded-lg py-2 border border-green-300"
-                            >
-                              <Download className="w-3 h-3" /> تحميل ملف الصوت MP3
-                            </a>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* ── SCENE COMPOSER ── */}
-                    {showSceneComposer && (
-                      <SceneComposer
-                        onClose={() => setShowSceneComposer(false)}
-                        onExport={(dataUrl: string) => {
-                          const byteStr = atob(dataUrl.split(",")[1]);
-                          const mimeStr = dataUrl.split(",")[0].split(":")[1].split(";")[0];
-                          const ab = new ArrayBuffer(byteStr.length);
-                          const ia = new Uint8Array(ab);
-                          for (let i = 0; i < byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
-                          const blob = new Blob([ab], { type: mimeStr });
-                          const file = new File([blob], `scene-${Date.now()}.png`, { type: mimeStr });
-                          const formData = new FormData();
-                          formData.append("file", file);
-                          fetch("/api/upload", { method: "POST", body: formData, credentials: "include" })
-                            .then(r => r.json())
-                            .then(data => {
-                              const url = data.url || data.path;
-                              if (url) {
-                                form.setValue("mediaUrl", url);
-                                form.setValue("mediaType", "image");
-                                toast({ title: "✅ تم حفظ مشهدك وتعيينه للإعلان!" });
-                              }
-                            })
-                            .catch(() => {
-                              form.setValue("mediaUrl", dataUrl);
-                              form.setValue("mediaType", "image");
-                              toast({ title: "✅ تم تعيين المشهد للإعلان!" });
-                            });
-                          setShowSceneComposer(false);
-                        }}
-                      />
-                    )}
-
-                    {/* ── AI PRESENTER PANEL (HeyGen-style) ── */}
-                    {showPresenterPanel && (
-                      <div className="border-2 border-indigo-400 rounded-xl p-4 bg-indigo-50 dark:bg-indigo-950/20 space-y-4">
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg">🎬</span>
-                          <p className="text-sm font-bold text-indigo-700 dark:text-indigo-300">مذيع AI احترافي — اختر مذيعك وولّد فيديو سينمائي</p>
-                          <Button type="button" size="sm" variant="ghost" className="mr-auto h-6 w-6 p-0" onClick={() => setShowPresenterPanel(false)}>
-                            <X className="w-3 h-3" />
-                          </Button>
-                        </div>
-
-                        {/* Presenter Grid */}
-                        <div>
-                          <p className="text-xs font-bold text-indigo-800 dark:text-indigo-300 mb-2">① اختر المذيع:</p>
-                          {presenters.length === 0 ? (
-                            <div className="flex items-center gap-2 text-xs text-indigo-600 py-4 justify-center">
-                              <Loader2 className="w-4 h-4 animate-spin" /> جاري تحميل المذيعين...
-                            </div>
-                          ) : (
-                            <div className="grid grid-cols-4 gap-2 max-h-52 overflow-y-auto pr-1">
-                              {presenters.slice(0, 40).map((p: any) => (
-                                <button
-                                  key={p.presenter_id}
-                                  type="button"
-                                  onClick={() => setSelectedPresenter(p)}
-                                  className={`relative rounded-xl overflow-hidden border-2 transition-all group ${selectedPresenter?.presenter_id === p.presenter_id ? "border-indigo-600 ring-2 ring-indigo-400 scale-105" : "border-gray-200 hover:border-indigo-400"}`}
-                                  data-testid={`btn-presenter-${p.presenter_id}`}
-                                >
-                                  <img src={p.thumbnail_url} alt={p.name} className="w-full aspect-square object-cover" />
-                                  {selectedPresenter?.presenter_id === p.presenter_id && (
-                                    <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center">
-                                      <div className="bg-indigo-600 rounded-full p-1"><CheckCircle2 className="w-4 h-4 text-white" /></div>
-                                    </div>
-                                  )}
-                                  <p className="text-center text-[10px] py-0.5 font-medium bg-white dark:bg-gray-800 truncate px-1">{p.name}</p>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Script */}
-                        <div className="space-y-1.5">
-                          <p className="text-xs font-bold text-indigo-800 dark:text-indigo-300">② اكتب ما سيقوله المذيع:</p>
-                          <Textarea
-                            value={presenterText}
-                            onChange={e => setPresenterText(e.target.value)}
-                            placeholder="مثال: أهلاً وسهلاً! عندنا أحسن العروض على الإلكترونيات — أجهزة أصلية بأسعار لا تصدق..."
-                            className="text-sm min-h-[80px] border-indigo-300 focus:border-indigo-500"
-                            data-testid="textarea-presenter-text"
-                          />
-                          <p className="text-[11px] text-muted-foreground">💡 الحد الأقصى 2000 حرف — يُنصح بنص 30-60 ثانية</p>
-                        </div>
-
-                        {/* Voice */}
-                        <div className="space-y-1">
-                          <p className="text-xs font-bold text-indigo-800 dark:text-indigo-300">③ اختر الصوت:</p>
-                          <Select value={presenterVoice} onValueChange={setPresenterVoice}>
-                            <SelectTrigger className="h-8 text-xs border-indigo-300" data-testid="select-presenter-voice">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="ar-EG-SalmaNeural">🎙️ سلمى — صوت نسائي مصري</SelectItem>
-                              <SelectItem value="ar-EG-ShakirNeural">🎙️ شاكر — صوت رجالي مصري</SelectItem>
-                              <SelectItem value="ar-SA-ZariyahNeural">🎙️ زارية — صوت نسائي خليجي</SelectItem>
-                              <SelectItem value="ar-SA-HamedNeural">🎙️ حامد — صوت رجالي خليجي</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        {/* Generate Button */}
-                        <Button
-                          type="button"
-                          disabled={generatingClip || !selectedPresenter || !presenterText.trim()}
-                          onClick={async () => {
-                            if (!selectedPresenter || !presenterText.trim()) {
-                              toast({ variant: "destructive", title: "اختر مذيع واكتب النص أولاً" });
-                              return;
-                            }
-                            setGeneratingClip(true);
-                            try {
-                              const res = await fetch("/api/ai/presenter-clip", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ presenterId: selectedPresenter.presenter_id, text: presenterText, voiceId: presenterVoice }),
-                                credentials: "include"
-                              });
-                              const data = await res.json();
-                              if (!res.ok) throw new Error(data.message);
-                              setClipVideoUrl(data.videoUrl);
-                              toast({ title: "🎬 تم توليد الفيديو بنجاح!", className: "bg-indigo-600 text-white border-none" });
-                            } catch (e: any) {
-                              toast({ variant: "destructive", title: "فشل توليد الفيديو", description: e.message });
-                            } finally { setGeneratingClip(false); }
-                          }}
-                          className="w-full gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
-                          data-testid="btn-gen-presenter-clip"
-                        >
-                          {generatingClip ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري توليد الفيديو... (30-90 ثانية)</> : <><span>🎬</span> ④ ولّد الفيديو الاحترافي</>}
-                        </Button>
-
-                        {/* Result Video */}
-                        {clipVideoUrl && (
-                          <div className="space-y-2">
-                            <video src={clipVideoUrl} controls className="w-full rounded-xl border-2 border-indigo-400 shadow-lg" data-testid="video-presenter-clip" />
-                            <div className="flex gap-2">
-                              <Button type="button" size="sm" variant="outline" className="gap-1.5 border-indigo-400 text-indigo-600 flex-1"
-                                onClick={() => { form.setValue("mediaUrl", clipVideoUrl); form.setValue("mediaType", "video"); toast({ title: "✅ تم تعيين الفيديو للإعلان" }); }}>
-                                ✅ استخدم في الإعلان
-                              </Button>
-                              <a href={clipVideoUrl} download className="flex-1">
-                                <Button type="button" size="sm" variant="outline" className="w-full gap-1.5 border-indigo-400 text-indigo-600">
-                                  ⬇️ تحميل
-                                </Button>
-                              </a>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Talking Photo Section */}
-                    {(showTalkingPhotoPanel || talkingPhotoVideoUrl) && (
-                      <div className="border-2 border-purple-300 rounded-xl p-4 bg-purple-50 dark:bg-purple-950/20 space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Camera className="w-4 h-4 text-purple-600" />
-                          <p className="text-sm font-bold text-purple-700">🎭 حوّل صورتك لفيديو ناطق — 3 خطوات فقط</p>
-                          <Button type="button" size="sm" variant="ghost" className="mr-auto h-6 w-6 p-0" onClick={() => { setTalkingPhotoText(""); setTalkingPhotoVideoUrl(""); setTalkingPhotoFaceUrl("/uploads/avatar-male-1.jpg"); setShowTalkingPhotoPanel(false); }}>
-                            <X className="w-3 h-3" />
-                          </Button>
-                        </div>
-
-                        {/* ── Step 1: Choose face ── */}
-                        <div className="space-y-3">
-                          <p className="text-xs font-bold text-purple-800 dark:text-purple-300">① اختر الشخص اللي هيتكلم في الفيديو:</p>
-
-                          {/* Upload personal photo — PRIMARY option */}
-                          <label
-                            className="relative flex flex-col items-center justify-center gap-2 cursor-pointer rounded-2xl border-2 border-dashed border-purple-400 bg-white dark:bg-purple-950/20 hover:bg-purple-50 dark:hover:bg-purple-950/40 transition-all p-4 group"
-                            data-testid="label-upload-face"
-                          >
-                            {talkingPhotoFaceUrl && ![ "/uploads/avatar-male-1.jpg", "/uploads/avatar-male-2.jpg", "/uploads/avatar-female-1.jpg", "/uploads/avatar-female-2.jpg" ].includes(talkingPhotoFaceUrl) ? (
-                              /* Show uploaded face */
-                              <div className="flex flex-col items-center gap-2">
-                                <div className="relative">
-                                  <img src={talkingPhotoFaceUrl} alt="صورتك" className="w-20 h-20 rounded-full object-cover border-4 border-purple-500 shadow-lg" />
-                                  <div className="absolute -bottom-1 -right-1 bg-green-500 rounded-full p-1">
-                                    <CheckCircle2 className="w-3 h-3 text-white" />
-                                  </div>
-                                </div>
-                                <p className="text-xs font-bold text-green-600">✅ صورتك جاهزة — اضغط لتغييرها</p>
-                              </div>
-                            ) : (
-                              /* Upload prompt */
-                              <div className="flex flex-col items-center gap-2 py-1">
-                                <div className="w-14 h-14 rounded-full bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center group-hover:scale-110 transition-transform">
-                                  <Upload className="w-6 h-6 text-purple-600" />
-                                </div>
-                                <div className="text-center">
-                                  <p className="text-sm font-bold text-purple-700 dark:text-purple-300">ارفع صورتك الشخصية</p>
-                                  <p className="text-xs text-muted-foreground mt-0.5">صورة واضحة للوجه — JPG أو PNG</p>
-                                </div>
-                                <div className="flex gap-3 text-xs text-muted-foreground">
-                                  <span className="flex items-center gap-1">✅ وجه واضح أمامي</span>
-                                  <span className="flex items-center gap-1">✅ إضاءة جيدة</span>
-                                  <span className="flex items-center gap-1">✅ خلفية بسيطة</span>
-                                </div>
-                              </div>
-                            )}
-                            <input
-                              type="file"
-                              accept="image/jpeg,image/jpg,image/png"
-                              className="hidden"
-                              data-testid="input-upload-face"
-                              onChange={async (e) => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                const fd = new FormData();
-                                fd.append("file", file);
-                                toast({ title: "⏳ جاري رفع الصورة..." });
-                                const r = await fetch("/api/upload", { method: "POST", body: fd, credentials: "include" });
-                                const d = await r.json();
-                                if (d.url) { setTalkingPhotoFaceUrl(d.url); toast({ title: "✅ تم رفع صورتك! جاهز للفيديو", className: "bg-green-600 text-white border-none" }); }
-                                else toast({ variant: "destructive", title: "❌ فشل رفع الصورة" });
-                              }}
-                            />
-                          </label>
-
-                          {/* ── Mascot Generator ── */}
-                          <div className="space-y-2 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800/40 rounded-xl p-3">
-                            <p className="text-xs font-bold text-orange-700 dark:text-orange-400">🎨 مقدّم إعلانك — اختر نوع منتجك وولّد وجه مصري احترافي بالذكاء الاصطناعي:</p>
-                            <div className="grid grid-cols-5 gap-1.5">
-                              {MASCOT_CATEGORIES.map((cat) => (
-                                <button
-                                  key={cat.label}
-                                  type="button"
-                                  disabled={generatingMascot}
-                                  onClick={() => handleGenerateMascot(cat.prompt)}
-                                  className="flex flex-col items-center gap-1 p-2 rounded-xl border border-orange-200 bg-white dark:bg-orange-950/30 hover:border-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                  data-testid={`btn-mascot-${cat.label}`}
-                                >
-                                  <span className="text-xl">{cat.emoji}</span>
-                                  <span className="text-[10px] font-medium text-orange-700 dark:text-orange-400">{cat.label}</span>
-                                </button>
-                              ))}
-                            </div>
-                            {generatingMascot && (
-                              <div className="flex items-center gap-2 text-xs text-orange-600">
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                                جاري توليد الماسكوت بالذكاء الاصطناعي...
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Or choose built-in avatar */}
-                          <div className="space-y-1.5">
-                            <p className="text-xs text-muted-foreground text-center">— أو اختر شخصية بشرية جاهزة —</p>
-                            <div className="grid grid-cols-4 gap-2">
-                              {[
-                                { url: "/uploads/avatar-male-1.jpg", label: "رجل ١" },
-                                { url: "/uploads/avatar-male-2.jpg", label: "رجل ٢" },
-                                { url: "/uploads/avatar-female-1.jpg", label: "سيدة ١" },
-                                { url: "/uploads/avatar-female-2.jpg", label: "سيدة ٢" },
-                              ].map((av) => (
-                                <button
-                                  key={av.url}
-                                  type="button"
-                                  onClick={() => setTalkingPhotoFaceUrl(av.url)}
-                                  className={`relative rounded-xl overflow-hidden border-2 transition-all ${talkingPhotoFaceUrl === av.url ? "border-purple-600 ring-2 ring-purple-400" : "border-gray-200 hover:border-purple-400 opacity-70 hover:opacity-100"}`}
-                                  data-testid={`btn-avatar-${av.label}`}
-                                >
-                                  <img src={av.url} alt={av.label} className="w-full aspect-square object-cover" />
-                                  {talkingPhotoFaceUrl === av.url && (
-                                    <div className="absolute inset-0 bg-purple-600/20 flex items-center justify-center">
-                                      <div className="bg-purple-600 rounded-full p-0.5">
-                                        <CheckCircle2 className="w-4 h-4 text-white" />
-                                      </div>
-                                    </div>
-                                  )}
-                                  <p className="text-center text-xs py-0.5 font-medium">{av.label}</p>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* ── Step 2: Script ── */}
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <p className="text-xs font-bold text-purple-800 dark:text-purple-300">② اكتب ما سيقوله في الفيديو:</p>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={handleImproveScript}
-                              disabled={generatingProScript}
-                              className="h-7 text-xs gap-1 border-purple-400 text-purple-600 hover:bg-purple-50 px-2"
-                              data-testid="btn-improve-script"
-                            >
-                              {generatingProScript ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                              {generatingProScript ? "جاري التحسين..." : "✨ سكريبت احترافي"}
-                            </Button>
-                          </div>
-                          {/* ── Ready Templates ── */}
-                          <div className="space-y-1.5">
-                            <p className="text-xs font-bold text-purple-700 dark:text-purple-300">⚡ قوالب جاهزة — اضغط واكتب اسم منتجك فقط:</p>
-                            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-                              {[
-                                { emoji: "🍅", cat: "خضار وفاكهة", color: "bg-green-50 border-green-300 hover:bg-green-100", text: "السلام عليكم! عندنا أحسن خضار وفاكهة طازة النهارده!\nالبضاعة جاية مباشرة من المزرعة لحد بيتك!\nأسعار مش هتلاقيها في أي حتة تانية!\nاتصل دلوقتي والتوصيل مجاناً للطلبات فوق 100 جنيه!" },
-                                { emoji: "🍔", cat: "مطعم وأكل", color: "bg-orange-50 border-orange-300 hover:bg-orange-100", text: "أهلاً وسهلاً بيكم في مطعمنا!\nعندنا أشهى الأكلات المصرية الأصيلة بأيدي أمهر الطهاة!\nالطعم اللي بتدور عليه من زمان موجود هنا!\nاطلب دلوقتي والتوصيل في 30 دقيقة لحد بيتك!" },
-                                { emoji: "📱", cat: "موبايل وإلكترونيات", color: "bg-blue-50 border-blue-300 hover:bg-blue-100", text: "أحسن العروض على الموبايلات والإلكترونيات!\nأجهزة أصلية بضمان سنة كاملة!\nأسعار تبدأ من 2000 جنيه بس!\nأقساط ميسرة بدون فوائد!\nتعالوا زوروا معرضنا أو اطلبوا أونلاين!" },
-                                { emoji: "👗", cat: "ملابس وفاشيون", color: "bg-pink-50 border-pink-300 hover:bg-pink-100", text: "مجموعة الموسم الجديدة وصلت!\nأحدث صيحات الموضة بأسعار مناسبة للجميع!\nتشكيلة واسعة من المقاسات والألوان!\nالتوصيل لجميع محافظات مصر في يومين بس!\nاطلبوا دلوقتي والكمية محدودة!" },
-                                { emoji: "🏠", cat: "عقارات", color: "bg-yellow-50 border-yellow-300 hover:bg-yellow-100", text: "فرصة العمر في عقارات!\nشقق وفيلات بأفضل الأسعار في المنطقة!\nتشطيب سوبر لوكس وموقع مميز!\nأقساط مريحة على 10 سنين!\nتواصلوا معنا النهارده وشوفوا الوحدات المتاحة!" },
-                                { emoji: "🚗", cat: "سيارات", color: "bg-slate-50 border-slate-300 hover:bg-slate-100", text: "أفضل عروض السيارات دلوقتي!\nسيارات مستعملة بحالة ممتازة وأسعار معقولة!\nفحص كامل وضمان 6 شهور!\nتمويل بنكي ميسر!\nتعالوا جربوا وهتحبوا الصفقة!" },
-                                { emoji: "💊", cat: "صيدلية وصحة", color: "bg-teal-50 border-teal-300 hover:bg-teal-100", text: "صحتك في الأول!\nعندنا كل أنواع الأدوية والمكملات الغذائية!\nأسعار أقل من أي صيدلية تانية!\nتوصيل سريع لحد بيتك!\nاستشارة صيدلاني مجاناً مع كل طلب!" },
-                                { emoji: "☕", cat: "كافيه ومشروبات", color: "bg-amber-50 border-amber-300 hover:bg-amber-100", text: "مرحبا بيكم في كافيهنا!\nأحلى القهوة والمشروبات الطازة!\nأجواء هادية ومريحة للعيلة والأصحاب!\nعندنا عروض خاصة كل يوم!\nاحجزوا طولتكم دلوقتي!" },
-                              ].map((tmpl) => (
-                                <button
-                                  key={tmpl.cat}
-                                  type="button"
-                                  onClick={() => setTalkingPhotoText(tmpl.text)}
-                                  className={`flex-shrink-0 flex flex-col items-start gap-1 p-2.5 rounded-xl border ${tmpl.color} transition-all text-right w-36`}
-                                  data-testid={`btn-template-${tmpl.cat}`}
-                                >
-                                  <span className="text-2xl">{tmpl.emoji}</span>
-                                  <span className="text-[11px] font-bold text-gray-700 leading-tight">{tmpl.cat}</span>
-                                  <span className="text-[10px] text-gray-500 leading-tight line-clamp-2">{tmpl.text.split('\n')[0]}</span>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          <Textarea
-                            value={talkingPhotoText}
-                            onChange={e => setTalkingPhotoText(e.target.value)}
-                            placeholder="اضغط على قالب فوق أو اكتب نصك هنا... مثال: عندي هواتف بأسعار ممتازة للبيع"
-                            className="text-sm min-h-[80px] border-purple-300 focus:border-purple-500"
-                            data-testid="textarea-talking-photo-text"
-                          />
-                          <p className="text-xs text-muted-foreground">💡 اختر قالب جاهز أو اكتب نصك → اضغط ✨ لتحسينه بالذكاء الاصطناعي</p>
-                        </div>
-
-                        {/* ── Step 3: Voice ── */}
-                        <div className="space-y-1">
-                          <p className="text-xs font-bold text-purple-800 dark:text-purple-300">③ اختر الصوت:</p>
-                          <Select value={talkingPhotoVoice} onValueChange={setTalkingPhotoVoice}>
-                            <SelectTrigger className="h-8 text-xs border-purple-300" data-testid="select-talking-voice">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="ar-EG-SalmaNeural">🎙️ سلمى — صوت نسائي مصري</SelectItem>
-                              <SelectItem value="ar-EG-ShakirNeural">🎙️ شاكر — صوت رجالي مصري</SelectItem>
-                              <SelectItem value="ar-SA-ZariyahNeural">🎙️ زارية — صوت نسائي خليجي</SelectItem>
-                              <SelectItem value="ar-SA-HamedNeural">🎙️ حامد — صوت رجالي خليجي</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <Button
-                          type="button"
-                          onClick={handleTalkingPhoto}
-                          disabled={generatingTalkingPhoto || !talkingPhotoText.trim()}
-                          className="w-full gap-2 bg-purple-600 hover:bg-purple-700 text-white"
-                          data-testid="btn-gen-talking-photo"
-                        >
-                          {generatingTalkingPhoto ? (
-                            <><Loader2 className="w-4 h-4 animate-spin" /> جاري توليد الفيديو... (30-60 ثانية)</>
-                          ) : (
-                            <><Camera className="w-4 h-4" /> ④ ولّد الفيديو الناطق الآن</>  
-                          )}
-                        </Button>
-
-                        {talkingPhotoVideoUrl && (
-                          <div className="space-y-2">
-                            <p className="text-xs font-bold text-green-600">✅ تم توليد الفيديو!</p>
-                            <video
-                              src={talkingPhotoVideoUrl}
-                              controls
-                              className="w-full rounded-xl border-2 border-purple-300 max-h-64"
-                              data-testid="video-talking-photo-result"
-                            />
-                            <div className="flex gap-2">
-                              <a
-                                href={talkingPhotoVideoUrl}
-                                download
-                                className="flex-1 flex items-center justify-center gap-1 text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-lg py-2 border border-purple-300"
-                              >
-                                <Download className="w-3 h-3" /> تحميل الفيديو
-                              </a>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="flex-1 text-xs border-purple-300 text-purple-600"
-                                onClick={() => { form.setValue("mediaUrl", talkingPhotoVideoUrl); form.setValue("mediaType", "video"); toast({ title: "✅ تم تعيين الفيديو للإعلان" }); }}
-                                data-testid="btn-use-talking-video"
-                              >
-                                استخدام في الإعلان
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
 
                     {/* AI Image Edit section */}
                     {(aiImageUrl || refImages.length > 0) && (

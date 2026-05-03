@@ -1,0 +1,239 @@
+PS C:\Windows\system32> ssh -i "$env:USERPROFILE\.ssh\id_ed25519" root@72.61.177.222
+kex_exchange_identification: read: Connection reset
+Connection reset by 72.61.177.222 port 22
+PS C:\Windows\system32>
+PS C:\Windows\system32> curl ifconfig.me
+
+
+StatusCode        : 200                                                                                                 StatusDescription : OK                                                                                                  Content           : <!DOCTYPE html>                                                                                                         <html lang="en">                                                                                    
+                    <head>
+                        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+                        <meta http-equiv="content-style-type" content="text/css" />
+                        <meta http-equiv="c...
+RawContent        : HTTP/1.1 200 OK
+                    access-control-allow-origin: *
+                    Content-Length: 10689
+                    Content-Type: text/html; charset=utf-8
+                    Date: Mon, 20 Apr 2026 11:40:08 GMT
+                    Via: 1.1 google
+
+                    <!DOCTYPE html>
+                    <html lang="en">...
+Forms             : {}
+Headers           : {[access-control-allow-origin, *], [Content-Length, 10689], [Content-Type, text/html;
+                    charset=utf-8], [Date, Mon, 20 Apr 2026 11:40:08 GMT]...}
+Images            : {}
+InputFields       : {}
+Links             : {@{innerHTML=IPinfo.io; innerText=IPinfo.io; outerHTML=<A href="https://ipinfo.io/?utm_source=ifcon
+                    fig.me&amp;utm_medium=referral&amp;utm_campaign=upsell_sister_sites">IPinfo.io</A>;
+                    outerText=IPinfo.io; tagName=A; href=https://ipinfo.io/?utm_source=ifconfig.me&amp;utm_medium=refer
+                    ral&amp;utm_campaign=upsell_sister_sites}, @{innerHTML=What Is My IP Address? - ifconfig.me;
+                    innerText=What Is My IP Address? - ifconfig.me; outerHTML=<A href="http://ifconfig.me">What Is My
+                    IP Address? - ifconfig.me</A>; outerText=What Is My IP Address? - ifconfig.me; tagName=A;
+                    href=http://ifconfig.me}, @{innerHTML=; innerText=; outerHTML=<A class=twitter-share-button
+                    href="http://twitter.com/share" data-count="horizontal" data-text="What Is My IP Address? -
+                    ifconfig.me" data-url="http://ifconfig.me/"></A>; outerText=; tagName=A;
+                    class=twitter-share-button; href=http://twitter.com/share; data-count=horizontal; data-text=What
+                    Is My IP Address? - ifconfig.me; data-url=http://ifconfig.me/}}
+ParsedHtml        : mshtml.HTMLDocumentClass
+RawContentLength  : 10689
+
+
+
+PS C:\Windows\system32> (Invoke-WebRequest -Uri "https://api.ipify.org").Content
+156.213.223.252
+PS C:\Windows\system32>
+PS C:\Windows\system32> 102.45.67.89
+PS C:\Windows\system32>
+PS C:\Windows\system32> ssh -i "$env:USERPROFILE\.ssh\id_ed25519" root@72.61.177.222
+Welcome to Ubuntu 24.04.4 LTS (GNU/Linux 6.8.0-110-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+
+ System information as of Mon Apr 20 11:46:29 UTC 2026
+
+  System load:  0.0               Processes:             119
+  Usage of /:   3.0% of 95.82GB   Users logged in:       0
+  Memory usage: 2%                IPv4 address for eth0: 72.61.177.222
+  Swap usage:   0%                IPv6 address for eth0: 2a02:4780:41:9640::1
+
+ * Strictly confined Kubernetes makes edge and IoT secure. Learn how MicroK8s
+   just raised the bar for easy, resilient and secure K8s cluster deployment.
+
+   https://ubuntu.com/engage/secure-kubernetes-at-the-edge
+
+Expanded Security Maintenance for Applications is not enabled.
+
+0 updates can be applied immediately.
+
+Enable ESM Apps to receive additional future security updates.
+See https://ubuntu.com/esm or run: sudo pro status
+
+
+1 updates could not be installed automatically. For more details,
+see /var/log/unattended-upgrades/unattended-upgrades.log
+
+Last login: Mon Apr 20 10:21:03 2026 from 169.254.0.1
+root@srv1602266:~# cd /root && ls
+'ads-as-platform (2).tar.gz'   snap
+root@srv1602266:~#
+root@srv1602266:~#
+root@srv1602266:~# tar -xzf 'ads-as-platform (2).tar.gz'
+root@srv1602266:~#
+root@srv1602266:~#
+root@srv1602266:~# ls
+'ads-as-platform (2).tar.gz'   drizzle.config.ts   postcss.config.js   server   tailwind.config.ts
+ client                        package-lock.json   replit.md           shared   tsconfig.json
+ components.json               package.json        script              snap     vite.config.ts
+
+added 629 packages, and audited 630 packages in 10s
+
+97 packages are looking for funding
+  run `npm fund` for details
+
+3 vulnerabilities (2 high, 1 critical)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+root@srv1602266:~# cat > .env << 'EOF'
+> DATABASE_URL=postgresql://adsas_user:AdsAs2026StrongPass@localhost:5432/adsas_db
+> OPENAI_API_KEY=your_openai_key
+> DID_API_KEY=your_did_key
+> NODE_ENV=production
+> PORT=5000
+> EOF
+No config path provided, using default 'drizzle.config.ts'
+Reading config file '/root/drizzle.config.ts'6StrongPass@localhost:5432/adsas_db
+Using 'pg' driver for database querying
+[✓] Pulling schema from database...
+[✓] Changes applied
+building client...
+vite v7.3.1 building client environment for production...
+transforming (1) src/main.tsxBrowserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+✓ 3750 modules transformed.
+../dist/public/index.html                    10.67 kB │ gzip:   2.91 kB
+../dist/public/assets/index-Bfp6eRck.css    209.16 kB │ gzip:  33.44 kB
+../dist/public/assets/hls-D02re3bK.js       521.93 kB │ gzip: 161.74 kB
+../dist/public/assets/index-BboJFFxX.js   2,507.50 kB │ gzip: 673.94 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 12.78s
+building server...
+
+  dist/index.cjs  1.7mb ⚠️
+
+⚡ Done in 246ms
+root@srv1602266:~#
+root@srv1602266:~# pm2 start dist/index.cjs --name "ads-as" && pm2 save && pm2 startup
+
+                        -------------
+
+__/\\\\\\\\\\\\\____/\\\\____________/\\\\____/\\\\\\\\\_____
+ _\/\\\/////////\\\_\/\\\\\\________/\\\\\\__/\\\///////\\\___
+  _\/\\\_______\/\\\_\/\\\//\\\____/\\\//\\\_\///______\//\\\__
+   _\/\\\\\\\\\\\\\/__\/\\\\///\\\/\\\/_\/\\\___________/\\\/___
+    _\/\\\/////////____\/\\\__\///\\\/___\/\\\________/\\\//_____
+     _\/\\\_____________\/\\\____\///_____\/\\\_____/\\\//________
+      _\/\\\_____________\/\\\_____________\/\\\___/\\\/___________
+       _\/\\\_____________\/\\\_____________\/\\\__/\\\\\\\\\\\\\\\_
+        _\///______________\///______________\///__\///////////////__
+
+
+                          Runtime Edition
+
+        PM2 is a Production Process Manager for Node.js applications
+                     with a built-in Load Balancer.
+
+                Start and Daemonize any application:
+                $ pm2 start app.js
+
+                Load Balance 4 instances of api.js:
+                $ pm2 start api.js -i 4
+
+                Monitor in production:
+                $ pm2 monitor
+
+                Make pm2 auto-boot at server restart:
+                $ pm2 startup
+
+                To go further checkout:
+                http://pm2.io/
+
+
+                        -------------
+
+[PM2] Spawning PM2 daemon with pm2_home=/root/.pm2
+[PM2] PM2 Successfully daemonized
+[PM2] Starting /root/dist/index.cjs in fork_mode (1 instance)
+[PM2] Done.
+┌────┬────────────────────┬──────────┬──────┬───────────┬──────────┬──────────┐
+│ id │ name               │ mode     │ ↺    │ status    │ cpu      │ memory   │
+├────┼────────────────────┼──────────┼──────┼───────────┼──────────┼──────────┤
+│ 0  │ ads-as             │ fork     │ 0    │ online    │ 0%       │ 27.9mb   │
+└────┴────────────────────┴──────────┴──────┴───────────┴──────────┴──────────┘
+[PM2] Saving current process list...
+[PM2] Successfully saved in /root/.pm2/dump.pm2
+[PM2] Init System found: systemd
+Platform systemd
+Template
+[Unit]
+Description=PM2 process manager
+Documentation=https://pm2.keymetrics.io/
+After=network.target
+
+[Service]
+Type=forking
+User=root
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+Environment=PM2_HOME=/root/.pm2
+PIDFile=/root/.pm2/pm2.pid
+Restart=on-failure
+
+ExecStart=/usr/lib/node_modules/pm2/bin/pm2 resurrect
+ExecReload=/usr/lib/node_modules/pm2/bin/pm2 reload all
+ExecStop=/usr/lib/node_modules/pm2/bin/pm2 kill
+
+[Install]
+WantedBy=multi-user.target
+
+Target path
+/etc/systemd/system/pm2-root.service
+Command list
+[ 'systemctl enable pm2-root' ]
+[PM2] Writing init configuration in /etc/systemd/system/pm2-root.service
+[PM2] Making script booting at startup...
+[PM2] [-] Executing: systemctl enable pm2-root...
+Created symlink /etc/systemd/system/multi-user.target.wants/pm2-root.service → /etc/systemd/system/pm2-root.service.
+[PM2] [v] Command successfully executed.
++---------------------------------------+
+[PM2] Freeze a process list on reboot via:
+$ pm2 save
+
+[PM2] Remove init script via:
+$ pm2 unstartup systemd
+root@srv1602266:~#
+root@srv1602266:~#
+
+
+
+
+
+
+
+
+

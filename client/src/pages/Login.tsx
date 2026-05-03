@@ -70,7 +70,6 @@ export default function Login() {
   // Forgot password
   const [forgotIdentifier, setForgotIdentifier] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
-  const [resetToken, setResetToken] = useState("");
 
   useEffect(() => {
     if (user) {
@@ -89,7 +88,6 @@ export default function Login() {
     } catch (err: any) {
       if (err?.message === "first_login" || err?.status === 403) {
         setFirstLoginUserId(err.userId || "");
-        setResetToken(err.resetToken || "");
         setScreen("set-password");
       } else {
         toast({ variant: "destructive", title: err?.message || "فشل تسجيل الدخول" });
@@ -120,20 +118,9 @@ export default function Login() {
     if (newPw1.length < 6) return toast({ variant: "destructive", title: "كلمة المرور 6 أحرف على الأقل" });
     if (newPw1 !== newPw2) return toast({ variant: "destructive", title: "كلمتا المرور غير متطابقتين" });
     try {
-      await setPassword.mutateAsync({ userId: firstLoginUserId, password: newPw1, resetToken });
-      toast({ title: "✅ تم تغيير كلمة المرور بنجاح", description: "يمكنك الآن تسجيل الدخول بكلمة المرور الجديدة" });
-      setNewPw1("");
-      setNewPw2("");
-      setResetToken("");
-      setFirstLoginUserId("");
-      setScreen("login");
+      await setPassword.mutateAsync({ userId: firstLoginUserId, password: newPw1 });
     } catch (err: any) {
-      if (err?.message?.includes("انتهت صلاحية")) {
-        toast({ variant: "destructive", title: "انتهت صلاحية الطلب", description: "ابدأ من 'نسيت كلمة المرور' من جديد" });
-        setScreen("forgot");
-      } else {
-        toast({ variant: "destructive", title: err?.message || "فشل تعيين كلمة المرور" });
-      }
+      toast({ variant: "destructive", title: err?.message || "فشل تعيين كلمة المرور" });
     }
   };
 
@@ -145,29 +132,18 @@ export default function Login() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ identifier: forgotIdentifier.trim() }),
+        body: JSON.stringify({ identifier: forgotIdentifier }),
       });
-      let json: any = {};
-      try { json = await res.json(); } catch { json = {}; }
-
-      if (!res.ok && res.status >= 500) {
-        toast({ variant: "destructive", title: "خطأ في الخادم، حاول مجدداً بعد قليل" });
-        return;
-      }
+      const json = await res.json();
       if (json.notFound || !json.userId) {
-        toast({
-          variant: "destructive",
-          title: "الحساب غير موجود",
-          description: "تأكد من الإيميل أو رقم الهاتف أو الـ ID. إذا نسيت بياناتك تواصل مع الدعم على واتساب."
-        });
+        toast({ variant: "destructive", title: "البيانات غير مسجّلة، تأكد من الإيميل أو الـ ID" });
         return;
       }
       setFirstLoginUserId(json.userId);
-      setResetToken(json.resetToken || "");
       setScreen("set-password");
       toast({ title: `مرحباً ${json.firstName || ""}، عيّن كلمة مرور جديدة` });
     } catch {
-      toast({ variant: "destructive", title: "تعذّر الاتصال، تحقق من الإنترنت وحاول مجدداً" });
+      toast({ variant: "destructive", title: "حدث خطأ، حاول مجدداً" });
     } finally {
       setForgotLoading(false);
     }
@@ -194,10 +170,6 @@ export default function Login() {
           <p className="text-muted-foreground text-sm flex items-center justify-center gap-2">
             <span className="text-lg">🇪🇬</span>
             المنصة الإعلانية الأولى في مصر
-          </p>
-          <p className="text-xs text-muted-foreground/70 mt-1 flex items-center justify-center gap-1">
-            <span>🛒</span>
-            وهى إحدى منصات تطبيق <span className="font-bold text-primary">سوق ماركات</span>
           </p>
           <div className="flex items-center justify-center gap-6 mt-3">
             {[{ label: "معلن نشط", value: "2.4K+" }, { label: "بث يومي", value: "150+" }, { label: "إعلان منشور", value: "18K+" }].map(s => (
@@ -544,21 +516,19 @@ export default function Login() {
               </div>
             </div>
 
-            <div className="space-y-3 mb-4">
-              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-700 dark:text-amber-400">
-                📋 <strong>ادخل أي من:</strong> البريد الإلكتروني المسجّل، أو رقم الهاتف (مثل 01012345678)، أو رقم الـ ID الخاص بك
-              </div>
+            <div className="p-3 mb-4 bg-blue-500/10 border border-blue-500/20 rounded-xl text-sm text-blue-600">
+              💡 <strong>ملاحظة:</strong> إذا كنت سجّلت حسابك قبلاً عبر Replit أو Google، أدخل إيميلك هنا وستتمكن من تعيين كلمة مرور جديدة
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-semibold mb-1.5 block">البريد الإلكتروني / رقم الهاتف / الـ ID</label>
+                <label className="text-sm font-semibold mb-1.5 block">البريد الإلكتروني أو رقم الهاتف أو الـ ID</label>
                 <div className="relative">
                   <Mail className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     value={forgotIdentifier}
                     onChange={e => setForgotIdentifier(e.target.value)}
-                    placeholder="example@email.com أو 01XXXXXXXXX"
+                    placeholder="example@email.com أو 01XXXXXXXXX أو 54219806"
                     className="pr-9 h-11"
                     dir="ltr"
                     data-testid="input-forgot-identifier"
@@ -580,19 +550,10 @@ export default function Login() {
                 إعادة تعيين كلمة المرور
               </Button>
 
-              <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
-                <button onClick={() => setScreen("login")} className="text-primary hover:underline font-medium">
-                  تذكرت كلمة المرور؟ سجّل الدخول
-                </button>
-                <a
-                  href="https://wa.me/201126665741?text=أحتاج%20مساعدة%20في%20استرجاع%20حسابي"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-green-600 hover:text-green-700 text-xs flex items-center gap-1 hover:underline"
-                >
-                  💬 مشكلة في الاسترجاع؟ تواصل مع الدعم على واتساب
-                </a>
-              </div>
+              <p className="text-center text-sm text-muted-foreground">
+                تذكرت كلمة المرور؟{" "}
+                <button onClick={() => setScreen("login")} className="text-primary hover:underline font-medium">سجّل الدخول</button>
+              </p>
             </div>
           </div>
         )}

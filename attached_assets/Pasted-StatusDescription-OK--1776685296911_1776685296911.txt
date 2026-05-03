@@ -1,0 +1,43 @@
+StatusDescription : OK                                                                                                  Content           : <!DOCTYPE html>                                                                                                         <html lang="en">                                                                                    
+                    <head>
+                        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+                        <meta http-equiv="content-style-type" content="text/css" />
+                        <meta http-equiv="c...
+RawContent        : HTTP/1.1 200 OK
+                    access-control-allow-origin: *
+                    Content-Length: 10689
+                    Content-Type: text/html; charset=utf-8
+                    Date: Mon, 20 Apr 2026 11:40:08 GMT
+                    Via: 1.1 google
+
+                    <!DOCTYPE html>
+                    <html lang="en">...
+Forms             : {}
+Headers           : {[access-control-allow-origin, *], [Content-Length, 10689], [Content-Type, text/html;
+                    charset=utf-8], [Date, Mon, 20 Apr 2026 11:40:08 GMT]...}
+Images            : {}
+InputFields       : {}
+Links             : {@{innerHTML=IPinfo.io; innerText=IPinfo.io; outerHTML=<A href="https://ipinfo.io/?utm_source=ifcon
+                    fig.me&amp;utm_medium=referral&amp;utm_campaign=upsell_sister_sites">IPinfo.io</A>;
+                    outerText=IPinfo.io; tagName=A; href=https://ipinfo.io/?utm_source=ifconfig.me&amp;utm_medium=refer
+                    ral&amp;utm_campaign=upsell_sister_sites}, @{innerHTML=What Is My IP Address? - ifconfig.me;
+                    innerText=What Is My IP Address? - ifconfig.me; outerHTML=<A href="http://ifconfig.me">What Is My
+                    IP Address? - ifconfig.me</A>; outerText=What Is My IP Address? - ifconfig.me; tagName=A;
+                    href=http://ifconfig.me}, @{innerHTML=; innerText=; outerHTML=<A class=twitter-share-button
+                    href="http://twitter.com/share" data-count="horizontal" data-text="What Is My IP Address? -
+                    ifconfig.me" data-url="http://ifconfig.me/"></A>; outerText=; tagName=A;
+                    class=twitter-share-button; href=http://twitter.com/share; data-count=horizontal; data-text=What
+                    Is My IP Address? - ifconfig.me; data-url=http://ifconfig.me/}}
+ParsedHtml        : mshtml.HTMLDocumentClass
+RawContentLength  : 10689
+
+
+
+PS C:\Windows\system32> (Invoke-WebRequest -Uri "https://api.ipify.org").Content
+156.213.223.252
+PS C:\Windows\system32>
+PS C:\Windows\system32> 102.45.67.89
+PS C:\Windows\system32>
+PS C:\Windows\system32>
+
+

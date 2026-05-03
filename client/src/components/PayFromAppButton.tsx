@@ -24,14 +24,13 @@ interface Props {
 }
 
 const SERVICE_TYPES = [
-  { value: "ad_boost",      emoji: "⚡",  name: "تعزيز الإعلان",           desc: "ظهور مميز في الصدارة",            settingKey: "boost_price_egp",         fixedPrice: null },
-  { value: "renewal",       emoji: "🔄",  name: "تجديد 30 يوم",            desc: "تمديد صلاحية إعلانك",             settingKey: "renewal_price_30",        fixedPrice: null },
-  { value: "campaign",      emoji: "📣",  name: "حملة إعلانية",            desc: "استهدف جمهورك بدقة",              settingKey: "campaign_min_budget_egp", fixedPrice: null },
-  { value: "ai_image",      emoji: "🖼️", name: "صورة بالذكاء",            desc: "توليد صورة احترافية",             settingKey: "ai_price_image",          fixedPrice: null },
-  { value: "ai_video",      emoji: "🎬",  name: "فيديو بالذكاء",           desc: "إنشاء مقطع فيديو",                settingKey: "ai_price_video",          fixedPrice: null },
-  { value: "ai_content",    emoji: "✍️", name: "محتوى بالذكاء",           desc: "كتابة نص إعلاني احترافي",        settingKey: "ai_price_content",        fixedPrice: null },
-  { value: "ai_credits",    emoji: "🤖",  name: "رصيد ذكاء",               desc: "كريديتات إضافية للـ AI",          settingKey: "ai_price_per_credit_egp", fixedPrice: null },
-  { value: "talking_photo", emoji: "🗣️", name: "فيديو متكلم بصوت طبيعي", desc: "خضار، منتج، شخص — أي صورة تتكلم 🔥", settingKey: "",                    fixedPrice: 100 },
+  { value: "ad_boost",   emoji: "⚡", name: "تعزيز الإعلان",    desc: "ظهور مميز في الصدارة",       settingKey: "boost_price_egp" },
+  { value: "renewal",    emoji: "🔄", name: "تجديد 30 يوم",    desc: "تمديد صلاحية إعلانك",        settingKey: "renewal_price_30" },
+  { value: "campaign",   emoji: "📣", name: "حملة إعلانية",    desc: "استهدف جمهورك بدقة",         settingKey: "campaign_min_budget_egp" },
+  { value: "ai_image",   emoji: "🖼️", name: "صورة بالذكاء",    desc: "توليد صورة احترافية",        settingKey: "ai_price_image" },
+  { value: "ai_video",   emoji: "🎬", name: "فيديو بالذكاء",   desc: "إنشاء مقطع فيديو",           settingKey: "ai_price_video" },
+  { value: "ai_content", emoji: "✍️", name: "محتوى بالذكاء",  desc: "كتابة نص إعلاني احترافي",   settingKey: "ai_price_content" },
+  { value: "ai_credits", emoji: "🤖", name: "رصيد ذكاء",       desc: "كريديتات إضافية للـ AI",     settingKey: "ai_price_per_credit_egp" },
 ];
 
 export function PayFromAppButton({ price, label, className = "", size = "default", variant = "default", adId, defaultService }: Props) {
@@ -40,7 +39,6 @@ export function PayFromAppButton({ price, label, className = "", size = "default
   const [selectedService, setSelectedService] = useState(defaultService || "");
   const [manualAmount, setManualAmount]       = useState(price ? String(price) : "");
   const [adIdInput, setAdIdInput]             = useState(adId ? String(adId) : "");
-  const [orderRef, setOrderRef]               = useState("");
   const [screenshotUrl, setScreenshotUrl]     = useState("");
   const [screenshotPreview, setScreenshotPreview] = useState("");
   const [uploading, setUploading]             = useState(false);
@@ -54,18 +52,14 @@ export function PayFromAppButton({ price, label, className = "", size = "default
   });
 
   const getPrice = (settingKey: string) => {
-    if (!settingKey) return null;
     const v = pricing[settingKey];
     return v ? parseFloat(v) : null;
   };
 
   const selectedSvc = SERVICE_TYPES.find(s => s.value === selectedService);
-  const svcPrice = selectedSvc
-    ? (selectedSvc.fixedPrice ?? getPrice(selectedSvc.settingKey) ?? null)
-    : null;
   const finalAmount = manualAmount
     ? parseFloat(manualAmount)
-    : (svcPrice ?? price ?? 0);
+    : (selectedSvc ? (getPrice(selectedSvc.settingKey) ?? price ?? 0) : (price ?? 0));
 
   const submitMutation = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/payments", data),
@@ -101,10 +95,6 @@ export function PayFromAppButton({ price, label, className = "", size = "default
       toast({ variant: "destructive", title: "ارفع صورة الفاتورة أولاً" });
       return;
     }
-    if (!orderRef.trim()) {
-      toast({ variant: "destructive", title: "أدخل رقم الطلب من التطبيق" });
-      return;
-    }
     const now = new Date();
     const datePart = now.toISOString().slice(0, 10).replace(/-/g, "");
     const rand = Math.floor(1000 + Math.random() * 9000);
@@ -114,16 +104,15 @@ export function PayFromAppButton({ price, label, className = "", size = "default
       amountEGP: finalAmount,
       serviceType: selectedService || "other",
       adId: adIdInput ? parseInt(adIdInput) : (adId ?? null),
-      paymentRef: orderRef.trim(),
       screenshotUrl,
       orderNumber: `ORD-${datePart}-${rand}`,
-      notes: `دفع عبر تطبيق سوق ماركات — ${selectedSvc?.name || "خدمة"} — رقم الطلب: ${orderRef.trim()}`,
+      notes: `دفع عبر تطبيق سوق ماركات — ${selectedSvc?.name || "خدمة"}`,
     });
   };
 
   const reset = () => {
     setStep(1); setSelectedService(defaultService || ""); setManualAmount(price ? String(price) : "");
-    setAdIdInput(adId ? String(adId) : ""); setOrderRef(""); setScreenshotUrl(""); setScreenshotPreview("");
+    setAdIdInput(adId ? String(adId) : ""); setScreenshotUrl(""); setScreenshotPreview("");
     if (fileRef.current) fileRef.current.value = "";
   };
 
@@ -176,13 +165,13 @@ export function PayFromAppButton({ price, label, className = "", size = "default
                 <p className="text-xs text-muted-foreground mb-3">ستجد نفس الخدمة في تطبيق سوق ماركات</p>
                 <div className="space-y-2 max-h-64 overflow-y-auto pl-1">
                   {SERVICE_TYPES.map(svc => {
-                    const itemPrice = svc.fixedPrice ?? getPrice(svc.settingKey);
+                    const svcPrice = getPrice(svc.settingKey);
                     return (
                       <button
                         key={svc.value}
                         onClick={() => {
                           setSelectedService(svc.value);
-                          if (itemPrice) setManualAmount(String(itemPrice));
+                          if (svcPrice) setManualAmount(String(svcPrice));
                         }}
                         className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-right transition-all ${
                           selectedService === svc.value
@@ -196,8 +185,8 @@ export function PayFromAppButton({ price, label, className = "", size = "default
                           <p className="font-bold text-sm">{svc.name}</p>
                           <p className="text-xs text-muted-foreground">{svc.desc}</p>
                         </div>
-                        {itemPrice ? (
-                          <span className="text-sm font-extrabold text-primary whitespace-nowrap">{itemPrice} ج.م</span>
+                        {svcPrice ? (
+                          <span className="text-sm font-extrabold text-primary whitespace-nowrap">{svcPrice} ج.م</span>
                         ) : (
                           <span className="text-xs text-muted-foreground">متغير</span>
                         )}
@@ -289,33 +278,11 @@ export function PayFromAppButton({ price, label, className = "", size = "default
                 </div>
               </div>
 
-              {/* 2B: رقم الطلب من التطبيق */}
-              <div className="space-y-2">
-                <h3 className="font-bold text-sm">3️⃣ أدخل رقم الطلب من التطبيق</h3>
-                <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-300/50 px-3 py-2 text-xs text-amber-800 dark:text-amber-400">
-                  📋 بعد الدفع، افتح الطلب في تطبيق سوق ماركات — ستجد رقم الطلب مكتوباً عليه <strong>"تم الدفع"</strong>
-                </div>
-                <input
-                  type="text"
-                  placeholder="مثال: ORD-12345 أو رقم الطلب"
-                  value={orderRef}
-                  onChange={e => setOrderRef(e.target.value)}
-                  className={`w-full rounded-xl border-2 px-3 py-2.5 text-sm font-mono outline-none transition-colors ${
-                    orderRef.trim()
-                      ? "border-green-400 bg-green-50 dark:bg-green-950/20"
-                      : "border-red-300 dark:border-red-700 bg-background"
-                  }`}
-                  dir="ltr"
-                  data-testid="input-order-ref"
-                />
-                {!orderRef.trim() && (
-                  <p className="text-[10px] text-red-500 font-bold">⚠️ رقم الطلب إلزامي لتأكيد الدفع</p>
-                )}
-              </div>
-
-              {/* 2C: ارفع الفاتورة */}
+              {/* 2B: ارفع الفاتورة */}
               <div>
-                <h3 className="font-bold text-sm mb-1">4️⃣ ارفع صورة الطلب (يكتب عليها تم الدفع)</h3>
+                <h3 className="font-bold text-sm mb-1">3️⃣ ارفع صورة الفاتورة من التطبيق</h3>
+                <p className="text-xs text-muted-foreground mb-2">بعد الدفع في التطبيق، التقط صورة للفاتورة وارفعها هنا</p>
+
                 <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
 
                 {screenshotPreview ? (
@@ -341,7 +308,7 @@ export function PayFromAppButton({ price, label, className = "", size = "default
                     data-testid="btn-upload-invoice"
                   >
                     {uploading ? <Loader2 className="w-6 h-6 animate-spin" /> : <Upload className="w-6 h-6" />}
-                    <span className="text-sm font-medium">{uploading ? "جاري الرفع..." : "اضغط لرفع صورة الطلب"}</span>
+                    <span className="text-sm font-medium">{uploading ? "جاري الرفع..." : "اضغط لرفع صورة الفاتورة"}</span>
                     <span className="text-xs">PNG / JPG / WEBP</span>
                   </button>
                 )}
@@ -350,14 +317,14 @@ export function PayFromAppButton({ price, label, className = "", size = "default
               <Button
                 className="w-full gap-2"
                 onClick={handleSubmit}
-                disabled={!screenshotUrl || !orderRef.trim() || submitMutation.isPending}
+                disabled={!screenshotUrl || submitMutation.isPending}
                 data-testid="btn-submit-payment"
               >
                 {submitMutation.isPending ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري الإرسال...</> : "إرسال طلب التفعيل 🚀"}
               </Button>
 
               <p className="text-[10px] text-center text-muted-foreground">
-                سيتحقق الأدمن من رقم الطلب وصورته خلال دقائق ويفعّل الخدمة
+                سيتحقق الأدمن من الفاتورة خلال دقائق ويفعّل الخدمة تلقائياً
               </p>
             </div>
           )}

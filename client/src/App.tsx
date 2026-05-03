@@ -1,4 +1,4 @@
-import { Switch, Route, Redirect } from "wouter";
+import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -7,7 +7,6 @@ import { LanguageProvider } from "@/components/LanguageProvider";
 import { Navbar } from "@/components/Navbar";
 import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
-import { useEffect } from "react";
 
 import Home from "@/pages/Home";
 import Ads from "@/pages/Ads";
@@ -20,7 +19,6 @@ import LiveStreamList from "@/pages/LiveStreamList";
 import StartStream from "@/pages/StartStream";
 import Campaigns from "@/pages/Campaigns";
 import AdminPanel from "@/pages/AdminPanel";
-import AdminAiControl from "@/pages/AdminAiControl";
 import Revenue from "@/pages/Revenue";
 import Payments from "@/pages/Payments";
 import Reels from "@/pages/Reels";
@@ -35,33 +33,12 @@ import Social from "@/pages/Social";
 import Help from "@/pages/Help";
 import Consultations from "@/pages/Consultations";
 import Coupons from "@/pages/Coupons";
-import MenuGenerator from "@/pages/MenuGenerator";
-import PublicMenu from "@/pages/PublicMenu";
-import WalletPage from "@/pages/Wallet";
-import Leaderboard from "@/pages/Leaderboard";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import { GlobalAssistant } from "@/components/GlobalAssistant";
 import { PushSetup } from "@/components/PushSetup";
 import { InterestOnboarding } from "@/components/InterestOnboarding";
-import { WhatsNewBanner } from "@/components/WhatsNewBanner";
 import BottomNav from "@/components/BottomNav";
 import NotFound from "@/pages/not-found";
-
-// Captures ?ref=CODE from URL and stores in localStorage for auto-apply after login
-function RefTracker() {
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const ref = params.get("ref");
-    if (ref && ref.length >= 4) {
-      localStorage.setItem("pending_referral_code", ref.toUpperCase());
-      params.delete("ref");
-      const newSearch = params.toString();
-      const newUrl = window.location.pathname + (newSearch ? "?" + newSearch : "") + window.location.hash;
-      window.history.replaceState({}, "", newUrl);
-    }
-  }, []);
-  return null;
-}
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { user, isLoading } = useAuth();
@@ -84,7 +61,6 @@ function ReelsPage() {
 function Router() {
   return (
     <>
-    <RefTracker />
     <Switch>
       <Route path="/reels" component={ReelsPage} />
       <Route>
@@ -117,17 +93,10 @@ function Router() {
               <Route path="/payments">
                 <ProtectedRoute component={Payments} />
               </Route>
-              <Route path="/settings">
-                <Redirect to="/admin" />
-              </Route>
               <Route path="/admin">
                 <ProtectedRoute component={AdminPanel} />
               </Route>
-              <Route path="/admin/ai">
-                <ProtectedRoute component={AdminAiControl} />
-              </Route>
               <Route path="/login" component={Login} />
-              <Route path="/m/:slug" component={PublicMenu} />
               <Route path="/my-content" component={MyContent} />
               <Route path="/media-library">
                 <ProtectedRoute component={MediaLibrary} />
@@ -153,13 +122,6 @@ function Router() {
               <Route path="/coupons">
                 <ProtectedRoute component={Coupons} />
               </Route>
-              <Route path="/menu-generator">
-                <ProtectedRoute component={MenuGenerator} />
-              </Route>
-              <Route path="/wallet">
-                <ProtectedRoute component={WalletPage} />
-              </Route>
-              <Route path="/leaderboard" component={Leaderboard} />
               <Route component={NotFound} />
             </Switch>
           </main>
@@ -185,7 +147,7 @@ function AppFooter() {
   const playStoreUrl  = g("app_play_store", "https://play.google.com/store/apps/details?id=com.apmo.souqmarket");
   const appStoreUrl   = g("app_app_store",  "https://apps.apple.com/eg/app/as-souqmarket/id6740153334");
   const huaweiUrl     = g("app_huawei",     "https://app.as-souqmarkat.com/?from-splash=false");
-  const vodafoneCash  = g("contact_vodafone_cash", "01098559311");
+  const vodafoneCash  = g("contact_vodafone_cash", "01098553911");
   const instaPay      = g("contact_instapay",      "01285558567");
   const platformName  = g("platform_name",  "شبكة سوق للإعلانات");
 
@@ -293,22 +255,16 @@ function AppFooter() {
               <li><a href="/livestream" className="hover:text-foreground transition-colors font-bold text-red-600 dark:text-red-400">📡 البث المباشر</a></li>
               <li><a href="/campaigns" className="hover:text-foreground transition-colors">الحملات الإعلانية</a></li>
               <li><a href="/media-library" className="hover:text-foreground transition-colors">مكتبة الوسائط</a></li>
-              <li><a href="/wallet" className="hover:text-foreground transition-colors font-bold text-emerald-600 dark:text-emerald-400">💰 محفظتي</a></li>
               <li><a href="/revenue" className="hover:text-foreground transition-colors">الإيرادات</a></li>
               <li><a href="/embed-guide" className="hover:text-foreground transition-colors font-bold text-primary">دليل ربط الإعلانات</a></li>
               <li><a href="/consultations" className="hover:text-foreground transition-colors font-bold text-primary">💬 الاستشارات</a></li>
               <li><a href="/coupons" className="hover:text-foreground transition-colors font-bold text-primary">🎟️ كوبونات الخصم الذكية</a></li>
-              <li><a href="/menu-generator" className="hover:text-foreground transition-colors font-bold text-orange-600 dark:text-orange-400">🍽️ منشئ المنيو الذكي</a></li>
               <li><a href="/help" className="hover:text-foreground transition-colors font-bold text-amber-600 dark:text-amber-400">مركز المساعدة</a></li>
             </ul>
           </div>
         </div>
         <div className="text-center text-sm text-muted-foreground border-t pt-6">
-          <p className="font-bold text-base text-foreground mb-0.5">{platformName}</p>
-          <p className="text-xs text-muted-foreground/70 mb-2 flex items-center justify-center gap-1">
-            <span>🛒</span>
-            وهى إحدى منصات تطبيق <span className="font-bold text-primary">سوق ماركات</span>
-          </p>
+          <p className="font-bold text-base text-foreground mb-1">{platformName}</p>
           <p>© {new Date().getFullYear()} Souq Ads Network. جميع الحقوق محفوظة. جميع التعاملات بالجنيه المصري.</p>
         </div>
       </div>
@@ -323,7 +279,6 @@ function App() {
         <TooltipProvider>
           <Toaster />
           <Router />
-          <WhatsNewBanner />
         </TooltipProvider>
       </LanguageProvider>
     </QueryClientProvider>

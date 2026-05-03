@@ -578,7 +578,7 @@ export default function Campaigns() {
                     <p className="text-sm font-bold mb-1 flex items-center gap-2"><Megaphone className="w-4 h-4 text-yellow-600" /> زيادة الميزانية أو تجديد الإعلان؟</p>
                     <p className="text-xs text-muted-foreground mb-3">تواصل معنا بعد الدفع وسيتم تفعيل الحملة خلال دقائق</p>
                     <div className="flex flex-wrap gap-2 text-xs">
-                      <span className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-3 py-1.5 rounded-full font-bold">📱 Vodafone Cash: 01098559311</span>
+                      <span className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-3 py-1.5 rounded-full font-bold">📱 Vodafone Cash: 01098553911</span>
                       <span className="bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 px-3 py-1.5 rounded-full font-bold">📱 Etisalat: 01126665741</span>
                       <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-3 py-1.5 rounded-full font-bold">💳 InstaPay: 01285558567</span>
 

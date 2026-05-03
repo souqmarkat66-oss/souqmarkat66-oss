@@ -23,19 +23,18 @@ export function getSession() {
   const pgStore = connectPg(session);
   const sessionStore = new pgStore({
     conString: process.env.DATABASE_URL,
-    createTableIfMissing: true,
+    createTableIfMissing: false,
     ttl: sessionTtl,
     tableName: "sessions",
   });
   return session({
-    secret: process.env.SESSION_SECRET || "ads-as-default-secret-change-in-prod",
+    secret: process.env.SESSION_SECRET!,
     store: sessionStore,
     resave: false,
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      secure: true,
       maxAge: sessionTtl,
     },
   });
@@ -66,14 +65,6 @@ export async function setupAuth(app: Express) {
   app.use(getSession());
   app.use(passport.initialize());
   app.use(passport.session());
-
-  if (!process.env.REPL_ID) {
-    console.log("[Auth] REPL_ID not set — Replit OAuth disabled.");
-    app.get("/api/login", (_req, res) => res.status(503).json({ message: "Auth not available" }));
-    app.get("/api/callback", (_req, res) => res.status(503).json({ message: "Auth not available" }));
-    app.get("/api/logout", (_req, res) => res.redirect("/"));
-    return;
-  }
 
   const config = await getOidcConfig();
 

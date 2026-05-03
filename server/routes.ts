@@ -2,7 +2,6 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { Server as SocketServer } from "socket.io";
 import { storage } from "./storage";
-import { setAdminIo, emitAdminEvent } from "./adminEvents";
 import { z } from "zod";
 import { setupAuth } from "./replit_integrations/auth";
 import { isAuthenticated, registerCustomAuthRoutes } from "./customAuth";
@@ -19,146 +18,21 @@ import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
 import express from "express";
 import * as webpushModule from "web-push";
-import sharp from "sharp";
 const webpush: typeof webpushModule = (webpushModule as any).default || webpushModule;
 
-// Admin user IDs — hardcoded superadmins (always admin, cannot be removed)
-const ADMIN_USER_ID  = "54219806";
-const ADMIN_EMAIL    = "souqmarkat66@gmail.com";
-const ADMIN_USER_ID2 = "54165148";
-const ADMIN_EMAIL2   = "ahmedesmat.5151@gmail.com";
-
-// Extra admin IDs stored in platform_settings (dynamic, managed via admin panel)
-let _extraAdminIds: Set<string> = new Set();
-let _extraAdminLoaded = false;
-
-async function loadExtraAdminIds(): Promise<void> {
-  try {
-    const row = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'extra_admin_ids' LIMIT 1`);
-    const val = (row.rows[0] as any)?.value || "";
-    _extraAdminIds = new Set(val.split(",").map((s: string) => s.trim()).filter(Boolean));
-    _extraAdminLoaded = true;
-  } catch { _extraAdminIds = new Set(); _extraAdminLoaded = true; }
-}
-
-async function saveExtraAdminIds(): Promise<void> {
-  const val = Array.from(_extraAdminIds).join(",");
-  await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('extra_admin_ids', ${val})
-    ON CONFLICT (key) DO UPDATE SET value = ${val}`);
-}
+// Admin user ID
+const ADMIN_USER_ID = "54219806";
+const ADMIN_EMAIL   = "souqmarkat66@gmail.com";
 
 function isAdminUser(req: any): boolean {
-  const sub   = req.user?.claims?.sub;
-  const email = (req.user?.claims?.email || "").toLowerCase();
-  return sub === ADMIN_USER_ID  || email === ADMIN_EMAIL.toLowerCase() ||
-         sub === ADMIN_USER_ID2 || email === ADMIN_EMAIL2.toLowerCase() ||
-         (!!sub && _extraAdminIds.has(sub));
-}
-
-function isSuperAdmin(req: any): boolean {
-  const sub   = req.user?.claims?.sub;
-  const email = (req.user?.claims?.email || "").toLowerCase();
-  return sub === ADMIN_USER_ID  || email === ADMIN_EMAIL.toLowerCase() ||
-         sub === ADMIN_USER_ID2 || email === ADMIN_EMAIL2.toLowerCase();
+  return req.user?.claims?.sub === ADMIN_USER_ID ||
+         req.user?.claims?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 }
 
 async function requireAdmin(req: any, res: any, next: any) {
   if (!req.user) return res.status(401).json({ message: "Unauthorized" });
-  if (!_extraAdminLoaded) await loadExtraAdminIds();
   if (!isAdminUser(req)) return res.status(403).json({ message: "Admin access required" });
   next();
-}
-
-// ══════════════════════════════════════════════════════════════
-// AI Payment Screenshot Verifier — uses GPT-4o Vision
-// Ensures submitted proof images are real Egyptian wallet receipts
-// ══════════════════════════════════════════════════════════════
-async function verifyPaymentScreenshot(
-  screenshotUrl: string,
-  expectedAmountEGP: number,
-  paymentMethod: string
-): Promise<{ ok: boolean; reason: string; detectedAmount?: number }> {
-  try {
-    // Build absolute file path from the relative /uploads/… URL
-    const relPath = screenshotUrl.replace(/^\//, "");
-    const absPath = path.join(process.cwd(), relPath);
-    if (!fs.existsSync(absPath)) {
-      return { ok: false, reason: "ملف الإيصال غير موجود على الخادم" };
-    }
-
-    // Read the image and convert to base64
-    const imgBuffer = fs.readFileSync(absPath);
-    const mimeType  = absPath.endsWith(".png") ? "image/png"
-                    : absPath.endsWith(".webp") ? "image/webp"
-                    : "image/jpeg";
-    const base64Img = imgBuffer.toString("base64");
-
-    const methodNames: Record<string, string> = {
-      vodafone: "فودافون كاش",
-      etisalat: "اتصالات كاش",
-      instapay: "انستاباي",
-      souq:     "تحويل بنكي",
-    };
-    const methodAr = methodNames[paymentMethod] || paymentMethod;
-
-    const prompt = `أنت نظام تحقق من إيصالات الدفع الإلكترونية المصرية.
-المهمة: افحص هذه الصورة وحدد إذا كانت إيصال دفع حقيقي من ${methodAr} أو أي محفظة إلكترونية مصرية معروفة (فودافون كاش، اتصالات كاش، انستاباي، بنك الاهلي، CIB، إلخ).
-
-المبلغ المتوقع: ${expectedAmountEGP} جنيه مصري.
-
-قيّم الصورة وأجب بـ JSON فقط بدون أي نص إضافي:
-{
-  "isValidReceipt": true/false,
-  "detectedAmount": <المبلغ الظاهر في الصورة أو null>,
-  "detectedSource": "<اسم التطبيق أو البنك الظاهر>",
-  "amountMatches": true/false,
-  "reason": "<سبب القبول أو الرفض بالعربية في جملة واحدة>"
-}
-
-قواعد الرفض:
-- إذا كانت الصورة ليست إيصال دفع (صورة عادية، منتج، شخص، خلفية إلخ)
-- إذا لم يظهر أي مبلغ واضح
-- إذا كانت الصورة مُزوَّرة أو مُعدَّلة بشكل واضح
-- إذا اختلف المبلغ الظاهر عن ${expectedAmountEGP} ج.م بأكثر من 5 جنيه
-
-قواعد القبول:
-- إيصال واضح من تطبيق أو بنك مصري معروف
-- يظهر مبلغ قريب من ${expectedAmountEGP} ج.م`;
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-4.1",
-      max_tokens: 300,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "text", text: prompt },
-          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Img}`, detail: "high" } }
-        ]
-      }]
-    });
-
-    const raw = response.choices[0]?.message?.content?.trim() || "{}";
-    // Extract JSON from response (may have backticks)
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return { ok: false, reason: "تعذّر تحليل الإيصال — حاول مرة أخرى" };
-    const parsed = JSON.parse(jsonMatch[0]);
-
-    if (!parsed.isValidReceipt) {
-      return { ok: false, reason: parsed.reason || "الصورة لا تبدو إيصال دفع حقيقي" };
-    }
-    if (!parsed.amountMatches) {
-      return {
-        ok: false,
-        reason: parsed.reason || `المبلغ الظاهر في الإيصال (${parsed.detectedAmount || "غير واضح"} ج.م) لا يتطابق مع المبلغ المطلوب (${expectedAmountEGP} ج.م)`,
-        detectedAmount: parsed.detectedAmount
-      };
-    }
-    return { ok: true, reason: parsed.reason || "إيصال صحيح", detectedAmount: parsed.detectedAmount };
-  } catch (err: any) {
-    console.error("[verifyPaymentScreenshot]", err?.message);
-    // On AI error, allow the order through (fallback to manual admin review)
-    return { ok: true, reason: "تحقق تلقائي غير متاح — سيراجعه الأدمن" };
-  }
 }
 
 // AI credit check middleware
@@ -169,12 +43,10 @@ async function checkAiCredits(req: any, res: any, next: any) {
   const usageCount = await storage.getAiUsageCount(userId);
   if (usageCount >= freeCredits && !isAdminUser(req)) {
     const pricePerCredit = parseFloat(await storage.getSetting('ai_price_per_credit_egp') || '5');
-    // Use canonical users.balance_egp wallet balance (separate from revenue/withdrawal balance)
-    const balance = await storage.getWalletBalanceEGP(userId);
+    const balance = await storage.getUserBalanceEGP(userId);
     if (balance < pricePerCredit) {
       return res.status(402).json({
         message: "insufficient_credits",
-        requiresWalletTopup: true,
         usageCount,
         freeCredits,
         pricePerCredit,
@@ -188,71 +60,8 @@ async function checkAiCredits(req: any, res: any, next: any) {
   next();
 }
 
-// Dedicated middleware for Talking Photo — charges fixed price (default 100 EGP) upfront
-async function checkTalkingPhotoCredits(req: any, res: any, next: any) {
-  if (!req.user) return res.status(401).json({ message: "Unauthorized" });
-  if (isAdminUser(req)) return next(); // admins always free
-  const userId = req.user.claims.sub;
-  const price = parseFloat(await storage.getSetting('ai_price_talking_photo') || '100');
-  const balance = await storage.getWalletBalanceEGP(userId);
-  if (balance < price) {
-    return res.status(402).json({
-      message: "insufficient_credits",
-      requiresWalletTopup: true,
-      pricePerCredit: price,
-      balance,
-      service: "talking_photo",
-      serviceLabel: "الإعلان المتكلم",
-    });
-  }
-  req.talkingPhotoChargeEGP = price;
-  next();
-}
-
-// Atomically deduct AI charge from users.balance_egp and log to revenue_transactions
-async function deductAiCharge(userId: string, amountEGP: number, description: string): Promise<void> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    // Lock user row and verify sufficient balance before deducting
-    const userR = await client.query(`SELECT balance_egp FROM users WHERE id = $1 FOR UPDATE`, [userId]);
-    const balance = parseFloat(userR.rows[0]?.balance_egp || "0");
-    if (balance < amountEGP) {
-      await client.query("ROLLBACK");
-      throw new Error("رصيد غير كافٍ لإتمام عملية الذكاء الاصطناعي");
-    }
-    // Conditional deduct to prevent overdraft under concurrency
-    const deductR = await client.query(
-      `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) - $1
-       WHERE id = $2 AND COALESCE(balance_egp, 0) >= $1
-       RETURNING balance_egp`,
-      [amountEGP, userId]
-    );
-    if (deductR.rowCount === 0) {
-      await client.query("ROLLBACK");
-      throw new Error("رصيد غير كافٍ");
-    }
-    // Log to wallet_transactions ledger for auditability
-    await client.query(
-      `INSERT INTO wallet_transactions (user_id, type, amount_egp, description)
-       VALUES ($1, 'ai_debit', $2, $3)`,
-      [userId, amountEGP, description]
-    );
-    await client.query("COMMIT");
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
-  try {
-    await setupAuth(app);
-  } catch (err) {
-    console.error("[Auth] setupAuth failed, continuing without auth:", err);
-  }
+  await setupAuth(app);
   registerCustomAuthRoutes(app);
   registerImageRoutes(app);
 
@@ -266,7 +75,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
     next();
   });
-
 
   // ── Initialize webpush VAPID keys from DB ──
   try {
@@ -298,39 +106,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS company text`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS city text`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS relationship_status text`);
-    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender text`);
-    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type text`);
-    await db.execute(sql`CREATE TABLE IF NOT EXISTS smart_menus (
-      id SERIAL PRIMARY KEY,
-      user_id VARCHAR NOT NULL REFERENCES users(id),
-      slug VARCHAR UNIQUE NOT NULL,
-      restaurant_name TEXT,
-      restaurant_slogan TEXT,
-      theme TEXT DEFAULT 'classic',
-      style TEXT DEFAULT 'photo',
-      items JSONB DEFAULT '[]',
-      is_active BOOLEAN DEFAULT true,
-      views_count INTEGER DEFAULT 0,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW()
-    )`);
-    await db.execute(sql`CREATE TABLE IF NOT EXISTS stories (
-      id SERIAL PRIMARY KEY,
-      user_id VARCHAR NOT NULL REFERENCES users(id),
-      media_url TEXT NOT NULL,
-      media_type TEXT NOT NULL DEFAULT 'image',
-      caption TEXT,
-      views_count INTEGER DEFAULT 0,
-      expires_at TIMESTAMP NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW()
-    )`);
-    await db.execute(sql`CREATE TABLE IF NOT EXISTS story_views (
-      id SERIAL PRIMARY KEY,
-      story_id INTEGER NOT NULL REFERENCES stories(id),
-      viewer_id VARCHAR NOT NULL REFERENCES users(id),
-      created_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(story_id, viewer_id)
-    )`);
   } catch { /* columns may already exist */ }
 
   // ── Auto-cleanup stale live streams (older than 12 hours) ──
@@ -380,7 +155,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('app_play_store', 'https://play.google.com/store/apps/details?id=com.apmo.souqmarket') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('app_app_store', 'https://apps.apple.com/eg/app/as-souqmarket/id6740153334') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('app_huawei', 'https://app.as-souqmarkat.com/?from-splash=false') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_vodafone_cash', '01098559311') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_vodafone_cash', '01098553911') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_instapay', '01285558567') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_whatsapp', '') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_ads', '1') ON CONFLICT (key) DO NOTHING`);
@@ -439,8 +214,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     cors: { origin: "*", methods: ["GET", "POST"] },
   });
 
-  setAdminIo(io);
-
   const streamRooms: Map<string, {
     broadcasterId: string | null;
     cohostIds: string[];
@@ -482,17 +255,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   }
 
   io.on("connection", (socket) => {
-    socket.on("admin-join", () => {
-      socket.join("admin_room");
-    });
-
     socket.on("join-stream", (streamId: string) => {
-      const room = getOrCreateRoom(streamId);
-      if (room.bannedSockets.has(socket.id)) {
-        socket.emit("kicked-from-stream");
-        return;
-      }
       socket.join(`stream:${streamId}`);
+      const room = getOrCreateRoom(streamId);
       room.viewers.add(socket.id);
       const count = room.viewers.size;
       if (count > room.peakViewers) room.peakViewers = count;
@@ -521,10 +286,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     socket.on("chat-message", (data: { streamId: string; userId: string; userName: string; message: string; isVoice?: boolean; voiceUrl?: string; isOwner?: boolean }) => {
       const room = streamRooms.get(data.streamId);
-      if (room) {
-        room.totalComments++;
-        if (data.userId && data.userName) room.socketToUser.set(socket.id, { userId: data.userId, userName: data.userName });
-      }
+      if (room) room.totalComments++;
       const msg = { ...data, timestamp: new Date().toISOString(), id: Date.now() };
       io.to(`stream:${data.streamId}`).emit("chat-message", msg);
       storage.createChatMessage({
@@ -568,7 +330,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socket.on("request-cohost", (data: { streamId: string; userId: string; userName: string }) => {
       const room = streamRooms.get(data.streamId);
       if (!room?.broadcasterId) return;
-      if (room.cohostIds.length >= 8) {
+      if (room.cohostIds.length >= 3) {
         socket.emit("cohost-rejected", { reason: "max_cohosts" });
         return;
       }
@@ -597,19 +359,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     socket.on("accept-cohost", (data: { streamId: string; guestSocketId: string; guestName?: string }) => {
       const room = streamRooms.get(data.streamId);
-      if (!room) return;
-      if (room.cohostIds.length >= 8) {
-        io.to(data.guestSocketId).emit("cohost-rejected");
-        return;
-      }
-      if (!room.cohostIds.includes(data.guestSocketId)) {
+      if (room && !room.cohostIds.includes(data.guestSocketId)) {
         room.cohostIds.push(data.guestSocketId);
         if (data.guestName) room.cohostNames.set(data.guestSocketId, data.guestName);
       }
       io.to(data.guestSocketId).emit("cohost-accepted", { broadcasterId: socket.id });
     });
 
-    socket.on("reject-cohost", (data: { guestSocketId: string; streamId?: string }) => {
+    socket.on("reject-cohost", (data: { guestSocketId: string }) => {
       io.to(data.guestSocketId).emit("cohost-rejected");
     });
 
@@ -617,7 +374,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const streamId = typeof data === "string" ? data : data.streamId;
       const name = typeof data === "object" ? data.name : undefined;
       const room = streamRooms.get(streamId);
-      if (!room || room.cohostIds.length >= 8) return;
       if (room && !room.cohostIds.includes(socket.id)) {
         room.cohostIds.push(socket.id);
         if (name) room.cohostNames.set(socket.id, name);
@@ -688,25 +444,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     // ── TikTok-style Live Features ──────────────────────────────────
     socket.on("send-gift", async (data: { streamId: string; giftType: string; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId: string; broadcasterUserId?: string }) => {
-      const giftRoom = streamRooms.get(data.streamId);
-      if (giftRoom && data.userId && data.userName) giftRoom.socketToUser.set(socket.id, { userId: data.userId, userName: data.userName });
-      const giftCoins = Math.max(1, Math.min(Math.floor(data.giftCoins || 0), 1000));
+      // Deduct coins from sender & credit broadcaster in DB
       try {
-        if (data.userId && giftCoins > 0) {
-          const balCheck = await pool.query(`SELECT balance FROM coin_wallets WHERE user_id = $1`, [data.userId]);
-          if (!balCheck.rows.length || balCheck.rows[0].balance < giftCoins) return;
+        if (data.userId && data.giftCoins > 0) {
+          // Deduct from sender
           await pool.query(
-            `UPDATE coin_wallets SET balance = balance - $2::int, total_spent = total_spent + $2::int, updated_at = NOW() WHERE user_id = $1 AND balance >= $2::int`,
-            [data.userId, giftCoins]
+            `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
+             VALUES ($1, GREATEST(0, -$2::int), $2::int, 0)
+             ON CONFLICT (user_id) DO UPDATE
+             SET balance = GREATEST(0, coin_wallets.balance - $2::int),
+                 total_spent = coin_wallets.total_spent + $2::int,
+                 updated_at = NOW()`,
+            [data.userId, data.giftCoins]
           );
           // Log sender transaction
           await pool.query(
             `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id, related_user_id)
              VALUES ($1, 'gift_sent', $2, $3, $4, $5)`,
-            [data.userId, -giftCoins, `هدية ${data.giftName} في البث`, data.streamId ? parseInt(data.streamId) : null, data.broadcasterUserId || null]
+            [data.userId, -data.giftCoins, `هدية ${data.giftName} في البث`, data.streamId ? parseInt(data.streamId) : null, data.broadcasterUserId || null]
           );
+          // Credit broadcaster (60% to broadcaster, platform keeps 40%)
           if (data.broadcasterUserId) {
-            const broadcasterCoins = Math.floor(giftCoins * 0.6);
+            const broadcasterCoins = Math.floor(data.giftCoins * 0.6);
             await pool.query(
               `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
                VALUES ($1, $2::int, 0, $2::int)
@@ -762,237 +521,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       socket.to(`stream:${data.streamId}`).emit("new-follower", { userName: data.userName });
     });
 
-    // ── Kick viewer ──────────────────────────────────────
-    socket.on("kick-viewer", (data: { streamId: string; viewerSocketId: string }) => {
-      const room = streamRooms.get(data.streamId);
-      if (!room || room.broadcasterId !== socket.id) return;
-      room.bannedSockets.add(data.viewerSocketId);
-      room.viewers.delete(data.viewerSocketId);
-      io.to(data.viewerSocketId).emit("kicked-from-stream");
-      const targetSocket = io.sockets.sockets.get(data.viewerSocketId);
-      if (targetSocket) targetSocket.leave(`stream:${data.streamId}`);
-      io.to(`stream:${data.streamId}`).emit("viewer-count", room.viewers.size);
-    });
-
-    // ── Viewer list ──────────────────────────────────────
-    socket.on("get-viewer-list", (data: { streamId: string }) => {
-      const room = streamRooms.get(data.streamId);
-      if (!room || room.broadcasterId !== socket.id) return;
-      const list: { socketId: string; userName: string; userId: string }[] = [];
-      room.viewers.forEach(viewerId => {
-        if (viewerId === socket.id) return;
-        const info = room.socketToUser.get(viewerId);
-        list.push({ socketId: viewerId, userName: info?.userName || "مشاهد", userId: info?.userId || "" });
-      });
-      socket.emit("viewer-list", list);
-    });
-
-    // ── Cross-Stream Battle / Challenge system ────────────────────────
-    // Global battle state (shared across all sockets via closure)
-    interface CrossBattle {
-      id: string;
-      streamIdA: string;
-      streamIdB: string;
-      broadcasterSocketA: string;
-      broadcasterSocketB: string;
-      broadcasterUserIdA: string;
-      broadcasterUserIdB: string;
-      broadcasterNameA: string;
-      broadcasterNameB: string;
-      totalA: number;
-      totalB: number;
-      startedAt: number;
-      timerId: any;
-    }
-    if (!(io as any)._battleLinks) (io as any)._battleLinks = new Map<string, CrossBattle>();
-    if (!(io as any)._streamToBattle) (io as any)._streamToBattle = new Map<string, string>();
-    if (!(io as any)._pendingInvites) (io as any)._pendingInvites = new Map<string, any>();
-    const battleLinks: Map<string, CrossBattle> = (io as any)._battleLinks;
-    const streamToBattle: Map<string, string> = (io as any)._streamToBattle;
-    const pendingInvites: Map<string, any> = (io as any)._pendingInvites;
-
-    socket.on("battle-invite", (data: { fromStreamId: string; toStreamId: string; fromName: string; fromUserId: string }) => {
-      const fromRoom = streamRooms.get(data.fromStreamId);
-      if (!fromRoom || fromRoom.broadcasterId !== socket.id) return;
-      if (streamToBattle.has(data.fromStreamId) || streamToBattle.has(data.toStreamId)) return;
-      const toRoom = streamRooms.get(data.toStreamId);
-      if (!toRoom || !toRoom.broadcasterId) return;
-      const inviteId = `inv_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-      pendingInvites.set(inviteId, {
-        fromStreamId: data.fromStreamId, toStreamId: data.toStreamId,
-        fromSocketId: socket.id, fromName: data.fromName, fromUserId: data.fromUserId,
-        createdAt: Date.now(),
-      });
-      io.to(toRoom.broadcasterId).emit("battle-invite-received", {
-        inviteId, fromStreamId: data.fromStreamId, fromName: data.fromName,
-      });
-      socket.emit("battle-invite-sent", { inviteId, toStreamId: data.toStreamId });
-      setTimeout(() => {
-        if (pendingInvites.has(inviteId)) {
-          pendingInvites.delete(inviteId);
-          socket.emit("battle-invite-expired", { inviteId });
-        }
-      }, 30000);
-    });
-
-    socket.on("battle-accept", (data: { inviteId: string; myName: string; myUserId: string }) => {
-      const invite = pendingInvites.get(data.inviteId);
-      if (!invite) return;
-      pendingInvites.delete(data.inviteId);
-      const roomA = streamRooms.get(invite.fromStreamId);
-      const roomB = streamRooms.get(invite.toStreamId);
-      if (!roomA?.broadcasterId || !roomB?.broadcasterId) return;
-      if (streamToBattle.has(invite.fromStreamId) || streamToBattle.has(invite.toStreamId)) return;
-
-      const battleId = `battle_${Date.now()}`;
-      const battle: CrossBattle = {
-        id: battleId,
-        streamIdA: invite.fromStreamId, streamIdB: invite.toStreamId,
-        broadcasterSocketA: roomA.broadcasterId, broadcasterSocketB: roomB.broadcasterId,
-        broadcasterUserIdA: invite.fromUserId, broadcasterUserIdB: data.myUserId,
-        broadcasterNameA: invite.fromName, broadcasterNameB: data.myName,
-        totalA: 0, totalB: 0, startedAt: Date.now(), timerId: null,
-      };
-      battleLinks.set(battleId, battle);
-      streamToBattle.set(invite.fromStreamId, battleId);
-      streamToBattle.set(invite.toStreamId, battleId);
-
-      const battleInfo = {
-        battleId, streamIdA: battle.streamIdA, streamIdB: battle.streamIdB,
-        nameA: battle.broadcasterNameA, nameB: battle.broadcasterNameB,
-        duration: 300,
-      };
-      io.to(`stream:${battle.streamIdA}`).emit("battle-started", battleInfo);
-      io.to(`stream:${battle.streamIdB}`).emit("battle-started", battleInfo);
-
-      battle.timerId = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - battle.startedAt) / 1000);
-        const timeLeft = Math.max(0, 300 - elapsed);
-        const timerData = { battleId, timeLeft };
-        io.to(`stream:${battle.streamIdA}`).emit("battle-timer", timerData);
-        io.to(`stream:${battle.streamIdB}`).emit("battle-timer", timerData);
-        if (timeLeft <= 0) {
-          clearInterval(battle.timerId);
-          const winner = battle.totalA > battle.totalB ? "A" : battle.totalB > battle.totalA ? "B" : "draw";
-          const endData = { battleId, winner, totalA: battle.totalA, totalB: battle.totalB, nameA: battle.broadcasterNameA, nameB: battle.broadcasterNameB };
-          io.to(`stream:${battle.streamIdA}`).emit("battle-ended", endData);
-          io.to(`stream:${battle.streamIdB}`).emit("battle-ended", endData);
-          streamToBattle.delete(battle.streamIdA);
-          streamToBattle.delete(battle.streamIdB);
-          battleLinks.delete(battleId);
-        }
-      }, 1000);
-    });
-
-    socket.on("battle-decline", (data: { inviteId: string }) => {
-      const invite = pendingInvites.get(data.inviteId);
-      if (!invite) return;
-      pendingInvites.delete(data.inviteId);
-      io.to(invite.fromSocketId).emit("battle-invite-declined", { inviteId: data.inviteId });
-    });
-
-    socket.on("battle-end-early", (data: { streamId: string }) => {
-      const battleId = streamToBattle.get(data.streamId);
-      if (!battleId) return;
-      const battle = battleLinks.get(battleId);
-      if (!battle) return;
-      if (battle.broadcasterSocketA !== socket.id && battle.broadcasterSocketB !== socket.id) return;
-      clearInterval(battle.timerId);
-      const winner = battle.totalA > battle.totalB ? "A" : battle.totalB > battle.totalA ? "B" : "draw";
-      const endData = { battleId, winner, totalA: battle.totalA, totalB: battle.totalB, nameA: battle.broadcasterNameA, nameB: battle.broadcasterNameB };
-      io.to(`stream:${battle.streamIdA}`).emit("battle-ended", endData);
-      io.to(`stream:${battle.streamIdB}`).emit("battle-ended", endData);
-      streamToBattle.delete(battle.streamIdA);
-      streamToBattle.delete(battle.streamIdB);
-      battleLinks.delete(battleId);
-    });
-
-    socket.on("battle-watch-opponent", (data: { myStreamId: string; opponentStreamId: string }) => {
-      const opponentRoom = streamRooms.get(data.opponentStreamId);
-      if (!opponentRoom?.broadcasterId) return;
-      socket.join(`stream:${data.opponentStreamId}`);
-      io.to(opponentRoom.broadcasterId).emit("battle-watcher", socket.id);
-    });
-
-    socket.on("battle-offer", (targetId: string, sdp: any) => socket.to(targetId).emit("battle-offer", socket.id, sdp));
-    socket.on("battle-answer", (targetId: string, sdp: any) => socket.to(targetId).emit("battle-answer", socket.id, sdp));
-    socket.on("battle-candidate", (targetId: string, candidate: any) => socket.to(targetId).emit("battle-candidate", socket.id, candidate));
-
-    socket.on("battle-gift", async (data: { streamId: string; giftType: string; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId: string; multiplier: number }) => {
-      const battleId = streamToBattle.get(data.streamId);
-      if (!battleId) return;
-      const battle = battleLinks.get(battleId);
-      if (!battle) return;
-      const validMultipliers = [2, 3, 5];
-      const mult = validMultipliers.includes(data.multiplier) ? data.multiplier : 1;
-      const bgCoins = Math.max(1, Math.min(Math.floor(data.giftCoins || 0), 1000));
-      const scoreValue = bgCoins * mult;
-      const isTeamA = data.streamId === battle.streamIdA;
-      const broadcasterUserId = isTeamA ? battle.broadcasterUserIdA : battle.broadcasterUserIdB;
-      if (isTeamA) { battle.totalA += scoreValue; } else { battle.totalB += scoreValue; }
-      try {
-        if (data.userId && bgCoins > 0) {
-          const balCheck = await pool.query(`SELECT balance FROM coin_wallets WHERE user_id = $1`, [data.userId]);
-          if (!balCheck.rows.length || balCheck.rows[0].balance < bgCoins) return;
-          await pool.query(
-            `UPDATE coin_wallets SET balance = balance - $2::int, total_spent = total_spent + $2::int, updated_at = NOW() WHERE user_id = $1 AND balance >= $2::int`,
-            [data.userId, bgCoins]
-          );
-          await pool.query(
-            `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id)
-             VALUES ($1, 'gift_sent', $2, $3, $4)`,
-            [data.userId, -bgCoins, `هدية تحدي ${data.giftName} (${mult}x سكور)`, data.streamId ? parseInt(data.streamId) : null]
-          );
-          const broadcasterCoins = Math.floor(bgCoins * 0.6);
-          await pool.query(
-            `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
-             VALUES ($1, $2::int, 0, $2::int)
-             ON CONFLICT (user_id) DO UPDATE
-             SET balance = coin_wallets.balance + $2::int,
-                 total_earned = coin_wallets.total_earned + $2::int,
-                 updated_at = NOW()`,
-            [broadcasterUserId, broadcasterCoins]
-          );
-          await pool.query(
-            `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id)
-             VALUES ($1, 'gift_received', $2, $3, $4)`,
-            [broadcasterUserId, broadcasterCoins, `هدية تحدي ${data.giftName} من ${data.userName}`, data.streamId ? parseInt(data.streamId) : null]
-          );
-          const egpAmount = parseFloat((broadcasterCoins * 0.05).toFixed(2));
-          await pool.query(
-            `INSERT INTO revenue_transactions (user_id, type, amount_egp, description, channel_id)
-             SELECT $1, 'earning', $2, $3, id FROM channels WHERE user_id = $1 LIMIT 1`,
-            [broadcasterUserId, egpAmount, `هدايا تحدي - ${data.giftName}`]
-          );
-        }
-      } catch (err) {
-        console.error("Battle gift error:", err);
-      }
-      const scoreData = { battleId, totalA: battle.totalA, totalB: battle.totalB };
-      io.to(`stream:${battle.streamIdA}`).emit("battle-score-update", scoreData);
-      io.to(`stream:${battle.streamIdB}`).emit("battle-score-update", scoreData);
-      io.to(`stream:${data.streamId}`).emit("stream-gift", { id: Date.now() + Math.random(), ...data, timestamp: new Date().toISOString() });
-    });
-
     socket.on("disconnect", () => {
       streamRooms.forEach((room, streamId) => {
         if (room.broadcasterId === socket.id) {
           room.broadcasterId = null;
           io.to(`stream:${streamId}`).emit("broadcaster-disconnected");
-          const bId = streamToBattle.get(streamId);
-          if (bId) {
-            const bt = battleLinks.get(bId);
-            if (bt) {
-              clearInterval(bt.timerId);
-              const winner = bt.totalA > bt.totalB ? "A" : bt.totalB > bt.totalA ? "B" : "draw";
-              const endData = { battleId: bId, winner, totalA: bt.totalA, totalB: bt.totalB, nameA: bt.broadcasterNameA, nameB: bt.broadcasterNameB, disconnected: true };
-              io.to(`stream:${bt.streamIdA}`).emit("battle-ended", endData);
-              io.to(`stream:${bt.streamIdB}`).emit("battle-ended", endData);
-              streamToBattle.delete(bt.streamIdA);
-              streamToBattle.delete(bt.streamIdB);
-              battleLinks.delete(bId);
-            }
-          }
         }
         if (room.cohostIds.includes(socket.id)) {
           room.cohostIds = room.cohostIds.filter(id => id !== socket.id);
@@ -1000,7 +533,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           io.to(`stream:${streamId}`).emit("cohost-left", socket.id);
         }
         room.viewers.delete(socket.id);
-        room.socketToUser.delete(socket.id);
       });
     });
   });
@@ -1096,44 +628,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const { packageId, coins, amountEGP, paymentMethod, paymentRef, screenshotUrl, userName } = req.body || {};
     if (!coins || !amountEGP || !paymentMethod) return res.status(400).json({ message: "بيانات ناقصة" });
 
-    // Sanitize screenshotUrl for coin purchase (only local /uploads/ paths)
-    let safeCoinsScreenshot: string | null = null;
-    if (screenshotUrl && typeof screenshotUrl === "string") {
-      const trimmed = screenshotUrl.trim();
-      if (/^\/uploads\/[^\s<>"]+$/.test(trimmed) || /^\/api\/uploads\/[^\s<>"]+$/.test(trimmed)) {
-        safeCoinsScreenshot = trimmed;
-      }
-    }
-
-    // ── AI Payment Screenshot Verification for coin purchase ────
-    if (safeCoinsScreenshot) {
-      const coinAmount = parseFloat(amountEGP);
-      if (!isNaN(coinAmount) && coinAmount > 0) {
-        const aiCheck = await verifyPaymentScreenshot(safeCoinsScreenshot, coinAmount, paymentMethod || "vodafone");
-        if (!aiCheck.ok) {
-          return res.status(400).json({
-            message: `❌ إيصال الدفع غير صالح: ${aiCheck.reason}`,
-            aiReason: aiCheck.reason,
-          });
-        }
-      }
-    }
-    // ────────────────────────────────────────────────────────────
-
     const r = await pool.query(
       `INSERT INTO coin_purchase_orders (user_id, user_name, package_id, coins, amount_egp, payment_method, payment_ref, screenshot_url, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending') RETURNING *`,
-      [userId, userName || null, packageId || null, coins, amountEGP, paymentMethod, paymentRef || null, safeCoinsScreenshot || null]
+      [userId, userName || null, packageId || null, coins, amountEGP, paymentMethod, paymentRef || null, screenshotUrl || null]
     );
-    // Notify admins about new coin purchase
+    // Notify admin
     try {
-      for (const adminId of [ADMIN_USER_ID, ADMIN_USER_ID2]) {
-        await createNotification(adminId, "system",
-          `🪙 طلب شحن عملات جديد`,
-          `${userName || userId} — ${coins} عملة مقابل ${amountEGP} ج.م (${paymentMethod})`,
-          "/admin"
-        );
-      }
+      const adminId = "54219806";
+      await pool.query(
+        `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coin_purchase', $2, $3)`,
+        [adminId, `طلب شحن عملات: ${userName || userId} دفع ${amountEGP} ج.م مقابل ${coins} عملة`, JSON.stringify({ orderId: r.rows[0].id, paymentMethod })]
+      );
     } catch (_) {}
     res.json({ success: true, order: r.rows[0], message: "تم استلام طلبك — سيتم تأكيد الشحن خلال دقائق" });
   });
@@ -1146,138 +652,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       [userId]
     );
     res.json(r.rows);
-  });
-
-  // ── Broadcaster Earnings Report ──
-  app.get("/api/broadcaster/earnings", isAuthenticated, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    try {
-      const wallet = await pool.query(`SELECT * FROM coin_wallets WHERE user_id = $1`, [userId]);
-      const w = wallet.rows[0] || { balance: 0, total_spent: 0, total_earned: 0 };
-      const txs = await pool.query(
-        `SELECT * FROM coin_transactions WHERE user_id = $1 AND type IN ('gift_received','coin_withdrawal','coin_transfer_out','coin_transfer_in') ORDER BY created_at DESC LIMIT 100`,
-        [userId]
-      );
-      const totalGiftCoins = txs.rows.filter((t: any) => t.type === 'gift_received').reduce((s: number, t: any) => s + Math.abs(t.coins), 0);
-      const totalWithdrawn = txs.rows.filter((t: any) => t.type === 'coin_withdrawal').reduce((s: number, t: any) => s + Math.abs(t.coins), 0);
-      const totalTransferredOut = txs.rows.filter((t: any) => t.type === 'coin_transfer_out').reduce((s: number, t: any) => s + Math.abs(t.coins), 0);
-      const totalTransferredIn = txs.rows.filter((t: any) => t.type === 'coin_transfer_in').reduce((s: number, t: any) => s + Math.abs(t.coins), 0);
-      res.json({
-        coinBalance: w.balance,
-        totalEarnedCoins: w.total_earned,
-        totalGiftCoins,
-        totalWithdrawnCoins: totalWithdrawn,
-        totalTransferredOut,
-        totalTransferredIn,
-        totalEarnedEGP: parseFloat((w.total_earned * 0.05).toFixed(2)),
-        currentBalanceEGP: parseFloat((w.balance * 0.05).toFixed(2)),
-        transactions: txs.rows,
-      });
-    } catch (e: any) {
-      res.status(500).json({ message: e.message });
-    }
-  });
-
-  // ── Coin Withdrawal (convert coins to EGP with 1% fee) — transactional ──
-  app.post("/api/coins/withdraw", isAuthenticated, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    const { coins, method, phoneNumber, cardNumber, nationalId } = req.body || {};
-    if (!coins || coins < 100) return res.status(400).json({ message: "الحد الأدنى للسحب 100 عملة" });
-    if (!method) return res.status(400).json({ message: "طريقة الاستلام مطلوبة" });
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const wallet = await client.query(`SELECT balance FROM coin_wallets WHERE user_id = $1 FOR UPDATE`, [userId]);
-      if (!wallet.rows.length || wallet.rows[0].balance < coins) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ message: "رصيد غير كافٍ" });
-      }
-      const fee = Math.floor(coins * 0.01);
-      const netCoins = coins - fee;
-      const netEGP = parseFloat((netCoins * 0.05).toFixed(2));
-      const upd = await client.query(
-        `UPDATE coin_wallets SET balance = balance - $2, updated_at = NOW() WHERE user_id = $1 AND balance >= $2 RETURNING balance`,
-        [userId, coins]
-      );
-      if (!upd.rows.length) { await client.query('ROLLBACK'); return res.status(400).json({ message: "رصيد غير كافٍ" }); }
-      await client.query(
-        `INSERT INTO coin_transactions (user_id, type, coins, description) VALUES ($1, 'coin_withdrawal', $2, $3)`,
-        [userId, -coins, `سحب ${coins} عملة (رسوم ${fee} عملة) — ${netEGP} ج.م عبر ${method}`]
-      );
-      const now = new Date();
-      const datePart = now.toISOString().slice(0,10).replace(/-/g,"");
-      const rand = Math.floor(1000 + Math.random() * 9000);
-      const orderNumber = `CW-${datePart}-${rand}`;
-      await client.query(
-        `INSERT INTO payment_requests (user_id, type, amount_egp, method, phone_number, national_id, card_number, status, order_number, admin_note)
-         VALUES ($1, 'withdrawal', $2, $3, $4, $5, $6, 'pending', $7, $8)`,
-        [userId, netEGP, method, phoneNumber || null, nationalId || null, cardNumber || null, orderNumber, `إجمالي: ${coins} عملة — رسوم 1%: ${fee} عملة — صافي: ${netCoins} عملة`]
-      );
-      await client.query('COMMIT');
-      const userR = await pool.query(`SELECT first_name, last_name FROM users WHERE id = $1`, [userId]);
-      const userName = `${userR.rows[0]?.first_name || ""} ${userR.rows[0]?.last_name || ""}`.trim() || userId;
-      for (const adminId of [ADMIN_USER_ID, ADMIN_USER_ID2]) {
-        await createNotification(adminId, "payment",
-          `🪙 طلب سحب عملات`,
-          `${userName} — ${coins} عملة (${netEGP} ج.م بعد رسوم 1%) عبر ${method}`,
-          "/admin"
-        );
-      }
-      res.json({ success: true, coins, fee, netCoins, netEGP, orderNumber, message: `تم إرسال طلب سحب ${netEGP} ج.م — رسوم 1% = ${fee} عملة` });
-    } catch (e: any) {
-      await client.query('ROLLBACK').catch(() => {});
-      res.status(500).json({ message: e.message });
-    } finally {
-      client.release();
-    }
-  });
-
-  // ── Transfer Coins to Another User — transactional ──
-  app.post("/api/coins/transfer", isAuthenticated, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    const { recipientUsername, coins, message: msg } = req.body || {};
-    if (!coins || coins < 1) return res.status(400).json({ message: "عدد العملات مطلوب" });
-    if (!recipientUsername) return res.status(400).json({ message: "اسم المستخدم المستلم مطلوب" });
-    const recipient = await pool.query(
-      `SELECT id, first_name, last_name, username FROM users WHERE username = $1 OR id = $1 LIMIT 1`,
-      [recipientUsername.trim()]
-    );
-    if (!recipient.rows.length) return res.status(404).json({ message: "المستخدم غير موجود" });
-    const recipientId = recipient.rows[0].id;
-    if (recipientId === userId) return res.status(400).json({ message: "لا يمكنك التحويل لنفسك" });
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const upd = await client.query(
-        `UPDATE coin_wallets SET balance = balance - $2, total_spent = total_spent + $2, updated_at = NOW() WHERE user_id = $1 AND balance >= $2 RETURNING balance`,
-        [userId, coins]
-      );
-      if (!upd.rows.length) { await client.query('ROLLBACK'); return res.status(400).json({ message: "رصيد غير كافٍ" }); }
-      await client.query(
-        `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned) VALUES ($1, $2, 0, $2)
-         ON CONFLICT (user_id) DO UPDATE SET balance = coin_wallets.balance + $2, total_earned = coin_wallets.total_earned + $2, updated_at = NOW()`,
-        [recipientId, coins]
-      );
-      await client.query(
-        `INSERT INTO coin_transactions (user_id, type, coins, description, related_user_id) VALUES ($1, 'coin_transfer_out', $2, $3, $4)`,
-        [userId, -coins, `تحويل ${coins} عملة إلى ${recipient.rows[0].first_name || recipientUsername}`, recipientId]
-      );
-      await client.query(
-        `INSERT INTO coin_transactions (user_id, type, coins, description, related_user_id) VALUES ($1, 'coin_transfer_in', $2, $3, $4)`,
-        [recipientId, coins, `استلام ${coins} عملة${msg ? ` — ${msg}` : ''}`, userId]
-      );
-      await client.query('COMMIT');
-      const senderR = await pool.query(`SELECT first_name FROM users WHERE id = $1`, [userId]);
-      const senderName = senderR.rows[0]?.first_name || 'مستخدم';
-      await createNotification(recipientId, 'system', `🪙 وصلك ${coins} عملة!`,
-        `${senderName} حوّل لك ${coins} عملة${msg ? ` — "${msg}"` : ''}`, '/revenue');
-      res.json({ success: true, coins, recipientName: recipient.rows[0].first_name || recipientUsername });
-    } catch (e: any) {
-      await client.query('ROLLBACK').catch(() => {});
-      res.status(500).json({ message: e.message });
-    } finally {
-      client.release();
-    }
   });
 
   // ADMIN: List purchase orders
@@ -1328,10 +702,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       );
       // Notify user
       try {
-        await createNotification(order.user_id, "payment",
-          `✅ تم قبول طلب شحن العملات`,
-          `تمت إضافة ${order.coins} عملة إلى محفظتك بنجاح 🎉`,
-          "/coins"
+        await pool.query(
+          `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coins_approved', $2, $3)`,
+          [order.user_id, `✅ تم قبول طلب شحن ${order.coins} عملة وإضافتها لمحفظتك`, JSON.stringify({ orderId, coins: order.coins })]
         );
       } catch (_) {}
       return res.json({ success: true, message: `تم قبول الطلب وإضافة ${order.coins} عملة` });
@@ -1343,10 +716,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         [adminNote || null, adminId, orderId]
       );
       try {
-        await createNotification(order.user_id, "payment",
-          `❌ تم رفض طلب شحن العملات`,
-          adminNote ? `سبب الرفض: ${adminNote}` : `للاستفسار تواصل مع الإدارة`,
-          "/coins"
+        await pool.query(
+          `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coins_rejected', $2, $3)`,
+          [order.user_id, `❌ تم رفض طلب شحن العملات${adminNote ? ": " + adminNote : ""}`, JSON.stringify({ orderId })]
         );
       } catch (_) {}
       return res.json({ success: true, message: "تم رفض الطلب" });
@@ -1359,8 +731,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/admin/coins/generate-codes", isAuthenticated, async (req: any, res) => {
     if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
     const { coins, priceEGP, count, expiresInDays } = req.body || {};
-    if (!coins || !count) return res.status(400).json({ message: "Missing fields" });
-    const resolvedPrice = priceEGP || 0;
+    if (!coins || !priceEGP || !count) return res.status(400).json({ message: "Missing fields" });
 
     const codes: string[] = [];
     const expiresAt = expiresInDays ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000) : null;
@@ -1370,75 +741,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       codes.push(code);
       await pool.query(
         `INSERT INTO coin_recharge_codes (code, coins, price_egp, expires_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-        [code, coins, resolvedPrice, expiresAt]
+        [code, coins, priceEGP, expiresAt]
       );
     }
     res.json({ success: true, codes, count: codes.length });
   });
 
   // ADMIN: List recharge codes
-  // ============ AI CONTROL & USAGE TRACKING ============
-  app.get("/api/admin/ai-settings", isAuthenticated, async (req: any, res) => {
-    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
-    const [imgQuality, imgSize, dailyCap, monthlyCap, kill] = await Promise.all([
-      storage.getSetting("ai_image_quality"),
-      storage.getSetting("ai_image_size"),
-      storage.getSetting("ai_daily_cap_usd"),
-      storage.getSetting("ai_monthly_cap_usd"),
-      storage.getSetting("ai_kill_switch"),
-    ]);
-    res.json({
-      imageQuality: imgQuality || "medium",
-      imageSize: imgSize || "1024x1024",
-      dailyCapUsd: parseFloat(dailyCap || "5"),
-      monthlyCapUsd: parseFloat(monthlyCap || "50"),
-      killSwitch: kill === "1",
-    });
-  });
-
-  app.post("/api/admin/ai-settings", isAuthenticated, async (req: any, res) => {
-    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
-    const { imageQuality, imageSize, dailyCapUsd, monthlyCapUsd, killSwitch } = req.body || {};
-    const validQ = ["low", "medium", "high"];
-    const validS = ["1024x1024", "1024x1536", "1536x1024", "auto"];
-    if (imageQuality && validQ.includes(imageQuality)) await storage.setSetting("ai_image_quality", imageQuality);
-    if (imageSize && validS.includes(imageSize)) await storage.setSetting("ai_image_size", imageSize);
-    if (dailyCapUsd !== undefined) await storage.setSetting("ai_daily_cap_usd", String(dailyCapUsd));
-    if (monthlyCapUsd !== undefined) await storage.setSetting("ai_monthly_cap_usd", String(monthlyCapUsd));
-    if (killSwitch !== undefined) await storage.setSetting("ai_kill_switch", killSwitch ? "1" : "0");
-    res.json({ ok: true });
-  });
-
-  app.get("/api/admin/ai-usage-stats", isAuthenticated, async (req: any, res) => {
-    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
-    try {
-      const today = await pool.query(`
-        SELECT type, COUNT(*)::int AS count, COALESCE(SUM(cost),0)::float AS cost
-        FROM ai_usage WHERE created_at >= CURRENT_DATE GROUP BY type
-      `);
-      const month = await pool.query(`
-        SELECT type, COUNT(*)::int AS count, COALESCE(SUM(cost),0)::float AS cost
-        FROM ai_usage WHERE created_at >= date_trunc('month', CURRENT_DATE) GROUP BY type
-      `);
-      const totalToday = await pool.query(`SELECT COUNT(*)::int AS count, COALESCE(SUM(cost),0)::float AS cost FROM ai_usage WHERE created_at >= CURRENT_DATE`);
-      const totalMonth = await pool.query(`SELECT COUNT(*)::int AS count, COALESCE(SUM(cost),0)::float AS cost FROM ai_usage WHERE created_at >= date_trunc('month', CURRENT_DATE)`);
-      const topUsers = await pool.query(`
-        SELECT au.user_id, u.first_name, u.last_name, COUNT(*)::int AS count, COALESCE(SUM(au.cost),0)::float AS cost
-        FROM ai_usage au LEFT JOIN users u ON u.id::text = au.user_id::text
-        WHERE au.created_at >= date_trunc('month', CURRENT_DATE)
-        GROUP BY au.user_id, u.first_name, u.last_name
-        ORDER BY count DESC LIMIT 10
-      `);
-      res.json({
-        today: { byType: today.rows, total: totalToday.rows[0] },
-        month: { byType: month.rows, total: totalMonth.rows[0] },
-        topUsers: topUsers.rows,
-      });
-    } catch (e: any) {
-      res.status(500).json({ message: e.message });
-    }
-  });
-
   app.get("/api/admin/coins/codes", isAuthenticated, async (req: any, res) => {
     if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
     const page = parseInt((req.query.page as string) || "1");
@@ -1468,259 +777,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch("/api/admin/coins/packages/:id", isAuthenticated, async (req: any, res) => {
     if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
-    const { isActive, name, coins, priceEGP, bonusCoins, sortOrder, description, badge } = req.body || {};
-    // Full update if name/coins/price provided, otherwise just toggle isActive
-    if (name !== undefined || coins !== undefined || priceEGP !== undefined) {
-      await pool.query(
-        `UPDATE coin_packages SET
-          name        = COALESCE($1, name),
-          coins       = COALESCE($2, coins),
-          price_egp   = COALESCE($3, price_egp),
-          bonus_coins = COALESCE($4, bonus_coins),
-          sort_order  = COALESCE($5, sort_order),
-          description = COALESCE($6, description),
-          badge       = COALESCE($7, badge),
-          is_active   = COALESCE($8, is_active)
-         WHERE id = $9`,
-        [name ?? null, coins ?? null, priceEGP ?? null, bonusCoins ?? null, sortOrder ?? null, description ?? null, badge ?? null, isActive ?? null, req.params.id]
-      );
-    } else {
-      await pool.query(`UPDATE coin_packages SET is_active = $1 WHERE id = $2`, [isActive, req.params.id]);
-    }
-    const r = await pool.query(`SELECT * FROM coin_packages WHERE id = $1`, [req.params.id]);
-    res.json(r.rows[0] || { success: true });
-  });
-
-  app.delete("/api/admin/coins/packages/:id", isAuthenticated, async (req: any, res) => {
-    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
-    await pool.query(`DELETE FROM coin_packages WHERE id = $1`, [req.params.id]);
+    const { isActive } = req.body || {};
+    await pool.query(`UPDATE coin_packages SET is_active = $1 WHERE id = $2`, [isActive, req.params.id]);
     res.json({ success: true });
-  });
-
-  // GET all packages for admin (including inactive)
-  app.get("/api/admin/coins/packages/all", isAuthenticated, async (req: any, res) => {
-    if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
-    const r = await pool.query(`SELECT * FROM coin_packages ORDER BY sort_order, price_egp`);
-    res.json(r.rows);
-  });
-
-  // ================================================================
-  // EGP WALLET ROUTES — محفظة الجنيه المصري
-  // ================================================================
-
-  // GET /api/wallet/balance — الرصيد الحالي + آخر المعاملات مع تفاصيل الإعلانات
-  app.get("/api/wallet/balance", isAuthenticated, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    try {
-      const userR = await pool.query(`SELECT balance_egp FROM users WHERE id = $1`, [userId]);
-      const balance = parseFloat(userR.rows[0]?.balance_egp || "0");
-      // All wallet mutations with ad title joined where available
-      const txR = await pool.query(
-        `SELECT wt.*, a.title as ad_title, a.id as ad_id_ref
-         FROM wallet_transactions wt
-         LEFT JOIN ads a ON a.id::text = wt.ref_id
-         WHERE wt.user_id = $1
-         ORDER BY wt.created_at DESC LIMIT 100`,
-        [userId]
-      );
-      // Spending breakdown by type
-      const breakdownR = await pool.query(
-        `SELECT type,
-                COALESCE(SUM(amount_egp),0) as total,
-                COUNT(*) as count
-         FROM wallet_transactions
-         WHERE user_id = $1 AND type != 'top_up'
-         GROUP BY type`,
-        [userId]
-      );
-      res.json({ balance, transactions: txR.rows, breakdown: breakdownR.rows });
-    } catch (e: any) {
-      res.status(500).json({ message: e.message });
-    }
-  });
-
-  // POST /api/wallet/top-up — طلب شحن المحفظة
-  app.post("/api/wallet/top-up", isAuthenticated, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    const { amountEGP, paymentMethod, paymentRef, screenshotUrl } = req.body || {};
-    if (!amountEGP || !paymentMethod) return res.status(400).json({ message: "المبلغ وطريقة الدفع مطلوبان" });
-    // Whitelist allowed payment methods
-    const ALLOWED_PAYMENT_METHODS = ["vodafone", "etisalat", "instapay", "souq"];
-    if (!ALLOWED_PAYMENT_METHODS.includes(paymentMethod)) {
-      return res.status(400).json({ message: "طريقة دفع غير مدعومة" });
-    }
-    const amount = parseFloat(amountEGP);
-    if (isNaN(amount) || amount <= 0) return res.status(400).json({ message: "مبلغ غير صالح" });
-
-    // Sanitize screenshotUrl: only accept relative /uploads/ paths from our own upload handler
-    let safeScreenshotUrl: string | null = null;
-    if (screenshotUrl && typeof screenshotUrl === "string") {
-      const trimmed = screenshotUrl.trim();
-      if (/^\/uploads\/[^\s<>"]+$/.test(trimmed) || /^\/api\/uploads\/[^\s<>"]+$/.test(trimmed)) {
-        safeScreenshotUrl = trimmed;
-      }
-      // Reject javascript:, data:, absolute external URLs — only same-origin upload paths allowed
-    }
-
-    // Require proof of payment: at least a screenshot or a payment reference
-    if (!safeScreenshotUrl && !paymentRef) {
-      return res.status(400).json({ message: "يرجى رفع إيصال الدفع أو إدخال رقم العملية كدليل على الدفع" });
-    }
-
-    // ── AI Payment Screenshot Verification ──────────────────────
-    // If a screenshot is provided, verify it is a real Egyptian wallet receipt
-    if (safeScreenshotUrl) {
-      const aiCheck = await verifyPaymentScreenshot(safeScreenshotUrl, amount, paymentMethod);
-      if (!aiCheck.ok) {
-        return res.status(400).json({
-          message: `❌ إيصال الدفع غير صالح: ${aiCheck.reason}`,
-          aiReason: aiCheck.reason,
-        });
-      }
-    }
-    // ────────────────────────────────────────────────────────────
-
-    const userR = await pool.query(`SELECT first_name, last_name FROM users WHERE id = $1`, [userId]);
-    const userName = `${userR.rows[0]?.first_name || ""} ${userR.rows[0]?.last_name || ""}`.trim() || userId;
-
-    // Generate order number — for Souq/البنك الأهلي, use a structured bank-transfer reference
-    const timestamp = Date.now();
-    const shortRand = Math.random().toString(36).toUpperCase().slice(2, 6);
-    const orderNumber = `WLT-${timestamp.toString(36).toUpperCase()}-${shortRand}`;
-
-    // For Souq method: generate a structured orderRef the user includes in their transfer description
-    let souqOrderRef: string | null = null;
-    if (paymentMethod === "souq") {
-      // Format: ADS-{userId_short}-{amount}-{timestamp_short}
-      const userShort = (userId || "").slice(-4).toUpperCase();
-      souqOrderRef = `ADS-${userShort}-${Math.round(amount)}-${shortRand}`;
-    }
-
-    const effectivePaymentRef = paymentRef || souqOrderRef || null;
-
-    const r = await pool.query(
-      `INSERT INTO wallet_top_up_orders (user_id, amount_egp, payment_method, payment_ref, screenshot_url, status, order_number)
-       VALUES ($1, $2, $3, $4, $5, 'pending', $6) RETURNING *`,
-      [userId, amount, paymentMethod, effectivePaymentRef, safeScreenshotUrl, orderNumber]
-    );
-
-    // Notify both admins about new wallet top-up request
-    for (const adminId of [ADMIN_USER_ID, ADMIN_USER_ID2]) {
-      try {
-        await createNotification(adminId, "payment",
-          `💰 طلب شحن محفظة جديد`,
-          `${userName} — ${amount} ج.م عبر ${paymentMethod}`,
-          "/admin"
-        );
-        emitAdminEvent("admin:wallet-topup-request", {
-          userName,
-          amount,
-          paymentMethod,
-          orderNumber,
-          at: new Date().toISOString(),
-        });
-      } catch (_) {}
-    }
-
-    res.status(201).json({
-      success: true,
-      order: r.rows[0],
-      orderNumber,
-      ...(souqOrderRef ? { souqOrderRef, message: `استخدم الرمز المرجعي ${souqOrderRef} في بيان التحويل البنكي` } : {}),
-    });
-  });
-
-  // GET /api/admin/wallet-topups — الأدمن يرى طلبات الشحن
-  app.get("/api/admin/wallet-topups", isAuthenticated, requireAdmin, async (req: any, res) => {
-    try {
-      const r = await pool.query(
-        `SELECT o.*, u.first_name, u.last_name, u.email, u.balance_egp
-         FROM wallet_top_up_orders o
-         LEFT JOIN users u ON u.id = o.user_id
-         ORDER BY o.created_at DESC
-         LIMIT 200`
-      );
-      res.json(r.rows);
-    } catch (e: any) {
-      res.status(500).json({ message: e.message });
-    }
-  });
-
-  // PATCH /api/admin/wallet-topups/:id — قبول أو رفض طلب الشحن
-  app.patch("/api/admin/wallet-topups/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
-    const { action, adminNote } = req.body || {};
-    const orderId = parseInt(req.params.id);
-    if (!action || !["approve", "reject"].includes(action)) return res.status(400).json({ message: "إجراء غير صالح" });
-
-    // Use a DB client with transaction for atomicity and row-level lock
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-
-      // Lock the order row to prevent concurrent double-approval
-      const orderR = await client.query(
-        `SELECT * FROM wallet_top_up_orders WHERE id = $1 FOR UPDATE`,
-        [orderId]
-      );
-      if (orderR.rows.length === 0) {
-        await client.query("ROLLBACK");
-        return res.status(404).json({ message: "الطلب غير موجود" });
-      }
-      const order = orderR.rows[0];
-
-      if (order.status !== "pending") {
-        await client.query("ROLLBACK");
-        return res.status(400).json({ message: "تم معالجة هذا الطلب مسبقاً" });
-      }
-
-      if (action === "approve") {
-        // Atomically: update wallet balance + log wallet transaction + mark order approved
-        await client.query(
-          `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) + $1 WHERE id = $2`,
-          [order.amount_egp, order.user_id]
-        );
-        await client.query(
-          `INSERT INTO wallet_transactions (user_id, type, amount_egp, description, ref_id)
-           VALUES ($1, 'top_up', $2, $3, $4)`,
-          [order.user_id, order.amount_egp, `شحن محفظة — ${order.payment_method}`, order.order_number]
-        );
-        await client.query(
-          `UPDATE wallet_top_up_orders SET status = 'approved', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
-          [adminNote || null, req.user.claims.sub, orderId]
-        );
-        await client.query("COMMIT");
-
-        // Notify user (outside transaction — non-critical)
-        try {
-          await createNotification(order.user_id, "payment",
-            `✅ تمت الموافقة على شحن محفظتك`,
-            `تم إضافة ${order.amount_egp} ج.م إلى رصيدك بنجاح 💰`,
-            "/wallet"
-          );
-        } catch (_) {}
-        return res.json({ success: true, message: "تمت الموافقة وإضافة الرصيد" });
-      } else {
-        await client.query(
-          `UPDATE wallet_top_up_orders SET status = 'rejected', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
-          [adminNote || null, req.user.claims.sub, orderId]
-        );
-        await client.query("COMMIT");
-
-        try {
-          await createNotification(order.user_id, "payment",
-            `❌ تم رفض طلب شحن المحفظة`,
-            adminNote ? `سبب الرفض: ${adminNote}` : `للاستفسار تواصل مع الإدارة`,
-            "/wallet"
-          );
-        } catch (_) {}
-        return res.json({ success: true, message: "تم رفض الطلب" });
-      }
-    } catch (e: any) {
-      await client.query("ROLLBACK");
-      res.status(500).json({ message: e.message });
-    } finally {
-      client.release();
-    }
   });
 
   // ================================================================
@@ -1843,18 +902,9 @@ Sitemap: ${BASE}/sitemap-pages.xml
   // ================================================================
   // PLATFORM SETTINGS (Admin only)
   // ================================================================
-  // ── Public settings — NEVER return secrets ─────────────────────
-  const PRIVATE_KEYS = new Set([
-    'vapid_private_key', 'admin_pin', 'admin_recovery_email',
-    'admin_recovery_phone', 'password_hash',
-  ]);
   app.get("/api/settings", async (req, res) => {
-    const all = await storage.getAllSettings();
-    const safe: Record<string, string> = {};
-    for (const [k, v] of Object.entries(all)) {
-      if (!PRIVATE_KEYS.has(k)) safe[k] = v;
-    }
-    res.json(safe);
+    const settings = await storage.getAllSettings();
+    res.json(settings);
   });
 
   // ── Admin PIN ────────────────────────────────────────────────────
@@ -1946,16 +996,6 @@ Sitemap: ${BASE}/sitemap-pages.xml
       await storage.setSetting(key, value);
     }
     res.json({ success: true });
-  });
-
-  // ── WhatsNew: track how many users dismissed the banner ──
-  app.post("/api/whatsnew/seen", async (_req, res) => {
-    await db.execute(sql`
-      INSERT INTO platform_settings (key, value) VALUES ('whatsnew_seen_count', '1')
-      ON CONFLICT (key) DO UPDATE
-        SET value = (CAST(platform_settings.value AS INTEGER) + 1)::TEXT
-    `);
-    res.json({ ok: true });
   });
 
   // ================================================================
@@ -2208,11 +1248,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       // ── Fetch page ──
       params.push(limit, offset);
       const dataRes = await pool.query(
-        `SELECT a.*, u.first_name AS seller_first_name, u.last_name AS seller_last_name,
-                u.profile_image_url AS seller_avatar, u.governorate AS seller_governorate
-         FROM ads a
-         LEFT JOIN users u ON u.id = a.user_id
-         WHERE ${where} ORDER BY ${orderBy} LIMIT $${pi++} OFFSET $${pi++}`,
+        `SELECT * FROM ads WHERE ${where} ORDER BY ${orderBy} LIMIT $${pi++} OFFSET $${pi++}`,
         params
       );
 
@@ -2246,9 +1282,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const { insertAdSchema } = await import("@shared/schema");
       const input = insertAdSchema.parse(req.body);
-      // Default ad duration = 7 days from creation
-      const defaultExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-      const ad = await storage.createAd({ ...input, userId: req.user.claims.sub, expiresAt: input.expiresAt ?? defaultExpiry });
+      const ad = await storage.createAd({ ...input, userId: req.user.claims.sub });
       res.status(201).json(ad);
 
       // ── Notify targeted users about the new ad (async, non-blocking) ──
@@ -2373,17 +1407,15 @@ Sitemap: ${BASE}/sitemap-pages.xml
         VALUES (${orderNumber}, ${adId}, ${userId}, ${amount || 0}, ${paymentRef}, 'pending', ${paymentMethod || null}, ${screenshotUrl || null})
       `);
 
-      // Notify both admins
+      // Notify admin
       const userName = req.user.claims?.first_name || "مستخدم";
-      for (const adminId of [ADMIN_USER_ID, ADMIN_USER_ID2]) {
-        await createNotification(
-          adminId,
-          "payment",
-          `⚡ طلب تعزيز جديد`,
-          `${userName} — ${amount || 0} ج.م لتعزيز إعلان #${adId} (${orderNumber})`,
-          `/admin`
-        );
-      }
+      await createNotification(
+        ADMIN_USER_ID,
+        "system",
+        `💳 طلب تعزيز جديد #${orderNumber}`,
+        `${userName} دفع ${amount || 0} ج.م لتعزيز إعلان رقم ${adId} — مرجع الدفع: ${paymentRef}. تحقق وأكّد.`,
+        `/admin`
+      );
 
       // Send DM (from admin) to user with receipt
       const receiptMsg =
@@ -2435,13 +1467,11 @@ Sitemap: ${BASE}/sitemap-pages.xml
       await db.execute(sql`UPDATE boost_orders SET status = ${status} WHERE id = ${req.params.id}`);
 
       if (status === 'confirmed') {
-        // ✅ ACTIVATE: mark ad as boosted using duration from platform_settings
-        const durRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_duration_days' LIMIT 1`);
-        const durDays = parseInt((durRow.rows[0] as any)?.value || "30");
-        await pool.query(
-          `UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '1 day' * $1 WHERE id = $2`,
-          [durDays, order.ad_id]
-        );
+        // ✅ ACTIVATE: mark ad as boosted for 30 days
+        await db.execute(sql`
+          UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '30 days'
+          WHERE id = ${order.ad_id}
+        `);
         // Actually run the boost
         const ad = await storage.getAd(order.ad_id);
         if (ad) {
@@ -2531,82 +1561,41 @@ Sitemap: ${BASE}/sitemap-pages.xml
         return res.status(403).json({ message: "خاصية التعزيز معطّلة حالياً من قِبل الإدارة" });
       }
 
-      // Check boost price and duration
+      // Check boost price
       const boostPriceRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_price_egp' LIMIT 1`);
       const boostPrice = parseFloat((boostPriceRow.rows[0] as any)?.value || "0");
-      const boostDurRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_duration_days' LIMIT 1`);
-      const boostDays = parseInt((boostDurRow.rows[0] as any)?.value || "30");
 
-      // Rate limit: check last boost time — max once per 30 days if boost is free
-      // If boostPrice > 0, ALL boosts require wallet deduction (no free limit)
+      const { payment_ref } = req.body || {};
+      const isPaid = !!payment_ref; // client sends payment_ref when user has paid
+
+      // Rate limit: check last boost time — max once per 30 days for FREE boosts
       const lastBoost = await db.execute(
         sql`SELECT created_at FROM notifications
             WHERE link = ${`/ads/${adId}`} AND title LIKE '%🚀%'
             ORDER BY created_at DESC LIMIT 1`
       );
 
-      if (boostPrice <= 0 && lastBoost.rows.length > 0) {
-        // Free boost: enforce rate limit equal to boost duration
+      if (lastBoost.rows.length > 0) {
         const last = new Date((lastBoost.rows[0] as any).created_at);
         const daysAgo = (Date.now() - last.getTime()) / 86_400_000;
-        if (daysAgo < boostDays) {
-          const daysLeft = Math.ceil(boostDays - daysAgo);
-          return res.status(429).json({ message: `يمكنك تعزيز هذا الإعلان مرة واحدة كل ${boostDays} يوم. الأيام المتبقية: ${daysLeft} يوم` });
+        if (daysAgo < 30) {
+          if (isPaid) {
+            // Paid extra boost — allow immediately, skip the 30-day limit
+          } else if (boostPrice > 0) {
+            // Free limit used up → offer paid option
+            const daysLeft = Math.ceil(30 - daysAgo);
+            return res.status(402).json({
+              requiresPayment: true,
+              price: boostPrice,
+              message: `استخدمت تعزيزك المجاني. يمكنك التعزيز الآن مقابل ${boostPrice} ج.م أو الانتظار ${daysLeft} يوم`,
+            });
+          } else {
+            // Price = 0, strictly once per 30 days
+            const daysLeft = Math.ceil(30 - daysAgo);
+            return res.status(429).json({ message: `يمكنك تعزيز هذا الإعلان مرة واحدة كل 30 يوم. الأيام المتبقية: ${daysLeft} يوم` });
+          }
         }
       }
-
-      // Paid boost: always require wallet deduction (every boost costs boostPrice EGP)
-      if (boostPrice > 0) {
-        const boostClient = await pool.connect();
-        try {
-          await boostClient.query("BEGIN");
-          // Lock user row to prevent concurrent overdraft
-          const walletR = await boostClient.query(`SELECT balance_egp FROM users WHERE id = $1 FOR UPDATE`, [userId]);
-          const balance = parseFloat(walletR.rows[0]?.balance_egp || "0");
-          if (balance < boostPrice) {
-            await boostClient.query("ROLLBACK");
-            return res.status(402).json({
-              requiresWalletTopup: true,
-              price: boostPrice,
-              balance,
-              message: `رصيد محفظتك غير كافٍ (${balance} ج.م). التعزيز يكلف ${boostPrice} ج.م — اشحن محفظتك أولاً`,
-            });
-          }
-          // Use conditional deduction: only deduct if balance is still sufficient (extra safety)
-          const deductR = await boostClient.query(
-            `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) - $1
-             WHERE id = $2 AND COALESCE(balance_egp, 0) >= $1
-             RETURNING balance_egp`,
-            [boostPrice, userId]
-          );
-          if (deductR.rowCount === 0) {
-            await boostClient.query("ROLLBACK");
-            return res.status(402).json({
-              requiresWalletTopup: true,
-              price: boostPrice,
-              message: `رصيد محفظتك غير كافٍ. التعزيز يكلف ${boostPrice} ج.م — اشحن محفظتك أولاً`,
-            });
-          }
-          // Log to wallet_transactions ledger for auditability
-          await boostClient.query(
-            `INSERT INTO wallet_transactions (user_id, type, amount_egp, description, ref_id)
-             VALUES ($1, 'boost_debit', $2, $3, $4)`,
-            [userId, boostPrice, `تعزيز إعلان #${adId}`, String(adId)]
-          );
-          await boostClient.query("COMMIT");
-        } catch (txErr) {
-          await boostClient.query("ROLLBACK");
-          throw txErr;
-        } finally {
-          boostClient.release();
-        }
-      }
-
-      // ✅ Activate boost on the ad using duration from platform_settings
-      await pool.query(
-        `UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '1 day' * $1 WHERE id = $2`,
-        [boostDays, adId]
-      );
 
       const publisherName = req.user.claims?.first_name || "معلن";
       const adLink = `/ads/${adId}`;
@@ -2686,122 +1675,6 @@ Sitemap: ${BASE}/sitemap-pages.xml
     if (isNaN(channelId)) return res.json({ following: false });
     const follow = await storage.getFollow(req.user.claims.sub, channelId);
     res.json({ following: !!follow });
-  });
-
-  // ── User Follow (user-to-user) ──────────────────────────────
-  app.post("/api/users/:id/follow", isAuthenticated, async (req: any, res) => {
-    const followerId = req.user.claims.sub;
-    const followingId = req.params.id;
-    if (followerId === followingId) return res.status(400).json({ message: "لا يمكنك متابعة نفسك" });
-    try {
-      const existing = await pool.query(
-        `SELECT id FROM user_follows WHERE follower_id = $1 AND following_id = $2`,
-        [followerId, followingId]
-      );
-      if (existing.rows.length > 0) {
-        await pool.query(`DELETE FROM user_follows WHERE follower_id = $1 AND following_id = $2`, [followerId, followingId]);
-        res.json({ following: false });
-      } else {
-        await pool.query(
-          `INSERT INTO user_follows (follower_id, following_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-          [followerId, followingId]
-        );
-        const followerUser = await storage.getUser(followerId);
-        const followerName = followerUser ? `${followerUser.firstName || ''} ${followerUser.lastName || ''}`.trim() : 'مستخدم';
-        await createNotification(followingId, "system", "متابع جديد", `${followerName} بدأ متابعتك`, `/profile/${followerId}`);
-        res.json({ following: true });
-      }
-    } catch (e: any) {
-      res.status(500).json({ message: e.message });
-    }
-  });
-
-  app.get("/api/users/:id/follow", isAuthenticated, async (req: any, res) => {
-    const followerId = req.user.claims.sub;
-    const followingId = req.params.id;
-    try {
-      const r = await pool.query(
-        `SELECT id FROM user_follows WHERE follower_id = $1 AND following_id = $2`,
-        [followerId, followingId]
-      );
-      res.json({ following: r.rows.length > 0 });
-    } catch { res.json({ following: false }); }
-  });
-
-  app.get("/api/users/:id/followers", async (req, res) => {
-    const userId = req.params.id;
-    try {
-      const [followersR, followingR] = await Promise.all([
-        pool.query(
-          `SELECT uf.follower_id, u.first_name, u.last_name, u.profile_image_url, uf.created_at
-           FROM user_follows uf LEFT JOIN users u ON u.id = uf.follower_id
-           WHERE uf.following_id = $1 ORDER BY uf.created_at DESC LIMIT 100`, [userId]
-        ),
-        pool.query(
-          `SELECT uf.following_id, u.first_name, u.last_name, u.profile_image_url, uf.created_at
-           FROM user_follows uf LEFT JOIN users u ON u.id = uf.following_id
-           WHERE uf.follower_id = $1 ORDER BY uf.created_at DESC LIMIT 100`, [userId]
-        ),
-      ]);
-      const countFollowers = await pool.query(`SELECT COUNT(*) FROM user_follows WHERE following_id = $1`, [userId]);
-      const countFollowing = await pool.query(`SELECT COUNT(*) FROM user_follows WHERE follower_id = $1`, [userId]);
-      res.json({
-        followersCount: Number(countFollowers.rows[0].count),
-        followingCount: Number(countFollowing.rows[0].count),
-        followers: followersR.rows,
-        following: followingR.rows,
-      });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  // ── Advertiser Stats (my ads performance) ──────────────────
-  app.get("/api/my-stats", isAuthenticated, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    try {
-      const [adsR, viewsR, likesR, clicksR, followersR, msgsR, waR, soldR] = await Promise.all([
-        pool.query(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status='active') as active FROM ads WHERE user_id = $1`, [userId]),
-        pool.query(`SELECT COALESCE(SUM(views_count),0) as total_views FROM ads WHERE user_id = $1`, [userId]),
-        pool.query(`SELECT COALESCE(SUM(likes_count),0) as total_likes FROM ads WHERE user_id = $1`, [userId]),
-        pool.query(`SELECT COUNT(*) as total_clicks FROM ad_link_clicks WHERE user_id = $1`, [userId]),
-        pool.query(`SELECT COUNT(*) FROM user_follows WHERE following_id = $1`, [userId]),
-        pool.query(`SELECT COUNT(DISTINCT sender_id) as unique_senders FROM messages WHERE receiver_id = $1`, [userId]),
-        pool.query(`SELECT COALESCE(SUM(whatsapp_clicks),0) as total_wa FROM ads WHERE user_id = $1`, [userId]),
-        pool.query(`SELECT COUNT(*) as sold_count FROM ads WHERE user_id = $1 AND is_sold = true`, [userId]),
-      ]);
-      const topAdsR = await pool.query(
-        `SELECT id, title, views_count, likes_count, whatsapp_clicks, media_url, media_type, price_egp, created_at
-         FROM ads WHERE user_id = $1 ORDER BY views_count DESC LIMIT 5`, [userId]
-      );
-      const recentClicksR = await pool.query(
-        `SELECT alc.link_type, alc.created_at, a.title as ad_title
-         FROM ad_link_clicks alc LEFT JOIN ads a ON a.id = alc.ad_id
-         WHERE alc.user_id = $1 OR a.user_id = $1
-         ORDER BY alc.created_at DESC LIMIT 20`, [userId]
-      );
-
-      const a = adsR.rows[0] as any;
-      const v = viewsR.rows[0] as any;
-      const l = likesR.rows[0] as any;
-      const c = clicksR.rows[0] as any;
-      const f = followersR.rows[0] as any;
-      const m = msgsR.rows[0] as any;
-      const wa = waR.rows[0] as any;
-      const s = soldR.rows[0] as any;
-
-      res.json({
-        totalAds: Number(a.total),
-        activeAds: Number(a.active),
-        totalViews: Number(v.total_views),
-        totalLikes: Number(l.total_likes),
-        totalClicks: Number(c.total_clicks),
-        followersCount: Number(f.count),
-        uniqueMessages: Number(m.unique_senders),
-        totalWhatsappClicks: Number(wa.total_wa),
-        soldAds: Number(s.sold_count),
-        topAds: topAdsR.rows,
-        recentClicks: recentClicksR.rows,
-      });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   // Channel analytics (only for channel owner or admin)
@@ -2920,18 +1793,6 @@ Sitemap: ${BASE}/sitemap-pages.xml
         console.error('[AI Moderation] Error:', e);
       }
     })();
-
-    // ── Notify admin panel in real-time ──
-    emitAdminEvent("admin:stream-started", {
-      streamId: stream.id,
-      title: stream.title || "بث بدون عنوان",
-      broadcasterName: req.user.claims?.first_name
-        ? `${req.user.claims.first_name} ${req.user.claims.last_name || ""}`.trim()
-        : "مستخدم",
-      link: `/streams/${stream.id}`,
-      at: new Date().toISOString(),
-    });
-
     res.json(updated);
   });
 
@@ -3132,54 +1993,6 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // ================================================================
-  // ================================================================
-  // LEADERBOARD
-  // ================================================================
-  app.get("/api/leaderboard", async (_req, res) => {
-    try {
-      const [topSellers, topChannels, topReels] = await Promise.all([
-        pool.query(`
-          SELECT u.id, u.first_name, u.last_name, u.profile_image_url,
-            COUNT(a.id)::int as ads_count,
-            COALESCE(SUM(a.views_count), 0)::int as total_views,
-            COALESCE(SUM(a.likes_count), 0)::int as total_likes
-          FROM users u
-          JOIN ads a ON a.user_id = u.id AND a.status = 'active'
-          GROUP BY u.id, u.first_name, u.last_name, u.profile_image_url
-          ORDER BY total_views DESC, ads_count DESC
-          LIMIT 10
-        `),
-        pool.query(`
-          SELECT c.id, c.name, c.avatar_url, c.subscriber_count,
-            COALESCE(c.earnings_egp, 0) as earnings_egp,
-            COALESCE(c.views_count, 0) as views_count,
-            u.first_name, u.last_name, u.profile_image_url as owner_avatar,
-            c.is_verified
-          FROM channels c
-          JOIN users u ON u.id = c.user_id
-          ORDER BY c.subscriber_count DESC, c.views_count DESC
-          LIMIT 10
-        `),
-        pool.query(`
-          SELECT r.id, r.title, r.thumbnail_url, r.views_count, r.likes_count,
-            c.name as channel_name, c.avatar_url as channel_avatar
-          FROM reels r
-          LEFT JOIN channels c ON c.id = r.channel_id
-          WHERE r.status = 'active'
-          ORDER BY r.views_count DESC
-          LIMIT 10
-        `),
-      ]);
-      res.json({
-        topSellers: topSellers.rows,
-        topChannels: topChannels.rows,
-        topReels: topReels.rows,
-      });
-    } catch (e: any) {
-      res.status(500).json({ message: e.message });
-    }
-  });
-
   // REELS ROUTES
   // ================================================================
   app.get("/api/reels", async (req: any, res) => {
@@ -3685,8 +2498,8 @@ Sitemap: ${BASE}/sitemap-pages.xml
       if (!title || !description || !mediaUrl || !mediaType) return res.status(400).json({ message: "بيانات ناقصة" });
       const adminId = req.user.id;
       const result = await db.execute(sql`
-        INSERT INTO ads (title, description, media_url, media_type, user_id, price_egp, whatsapp_number, is_admin_promo, status, language, expires_at)
-        VALUES (${title}, ${description}, ${mediaUrl}, ${mediaType}, ${adminId}, ${priceEGP || null}, ${whatsappNumber || null}, true, 'active', 'ar', NOW() + INTERVAL '7 days')
+        INSERT INTO ads (title, description, media_url, media_type, user_id, price_egp, whatsapp_number, is_admin_promo, status, language)
+        VALUES (${title}, ${description}, ${mediaUrl}, ${mediaType}, ${adminId}, ${priceEGP || null}, ${whatsappNumber || null}, true, 'active', 'ar')
         RETURNING id
       `);
       res.json({ success: true, id: (result.rows[0] as any).id });
@@ -3931,45 +2744,17 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.post("/api/payments", isAuthenticated, async (req: any, res) => {
     try {
       const { insertPaymentRequestSchema } = await import("@shared/schema");
-      const userId = req.user.claims.sub;
+      // Generate unique order number: ORD-YYYYMMDD-XXXX
       const now = new Date();
       const datePart = now.toISOString().slice(0,10).replace(/-/g,"");
       const rand = Math.floor(1000 + Math.random() * 9000);
       const orderNumber = `ORD-${datePart}-${rand}`;
-      let bodyData = { ...req.body };
-      if (bodyData.type === 'withdrawal' && bodyData.amountEGP) {
-        const gross = parseFloat(bodyData.amountEGP);
-        const fee = parseFloat((gross * 0.01).toFixed(2));
-        const net = parseFloat((gross - fee).toFixed(2));
-        bodyData.amountEGP = net;
-        bodyData.adminNote = `${bodyData.adminNote || ''} | رسوم سحب 1%: ${fee} ج.م (إجمالي: ${gross} ج.م)`.trim().replace(/^\| /, '');
-      }
       const input = insertPaymentRequestSchema.parse({
-        ...bodyData,
-        userId,
+        ...req.body,
+        userId: req.user.claims.sub,
         orderNumber,
       });
       const payment = await storage.createPaymentRequest(input);
-
-      // ── Notify both admins about new payment request ──
-      try {
-        const userR = await pool.query(`SELECT first_name, last_name FROM users WHERE id = $1`, [userId]);
-        const userName = `${userR.rows[0]?.first_name || ""} ${userR.rows[0]?.last_name || ""}`.trim() || userId;
-        const methodLabels: Record<string, string> = {
-          vodafone: "فودافون كاش", etisalat: "اتصالات e& كاش",
-          instapay: "InstaPay", souq: "سوق ماركات", visa_bank: "تحويل بنكي",
-        };
-        const methodLabel = methodLabels[input.method] || input.method;
-        const svcLabel = input.serviceType ? ` — ${input.serviceType}` : "";
-        for (const adminId of [ADMIN_USER_ID, ADMIN_USER_ID2]) {
-          await createNotification(adminId, "payment",
-            `💳 طلب دفع جديد`,
-            `${userName} — ${input.amountEGP} ج.م عبر ${methodLabel}${svcLabel}`,
-            "/admin"
-          );
-        }
-      } catch (_) {}
-
       res.status(201).json(payment);
     } catch (err: any) {
       res.status(400).json({ message: err.message });
@@ -3985,22 +2770,19 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
     try {
       if (svcType === 'ad_boost' && adId) {
-        const durR = await db.execute(sql`SELECT value FROM platform_settings WHERE key = 'boost_duration_days' LIMIT 1`);
-        const durDays = parseInt((durR.rows[0] as any)?.value || "30");
         await pool.query(
-          `UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '1 day' * $1 WHERE id = $2`,
-          [durDays, adId]
+          `UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '30 days' WHERE id = $1`,
+          [adId]
         );
         await createNotification(userId, 'system', '⚡ تم تعزيز إعلانك!',
           `إعلانك #${adId} أصبح مميزاً في الصدارة لمدة 30 يوماً`, `/ads/${adId}`);
-      } else if ((svcType === 'renewal' || svcType === 'renewal_30') && adId) {
-        const renewDays = svcType === 'renewal' ? 7 : 30;
+      } else if (svcType === 'renewal' && adId) {
         await pool.query(
-          `UPDATE ads SET status = 'active', expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + INTERVAL '1 day' * $2 WHERE id = $1`,
-          [adId, renewDays]
+          `UPDATE ads SET status = 'active', expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + INTERVAL '30 days' WHERE id = $1`,
+          [adId]
         );
         await createNotification(userId, 'system', '🔄 تم تجديد إعلانك!',
-          `إعلانك #${adId} تم تجديده لمدة ${renewDays} يوماً إضافية`, `/ads/${adId}`);
+          `إعلانك #${adId} تم تجديده لمدة 30 يوماً إضافية`, `/ads/${adId}`);
       } else if (svcType === 'ai_credits') {
         const creditsRow = await pool.query(
           `SELECT value FROM platform_settings WHERE key = 'ai_free_credits' LIMIT 1`
@@ -4088,107 +2870,6 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
-  // ── Stream content report (viewer → flags violation) ─────────────────
-  app.post("/api/streams/:id/report", isAuthenticated, async (req: any, res) => {
-    try {
-      const streamId = Number(req.params.id);
-      const userId   = req.user.claims.sub as string;
-      const { reason } = req.body as { reason: string };
-      if (!reason) return res.status(400).json({ message: "reason required" });
-
-      // Insert into generic reports table (targetType = 'stream')
-      await db.execute(sql`
-        INSERT INTO reports (reporter_id, target_type, target_id, reason, status)
-        VALUES (${userId}, 'stream', ${streamId}, ${reason}, 'pending')
-        ON CONFLICT DO NOTHING
-      `);
-
-      // Count total unique-reporter reports for this stream
-      const countRes = await db.execute(sql`
-        SELECT COUNT(DISTINCT reporter_id) as cnt
-        FROM reports
-        WHERE target_type = 'stream' AND target_id = ${streamId} AND status = 'pending'
-      `);
-      const reportCount = Number((countRes.rows[0] as any)?.cnt || 0);
-
-      // 3+ reports → emit warning to broadcaster
-      if (reportCount >= 3 && reportCount < 5) {
-        io.to(`stream:${streamId}`).emit("stream-content-warning", {
-          count: reportCount,
-          message: "⚠️ تلقّى بثّك عدة بلاغات بسبب محتوى مخالف. يرجى الالتزام بسياسة المنصة."
-        });
-      }
-      // 5+ reports → force-end the stream
-      if (reportCount >= 5) {
-        await storage.updateLiveStream(streamId, { status: 'ended' });
-        io.to(`stream:${streamId}`).emit("stream-force-ended", {
-          reason: "أُغلق البث بسبب بلاغات متعددة عن محتوى مخالف لسياسة المنصة."
-        });
-      }
-
-      res.json({ ok: true, reportCount });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  // ── Admin: get pending stream reports ────────────────────────────────
-  app.get("/api/admin/stream-reports", isAuthenticated, requireAdmin, async (_req, res) => {
-    try {
-      const result = await db.execute(sql`
-        SELECT
-          r.id, r.reporter_id, r.target_id as stream_id, r.reason,
-          r.status, r.created_at,
-          ls.title as stream_title, ls.status as stream_status,
-          ls.user_id as broadcaster_id,
-          COUNT(*) OVER (PARTITION BY r.target_id) as total_reports
-        FROM reports r
-        LEFT JOIN live_streams ls ON ls.id = r.target_id
-        WHERE r.target_type = 'stream'
-        ORDER BY r.created_at DESC
-        LIMIT 200
-      `);
-      res.json(result.rows);
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  // ── Admin: warn broadcaster via socket ───────────────────────────────
-  app.post("/api/admin/streams/:id/warn", isAuthenticated, requireAdmin, async (req: any, res) => {
-    try {
-      const streamId = Number(req.params.id);
-      const { message } = req.body as { message?: string };
-      io.to(`stream:${streamId}`).emit("stream-content-warning", {
-        count: 99,
-        message: message || "⚠️ تحذير من الإدارة: يرجى الالتزام بسياسة المنصة وإزالة المحتوى المخالف فوراً."
-      });
-      res.json({ ok: true });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  // ── Admin: force-close a live stream ────────────────────────────────
-  app.post("/api/admin/streams/:id/force-end", isAuthenticated, requireAdmin, async (req: any, res) => {
-    try {
-      const streamId = Number(req.params.id);
-      const { reason } = req.body as { reason?: string };
-      await storage.updateLiveStream(streamId, { status: 'ended' });
-      io.to(`stream:${streamId}`).emit("stream-force-ended", {
-        reason: reason || "أُغلق البث من قِبَل الإدارة بسبب انتهاك سياسة المنصة."
-      });
-      // Mark all pending reports for this stream as resolved
-      await db.execute(sql`
-        UPDATE reports SET status='resolved'
-        WHERE target_type='stream' AND target_id=${streamId} AND status='pending'
-      `);
-      res.json({ ok: true });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
   // ================================================================
   // ADMIN PANEL ROUTES (admin only)
   // ================================================================
@@ -4197,154 +2878,6 @@ Sitemap: ${BASE}/sitemap-pages.xml
     const usersResult = await db.execute(sql`SELECT COUNT(*) as cnt FROM users`);
     const totalUsers = Number((usersResult.rows[0] as any)?.cnt || 0);
     res.json({ ...stats, totalUsers });
-  });
-
-  // ── Pending Counts for Admin Badges ──────────────────────────
-  app.get("/api/admin/pending-counts", isAuthenticated, requireAdmin, async (_req, res) => {
-    try {
-      const [paymentsRes, topupsRes, adsRes, boostRes, renewalRes] = await Promise.all([
-        pool.query(`SELECT COUNT(*) as cnt FROM payment_requests WHERE status = 'pending'`),
-        pool.query(`SELECT COUNT(*) as cnt FROM wallet_top_up_orders WHERE status = 'pending'`),
-        pool.query(`SELECT COUNT(*) as cnt FROM ads WHERE status = 'pending'`),
-        pool.query(`SELECT COUNT(*) as cnt FROM boost_orders WHERE status = 'pending'`),
-        pool.query(`SELECT COUNT(*) as cnt FROM renewal_orders WHERE status = 'pending'`),
-      ]);
-      res.json({
-        payments:      Number(paymentsRes.rows[0]?.cnt || 0),
-        walletcharges: Number(topupsRes.rows[0]?.cnt || 0),
-        ads:           Number(adsRes.rows[0]?.cnt || 0),
-        boostorders:   Number(boostRes.rows[0]?.cnt || 0),
-        renewalorders: Number(renewalRes.rows[0]?.cnt || 0),
-      });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  // ── Wallet Revenue Summary ────────────────────────────────────
-  app.get("/api/admin/wallet-stats", isAuthenticated, requireAdmin, async (_req, res) => {
-    try {
-      const [topupRes, spendRes, balanceRes, pendingRes, recentRes] = await Promise.all([
-        // Total approved top-ups (money received from clients)
-        pool.query(`
-          SELECT COALESCE(SUM(amount_egp),0) as total_approved,
-                 COUNT(*) FILTER (WHERE status='approved') as count_approved
-          FROM wallet_top_up_orders WHERE status = 'approved'
-        `),
-        // Total spent from wallets on platform services
-        pool.query(`
-          SELECT COALESCE(SUM(amount_egp),0) as total_spent
-          FROM wallet_transactions WHERE type IN ('boost_debit','renewal_debit','ai_debit')
-        `),
-        // Total balance currently sitting in all wallets
-        pool.query(`
-          SELECT COALESCE(SUM(balance_egp),0) as total_wallet_balance, COUNT(*) as users_with_balance
-          FROM users WHERE balance_egp > 0
-        `),
-        // Pending top-up requests
-        pool.query(`
-          SELECT COALESCE(SUM(amount_egp),0) as pending_amount, COUNT(*) as pending_count
-          FROM wallet_top_up_orders WHERE status = 'pending'
-        `),
-        // Last 10 approved top-ups
-        pool.query(`
-          SELECT o.order_number, o.amount_egp, o.payment_method, o.created_at,
-                 u.first_name, u.last_name
-          FROM wallet_top_up_orders o
-          LEFT JOIN users u ON u.id = o.user_id
-          WHERE o.status = 'approved'
-          ORDER BY o.created_at DESC LIMIT 10
-        `),
-      ]);
-
-      const t = topupRes.rows[0] as any;
-      const s = spendRes.rows[0] as any;
-      const b = balanceRes.rows[0] as any;
-      const p = pendingRes.rows[0] as any;
-
-      res.json({
-        totalCollectedEGP:    Number(t.total_approved),
-        totalApprovedCount:   Number(t.count_approved),
-        totalSpentEGP:        Number(s.total_spent),
-        totalCurrentBalanceEGP: Number(b.total_wallet_balance),
-        usersWithBalance:     Number(b.users_with_balance),
-        pendingAmountEGP:     Number(p.pending_amount),
-        pendingCount:         Number(p.pending_count),
-        platformNetEGP:       Number(t.total_approved) - Number(b.total_wallet_balance),
-        recentApproved:       recentRes.rows,
-      });
-    } catch (e: any) {
-      res.status(500).json({ message: e.message });
-    }
-  });
-
-  app.get("/api/admin/broadcaster-earnings", isAuthenticated, requireAdmin, async (_req, res) => {
-    try {
-      const [totalGifts, topBroadcasters, platformRevenue, withdrawals, transfers, recentGifts] = await Promise.all([
-        pool.query(`
-          SELECT COUNT(*) as total_gifts,
-                 COALESCE(SUM(ABS(coins)),0) as total_coins_gifted
-          FROM coin_transactions WHERE type = 'gift_sent'
-        `),
-        pool.query(`
-          SELECT ct.user_id, COALESCE(SUM(ct.coins),0) as total_earned,
-                 u.first_name, u.last_name, u.username, u.profile_image_url,
-                 cw.balance as current_balance
-          FROM coin_transactions ct
-          LEFT JOIN users u ON u.id = ct.user_id
-          LEFT JOIN coin_wallets cw ON cw.user_id = ct.user_id
-          WHERE ct.type = 'gift_received'
-          GROUP BY ct.user_id, u.first_name, u.last_name, u.username, u.profile_image_url, cw.balance
-          ORDER BY total_earned DESC LIMIT 20
-        `),
-        pool.query(`
-          SELECT COALESCE(SUM(ABS(coins)),0) as total_sent,
-                 COALESCE(SUM(ABS(coins)),0) - COALESCE((SELECT SUM(coins) FROM coin_transactions WHERE type='gift_received'),0) as platform_cut
-          FROM coin_transactions WHERE type = 'gift_sent'
-        `),
-        pool.query(`
-          SELECT COUNT(*) as count, COALESCE(SUM(ABS(coins)),0) as total_coins
-          FROM coin_transactions WHERE type = 'coin_withdrawal'
-        `),
-        pool.query(`
-          SELECT COUNT(*) as count, COALESCE(SUM(ABS(coins)),0) as total_coins
-          FROM coin_transactions WHERE type = 'coin_transfer_out'
-        `),
-        pool.query(`
-          SELECT ct.*, u.first_name as sender_name, u2.first_name as receiver_name
-          FROM coin_transactions ct
-          LEFT JOIN users u ON u.id = ct.related_user_id
-          LEFT JOIN users u2 ON u2.id = ct.user_id
-          WHERE ct.type = 'gift_received'
-          ORDER BY ct.created_at DESC LIMIT 30
-        `),
-      ]);
-      const g = totalGifts.rows[0] as any;
-      const p = platformRevenue.rows[0] as any;
-      const w = withdrawals.rows[0] as any;
-      const t = transfers.rows[0] as any;
-      res.json({
-        totalGiftsSent: Number(g.total_gifts),
-        totalCoinsGifted: Number(g.total_coins_gifted),
-        totalCoinsGiftedEGP: parseFloat((Number(g.total_coins_gifted) * 0.05).toFixed(2)),
-        platformCutCoins: Number(p.platform_cut),
-        platformCutEGP: parseFloat((Number(p.platform_cut) * 0.05).toFixed(2)),
-        totalWithdrawnCoins: Number(w.total_coins),
-        totalWithdrawnEGP: parseFloat((Number(w.total_coins) * 0.05).toFixed(2)),
-        withdrawalCount: Number(w.count),
-        totalTransferredCoins: Number(t.total_coins),
-        transferCount: Number(t.count),
-        topBroadcasters: topBroadcasters.rows.map((r: any) => ({
-          userId: r.user_id,
-          name: `${r.first_name || ''} ${r.last_name || ''}`.trim() || r.username || r.user_id,
-          profileImage: r.profile_image_url,
-          totalEarned: Number(r.total_earned),
-          totalEarnedEGP: parseFloat((Number(r.total_earned) * 0.05).toFixed(2)),
-          currentBalance: Number(r.current_balance || 0),
-        })),
-        recentGifts: recentGifts.rows,
-      });
-    } catch (e: any) {
-      res.status(500).json({ message: e.message });
-    }
   });
 
   app.get("/api/admin/reports", isAuthenticated, requireAdmin, async (req: any, res) => {
@@ -4358,39 +2891,9 @@ Sitemap: ${BASE}/sitemap-pages.xml
     res.json(report);
   });
 
-  // ── Admin: Ratings management ──────────────────────────────
-  app.get("/api/admin/ratings", isAuthenticated, requireAdmin, async (req: any, res) => {
-    const { type } = req.query;
-    const { ratings } = await import("@shared/schema");
-    const { db } = await import("./db");
-    const { desc, eq } = await import("drizzle-orm");
-    let query = db.select().from(ratings).orderBy(desc(ratings.createdAt)).$dynamic();
-    if (type && type !== "all") {
-      query = query.where(eq(ratings.targetType, type as string));
-    }
-    const rows = await query.limit(500);
-    res.json(rows);
-  });
-
-  app.delete("/api/admin/ratings/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
-    const { ratings } = await import("@shared/schema");
-    const { db } = await import("./db");
-    const { eq } = await import("drizzle-orm");
-    await db.delete(ratings).where(eq(ratings.id, Number(req.params.id)));
-    res.json({ success: true });
-  });
-
   app.get("/api/admin/campaigns", isAuthenticated, requireAdmin, async (req: any, res) => {
-    // Join with users to get advertiser name/phone/email
-    const r = await pool.query(`
-      SELECT ac.*,
-             u.first_name, u.last_name, u.email, u.phone,
-             CONCAT(u.first_name, ' ', u.last_name) AS advertiser_name
-      FROM ad_campaigns ac
-      LEFT JOIN users u ON u.id = ac.advertiser_id
-      ORDER BY ac.created_at DESC
-    `);
-    res.json(r.rows);
+    const campaigns = await storage.getAllAdCampaigns();
+    res.json(campaigns);
   });
 
   app.put("/api/admin/campaigns/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
@@ -4692,47 +3195,6 @@ Sitemap: ${BASE}/sitemap-pages.xml
     res.json(rows.rows);
   });
 
-  // ─── ADMIN MANAGEMENT ─────────────────────────────────────────
-  // Only superadmins can manage admins
-
-  app.get("/api/admin/admins", isAuthenticated, requireAdmin, async (req: any, res) => {
-    if (!isSuperAdmin(req)) return res.status(403).json({ message: "superadmin only" });
-    if (!_extraAdminLoaded) await loadExtraAdminIds();
-    const extraIds = Array.from(_extraAdminIds);
-    let extraUsers: any[] = [];
-    if (extraIds.length > 0) {
-      const idsLiteral = extraIds.map(id => `'${id.replace(/'/g,"''")}'`).join(",");
-      const rows = await db.execute(sql.raw(`
-        SELECT id, email, first_name, last_name, profile_image_url, phone, created_at
-        FROM users WHERE id IN (${idsLiteral})`));
-      extraUsers = rows.rows;
-    }
-    const hardcoded = [
-      { id: ADMIN_USER_ID,  email: ADMIN_EMAIL,  superAdmin: true },
-      { id: ADMIN_USER_ID2, email: ADMIN_EMAIL2, superAdmin: true },
-    ];
-    res.json({ hardcoded, extra: extraUsers });
-  });
-
-  app.post("/api/admin/admins/add", isAuthenticated, requireAdmin, async (req: any, res) => {
-    if (!isSuperAdmin(req)) return res.status(403).json({ message: "superadmin only" });
-    const { userId } = req.body;
-    if (!userId) return res.status(400).json({ message: "userId مطلوب" });
-    if (!_extraAdminLoaded) await loadExtraAdminIds();
-    _extraAdminIds.add(String(userId));
-    await saveExtraAdminIds();
-    res.json({ success: true, adminCount: _extraAdminIds.size });
-  });
-
-  app.post("/api/admin/admins/remove", isAuthenticated, requireAdmin, async (req: any, res) => {
-    if (!isSuperAdmin(req)) return res.status(403).json({ message: "superadmin only" });
-    const { userId } = req.body;
-    if (!userId) return res.status(400).json({ message: "userId مطلوب" });
-    _extraAdminIds.delete(String(userId));
-    await saveExtraAdminIds();
-    res.json({ success: true });
-  });
-
   app.put("/api/admin/streams/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { liveStreams } = await import("@shared/schema");
     const { eq } = await import("drizzle-orm");
@@ -4793,32 +3255,20 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.post("/api/ai/generate-copy", isAuthenticated, checkAiCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const { productName, targetAudience, adTitle, customPrompt, language } = req.body;
-      const titleHint = adTitle ? ` عنوان الإعلان المقترح: "${adTitle}".` : '';
-      const customHint = customPrompt ? ` معلومات إضافية عن المنتج والأسلوب المطلوب: "${customPrompt}".` : '';
-      const sysMsg = language === 'ar'
-        ? `أنت كاتب إعلانات محترف متخصص في السوق العربي. قواعدك الصارمة:
-١- اكتب بلغة عربية فصيحة سليمة خالية تماماً من الأخطاء الإملائية والنحوية.
-٢- استخدم أسلوباً تسويقياً جذاباً ومقنعاً يناسب الجمهور العربي.
-٣- لا تستخدم كلمات أجنبية إلا إذا كانت اسم المنتج أو علامة تجارية.
-٤- اجعل العناوين قصيرة وقوية، والأوصاف واضحة ومفصّلة.
-٥- لا تضع أي تعليق خارج JSON المطلوب.`
-        : `You are a professional copywriter. Write error-free, compelling ad copy.`;
-      const userMsg = language === 'ar'
-        ? `اكتب عنواناً ووصفاً إعلانياً جذاباً للمنتج التالي:\n- المنتج: "${productName}"\n- الجمهور المستهدف: "${targetAudience}"${titleHint}${customHint}\nأعد JSON بمفتاحين فقط: "title" (عنوان لا يتجاوز 10 كلمات) و"description" (وصف من 2-4 جمل).`
-        : `Write a catchy ad for: "${productName}". Target: "${targetAudience}".${titleHint}${customHint} Return JSON with "title" and "description".`;
+      const { productName, targetAudience, adTitle, language } = req.body;
+      const titleHint = adTitle ? (language === 'ar' ? ` عنوان الإعلان المقترح: "${adTitle}".` : ` Suggested ad title: "${adTitle}".`) : '';
+      const prompt = language === 'ar'
+        ? `اكتب عنوان ووصف جذاب لإعلان باللغة العربية. المنتج: "${productName}". الجمهور المستهدف: "${targetAudience}".${titleHint} أعد JSON مع مفاتيح "title" و"description".`
+        : `Write a catchy title and description for an ad. Product: "${productName}". Target: "${targetAudience}".${titleHint} Return JSON with "title" and "description".`;
       const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
-        messages: [
-          { role: "system", content: sysMsg },
-          { role: "user", content: userMsg },
-        ],
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
       });
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
       await storage.recordAiUsage(userId, 'copy');
       if (req.aiChargeEGP) {
-        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم توليد نص بالذكاء الاصطناعي');
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد نص بالذكاء الاصطناعي', channelId: null, campaignId: null });
       }
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
@@ -4830,28 +3280,18 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const userId = req.user.claims.sub;
       const { topic, language, tone } = req.body;
-      const sysMsg = language === 'ar'
-        ? `أنت كاتب محتوى تسويقي محترف. قواعدك:
-١- اكتب بلغة عربية فصيحة سليمة تماماً، خالية من أي أخطاء إملائية أو نحوية.
-٢- استخدم أسلوباً ${tone || 'رسمياً'} مناسباً للسوق العربي.
-٣- نظّم المحتوى بفقرات واضحة مع عناوين فرعية إن لزم.
-٤- لا تضع أي تعليق خارج JSON المطلوب.`
-        : `You are a professional content writer. Write error-free, well-structured content.`;
-      const userMsg = language === 'ar'
-        ? `اكتب مقالة تسويقية احترافية عن: "${topic}". أعد JSON بمفتاحين: "title" (عنوان جذاب) و"content" (المقالة كاملة منظّمة بفقرات).`
+      const prompt = language === 'ar'
+        ? `اكتب مقالة تسويقية احترافية عن: "${topic}". الأسلوب: ${tone || 'رسمي'}. أعد JSON مع مفاتيح "title" و"content".`
         : `Write a professional marketing article about: "${topic}". Tone: ${tone || 'professional'}. Return JSON with "title" and "content".`;
       const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
-        messages: [
-          { role: "system", content: sysMsg },
-          { role: "user", content: userMsg },
-        ],
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
       });
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
       await storage.recordAiUsage(userId, 'article');
       if (req.aiChargeEGP) {
-        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم توليد مقالة بالذكاء الاصطناعي');
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد مقالة بالذكاء الاصطناعي', channelId: null, campaignId: null });
       }
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
@@ -4862,32 +3302,20 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.post("/api/ai/generate-video-script", isAuthenticated, checkAiCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const { productName, adTitle, customPrompt, duration, language } = req.body;
-      const titleHint = adTitle ? ` عنوان الإعلان: "${adTitle}".` : '';
-      const customHint = customPrompt ? ` معلومات إضافية: "${customPrompt}".` : '';
-      const sysMsg = language === 'ar'
-        ? `أنت مخرج إعلانات ومؤلف سيناريو محترف متخصص في الإعلانات العربية. قواعدك:
-١- اكتب جميع النصوص بلغة عربية فصيحة سليمة خالية تماماً من الأخطاء الإملائية والنحوية.
-٢- التعليق الصوتي (voiceover) يكون بلغة عربية فصيحة جذابة وواضحة.
-٣- أوصاف المشاهد (visual) تكون دقيقة واحترافية لتوجيه المصوّر.
-٤- استخدم أسلوباً سينمائياً درامياً يستحوذ على الانتباه.
-٥- لا تضع أي تعليق خارج JSON المطلوب.`
-        : `You are a professional cinematographer and scriptwriter. Write error-free, compelling video ad scripts.`;
-      const userMsg = language === 'ar'
-        ? `اكتب سكريبت فيديو إعلاني سينمائي احترافي للمنتج: "${productName}"${titleHint}${customHint}\nمدة الفيديو: ${duration || 30} ثانية.\nأعد JSON بالمفاتيح التالية:\n- "title": عنوان الفيديو\n- "script": النص الكامل\n- "voiceover": التعليق الصوتي بالعربية الفصحى\n- "scenes": مصفوفة 4-6 مشاهد، كل مشهد يحتوي: "time" و"visual" و"narration" و"mood" و"transition"\n- "music": وصف الموسيقى التصويرية\n- "callToAction": دعوة للعمل`
-        : `Write a cinematic video ad script for "${productName}"${titleHint}${customHint} (${duration || 30}s). Return JSON: "title", "script", "voiceover", "scenes" (4-6 with "time","visual","narration","mood","transition"), "music", "callToAction".`;
+      const { productName, adTitle, duration, language } = req.body;
+      const titleHint = adTitle ? (language === 'ar' ? ` عنوان الإعلان: "${adTitle}".` : ` Ad title: "${adTitle}".`) : '';
+      const prompt = language === 'ar'
+        ? `اكتب سكريبت فيديو إعلاني سينمائي احترافي بالكامل لـ "${productName}"${titleHint} مدته ${duration || 30} ثانية. أعد JSON مع: "title", "script" (النص الكامل), "voiceover" (التعليق الصوتي بالعربية المصرية العامية), "scenes" (مصفوفة من 4-6 مشاهد كل منها: "time" الوقت, "visual" وصف الصورة المتحركة, "narration" التعليق الصوتي, "mood" المزاج, "transition" طريقة الانتقال), "music" (وصف الموسيقى التصويرية), "callToAction" (دعوة للعمل).`
+        : `Write a complete professional cinematic video ad script for "${productName}"${titleHint} (${duration || 30} seconds). Return JSON: "title", "script", "voiceover", "scenes" (4-6 scenes with "time", "visual", "narration", "mood", "transition"), "music", "callToAction".`;
       const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
-        messages: [
-          { role: "system", content: sysMsg },
-          { role: "user", content: userMsg },
-        ],
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
       });
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
       await storage.recordAiUsage(userId, 'video_script');
       if (req.aiChargeEGP) {
-        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم توليد سكريبت فيديو');
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد سكريبت فيديو', channelId: null, campaignId: null });
       }
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
@@ -4895,106 +3323,40 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
-  // ─── AI VIRAL / TRENDING AD GENERATOR ─────────────────────────────────
-  app.post("/api/ai/generate-trending", isAuthenticated, checkAiCredits, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { productName, category, targetAudience, platform = "tiktok" } = req.body;
-      if (!productName) return res.status(400).json({ message: "productName مطلوب" });
-
-      const platformHints: Record<string, string> = {
-        tiktok: "TikTok وReels — فيديوهات قصيرة تجذب الانتباه في أول 3 ثواني، أسلوب شبابي طريف",
-        instagram: "Instagram — جمالي وأنيق، صور احترافية، كابشن قصير وجذاب",
-        facebook: "Facebook — مباشر ومقنع، يخاطب الأسرة والأعمار المختلفة",
-        youtube: "YouTube Shorts — محتوى تعليمي أو ترفيهي مع قيمة مضافة واضحة",
-      };
-
-      const sysMsg = `أنت خبير تسويق رقمي متخصص في إنشاء محتوى فيروسي (viral) للسوق المصري العربي.
-قواعدك:
-١- اكتب بالعربية الفصيحة السهلة أو العامية المصرية الجذابة حسب المنصة
-٢- الـ Hook يجب أن يشد الانتباه خلال 3 ثواني فقط
-٣- استخدم أساليب الـ viral marketing المثبتة: الفضول، التحدي، الإثارة، الفائدة المباشرة
-٤- الهاشتاقات تكون مزيج من الترند العالمي والمحلي المصري
-٥- أعد JSON فقط بدون أي نص خارجه`;
-
-      const userMsg = `أنشئ حزمة إعلان فيروسي ترند لـ: "${productName}"
-الفئة: ${category || "عام"}
-الجمهور المستهدف: ${targetAudience || "جميع المصريين"}
-المنصة: ${platformHints[platform] || platformHints.tiktok}
-
-أعد JSON بالمفاتيح التالية:
-- "hook": جملة صدمة تشد الانتباه في 3 ثواني (مثال: "ليه بتدفع أكتر؟!" / "السر اللي مش هيتقالك!")
-- "viral_title": عنوان فيروسي لا يقاوم (عربي جذاب)
-- "viral_description": وصف بأسلوب ترند — قصير ومؤثر (3-4 جمل بالعامية المصرية)
-- "call_to_action": دعوة عمل قوية (مثال: "اطلب دلوقتي قبل ما ينتهي!")
-- "hashtags": مصفوفة 10 هاشتاق مزيج عربي وإنجليزي (بدون #)
-- "content_angles": مصفوفة 3 زوايا تسويقية مختلفة للتجربة
-- "viral_score": تقييم إمكانية الانتشار من 100 (رقم فقط)
-- "viral_tips": مصفوفة 3 نصائح لزيادة الانتشار
-- "image_prompt": وصف بالإنجليزية لصورة DALL-E احترافية تناسب الإعلان`;
-
-      const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
-        messages: [
-          { role: "system", content: sysMsg },
-          { role: "user", content: userMsg },
-        ],
-        response_format: { type: "json_object" },
-      });
-
-      const content = JSON.parse(response.choices[0]?.message?.content || "{}");
-      await storage.recordAiUsage(userId, 'trending');
-      if (req.aiChargeEGP) {
-        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم توليد إعلان ترند فيروسي');
-      }
-      res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
-    } catch (error: any) {
-      res.status(500).json({ message: "فشل التوليد: " + error.message });
-    }
-  });
-
   // AI Image generation (uses DALL-E via image routes, but track usage here)
   app.post("/api/ai/generate-image", isAuthenticated, checkAiCredits, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    const { prompt, size } = req.body;
-    // gpt-image-1 valid sizes only (DALL-E 3 sizes like 1792x1024 are NOT supported)
-    const validSizes = ["1024x1024", "1024x1536", "1536x1024", "auto"];
-    const safeSize = validSizes.includes(size) ? size : "1024x1024";
-
-    let lastError: any = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const response = await openai.images.generate({
-          model: "gpt-image-1",
-          prompt,
-          n: 1,
-          size: safeSize as any,
-        });
-        const b64 = response.data?.[0]?.b64_json;
-        const imageUrl = response.data?.[0]?.url;
-        const filename = `ai-img-${Date.now()}.png`;
-        const savePath = path.join(process.cwd(), 'uploads', filename);
-        if (b64) {
-          fs.writeFileSync(savePath, Buffer.from(b64, 'base64'));
-        } else if (imageUrl) {
-          const imgRes = await fetch(imageUrl);
-          const buf = Buffer.from(await imgRes.arrayBuffer());
-          fs.writeFileSync(savePath, buf);
-        } else {
-          throw new Error("No image generated");
-        }
-        const finalUrl = `/uploads/${filename}`;
-        await storage.recordAiUsage(userId, 'image');
-        if (req.aiChargeEGP) {
-          await deductAiCharge(userId, req.aiChargeEGP, 'رسوم توليد صورة بالذكاء الاصطناعي');
-        }
-        return res.json({ url: finalUrl, creditsUsed: (req.aiUsageCount || 0) + 1 });
-      } catch (error: any) {
-        lastError = error;
-        if (attempt < 3) await new Promise(r => setTimeout(r, 2000 * attempt));
+    try {
+      const userId = req.user.claims.sub;
+      const { prompt, size } = req.body;
+      const response = await openai.images.generate({
+        model: "gpt-image-1",
+        prompt: prompt,
+        n: 1,
+        size: (size || "1024x1024") as any,
+      });
+      // Always save locally — b64_json or download from URL — so the image persists
+      const b64 = response.data?.[0]?.b64_json;
+      const imageUrl = response.data?.[0]?.url;
+      const filename = `ai-img-${Date.now()}.png`;
+      const savePath = path.join(process.cwd(), 'uploads', filename);
+      if (b64) {
+        fs.writeFileSync(savePath, Buffer.from(b64, 'base64'));
+      } else if (imageUrl) {
+        const imgRes = await fetch(imageUrl);
+        const buf = Buffer.from(await imgRes.arrayBuffer());
+        fs.writeFileSync(savePath, buf);
+      } else {
+        throw new Error("No image generated");
       }
+      const finalUrl = `/uploads/${filename}`;
+      await storage.recordAiUsage(userId, 'image');
+      if (req.aiChargeEGP) {
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد صورة بالذكاء الاصطناعي', channelId: null, campaignId: null });
+      }
+      res.json({ url: finalUrl, creditsUsed: (req.aiUsageCount || 0) + 1 });
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to generate image: " + error.message });
     }
-    res.status(500).json({ message: "فشل توليد الصورة بعد 3 محاولات: " + lastError?.message });
   });
 
   // ─── AI ANALYZE IMAGE → generate ad copy ─────────────────────
@@ -5010,19 +3372,15 @@ Sitemap: ${BASE}/sitemap-pages.xml
       });
 
       const systemPrompt = language === 'ar'
-        ? `أنت خبير تسويق إبداعي متخصص في الإعلانات العربية. قواعدك الصارمة:
-١- اكتب بلغة عربية فصيحة سليمة خالية تماماً من الأخطاء الإملائية والنحوية.
-٢- حلّل الصور بدقة واستخرج أبرز مميزات المنتج.
-٣- اكتب نصاً إعلانياً جذاباً ومقنعاً يستهدف الجمهور العربي.
-٤- لا تضع أي تعليق خارج JSON المطلوب.`
-        : `You are a creative marketing expert. Analyze images and create professional, error-free ad content.`;
+        ? "أنت خبير تسويق إبداعي متخصص في الإعلانات العربية. حلّل الصور وأنشئ محتوى إعلاني احترافي."
+        : "You are a creative marketing expert. Analyze images and create professional ad content.";
 
       const userPrompt = language === 'ar'
-        ? `حلّل هذه الصور واكتب إعلاناً احترافياً${productName ? ` للمنتج: ${productName}` : ''}${targetAudience ? `، الجمهور المستهدف: ${targetAudience}` : ''}.\nأعد JSON بمفتاحين فقط: "title" (عنوان جذاب ومختصر) و"description" (وصف إعلاني مقنع من 2-3 جمل).`
+        ? `حلّل هذه الصور وأنشئ إعلاناً احترافياً${productName ? ` لـ ${productName}` : ''}${targetAudience ? ` يستهدف ${targetAudience}` : ''}.\nأرجع JSON: {"title": "...", "description": "..."}`
         : `Analyze these images and create a professional ad${productName ? ` for ${productName}` : ''}${targetAudience ? ` targeting ${targetAudience}` : ''}.\nReturn JSON: {"title": "...", "description": "..."}`;
 
       const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
+        model: "gpt-4o",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: [{ type: "text", text: userPrompt }, ...imageContents] }
@@ -5034,246 +3392,11 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const result = JSON.parse(response.choices[0].message.content || "{}");
       await storage.recordAiUsage(userId, 'text');
       if (req.aiChargeEGP) {
-        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم تحليل صورة بالذكاء الاصطناعي');
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم تحليل صورة بالذكاء الاصطناعي', channelId: null, campaignId: null });
       }
       res.json({ title: result.title || "", description: result.description || "" });
     } catch (error: any) {
       res.status(500).json({ message: "فشل تحليل الصورة: " + error.message });
-    }
-  });
-
-  // ─── AI TEXT TO SPEECH ──────────────────────────────────────────
-  app.post("/api/ai/text-to-speech", isAuthenticated, checkAiCredits, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { text, voice = "nova", speed = 1.0 } = req.body;
-      if (!text) return res.status(400).json({ message: "النص مطلوب" });
-      if (text.length > 4096) return res.status(400).json({ message: "النص طويل جداً (الحد الأقصى 4096 حرف)" });
-
-      const validVoices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
-      const safeVoice = validVoices.includes(voice) ? voice : "nova";
-      const buffer = await textToSpeech(text, safeVoice as any, "mp3");
-      const filename = `tts-${Date.now()}.mp3`;
-      const savePath = path.join(process.cwd(), 'uploads', filename);
-      fs.writeFileSync(savePath, buffer);
-      const audioUrl = `/uploads/${filename}`;
-
-      await storage.recordAiUsage(userId, 'tts');
-      if (req.aiChargeEGP) {
-        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم توليد صوت بالذكاء الاصطناعي');
-      }
-      res.json({ audioUrl });
-    } catch (error: any) {
-      res.status(500).json({ message: "فشل توليد الصوت: " + error.message });
-    }
-  });
-
-  // ─── D-ID TALKING PHOTO ─────────────────────────────────────────
-  app.post("/api/ai/talking-photo", isAuthenticated, checkTalkingPhotoCredits, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { imageUrl, text, voiceId } = req.body;
-      if (!imageUrl || !text) return res.status(400).json({ message: "imageUrl والنص مطلوبان" });
-
-      const DID_API_KEY = process.env.DID_API_KEY;
-      if (!DID_API_KEY) return res.status(503).json({ message: "خدمة الصورة الناطقة غير مفعّلة بعد. تواصل مع المسؤول." });
-
-      // ─── Deduct BEFORE calling D-ID (pre-payment) ───────────────────
-      if (req.talkingPhotoChargeEGP) {
-        await deductAiCharge(userId, req.talkingPhotoChargeEGP, `رسوم إعلان متكلم بالذكاء الاصطناعي (D-ID) — ${req.talkingPhotoChargeEGP} ج.م`);
-      }
-
-      const imageFullUrl = imageUrl.startsWith('/') ? `https://${req.headers.host}${imageUrl}` : imageUrl;
-
-      const createRes = await fetch("https://api.d-id.com/talks", {
-        method: "POST",
-        headers: {
-          "Authorization": `Basic ${DID_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          source_url: imageFullUrl,
-          script: {
-            type: "text",
-            input: text,
-            provider: {
-              type: "microsoft",
-              voice_id: voiceId || "ar-EG-ShakirNeural",
-            },
-          },
-          config: { fluent: true, pad_audio: 0.5 },
-        }),
-      });
-
-      const createData: any = await createRes.json();
-      if (!createRes.ok) throw new Error(createData?.description || createData?.message || "فشل إنشاء الفيديو");
-
-      const talkId = createData.id;
-
-      // Poll until done (max 60 seconds)
-      let videoUrl: string | null = null;
-      for (let i = 0; i < 20; i++) {
-        await new Promise(r => setTimeout(r, 3000));
-        const statusRes = await fetch(`https://api.d-id.com/talks/${talkId}`, {
-          headers: { "Authorization": `Basic ${DID_API_KEY}` },
-        });
-        const statusData: any = await statusRes.json();
-        if (statusData.status === "done") { videoUrl = statusData.result_url; break; }
-        if (statusData.status === "error") throw new Error("فشل D-ID في معالجة الفيديو");
-      }
-
-      if (!videoUrl) return res.status(504).json({ message: "انتهت مهلة توليد الفيديو، حاول مرة أخرى" });
-
-      // Download and save locally
-      const vidRes = await fetch(videoUrl);
-      const buf = Buffer.from(await vidRes.arrayBuffer());
-      const filename = `talking-${Date.now()}.mp4`;
-      const savePath = path.join(process.cwd(), 'uploads', filename);
-      fs.writeFileSync(savePath, buf);
-      const localUrl = `/uploads/${filename}`;
-
-      await storage.recordAiUsage(userId, 'talking_photo');
-      res.json({ videoUrl: localUrl, charged: req.talkingPhotoChargeEGP || 0 });
-    } catch (error: any) {
-      res.status(500).json({ message: "فشل توليد الصورة الناطقة: " + error.message });
-    }
-  });
-
-  // ─── SERVER-SIDE BACKGROUND REMOVAL (using sharp + pixel analysis) ──
-  app.post("/api/ai/remove-bg", isAuthenticated, upload.single("image"), async (req: any, res) => {
-    if (!req.file) return res.status(400).json({ message: "لم يُرسل ملف" });
-    try {
-      const imgBuf = fs.readFileSync(req.file.path);
-      const sharpImg = sharp(imgBuf).ensureAlpha();
-      const meta = await sharpImg.metadata();
-      const w = meta.width!, h = meta.height!;
-
-      const { data } = await sharp(imgBuf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-      const pixels = new Uint8ClampedArray(data);
-
-      // Sample background color from 4 corners (average of 5x5 patches)
-      const sampleCorner = (sx: number, sy: number) => {
-        let r = 0, g = 0, b = 0, n = 0;
-        for (let dy = 0; dy < 5; dy++) for (let dx = 0; dx < 5; dx++) {
-          const idx = ((sy + dy) * w + (sx + dx)) * 4;
-          r += pixels[idx]; g += pixels[idx + 1]; b += pixels[idx + 2]; n++;
-        }
-        return [r / n, g / n, b / n];
-      };
-      const corners = [
-        sampleCorner(0, 0), sampleCorner(w - 5, 0),
-        sampleCorner(0, h - 5), sampleCorner(w - 5, h - 5)
-      ];
-      const bgR = corners.reduce((a, c) => a + c[0], 0) / 4;
-      const bgG = corners.reduce((a, c) => a + c[1], 0) / 4;
-      const bgB = corners.reduce((a, c) => a + c[2], 0) / 4;
-      const tolerance = Math.min(120, Math.max(10, parseInt(req.query.tolerance as string) || 45));
-
-      // Remove background pixels
-      for (let i = 0; i < pixels.length; i += 4) {
-        const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
-        const dist = Math.sqrt((r - bgR) ** 2 + (g - bgG) ** 2 + (b - bgB) ** 2);
-        if (dist < tolerance) {
-          pixels[i + 3] = 0;
-        } else if (dist < tolerance * 1.5) {
-          pixels[i + 3] = Math.round(((dist - tolerance) / (tolerance * 0.5)) * 255);
-        }
-      }
-
-      const outBuf = await sharp(Buffer.from(pixels), { raw: { width: w, height: h, channels: 4 } })
-        .png()
-        .toBuffer();
-      const filename = `nobg-${Date.now()}.png`;
-      const outPath = path.join(process.cwd(), "uploads", filename);
-      fs.writeFileSync(outPath, outBuf);
-      try { fs.unlinkSync(req.file.path); } catch {}
-      res.json({ url: `/uploads/${filename}` });
-    } catch (e: any) {
-      res.status(500).json({ message: "فشل حذف الخلفية: " + e.message });
-    }
-  });
-
-  // ─── D-ID STATUS CHECK ──────────────────────────────────────────
-  app.get("/api/ai/talking-photo/status", isAuthenticated, async (req: any, res) => {
-    const hasKey = !!process.env.DID_API_KEY;
-    res.json({ available: hasKey });
-  });
-
-  // ─── D-ID PRESENTERS LIST ───────────────────────────────────────
-  app.get("/api/ai/presenters", isAuthenticated, async (req: any, res) => {
-    try {
-      const didKey = process.env.DID_API_KEY;
-      if (!didKey) return res.status(503).json({ message: "D-ID غير متاح" });
-      const r = await fetch("https://api.d-id.com/clips/presenters?limit=100", {
-        headers: { "Authorization": `Basic ${Buffer.from(didKey).toString("base64")}`, "Content-Type": "application/json" }
-      });
-      const data = await r.json() as any;
-      res.json(data.presenters || []);
-    } catch (e: any) {
-      res.status(500).json({ message: e.message });
-    }
-  });
-
-  // ─── D-ID PRESENTER CLIP (HeyGen-style) ─────────────────────────
-  app.post("/api/ai/presenter-clip", isAuthenticated, checkTalkingPhotoCredits, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const { presenterId, text, voiceId = "ar-EG-SalmaNeural" } = req.body;
-      if (!presenterId || !text) return res.status(400).json({ message: "اختر مذيع واكتب النص" });
-      if (text.length > 2000) return res.status(400).json({ message: "النص طويل جداً (الحد 2000 حرف)" });
-
-      const didKey = process.env.DID_API_KEY;
-      if (!didKey) return res.status(503).json({ message: "D-ID غير متاح" });
-      const authHeader = `Basic ${Buffer.from(didKey).toString("base64")}`;
-
-      // Charge wallet
-      if (req.talkingPhotoChargeEGP) {
-        await deductAiCharge(userId, req.talkingPhotoChargeEGP, `رسوم مذيع AI (D-ID Clips) — ${req.talkingPhotoChargeEGP} ج.م`);
-      }
-
-      // Create clip
-      const createRes = await fetch("https://api.d-id.com/clips", {
-        method: "POST",
-        headers: { "Authorization": authHeader, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          presenter_id: presenterId,
-          script: {
-            type: "text",
-            input: text,
-            provider: { type: "microsoft", voice_id: voiceId }
-          },
-          config: { result_format: "mp4" }
-        })
-      });
-      const createData = await createRes.json() as any;
-      if (!createRes.ok) throw new Error(createData.description || createData.message || "فشل إنشاء الكليب");
-      const clipId = createData.id;
-
-      // Poll until done (max 90 sec)
-      let videoUrl = "";
-      for (let i = 0; i < 18; i++) {
-        await new Promise(r => setTimeout(r, 5000));
-        const statusRes = await fetch(`https://api.d-id.com/clips/${clipId}`, {
-          headers: { "Authorization": authHeader }
-        });
-        const statusData = await statusRes.json() as any;
-        if (statusData.status === "done") { videoUrl = statusData.result_url; break; }
-        if (statusData.status === "error") throw new Error("فشل D-ID في معالجة الكليب");
-      }
-      if (!videoUrl) throw new Error("انتهت المهلة — حاول مرة أخرى");
-
-      // Download & save locally
-      const vidRes = await fetch(videoUrl);
-      const vidBuf = Buffer.from(await vidRes.arrayBuffer());
-      const filename = `clip-${Date.now()}.mp4`;
-      const savePath = path.join(process.cwd(), "uploads", filename);
-      fs.writeFileSync(savePath, vidBuf);
-      const localUrl = `/uploads/${filename}`;
-
-      await storage.recordAiUsage(userId, "presenter_clip");
-      res.json({ videoUrl: localUrl, charged: req.talkingPhotoChargeEGP || 0 });
-    } catch (e: any) {
-      res.status(500).json({ message: "فشل توليد الفيديو: " + e.message });
     }
   });
 
@@ -5288,7 +3411,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const prompt = `Translate the following ad content to ${langName}. Keep it natural, catchy and suitable for advertising.\n\nTitle: ${title || ""}\nDescription: ${description || ""}\n\nReturn JSON: {"title": "translated title", "description": "translated description"}`;
 
       const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
+        model: "gpt-4o",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
         max_tokens: 400,
@@ -5297,208 +3420,12 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const result = JSON.parse(response.choices[0].message.content || "{}");
       await storage.recordAiUsage(userId, 'text');
       if (req.aiChargeEGP) {
-        await deductAiCharge(userId, req.aiChargeEGP, 'رسوم ترجمة بالذكاء الاصطناعي');
+        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم ترجمة بالذكاء الاصطناعي', channelId: null, campaignId: null });
       }
       res.json({ title: result.title || "", description: result.description || "" });
     } catch (error: any) {
       res.status(500).json({ message: "فشل الترجمة: " + error.message });
     }
-  });
-
-  // ─── AI MENU CARD GENERATOR ───────────────────────────────────
-  app.post("/api/ai/menu-card", isAuthenticated, checkAiCredits, async (req: any, res) => {
-    try {
-      const { restaurantName, dishName, price, description, category, style } = req.body || {};
-      if (!dishName) return res.status(400).json({ message: "اسم الأكلة مطلوب" });
-
-      const styleMap: Record<string, string> = {
-        photo: "Ultra high resolution professional food photography shot with Canon EOS R5 85mm f/1.4 lens, natural soft window lighting from the side, shallow depth of field with creamy bokeh background, the dish is perfectly plated on a clean white ceramic plate on a rustic wooden table",
-        elegant: "Luxury fine dining food photography, dramatic dark moody background with rim lighting, the dish is artfully plated on premium black slate or elegant porcelain, Michelin star restaurant presentation, professional studio lighting with soft shadows",
-        street: "Authentic Egyptian street food photography, warm golden hour natural lighting, the food looks freshly cooked and steaming hot, vibrant saturated colors, served in traditional Egyptian style, close-up overhead angle shot, real food texture visible",
-        cartoon: "Colorful hand-drawn watercolor food illustration, warm pastel tones, cute appetizing style, detailed food textures, white background, menu illustration art",
-      };
-      const catMap: Record<string, string> = {
-        grills: "authentic Egyptian grilled meat (kebab, kofta, or grilled chicken), charcoal grill marks visible, served with Egyptian bread and tahini",
-        seafood: "fresh Egyptian seafood dish, perfectly cooked fish or shrimp, golden crispy fried or grilled, served with rice and lemon",
-        sweets: "traditional Egyptian dessert (kunafa, basbousa, or om ali), golden syrupy texture, garnished beautifully",
-        drinks: "refreshing Egyptian beverage, fresh juice or hot drink, condensation drops visible on glass, ice cubes",
-        fastfood: "delicious fast food meal, juicy burger or crispy fried chicken or shawarma, melted cheese, fresh vegetables",
-        salads: "fresh colorful Mediterranean salad, crisp vegetables, olive oil drizzle, herbs garnish, served in a bowl",
-        pizza: "authentic Italian pizza or fresh pasta, melted mozzarella cheese stretching, fresh basil, tomato sauce",
-        oriental: "traditional Egyptian home-cooked dish (molokhia, koshari, or stuffed vegetables), served in authentic Egyptian pottery or traditional plate, steaming hot, rich sauce",
-      };
-
-      const styleDesc = styleMap[style] || styleMap.photo;
-      const catDesc = catMap[category] || "delicious freshly prepared food dish";
-      const prompt = `${styleDesc}. The dish is: ${catDesc}. The specific dish name is "${dishName}"${description ? `, described as: ${description}` : ""}. The photo must look 100% real and photorealistic like taken by a professional food photographer for a restaurant menu. Show real food textures, steam, sauce drips, and natural imperfections. Shot from a 45-degree angle or top-down. Absolutely NO text, NO watermarks, NO labels, NO writing on the image.`;
-
-      const killSwitch = await storage.getSetting("ai_kill_switch");
-      if (killSwitch === "1") {
-        return res.status(503).json({ message: "تم إيقاف خدمة توليد الصور بالذكاء الاصطناعي مؤقتاً من الإدارة" });
-      }
-      const imgQuality = (await storage.getSetting("ai_image_quality")) || "medium";
-      const imgSize = (await storage.getSetting("ai_image_size")) || "1024x1024";
-      const imgResp = await openai.images.generate({
-        model: "gpt-image-1",
-        prompt,
-        n: 1,
-        size: imgSize as any,
-        quality: imgQuality as any,
-      });
-      // Estimate cost (USD) for tracking
-      const costMap: Record<string, Record<string, number>> = {
-        "1024x1024": { low: 0.011, medium: 0.042, high: 0.167 },
-        "1024x1536": { low: 0.016, medium: 0.063, high: 0.25 },
-        "1536x1024": { low: 0.016, medium: 0.063, high: 0.25 },
-      };
-      const estCost = costMap[imgSize]?.[imgQuality] || 0.05;
-      try { await storage.recordAiUsage((req.user as any)?.claims?.sub || "unknown", "image", estCost); } catch {}
-
-      const b64 = imgResp.data?.[0]?.b64_json;
-      const imageUrl = imgResp.data?.[0]?.url;
-      const filename = `menu-${Date.now()}.png`;
-      const savePath = path.join(process.cwd(), 'uploads', filename);
-      if (b64) {
-        fs.writeFileSync(savePath, Buffer.from(b64, 'base64'));
-      } else if (imageUrl) {
-        const r = await fetch(imageUrl);
-        fs.writeFileSync(savePath, Buffer.from(await r.arrayBuffer()));
-      }
-
-      // Generate Arabic caption
-      const captionResp = await openai.chat.completions.create({
-        model: "gpt-4.1-mini",
-        messages: [{
-          role: "user",
-          content: `اكتب وصفاً تسويقياً قصيراً وشهياً باللغة العربية لـ"${dishName}" ${description ? `(${description})` : ""} ${restaurantName ? `من مطعم ${restaurantName}` : ""} ${price ? `بسعر ${price} جنيه` : ""}. الوصف لا يزيد عن 3 جمل قصيرة ومشوّقة.`
-        }],
-        max_tokens: 150,
-      });
-      const caption = captionResp.choices?.[0]?.message?.content?.trim() || "";
-
-      res.json({ imageUrl: `/uploads/${filename}`, caption });
-    } catch (e: any) {
-      console.error("menu-card error:", e.message);
-      res.status(500).json({ message: e.message });
-    }
-  });
-
-  // ─── SMART MENU SAVE/SHARE/QR ────────────────────────────────
-
-  const VALID_THEMES = ["classic", "modern", "elegant", "fresh", "warm"];
-  const VALID_STYLES = ["photo", "elegant", "street", "cartoon"];
-
-  app.post("/api/menus", isAuthenticated, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    const { restaurantName, restaurantSlogan, theme, style, items } = req.body;
-    if (!items || !Array.isArray(items) || items.length === 0) return res.status(400).json({ message: "أضف أطباق أولاً" });
-    if (items.length > 100) return res.status(400).json({ message: "الحد الأقصى 100 طبق" });
-    const safeTheme = VALID_THEMES.includes(theme) ? theme : "classic";
-    const safeStyle = VALID_STYLES.includes(style) ? style : "photo";
-
-    const menuCost = 2;
-    if (!isAdminUser(req)) {
-      const freeCredits = parseInt(await storage.getSetting('ai_free_credits') || '3');
-      const usageCount = await storage.getAiUsageCount(userId);
-      if (usageCount >= freeCredits) {
-        const pricePerCredit = parseFloat(await storage.getSetting('ai_price_per_credit_egp') || '5');
-        const totalCost = pricePerCredit * menuCost;
-        const balance = await storage.getWalletBalanceEGP(userId);
-        if (balance < totalCost) {
-          return res.status(402).json({
-            message: "insufficient_credits",
-            requiresWalletTopup: true,
-            cost: menuCost,
-            pricePerCredit,
-            totalCostEGP: totalCost,
-            balance
-          });
-        }
-        await deductAiCharge(userId, totalCost, `حفظ منيو ذكي (${menuCost} كريدت)`);
-      }
-      for (let i = 0; i < menuCost; i++) { await storage.recordAiUsage(userId, 'menu_save', 0); }
-    }
-
-    const slug = `menu-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-    try {
-      const r = await pool.query(
-        `INSERT INTO smart_menus (user_id, slug, restaurant_name, restaurant_slogan, theme, style, items) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [userId, slug, (restaurantName || '').slice(0, 200), (restaurantSlogan || '').slice(0, 300), safeTheme, safeStyle, JSON.stringify(items)]
-      );
-      res.json(r.rows[0]);
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  app.put("/api/menus/:id", isAuthenticated, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    const menuId = Number(req.params.id);
-    const { restaurantName, restaurantSlogan, theme, style, items } = req.body;
-    if (!items || !Array.isArray(items) || items.length === 0) return res.status(400).json({ message: "أضف أطباق أولاً" });
-    if (items.length > 100) return res.status(400).json({ message: "الحد الأقصى 100 طبق" });
-    const safeTheme = VALID_THEMES.includes(theme) ? theme : "classic";
-    const safeStyle = VALID_STYLES.includes(style) ? style : "photo";
-    try {
-      const check = await pool.query(`SELECT user_id FROM smart_menus WHERE id = $1`, [menuId]);
-      if (check.rows.length === 0) return res.status(404).json({ message: "المنيو غير موجود" });
-      if (check.rows[0].user_id !== userId) return res.status(403).json({ message: "غير مصرح" });
-
-      const updateCost = 1;
-      if (!isAdminUser(req)) {
-        const freeCredits = parseInt(await storage.getSetting('ai_free_credits') || '3');
-        const usageCount = await storage.getAiUsageCount(userId);
-        if (usageCount >= freeCredits) {
-          const pricePerCredit = parseFloat(await storage.getSetting('ai_price_per_credit_egp') || '5');
-          const totalCost = pricePerCredit * updateCost;
-          const balance = await storage.getWalletBalanceEGP(userId);
-          if (balance < totalCost) {
-            return res.status(402).json({
-              message: "insufficient_credits",
-              requiresWalletTopup: true,
-              cost: updateCost,
-              pricePerCredit,
-              totalCostEGP: totalCost,
-              balance
-            });
-          }
-          await deductAiCharge(userId, totalCost, `تعديل منيو ذكي (${updateCost} كريدت)`);
-        }
-        await storage.recordAiUsage(userId, 'menu_update', 0);
-      }
-
-      const r = await pool.query(
-        `UPDATE smart_menus SET restaurant_name = $1, restaurant_slogan = $2, theme = $3, style = $4, items = $5, updated_at = NOW() WHERE id = $6 RETURNING *`,
-        [(restaurantName || '').slice(0, 200), (restaurantSlogan || '').slice(0, 300), safeTheme, safeStyle, JSON.stringify(items), menuId]
-      );
-      res.json(r.rows[0]);
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  app.get("/api/menus/mine", isAuthenticated, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    try {
-      const r = await pool.query(`SELECT * FROM smart_menus WHERE user_id = $1 ORDER BY updated_at DESC`, [userId]);
-      res.json(r.rows);
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  app.get("/api/menus/public/:slug", async (req, res) => {
-    try {
-      const r = await pool.query(`SELECT * FROM smart_menus WHERE slug = $1 AND is_active = true`, [req.params.slug]);
-      if (r.rows.length === 0) return res.status(404).json({ message: "المنيو غير موجود" });
-      await pool.query(`UPDATE smart_menus SET views_count = views_count + 1 WHERE slug = $1`, [req.params.slug]);
-      res.json(r.rows[0]);
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  app.delete("/api/menus/:id", isAuthenticated, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    try {
-      const check = await pool.query(`SELECT user_id FROM smart_menus WHERE id = $1`, [Number(req.params.id)]);
-      if (check.rows.length === 0) return res.status(404).json({ message: "غير موجود" });
-      if (check.rows[0].user_id !== userId && !isAdminUser(req)) return res.status(403).json({ message: "غير مصرح" });
-      await pool.query(`DELETE FROM smart_menus WHERE id = $1`, [Number(req.params.id)]);
-      res.json({ ok: true });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   // ─── AI TEXT-TO-SPEECH (Egyptian Arabic via gpt-audio) ───────
@@ -6095,7 +4022,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // GET /api/admin/ai-pricing — get AI pricing settings
   app.get("/api/admin/ai-pricing", isAuthenticated, async (req: any, res) => {
-    if (!isAdminUser(req)) return res.status(403).json({ message: "forbidden" });
+    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
     try {
       const keys = ['ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post','ai_free_credits','ai_price_per_credit_egp','ai_referral_bonus_egp'];
       const rows = await db.execute(sql`SELECT key, value FROM platform_settings WHERE key IN (${sql.join(keys.map(k => sql`${k}`), sql`, `)})`);
@@ -6107,7 +4034,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // POST /api/admin/ai-pricing — update AI pricing settings
   app.post("/api/admin/ai-pricing", isAuthenticated, async (req: any, res) => {
-    if (!isAdminUser(req)) return res.status(403).json({ message: "forbidden" });
+    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
     try {
       const { settings } = req.body;
       for (const [key, value] of Object.entries(settings)) {
@@ -6122,7 +4049,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const allowedKeys = new Set([
         'boost_price_egp','boost_enabled',
-        'renewal_price_7','renewal_price_30','renewal_price_60','renewal_price_90',
+        'renewal_price_30','renewal_price_60','renewal_price_90',
         'campaign_min_budget_egp','wallet_min_withdrawal_egp',
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
         'ai_free_credits','ai_price_per_credit_egp',
@@ -6135,8 +4062,8 @@ Sitemap: ${BASE}/sitemap-pages.xml
         if (allowedKeys.has(r.key)) settings[r.key] = r.value;
       }
       const defaults: Record<string, string> = {
-        boost_price_egp: '200', boost_enabled: 'true', boost_share_reward_egp: '50',
-        renewal_price_7: '50', renewal_price_30: '350', renewal_price_60: '90', renewal_price_90: '130',
+        boost_price_egp: '50', boost_enabled: 'true',
+        renewal_price_30: '30', renewal_price_60: '55', renewal_price_90: '75',
         campaign_min_budget_egp: '100', wallet_min_withdrawal_egp: '100',
         ai_price_image: '10', ai_price_video: '25', ai_price_animation: '20',
         ai_price_content: '5', ai_price_post: '5',
@@ -6148,11 +4075,11 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   app.get("/api/admin/pricing", isAuthenticated, async (req: any, res) => {
-    if (!isAdminUser(req)) return res.status(403).json({ message: "forbidden" });
+    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
     try {
       const keys = [
         'cpm_rate_egp','cpc_rate_egp','publisher_share_pct','campaign_min_budget_egp',
-        'boost_price_egp','boost_enabled','boost_share_reward_egp',
+        'boost_price_egp','boost_enabled',
         'renewal_price_30','renewal_price_60','renewal_price_90',
         'wallet_min_withdrawal_egp','wallet_max_deposit_egp',
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
@@ -6167,12 +4094,12 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // POST /api/admin/pricing — update platform pricing settings
   app.post("/api/admin/pricing", isAuthenticated, async (req: any, res) => {
-    if (!isAdminUser(req)) return res.status(403).json({ message: "forbidden" });
+    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
     try {
       const { settings } = req.body;
       const allowed = [
         'cpm_rate_egp','cpc_rate_egp','publisher_share_pct','campaign_min_budget_egp',
-        'boost_price_egp','boost_enabled','boost_share_reward_egp',
+        'boost_price_egp','boost_enabled',
         'renewal_price_30','renewal_price_60','renewal_price_90',
         'wallet_min_withdrawal_egp','wallet_max_deposit_egp',
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
@@ -6190,7 +4117,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
     const { userId } = req.params;
     try {
       const [userRow, adsRow, channelRow] = await Promise.all([
-        db.execute(sql`SELECT id, first_name, last_name, profile_image_url, bio, governorate, referral_code, created_at, interests, birthday, job_title, company, city, relationship_status, gender, account_type FROM users WHERE id = ${userId}`),
+        db.execute(sql`SELECT id, first_name, last_name, profile_image_url, bio, governorate, referral_code, created_at, interests, birthday, job_title, company, city, relationship_status FROM users WHERE id = ${userId}`),
         db.execute(sql`SELECT COUNT(*) as count, SUM(views_count) as views, SUM(likes_count) as likes FROM ads WHERE user_id = ${userId} AND status = 'active'`),
         db.execute(sql`SELECT * FROM channels WHERE user_id = ${userId} LIMIT 1`),
       ]);
@@ -6431,7 +4358,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // ================================================================
-  // WHATSAPP CLICK TRACKING (legacy)
+  // WHATSAPP CLICK TRACKING
   // ================================================================
   app.post("/api/ads/:id/whatsapp-click", async (req, res) => {
     const id = parseInt(req.params.id);
@@ -6439,105 +4366,6 @@ Sitemap: ${BASE}/sitemap-pages.xml
       await db.execute(sql`UPDATE ads SET whatsapp_clicks = COALESCE(whatsapp_clicks, 0) + 1 WHERE id = ${id}`);
       res.json({ ok: true });
     } catch { res.json({ ok: false }); }
-  });
-
-  // ================================================================
-  // LINK REDIRECT TRACKER — /api/go/:adId/:type
-  // يتتبع كل نقرة ثم يُحوّل المستخدم للرابط الحقيقي
-  // ================================================================
-  app.get("/api/go/:adId/:type", async (req: any, res) => {
-    const adId  = parseInt(req.params.adId);
-    const ltype = req.params.type; // googleplay | appstore | appgallery | whatsapp | payment | website | facebook | other
-    const ip    = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
-    const ua    = req.headers["user-agent"] || "";
-    const uid   = req.user?.claims?.sub || null;
-
-    try {
-      // 1. جلب بيانات الإعلان
-      const adR = await db.execute(
-        sql`SELECT id, user_id, whatsapp_number, payment_link, app_store_url,
-                   google_play_url, app_gallery_url
-            FROM ads WHERE id = ${adId} LIMIT 1`
-      );
-      const ad: any = adR.rows[0];
-      if (!ad) return res.status(404).send("الإعلان غير موجود");
-
-      // 2. تحديد الرابط الهدف
-      const urlMap: Record<string, string> = {
-        whatsapp:   ad.whatsapp_number ? `https://wa.me/${String(ad.whatsapp_number).replace(/\D/g, "")}` : "",
-        payment:    ad.payment_link    || "",
-        appstore:   ad.app_store_url   || "",
-        googleplay: ad.google_play_url || "",
-        appgallery: ad.app_gallery_url || "",
-      };
-      const destUrl = urlMap[ltype] || "";
-      if (!destUrl) return res.status(404).send("الرابط غير متاح");
-
-      // 3. كشف الاحتيال — نفس IP نقر نفس النوع خلال ساعتين
-      const recentR = await db.execute(
-        sql`SELECT COUNT(*) as cnt FROM ad_link_clicks
-            WHERE ad_id = ${adId} AND link_type = ${ltype}
-              AND ip = ${ip} AND created_at > NOW() - INTERVAL '2 hours'`
-      );
-      const recentCount = parseInt((recentR.rows[0] as any)?.cnt || "0");
-      const isSelfClick  = uid && uid === ad.user_id;
-      const isFlood      = recentCount >= 3;
-      const isFraud      = isSelfClick || isFlood;
-      const fraudReason  = isSelfClick ? "self_click" : isFlood ? `flood_${recentCount}` : null;
-
-      // 4. تسجيل النقرة
-      await db.execute(
-        sql`INSERT INTO ad_link_clicks (ad_id, link_type, dest_url, ip, user_agent, user_id, is_fraud, fraud_reason)
-            VALUES (${adId}, ${ltype}, ${destUrl}, ${ip}, ${ua.slice(0, 300)}, ${uid}, ${isFraud}, ${fraudReason})`
-      );
-
-      // 5. تحديث العداد في جدول الإعلانات (فقط غير مزوّرة)
-      if (!isFraud) {
-        if (ltype === "whatsapp") {
-          await db.execute(sql`UPDATE ads SET whatsapp_clicks = COALESCE(whatsapp_clicks, 0) + 1 WHERE id = ${adId}`);
-        }
-      }
-
-      // 6. التحويل للرابط الحقيقي
-      res.redirect(302, destUrl);
-    } catch (e: any) {
-      console.error("[TRACKER]", e.message);
-      res.status(500).send("خطأ في الخادم");
-    }
-  });
-
-  // ================================================================
-  // LINK CLICK ANALYTICS — /api/ads/:id/link-clicks
-  // ================================================================
-  app.get("/api/ads/:id/link-clicks", isAuthenticated, async (req: any, res) => {
-    const adId  = parseInt(req.params.id);
-    const userId = req.user?.claims?.sub;
-    try {
-      // فقط صاحب الإعلان أو الأدمن
-      const ownerR = await db.execute(sql`SELECT user_id FROM ads WHERE id = ${adId}`);
-      const owner: any = ownerR.rows[0];
-      if (!owner) return res.status(404).json({ message: "الإعلان غير موجود" });
-      if (owner.user_id !== userId && !isAdminUser(req)) return res.status(403).json({ message: "غير مصرح" });
-
-      const stats = await db.execute(
-        sql`SELECT
-              link_type,
-              COUNT(*) FILTER (WHERE is_fraud = false) AS real_clicks,
-              COUNT(*) FILTER (WHERE is_fraud = true)  AS fraud_clicks,
-              COUNT(*) AS total_clicks,
-              MAX(created_at) AS last_click
-            FROM ad_link_clicks
-            WHERE ad_id = ${adId}
-            GROUP BY link_type
-            ORDER BY real_clicks DESC`
-      );
-      const total = await db.execute(
-        sql`SELECT COUNT(*) FILTER (WHERE is_fraud = false) AS real,
-                   COUNT(*) FILTER (WHERE is_fraud = true)  AS fraud
-            FROM ad_link_clicks WHERE ad_id = ${adId}`
-      );
-      res.json({ byType: stats.rows, totals: total.rows[0] });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   // ================================================================
@@ -6574,21 +4402,6 @@ Sitemap: ${BASE}/sitemap-pages.xml
   // AD RENEW
   // ================================================================
   // Admin-only direct renew (no payment)
-  // ─── Mark Ad as Sold / Unsold ──────────────────────────────────────────
-  app.post("/api/ads/:id/mark-sold", isAuthenticated, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    const id = parseInt(req.params.id);
-    try {
-      const r = await db.execute(sql`SELECT user_id, is_sold FROM ads WHERE id = ${id}`);
-      if (!r.rows.length) return res.status(404).json({ message: "الإعلان غير موجود" });
-      if ((r.rows[0] as any).user_id !== userId && !isAdminUser(req)) return res.status(403).json({ message: "غير مصرح" });
-      const currentlySold = (r.rows[0] as any).is_sold;
-      const newSold = !currentlySold;
-      await db.execute(sql`UPDATE ads SET is_sold = ${newSold} WHERE id = ${id}`);
-      res.json({ success: true, is_sold: newSold, message: newSold ? "تم وضع علامة مباع ✅" : "تم إلغاء علامة المباع" });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
   app.post("/api/ads/:id/renew", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
     const id = parseInt(req.params.id);
@@ -6608,100 +4421,17 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const rows = await db.execute(sql`
         SELECT key, value FROM platform_settings
-        WHERE key IN ('renewal_price_7', 'renewal_price_30', 'renewal_price_60', 'renewal_price_90')
+        WHERE key IN ('renewal_price_30', 'renewal_price_60', 'renewal_price_90')
       `);
       const settings: Record<string, number> = {};
       for (const r of rows.rows as any[]) settings[r.key] = parseFloat(r.value);
       res.json({
         options: [
-          { days: 7,  price: settings['renewal_price_7']  ?? 50,  label: "7 أيام 🔥",  badge: "الأكثر طلباً" },
-          { days: 30, price: settings['renewal_price_30'] ?? 350, label: "30 يوماً" },
-          { days: 60, price: settings['renewal_price_60'] ?? 600, label: "60 يوماً" },
-          { days: 90, price: settings['renewal_price_90'] ?? 800, label: "90 يوماً" },
+          { days: 30, price: settings['renewal_price_30'] ?? 50, label: "30 يوماً" },
+          { days: 60, price: settings['renewal_price_60'] ?? 90, label: "60 يوماً" },
+          { days: 90, price: settings['renewal_price_90'] ?? 130, label: "90 يوماً" },
         ]
       });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  // POST /api/ads/:id/renew-wallet — renew using wallet balance directly (instant)
-  app.post("/api/ads/:id/renew-wallet", isAuthenticated, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    const adId = parseInt(req.params.id);
-    const { durationDays } = req.body;
-    if (!durationDays) return res.status(400).json({ message: "مدة التجديد مطلوبة" });
-    try {
-      const adRow = await db.execute(sql`SELECT * FROM ads WHERE id = ${adId} LIMIT 1`);
-      const ad = adRow.rows[0] as any;
-      if (!ad) return res.status(404).json({ message: "الإعلان غير موجود" });
-      if (ad.user_id !== userId) return res.status(403).json({ message: "غير مصرح" });
-
-      // Validate durationDays is supported (7 or 30; reject other values unless explicitly configured)
-      const ALLOWED_DURATIONS: Record<number, { key: string; defaultPrice: number }> = {
-        7:  { key: "renewal_price_7",  defaultPrice: 50 },
-        30: { key: "renewal_price_30", defaultPrice: 350 },
-        60: { key: "renewal_price_60", defaultPrice: 600 },
-        90: { key: "renewal_price_90", defaultPrice: 800 },
-      };
-      const durationConfig = ALLOWED_DURATIONS[durationDays as number];
-      if (!durationConfig) {
-        return res.status(400).json({ message: `مدة التجديد غير مدعومة: ${durationDays} يوم — الخيارات المتاحة: 7 / 30 / 60 / 90` });
-      }
-      // Fetch price from platform_settings; fall back to default if not configured
-      const priceRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = ${durationConfig.key} LIMIT 1`);
-      const price = parseFloat((priceRow.rows[0] as any)?.value || String(durationConfig.defaultPrice));
-
-      // Atomic check-and-deduct using row lock
-      const client = await pool.connect();
-      try {
-        await client.query("BEGIN");
-        const userR = await client.query(`SELECT balance_egp FROM users WHERE id = $1 FOR UPDATE`, [userId]);
-        const balance = parseFloat(userR.rows[0]?.balance_egp || "0");
-        if (balance < price) {
-          await client.query("ROLLBACK");
-          return res.status(402).json({
-            requiresWalletTopup: true,
-            price,
-            balance,
-            message: `رصيد محفظتك غير كافٍ (${balance} ج.م). التجديد يكلف ${price} ج.م — اشحن محفظتك أولاً`,
-          });
-        }
-        // Deduct from wallet
-        await client.query(
-          `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) - $1 WHERE id = $2`,
-          [price, userId]
-        );
-        // Activate renewal
-        await client.query(
-          `UPDATE ads SET
-            expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + ($1 || ' days')::INTERVAL,
-            status = 'active'
-           WHERE id = $2`,
-          [durationDays, adId]
-        );
-        // Log to wallet_transactions ledger for auditability
-        await client.query(
-          `INSERT INTO wallet_transactions (user_id, type, amount_egp, description, ref_id)
-           VALUES ($1, 'renewal_debit', $2, $3, $4)`,
-          [userId, price, `تجديد إعلان #${adId} لمدة ${durationDays} يوم`, String(adId)]
-        );
-        await client.query("COMMIT");
-      } catch (err) {
-        await client.query("ROLLBACK");
-        throw err;
-      } finally {
-        client.release();
-      }
-
-      // Notify user
-      try {
-        await createNotification(userId, "system",
-          `✅ تم تجديد إعلانك بنجاح`,
-          `إعلان #${adId} تم تجديده لمدة ${durationDays} يوم — خُصم ${price} ج.م من محفظتك`,
-          `/ads/${adId}`
-        );
-      } catch (_) {}
-
-      res.json({ ok: true, adId, durationDays, price, message: `تم تجديد الإعلان لمدة ${durationDays} يوماً` });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -6739,21 +4469,20 @@ Sitemap: ${BASE}/sitemap-pages.xml
         VALUES (${userId}, ${ADMIN_USER_ID}, ${adId}, ${msg}, false, false)
       `);
 
-      // Bell notification to both admins
-      for (const adminId of [ADMIN_USER_ID, ADMIN_USER_ID2]) {
-        await createNotification(adminId, "payment",
-          `🔄 طلب تجديد إعلان`,
-          `إعلان #${adId} — ${durationDays} يوماً مقابل ${amount} ج.م (${orderNumber})`,
-          "/admin"
-        );
-      }
+      // Bell notification to admin
+      await createNotification(ADMIN_USER_ID, "system",
+        `🔄 طلب تجديد إعلان #${adId}`,
+        `رقم الطلب: ${orderNumber} — ${durationDays} يوماً مقابل ${amount} ج.م`,
+        "/admin"
+      );
 
       res.json({ ok: true, orderNumber, adId, durationDays, amount });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   // GET /api/renewal/orders — admin: list all pending renewal orders
-  app.get("/api/renewal/orders", isAuthenticated, requireAdmin, async (req: any, res) => {
+  app.get("/api/renewal/orders", isAuthenticated, async (req: any, res) => {
+    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
     try {
       const rows = await db.execute(sql`
         SELECT ro.*, u.first_name, u.last_name, u.phone, a.title as ad_title
@@ -6767,7 +4496,8 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // PATCH /api/renewal/orders/:id — admin: confirm or reject renewal
-  app.patch("/api/renewal/orders/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
+  app.patch("/api/renewal/orders/:id", isAuthenticated, async (req: any, res) => {
+    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
     const { status } = req.body;
     try {
       const orderRow = await db.execute(sql`SELECT * FROM renewal_orders WHERE id = ${req.params.id} LIMIT 1`);
@@ -6817,111 +4547,13 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // ================================================================
-  // ================================================================
-  // STORIES — 24-hour disappearing stories
-  // ================================================================
-
-  app.post("/api/stories", isAuthenticated, upload.single("media"), async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    const caption = req.body.caption || null;
-    if (!req.file) return res.status(400).json({ message: "الملف مطلوب" });
-    const mediaUrl = `/uploads/${req.file.filename}`;
-    const mediaType = req.file.mimetype?.startsWith("video") ? "video" : "image";
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    try {
-      const r = await pool.query(
-        `INSERT INTO stories (user_id, media_url, media_type, caption, expires_at) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [userId, mediaUrl, mediaType, caption, expiresAt]
-      );
-      res.json(r.rows[0]);
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  app.get("/api/stories", async (req, res) => {
-    try {
-      const r = await pool.query(`
-        SELECT s.*, u.first_name, u.last_name, u.profile_image_url
-        FROM stories s
-        LEFT JOIN users u ON u.id = s.user_id
-        WHERE s.expires_at > NOW()
-        ORDER BY s.created_at DESC
-      `);
-      const grouped: Record<string, any> = {};
-      for (const story of r.rows) {
-        const uid = story.user_id;
-        if (!grouped[uid]) {
-          grouped[uid] = {
-            userId: uid,
-            userName: `${story.first_name || ''} ${story.last_name || ''}`.trim() || 'مستخدم',
-            profileImage: story.profile_image_url,
-            stories: [],
-          };
-        }
-        grouped[uid].stories.push(story);
-      }
-      res.json(Object.values(grouped));
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  app.get("/api/stories/:id", async (req, res) => {
-    try {
-      const r = await pool.query(
-        `SELECT s.*, u.first_name, u.last_name, u.profile_image_url
-         FROM stories s LEFT JOIN users u ON u.id = s.user_id
-         WHERE s.id = $1 AND s.expires_at > NOW()`,
-        [req.params.id]
-      );
-      if (r.rows.length === 0) return res.status(404).json({ message: "الحالة غير موجودة أو انتهت" });
-      res.json(r.rows[0]);
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  app.post("/api/stories/:id/view", isAuthenticated, async (req: any, res) => {
-    const viewerId = req.user.claims.sub;
-    const storyId = Number(req.params.id);
-    try {
-      await pool.query(
-        `INSERT INTO story_views (story_id, viewer_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [storyId, viewerId]
-      );
-      await pool.query(`UPDATE stories SET views_count = views_count + 1 WHERE id = $1`, [storyId]);
-      res.json({ ok: true });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  app.get("/api/stories/:id/viewers", isAuthenticated, async (req: any, res) => {
-    const storyId = Number(req.params.id);
-    try {
-      const r = await pool.query(
-        `SELECT sv.viewer_id, u.first_name, u.last_name, u.profile_image_url, sv.created_at
-         FROM story_views sv LEFT JOIN users u ON u.id = sv.viewer_id
-         WHERE sv.story_id = $1 ORDER BY sv.created_at DESC`,
-        [storyId]
-      );
-      res.json(r.rows);
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  app.delete("/api/stories/:id", isAuthenticated, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    const storyId = Number(req.params.id);
-    try {
-      const r = await pool.query(`SELECT user_id FROM stories WHERE id = $1`, [storyId]);
-      if (r.rows.length === 0) return res.status(404).json({ message: "غير موجودة" });
-      if (r.rows[0].user_id !== userId && !isAdminUser(req)) return res.status(403).json({ message: "غير مصرح" });
-      await pool.query(`DELETE FROM story_views WHERE story_id = $1`, [storyId]);
-      await pool.query(`DELETE FROM stories WHERE id = $1`, [storyId]);
-      res.json({ ok: true });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
   // SOCIAL FEATURES: Memories, Birthdays, Profile Social Info
   // ================================================================
 
-  // PATCH /api/auth/me/social — update birthday, job, company, city, relationship, gender, account_type
+  // PATCH /api/auth/me/social — update birthday, job, company, city, relationship
   app.patch("/api/auth/me/social", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
-    const { birthday, jobTitle, company, city, relationshipStatus, gender, accountType } = req.body;
+    const { birthday, jobTitle, company, city, relationshipStatus } = req.body;
     try {
       await db.execute(sql`
         UPDATE users SET
@@ -6930,8 +4562,6 @@ Sitemap: ${BASE}/sitemap-pages.xml
           company = ${company || null},
           city = ${city || null},
           relationship_status = ${relationshipStatus || null},
-          gender = ${gender || null},
-          account_type = ${accountType || null},
           updated_at = NOW()
         WHERE id = ${userId}
       `);
@@ -7282,7 +4912,7 @@ ${reelTags}
 الرد يجب أن يكون باللغة العربية، احترافياً ومفيداً وقابلاً للتطبيق مباشرة.`;
 
       const response = await openai.chat.completions.create({
-        model: "gpt-4.1",
+        model: "gpt-4o",
         messages: [{ role: "user", content: prompt }],
         max_tokens: 800,
       });
@@ -7354,7 +4984,7 @@ ${reelTags}
         : 'اشتري X احصل على Y';
 
       const aiResponse = await openai.chat.completions.create({
-        model: "gpt-4.1",
+        model: "gpt-4o",
         messages: [{
           role: "user",
           content: `أنت خبير تسويق محترف. قم بإنشاء كوبون خصم احترافي وجذاب للمنشأة التالية:
@@ -7431,160 +5061,6 @@ ${reelTags}
       await db.execute(sql`UPDATE platform_settings SET value = ${String(price)}, updated_at = now() WHERE key = 'coupon_price_egp'`);
       res.json({ ok: true, price: Number(price) });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
-  });
-
-  // ================================================================
-  // SEO — Server-Side Meta Injection for bots & crawlers
-  // Googlebot, WhatsApp, Facebook, Telegram, Bing, etc.
-  // Regular users pass through to the SPA normally
-  // ================================================================
-  const BOT_UA = /whatsapp|facebookexternalhit|facebot|twitterbot|telegrambot|linkedinbot|discordbot|slackbot|pinterest|snapchat|googlebot|bingbot|applebot|line-poker|viber|iframely|semrushbot|ahrefsbot|mj12bot|dotbot|rogerbot|yandexbot|baiduspider|duckduckbot|petalbot/i;
-
-  const escH = (s: string) => (s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-  const SEO_BASE = "https://ads-as.com";
-
-  app.get("/ads/:id", async (req, res, next) => {
-    const ua = req.headers["user-agent"] || "";
-    if (!BOT_UA.test(ua)) return next();
-
-    const adId = parseInt(req.params.id);
-    if (isNaN(adId)) return next();
-
-    try {
-      const adR = await db.execute(
-        sql`SELECT id, title, description, media_url, media_type, price_egp, target_region, status FROM ads WHERE id = ${adId} AND status = 'active' LIMIT 1`
-      );
-      if (!adR.rows.length) return next();
-      const ad: any = adR.rows[0];
-
-      const pageUrl  = `${SEO_BASE}/ads/${adId}`;
-      const rawMedia = ad.media_url || "";
-      const imageUrl = rawMedia.startsWith("http") ? rawMedia : rawMedia ? `${SEO_BASE}${rawMedia}` : `${SEO_BASE}/icons/icon-512.png`;
-      const price    = ad.price_egp && Number(ad.price_egp) > 0 ? `${Number(ad.price_egp).toLocaleString("ar-EG")} جنيه` : "";
-      const region   = ad.target_region ? `في ${escH(ad.target_region)}` : "في مصر";
-      const category = "";
-      const adTitle  = escH(ad.title || "إعلان");
-      const fullTitle = `${adTitle}${price ? ` — ${price}` : ""} | شبكة سوق للإعلانات`;
-      const rawDesc  = ad.description ? String(ad.description).slice(0, 300) : `${ad.title || "إعلان"}${price ? ` — ${price}` : ""} ${region}`;
-      const desc     = escH(rawDesc);
-      const metaDesc = escH(`${rawDesc}${price ? ` | السعر: ${price}` : ""} ${region} — شبكة سوق للإعلانات ads-as.com`);
-
-      const schemaPrice = price ? `,"offers":{"@type":"Offer","price":"${ad.price_egp}","priceCurrency":"EGP","availability":"https://schema.org/InStock","areaServed":"EG"}` : "";
-
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.setHeader("Cache-Control", "public, max-age=300");
-      res.send(`<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>${fullTitle}</title>
-  <meta name="description" content="${metaDesc}"/>
-  <meta name="robots" content="index, follow, max-image-preview:large"/>
-  <link rel="canonical" href="${pageUrl}"/>
-
-  <meta property="og:type" content="product"/>
-  <meta property="og:url" content="${pageUrl}"/>
-  <meta property="og:title" content="${adTitle}${price ? ` — ${price}` : ""}"/>
-  <meta property="og:description" content="${desc}"/>
-  <meta property="og:image" content="${imageUrl}"/>
-  <meta property="og:image:width" content="800"/>
-  <meta property="og:image:height" content="600"/>
-  <meta property="og:site_name" content="شبكة سوق للإعلانات"/>
-  <meta property="og:locale" content="ar_EG"/>
-  ${price ? `<meta property="product:price:amount" content="${escH(String(ad.price_egp))}"/><meta property="product:price:currency" content="EGP"/>` : ""}
-
-  <meta name="twitter:card" content="summary_large_image"/>
-  <meta name="twitter:title" content="${adTitle}${price ? ` — ${price}` : ""}"/>
-  <meta name="twitter:description" content="${desc}"/>
-  <meta name="twitter:image" content="${imageUrl}"/>
-
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"${adTitle.replace(/"/g,'\\"')}","description":"${desc.replace(/"/g,'\\"')}","url":"${pageUrl}","image":"${imageUrl}"${schemaPrice},"brand":{"@type":"Organization","name":"شبكة سوق للإعلانات","url":"${SEO_BASE}"}}</script>
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"الرئيسية","item":"${SEO_BASE}/"},{"@type":"ListItem","position":2,"name":"الإعلانات","item":"${SEO_BASE}/ads"},{"@type":"ListItem","position":3,"name":"${adTitle.replace(/"/g,'\\"')}","item":"${pageUrl}"}]}</script>
-  <link rel="icon" type="image/png" href="/favicon.png"/>
-</head>
-<body style="font-family:Arial,sans-serif;direction:rtl;padding:20px;max-width:800px;margin:auto;color:#222">
-  <header style="border-bottom:2px solid #c0392b;padding-bottom:12px;margin-bottom:20px">
-    <a href="${SEO_BASE}" style="text-decoration:none;color:#c0392b;font-weight:bold;font-size:20px">🛒 شبكة سوق للإعلانات</a>
-    ${category ? `<span style="color:#888;margin-right:12px;font-size:14px">← ${category}</span>` : ""}
-  </header>
-  <main>
-    <h1 style="font-size:26px;margin:0 0 10px">${adTitle}</h1>
-    ${price ? `<p style="font-size:22px;font-weight:bold;color:#c0392b;margin:8px 0">💰 ${price}</p>` : ""}
-    <p style="color:#666;margin:6px 0;font-size:15px">📍 ${region}</p>
-    ${ad.media_type === "image" && rawMedia ? `<img src="${imageUrl}" alt="${adTitle}" style="max-width:100%;border-radius:10px;margin:16px 0;display:block" loading="lazy"/>` : ""}
-    ${ad.description ? `<div style="margin-top:16px;line-height:1.8;font-size:16px;white-space:pre-wrap;background:#f9f9f9;padding:16px;border-radius:8px">${escH(ad.description)}</div>` : ""}
-    <a href="${pageUrl}" style="display:inline-block;margin-top:24px;padding:14px 28px;background:#c0392b;color:white;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px">
-      📱 عرض الإعلان كاملاً
-    </a>
-  </main>
-  <footer style="margin-top:40px;padding-top:16px;border-top:1px solid #eee;color:#999;font-size:13px">
-    <a href="${SEO_BASE}/ads" style="color:#c0392b;text-decoration:none">تصفح جميع الإعلانات</a> |
-    <a href="${SEO_BASE}" style="color:#c0392b;text-decoration:none;margin-right:8px">الرئيسية</a>
-  </footer>
-</body>
-</html>`);
-    } catch { next(); }
-  });
-
-  app.get("/channels/:id", async (req, res, next) => {
-    const ua = req.headers["user-agent"] || "";
-    if (!BOT_UA.test(ua)) return next();
-
-    const chId = parseInt(req.params.id);
-    if (isNaN(chId)) return next();
-
-    try {
-      const chR = await db.execute(
-        sql`SELECT id, name, description, avatar_url, cover_url FROM channels WHERE id = ${chId} LIMIT 1`
-      );
-      if (!chR.rows.length) return next();
-      const ch: any = chR.rows[0];
-
-      const pageUrl  = `${SEO_BASE}/channels/${chId}`;
-      const rawAvatar = ch.avatar_url || ch.cover_url || "";
-      const imageUrl = rawAvatar.startsWith("http") ? rawAvatar : rawAvatar ? `${SEO_BASE}${rawAvatar}` : `${SEO_BASE}/icons/icon-512.png`;
-      const chName   = escH(ch.name || "قناة");
-      const chDesc   = escH(ch.description || `تابع قناة ${ch.name} على شبكة سوق للإعلانات`);
-
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.setHeader("Cache-Control", "public, max-age=300");
-      res.send(`<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>${chName} | قنوات شبكة سوق للإعلانات</title>
-  <meta name="description" content="${chDesc} — قناة رقمية على شبكة سوق للإعلانات ads-as.com"/>
-  <meta name="robots" content="index, follow"/>
-  <link rel="canonical" href="${pageUrl}"/>
-  <meta property="og:type" content="website"/>
-  <meta property="og:url" content="${pageUrl}"/>
-  <meta property="og:title" content="${chName}"/>
-  <meta property="og:description" content="${chDesc}"/>
-  <meta property="og:image" content="${imageUrl}"/>
-  <meta property="og:site_name" content="شبكة سوق للإعلانات"/>
-  <meta property="og:locale" content="ar_EG"/>
-  <meta name="twitter:card" content="summary_large_image"/>
-  <meta name="twitter:title" content="${chName}"/>
-  <meta name="twitter:description" content="${chDesc}"/>
-  <meta name="twitter:image" content="${imageUrl}"/>
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"${chName.replace(/"/g,'\\"')}","description":"${chDesc.replace(/"/g,'\\"')}","url":"${pageUrl}","logo":"${imageUrl}"}</script>
-  <link rel="icon" type="image/png" href="/favicon.png"/>
-</head>
-<body style="font-family:Arial,sans-serif;direction:rtl;padding:20px;max-width:800px;margin:auto;text-align:center">
-  <header style="border-bottom:2px solid #c0392b;padding-bottom:12px;margin-bottom:20px;text-align:right">
-    <a href="${SEO_BASE}" style="text-decoration:none;color:#c0392b;font-weight:bold;font-size:20px">🛒 شبكة سوق للإعلانات</a>
-  </header>
-  ${rawAvatar ? `<img src="${imageUrl}" alt="${chName}" style="width:120px;height:120px;border-radius:50%;object-fit:cover;margin:16px auto;display:block"/>` : ""}
-  <h1 style="font-size:26px;margin:10px 0">${chName}</h1>
-  ${ch.description ? `<p style="color:#555;line-height:1.8;max-width:500px;margin:10px auto;font-size:16px">${chDesc}</p>` : ""}
-  <a href="${pageUrl}" style="display:inline-block;margin-top:20px;padding:14px 28px;background:#c0392b;color:white;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px">
-    📺 زيارة القناة
-  </a>
-</body>
-</html>`);
-    } catch { next(); }
   });
 
   return httpServer;

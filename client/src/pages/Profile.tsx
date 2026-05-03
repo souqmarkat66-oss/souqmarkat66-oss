@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AdCard } from "@/components/AdCard";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MessageCircle, LayoutGrid, Eye, Heart, Tv, Star, Shield, AlertTriangle, Sparkles, Edit2, Camera, Copy, Gift, Check, Users, Cake, Briefcase, MapPin, ExternalLink, ThumbsUp, UserPlus, UserCheck, BarChart3 } from "lucide-react";
+import { MessageCircle, LayoutGrid, Eye, Heart, Tv, Star, Shield, AlertTriangle, Sparkles, Edit2, Camera, Copy, Gift, Check, Users, Cake, Briefcase, MapPin, ExternalLink } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect, useRef } from "react";
@@ -15,31 +15,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
-
-function StarRating({ value, onChange, readonly = false, size = "md" }: {
-  value: number; onChange?: (v: number) => void; readonly?: boolean; size?: "sm" | "md" | "lg";
-}) {
-  const [hover, setHover] = useState(0);
-  const sz = size === "sm" ? "w-4 h-4" : size === "lg" ? "w-8 h-8" : "w-6 h-6";
-  return (
-    <div className="flex gap-0.5">
-      {[1,2,3,4,5].map(n => (
-        <button
-          key={n}
-          type="button"
-          disabled={readonly}
-          onClick={() => onChange?.(n)}
-          onMouseEnter={() => !readonly && setHover(n)}
-          onMouseLeave={() => setHover(0)}
-          className={`transition-transform ${readonly ? "cursor-default" : "hover:scale-125 cursor-pointer"}`}
-          data-testid={`star-${n}`}
-        >
-          <Star className={`${sz} ${(hover || value) >= n ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground/30"}`} />
-        </button>
-      ))}
-    </div>
-  );
-}
 
 const ALL_INTERESTS = [
   { id: "tech", label: "تقنية وإلكترونيات", emoji: "📱" },
@@ -77,12 +52,6 @@ export default function Profile() {
   const [referralInput, setReferralInput] = useState("");
   const [copied, setCopied] = useState(false);
   const [referralStats, setReferralStats] = useState<{ count: string; earned: string } | null>(null);
-  const [myRating, setMyRating] = useState(0);
-  const [myReview, setMyReview] = useState("");
-  const [showRatingForm, setShowRatingForm] = useState(false);
-  const [myCoins, setMyCoins] = useState(0);
-  const [giftPanelOpen, setGiftPanelOpen] = useState(false);
-  const [sentGift, setSentGift] = useState<string | null>(null);
 
   const targetUserId = params?.userId || user?.id;
   const isOwn = user?.id === targetUserId;
@@ -117,76 +86,10 @@ export default function Profile() {
     }
   }, [referralData]);
 
-  // Auto-apply pending referral code stored from ?ref=CODE URL param
-  useEffect(() => {
-    if (!isOwn || !user || !referralData) return;
-    const pending = localStorage.getItem("pending_referral_code");
-    if (!pending) return;
-    localStorage.removeItem("pending_referral_code");
-    fetch("/api/auth/me/use-referral", {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: pending }),
-    }).then(r => r.json()).then(data => {
-      if (data.ok) {
-        toast({ title: `🎁 تم تطبيق رمز الإحالة! حصلت على ${data.bonus} جنيه مكافأة ترحيبية` });
-        qc.invalidateQueries({ queryKey: ["/api/auth/me/referral"] });
-      }
-    }).catch(() => {});
-  }, [isOwn, user, referralData]);
-
   const { data: userAds = [] } = useQuery<any[]>({
     queryKey: ["/api/profile", targetUserId, "ads"],
     queryFn: () => fetch(`/api/profile/${targetUserId}/ads`, { credentials: "include" }).then(r => r.json()),
     enabled: !!targetUserId,
-  });
-
-  const { data: ratingsData } = useQuery<{ ratings: any[]; avg: number; count: number }>({
-    queryKey: ["/api/ratings/user", targetUserId],
-    queryFn: () => fetch(`/api/ratings/user/${targetUserId}`).then(r => r.json()),
-    enabled: !!targetUserId,
-  });
-
-  const { data: followData } = useQuery<any>({
-    queryKey: ["/api/users", targetUserId, "followers"],
-    queryFn: () => fetch(`/api/users/${targetUserId}/followers`).then(r => r.json()),
-    enabled: !!targetUserId,
-  });
-
-  const { data: isFollowingData } = useQuery<any>({
-    queryKey: ["/api/users", targetUserId, "follow"],
-    queryFn: () => fetch(`/api/users/${targetUserId}/follow`, { credentials: "include" }).then(r => r.json()),
-    enabled: !!targetUserId && !isOwn && !!user,
-  });
-
-  const followMutation = useMutation({
-    mutationFn: () => fetch(`/api/users/${targetUserId}/follow`, { method: "POST", credentials: "include" }).then(r => r.json()),
-    onSuccess: (data: any) => {
-      toast({ title: data.following ? "✅ تمت المتابعة" : "تم إلغاء المتابعة" });
-      qc.invalidateQueries({ queryKey: ["/api/users", targetUserId, "follow"] });
-      qc.invalidateQueries({ queryKey: ["/api/users", targetUserId, "followers"] });
-    },
-  });
-
-  const { data: myStats } = useQuery<any>({
-    queryKey: ["/api/my-stats"],
-    queryFn: () => fetch("/api/my-stats", { credentials: "include" }).then(r => r.json()),
-    enabled: !!isOwn && !!user,
-  });
-
-  const ratingMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/ratings", {
-      targetType: "user",
-      targetId: String(targetUserId),
-      rating: myRating,
-      review: myReview || null,
-    }),
-    onSuccess: () => {
-      toast({ title: "✅ تم إرسال تقييمك، شكراً!" });
-      setShowRatingForm(false);
-      qc.invalidateQueries({ queryKey: ["/api/ratings/user", targetUserId] });
-    },
-    onError: () => toast({ title: "❌ حدث خطأ أثناء إرسال التقييم", variant: "destructive" }),
   });
 
   const interestsMutation = useMutation({
@@ -249,46 +152,6 @@ export default function Profile() {
         : "حدث خطأ";
       toast({ title: "❌ " + msg, variant: "destructive" });
     },
-  });
-
-  const PROFILE_GIFTS = [
-    { type: "rose",    emoji: "🌹", name: "وردة",      coins: 5   },
-    { type: "heart",   emoji: "❤️", name: "قلب",       coins: 10  },
-    { type: "clap",    emoji: "👏", name: "تصفيق",     coins: 5   },
-    { type: "star",    emoji: "⭐", name: "نجمة",      coins: 20  },
-    { type: "fire",    emoji: "🔥", name: "نار",       coins: 30  },
-    { type: "crown",   emoji: "👑", name: "تاج",       coins: 50  },
-    { type: "rocket",  emoji: "🚀", name: "صاروخ",     coins: 75  },
-    { type: "diamond", emoji: "💎", name: "ألماسة",    coins: 100 },
-    { type: "trophy",  emoji: "🏆", name: "كأس",       coins: 150 },
-    { type: "castle",  emoji: "🏰", name: "قصر",       coins: 500 },
-  ];
-
-  // Fetch my coin balance
-  useEffect(() => {
-    if (!user || isOwn) return;
-    fetch("/api/coins/wallet", { credentials: "include" })
-      .then(r => r.json())
-      .then(d => setMyCoins(d.coins || 0))
-      .catch(() => {});
-  }, [user, isOwn]);
-
-  const sendProfileGiftMutation = useMutation({
-    mutationFn: async (gift: typeof PROFILE_GIFTS[0]) => {
-      const res = await apiRequest("POST", "/api/coins/transfer", {
-        toUserId: targetUserId,
-        coins: gift.coins,
-        message: `هدية ${gift.emoji} ${gift.name}`,
-      });
-      return { ...res, gift };
-    },
-    onSuccess: (data: any) => {
-      setMyCoins(prev => prev - data.gift.coins);
-      setSentGift(data.gift.emoji);
-      toast({ title: `${data.gift.emoji} تم إرسال ${data.gift.name}!`, description: `خصم ${data.gift.coins} عملة من رصيدك` });
-      setTimeout(() => setSentGift(null), 3000);
-    },
-    onError: (e: any) => toast({ title: "❌ فشل الإرسال — تأكد من رصيدك", variant: "destructive" }),
   });
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -381,13 +244,6 @@ export default function Profile() {
                   <Shield className="w-3 h-3" /> موثّق
                 </Badge>
               )}
-              {ratingsData && ratingsData.count > 0 && (
-                <div className="flex items-center gap-1" title={`${ratingsData.count} تقييم`}>
-                  <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                  <span className="text-sm font-bold text-yellow-600">{ratingsData.avg.toFixed(1)}</span>
-                  <span className="text-xs text-muted-foreground">({ratingsData.count})</span>
-                </div>
-              )}
               {isOwn && (
                 <button
                   onClick={() => setEditOpen(true)}
@@ -414,30 +270,6 @@ export default function Profile() {
               <p className="text-xs text-muted-foreground mb-2">
                 عضو منذ {format(new Date(profileUser.created_at), "MMMM yyyy", { locale: ar })}
               </p>
-            )}
-            {/* Gender & Account Type badges */}
-            {(profileUser.gender || profileUser.account_type) && (
-              <div className="flex flex-wrap gap-2 mb-2 justify-center sm:justify-start">
-                {profileUser.gender && (
-                  <Badge variant="outline" className="gap-1 text-xs">
-                    {profileUser.gender === "male" ? "🧑 ذكر" : "👩 أنثى"}
-                  </Badge>
-                )}
-                {profileUser.account_type && (
-                  <Badge variant="outline" className={`gap-1 text-xs ${
-                    profileUser.account_type === "business" ? "border-amber-300 text-amber-700" :
-                    profileUser.account_type === "broadcaster" ? "border-purple-300 text-purple-700" :
-                    profileUser.account_type === "freelancer" ? "border-cyan-300 text-cyan-700" :
-                    "border-border"
-                  }`}>
-                    {profileUser.account_type === "personal" ? "👤 شخصي" :
-                     profileUser.account_type === "business" ? "🏪 تجاري" :
-                     profileUser.account_type === "broadcaster" ? "📹 مذيع" :
-                     profileUser.account_type === "freelancer" ? "💼 فريلانسر" :
-                     profileUser.account_type}
-                  </Badge>
-                )}
-              </div>
             )}
             {/* Social Info */}
             {(profileUser.birthday || profileUser.job_title || profileUser.company || profileUser.city || profileUser.governorate) && (
@@ -487,48 +319,11 @@ export default function Profile() {
             </div>
           </div>
 
-          {/* Follower counts */}
-          {followData && (
-            <div className="flex gap-4 mt-2 justify-center sm:justify-start text-sm">
-              <div className="flex items-center gap-1.5 cursor-pointer hover:text-primary transition-colors" data-testid="followers-count">
-                <Users className="w-4 h-4 text-primary" />
-                <span className="font-bold">{followData.followersCount}</span>
-                <span className="text-muted-foreground text-xs">متابع</span>
-              </div>
-              <div className="flex items-center gap-1.5" data-testid="following-count">
-                <span className="font-bold">{followData.followingCount}</span>
-                <span className="text-muted-foreground text-xs">يتابع</span>
-              </div>
-            </div>
-          )}
-
           {/* Actions */}
           {!isOwn && user && (
-            <div className="flex gap-2 flex-shrink-0 flex-wrap justify-center sm:justify-end">
-              <Button
-                size="sm"
-                className={`gap-2 ${isFollowingData?.following ? "bg-muted text-foreground hover:bg-muted/80" : ""}`}
-                variant={isFollowingData?.following ? "outline" : "default"}
-                onClick={() => followMutation.mutate()}
-                disabled={followMutation.isPending}
-                data-testid="btn-follow-user"
-              >
-                {isFollowingData?.following ? (
-                  <><UserCheck className="w-4 h-4" /> متابَع</>
-                ) : (
-                  <><UserPlus className="w-4 h-4" /> تابع</>
-                )}
-              </Button>
+            <div className="flex gap-2 flex-shrink-0">
               <Button size="sm" className="gap-2" onClick={startChat} data-testid="btn-start-chat">
                 <MessageCircle className="w-4 h-4" /> راسله
-              </Button>
-              <Button
-                size="sm" variant="outline"
-                className="gap-2 border-yellow-300 text-yellow-700 hover:bg-yellow-50 dark:hover:bg-yellow-950/20"
-                onClick={() => setShowRatingForm(v => !v)}
-                data-testid="btn-rate-seller"
-              >
-                <Star className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" /> قيّمه
               </Button>
               <Button
                 size="sm" variant="outline"
@@ -568,180 +363,6 @@ export default function Profile() {
         ))}
       </div>
 
-      {/* Advertiser Stats Dashboard */}
-      {isOwn && myStats && (
-        <div className="bg-card border border-border/60 rounded-2xl p-5 mb-6">
-          <div className="flex items-center gap-2 mb-4">
-            <BarChart3 className="w-5 h-5 text-primary" />
-            <h2 className="font-bold">إحصائيات إعلاناتك</h2>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            {[
-              { label: "إجمالي الإعلانات", value: myStats.totalAds, sub: `${myStats.activeAds} نشط`, color: "text-blue-500", icon: "📋" },
-              { label: "إجمالي المشاهدات", value: myStats.totalViews?.toLocaleString(), sub: "لجميع إعلاناتك", color: "text-emerald-500", icon: "👀" },
-              { label: "إجمالي الإعجابات", value: myStats.totalLikes?.toLocaleString(), sub: "تفاعل الجمهور", color: "text-pink-500", icon: "❤️" },
-              { label: "المتابعون", value: myStats.followersCount, sub: "يتابعون حسابك", color: "text-purple-500", icon: "👥" },
-            ].map(s => (
-              <div key={s.label} className="bg-muted/40 rounded-xl p-3 text-center">
-                <div className="text-lg mb-1">{s.icon}</div>
-                <div className={`text-xl font-black ${s.color}`}>{s.value}</div>
-                <div className="text-[10px] text-muted-foreground font-medium">{s.label}</div>
-                <div className="text-[9px] text-muted-foreground">{s.sub}</div>
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <div className="bg-muted/40 rounded-xl p-3 text-center">
-              <div className="text-lg mb-1">🔗</div>
-              <div className="text-xl font-black text-amber-500">{myStats.totalClicks}</div>
-              <div className="text-[10px] text-muted-foreground font-medium">نقرات على الروابط</div>
-            </div>
-            <div className="bg-muted/40 rounded-xl p-3 text-center">
-              <div className="text-lg mb-1">💬</div>
-              <div className="text-xl font-black text-cyan-500">{myStats.uniqueMessages}</div>
-              <div className="text-[10px] text-muted-foreground font-medium">تواصلوا معك</div>
-            </div>
-            <div className="bg-muted/40 rounded-xl p-3 text-center">
-              <div className="text-lg mb-1">📱</div>
-              <div className="text-xl font-black text-green-600">{myStats.totalWhatsappClicks || 0}</div>
-              <div className="text-[10px] text-muted-foreground font-medium">نقرات واتساب</div>
-              <div className="text-[9px] text-muted-foreground">مشترون تواصلوا</div>
-            </div>
-            <div className="bg-muted/40 rounded-xl p-3 text-center">
-              <div className="text-lg mb-1">✅</div>
-              <div className="text-xl font-black text-teal-600">{myStats.soldAds || 0}</div>
-              <div className="text-[10px] text-muted-foreground font-medium">تم بيعها</div>
-              <div className="text-[9px] text-muted-foreground">إعلانات مباعة</div>
-            </div>
-          </div>
-          {myStats.topAds?.length > 0 && (
-            <div>
-              <h3 className="text-sm font-bold mb-2 flex items-center gap-1">🏆 أفضل إعلاناتك أداءً</h3>
-              <div className="space-y-2">
-                {myStats.topAds.map((ad: any, i: number) => (
-                  <a key={ad.id} href={`/ads/${ad.id}`} className="flex items-center gap-3 p-2 rounded-xl hover:bg-muted/50 transition-colors" data-testid={`top-ad-${i}`}>
-                    <span className="text-xs font-bold text-muted-foreground w-4">{i+1}</span>
-                    {ad.media_url && (
-                      <img src={ad.media_url} alt="" className="w-10 h-10 rounded-lg object-cover" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">{ad.title}</div>
-                      <div className="text-[10px] text-muted-foreground">
-                        {ad.price_egp ? `${Number(ad.price_egp).toLocaleString()} ج.م` : "بدون سعر"}
-                      </div>
-                    </div>
-                    <div className="flex gap-2 text-[10px] text-muted-foreground flex-wrap justify-end">
-                      <span className="flex items-center gap-0.5"><Eye className="w-3 h-3" /> {ad.views_count || 0}</span>
-                      <span className="flex items-center gap-0.5"><Heart className="w-3 h-3" /> {ad.likes_count || 0}</span>
-                      {(ad.whatsapp_clicks || 0) > 0 && (
-                        <span className="flex items-center gap-0.5 text-green-600 font-bold">📱 {ad.whatsapp_clicks}</span>
-                      )}
-                      {ad.is_sold && (
-                        <span className="bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-400 px-1.5 rounded-full font-bold">مباع ✅</span>
-                      )}
-                    </div>
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Seller Ratings Section */}
-      <div className="bg-card border border-border/60 rounded-2xl p-5 mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Star className="w-5 h-5 fill-yellow-400 text-yellow-400" />
-            <h2 className="font-bold">تقييمات البائع</h2>
-            {ratingsData && ratingsData.count > 0 && (
-              <Badge variant="secondary">{ratingsData.count} تقييم</Badge>
-            )}
-          </div>
-          {ratingsData && ratingsData.count > 0 && (
-            <div className="flex items-center gap-2">
-              <StarRating value={Math.round(ratingsData.avg)} readonly size="sm" />
-              <span className="font-black text-xl text-yellow-600">{ratingsData.avg.toFixed(1)}</span>
-              <span className="text-xs text-muted-foreground">/ 5</span>
-            </div>
-          )}
-        </div>
-
-        {/* Rating form for non-owners */}
-        {!isOwn && user && showRatingForm && (
-          <div className="bg-muted/40 rounded-xl p-4 mb-4 border border-border/60">
-            <p className="text-sm font-semibold mb-3">✍️ قيّم هذا البائع</p>
-            <div className="flex items-center gap-3 mb-3">
-              <StarRating value={myRating} onChange={setMyRating} size="lg" />
-              {myRating > 0 && (
-                <span className="text-sm text-muted-foreground">
-                  {["", "ضعيف", "مقبول", "جيد", "جيد جداً", "ممتاز"][myRating]}
-                </span>
-              )}
-            </div>
-            <Textarea
-              value={myReview}
-              onChange={e => setMyReview(e.target.value)}
-              placeholder="اكتب تعليقك (اختياري)..."
-              className="min-h-[80px] resize-none text-sm mb-3"
-              maxLength={300}
-              data-testid="input-rating-review"
-            />
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                className="gap-2 bg-yellow-500 hover:bg-yellow-600 text-white"
-                onClick={() => ratingMutation.mutate()}
-                disabled={myRating === 0 || ratingMutation.isPending}
-                data-testid="btn-submit-rating"
-              >
-                <ThumbsUp className="w-3.5 h-3.5" />
-                {ratingMutation.isPending ? "جاري الإرسال..." : "إرسال التقييم"}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setShowRatingForm(false)}>إلغاء</Button>
-            </div>
-          </div>
-        )}
-
-        {/* Reviews list */}
-        {ratingsData && ratingsData.ratings.length > 0 ? (
-          <div className="space-y-3">
-            {ratingsData.ratings.slice(0, 5).map((r: any) => (
-              <div key={r.id} className="flex gap-3 p-3 bg-muted/30 rounded-xl">
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary/40 to-secondary/40 flex items-center justify-center text-white text-sm font-bold shrink-0">
-                  {r.user_name?.[0] || "م"}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-semibold truncate">{r.user_name}</span>
-                    <StarRating value={r.rating} readonly size="sm" />
-                  </div>
-                  {r.review && <p className="text-sm text-muted-foreground">{r.review}</p>}
-                  <p className="text-xs text-muted-foreground/60 mt-1">
-                    {r.created_at ? (() => { try { return format(new Date(r.created_at), "d MMM yyyy", { locale: ar }); } catch { return ""; } })() : ""}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-6 text-muted-foreground">
-            <Star className="w-8 h-8 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">لا توجد تقييمات بعد</p>
-            {!isOwn && user && !showRatingForm && (
-              <Button
-                size="sm" variant="outline"
-                className="mt-3 gap-2 border-yellow-300 text-yellow-700"
-                onClick={() => setShowRatingForm(true)}
-                data-testid="btn-be-first-rater"
-              >
-                <Star className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" /> كن أول من يقيّم
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-
       {/* Referral Section — only for owner */}
       {isOwn && (
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/10 border border-amber-200/60 dark:border-amber-800/40 rounded-2xl p-5 mb-6" dir="rtl">
@@ -762,30 +383,15 @@ export default function Profile() {
             </div>
           </div>
           {referralCode && (
-            <div className="bg-white/80 dark:bg-white/10 rounded-xl p-3 mb-3" dir="rtl">
-              <p className="text-xs text-muted-foreground mb-1">رمز الإحالة الخاص بك</p>
-              <p className="font-mono font-bold text-xl text-amber-700 dark:text-amber-400 tracking-widest mb-3">{referralCode}</p>
-              <div className="flex gap-2 flex-wrap">
-                <Button size="sm" variant="outline" onClick={copyReferralLink} className="gap-2" data-testid="btn-copy-referral">
-                  {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-                  {copied ? "تم النسخ" : "نسخ الرابط"}
-                </Button>
-                <Button
-                  size="sm"
-                  className="gap-2 bg-green-600 hover:bg-green-700 text-white"
-                  data-testid="btn-share-whatsapp-referral"
-                  onClick={() => {
-                    const link = `${window.location.origin}?ref=${referralCode}`;
-                    const msg = encodeURIComponent(
-                      `🎉 أدعوك تنضم لشبكة سوق الإعلانات!\n📢 أعلن عن منتجاتك، شاهد البث المباشر، واكسب أرباح\n🔗 سجّل الآن: ${link}\n🎁 كود الإحالة: ${referralCode} — هتحصل على مكافأة ترحيبية!`
-                    );
-                    window.open(`https://wa.me/?text=${msg}`, "_blank");
-                  }}
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.127.558 4.122 1.532 5.854L.057 23.5l5.797-1.521A11.932 11.932 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.844 0-3.576-.49-5.073-1.346l-.364-.216-3.44.902.919-3.357-.236-.373A9.958 9.958 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/></svg>
-                  شارك على واتساب
-                </Button>
+            <div className="bg-white/80 dark:bg-white/10 rounded-xl p-3 mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">رمز الإحالة الخاص بك</p>
+                <p className="font-mono font-bold text-lg text-amber-700 dark:text-amber-400 tracking-widest">{referralCode}</p>
               </div>
+              <Button size="sm" variant="outline" onClick={copyReferralLink} className="gap-2 shrink-0" data-testid="btn-copy-referral">
+                {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                {copied ? "تم النسخ" : "نسخ الرابط"}
+              </Button>
             </div>
           )}
           <div className="flex gap-2">
@@ -847,65 +453,6 @@ export default function Profile() {
           >
             {interestsMutation.isPending ? "جاري الحفظ..." : "حفظ الاهتمامات"}
           </Button>
-        </div>
-      )}
-
-      {/* ── GIFT GALLERY — visible only when viewing someone else's profile ── */}
-      {!isOwn && user && (
-        <div className="bg-gradient-to-br from-pink-50 to-rose-50 dark:from-pink-950/20 dark:to-rose-950/10 border border-rose-200/60 dark:border-rose-800/40 rounded-2xl p-5 mb-6" dir="rtl">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Gift className="w-5 h-5 text-rose-500" />
-              <h2 className="font-bold text-rose-900 dark:text-rose-400">أرسل هدية لـ {fullName}</h2>
-            </div>
-            <div className="flex items-center gap-1.5 bg-white/70 dark:bg-white/10 rounded-full px-3 py-1 border border-rose-200/60">
-              <span className="text-amber-500 text-sm">🪙</span>
-              <span className="font-black text-sm text-foreground">{myCoins.toLocaleString()}</span>
-              <span className="text-muted-foreground text-xs">عملة</span>
-            </div>
-          </div>
-
-          {/* Sent gift animation */}
-          {sentGift && (
-            <div className="flex justify-center mb-3">
-              <div className="bg-white/80 dark:bg-white/10 rounded-2xl px-6 py-3 text-center shadow-lg border border-rose-200">
-                <p className="text-4xl mb-1 animate-bounce">{sentGift}</p>
-                <p className="text-rose-600 text-xs font-bold">تم الإرسال!</p>
-              </div>
-            </div>
-          )}
-
-          {/* Gift grid */}
-          <div className="grid grid-cols-5 gap-2 mb-3">
-            {PROFILE_GIFTS.map(gift => {
-              const canAfford = myCoins >= gift.coins;
-              return (
-                <button
-                  key={gift.type}
-                  onClick={() => canAfford && sendProfileGiftMutation.mutate(gift)}
-                  disabled={!canAfford || sendProfileGiftMutation.isPending}
-                  data-testid={`profile-gift-${gift.type}`}
-                  className={`flex flex-col items-center gap-1 p-2 rounded-xl border transition-all active:scale-90
-                    ${canAfford
-                      ? "bg-white/80 dark:bg-white/10 border-rose-200/60 hover:border-rose-400 hover:shadow-md cursor-pointer"
-                      : "bg-white/40 dark:bg-white/5 border-gray-200/40 opacity-50 cursor-not-allowed"
-                    }`}
-                >
-                  <span className="text-2xl leading-none">{gift.emoji}</span>
-                  <span className="text-[9px] text-muted-foreground font-medium leading-none">{gift.name}</span>
-                  <div className="flex items-center gap-0.5">
-                    <span className="text-[8px] text-amber-500">🪙</span>
-                    <span className="text-[9px] font-black text-amber-600">{gift.coins}</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          <p className="text-center text-xs text-muted-foreground">
-            💝 هداياك تظهر في محفظة {fullName} مباشرة
-          </p>
         </div>
       )}
 
