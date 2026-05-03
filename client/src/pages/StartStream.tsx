@@ -64,9 +64,13 @@ export default function StartStream() {
     const data = form.getValues();
     setLoading(true);
     try {
-      /* فتح الكاميرا مباشرةً في نفس لحظة الضغط */
-      const ms = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      ms.getTracks().forEach(t => t.stop()); // نوقف الـ preview هنا، LiveStream هيفتحها بنفسه
+      /* فتح الكاميرا في لحظة الضغط (user-gesture) ونحتفظ بالـ stream */
+      const ms = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      /* نخزّن الـ stream في window عشان LiveStream يستخدمه مباشرة بدون ما يطلب الكاميرا تاني */
+      (window as any).__pendingCameraStream = ms;
     } catch {
       toast({ variant: "destructive", title: "⚠️ الكاميرا محجوبة", description: "افتح إعدادات المتصفح وأعطِ الموقع إذن الكاميرا والميكروفون، ثم أعد المحاولة" });
       setLoading(false);

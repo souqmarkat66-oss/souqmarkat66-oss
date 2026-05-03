@@ -262,10 +262,20 @@ export default function LiveStream() {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       setFacingSupported(devices.filter(d => d.kind === "videoinput").length > 1);
-      const ms = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
+
+      /* ✅ إذا كان StartStream فتح الكاميرا مسبقاً نستخدم نفس الـ stream مباشرة */
+      let ms: MediaStream;
+      const pending = (window as any).__pendingCameraStream as MediaStream | undefined;
+      if (pending && pending.active) {
+        ms = pending;
+        (window as any).__pendingCameraStream = null;
+      } else {
+        ms = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
+      }
+
       if (localStream.current) {
         const newVTrack = ms.getVideoTracks()[0];
         peers.current.forEach(pc => {
@@ -1297,42 +1307,61 @@ export default function LiveStream() {
 
   /* ═══ MODE PICKER for broadcaster — shows on first entry (broadcastMode === null) ═══ */
   if (isBroadcast && broadcastMode === null && !streaming) {
+    /* ✅ إذا كان StartStream فتح الكاميرا مسبقاً، ابدأ WebRTC تلقائياً بدون ما نطلب من المستخدم ضغطة تانية */
+    const hasPending = !!(window as any).__pendingCameraStream;
+    if (hasPending) {
+      startWebRTC();
+    }
     return (
       <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-50 p-6 gap-5" dir="rtl">
-        <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mb-2">
-          <Video className="w-8 h-8 text-red-400" />
-        </div>
-        <h2 className="text-white text-xl font-bold">اختر طريقة البث</h2>
-        <p className="text-white/60 text-sm text-center">اضغط لبدء البث — سيطلب المتصفح إذن الكاميرا والميكروفون</p>
-        <div className="flex flex-col gap-3 w-full max-w-xs">
-          {/* ✅ IMPORTANT: getUserMedia called directly in onClick for iOS/mobile compatibility */}
-          <button
-            onClick={startWebRTC}
-            className="w-full py-5 rounded-2xl bg-white text-black font-bold text-base flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-transform"
-            data-testid="btn-start-webrtc"
-          >
-            <Video className="w-6 h-6 text-red-500" />
-            <span>
-              <span className="block text-base">بث من الكاميرا</span>
-              <span className="block text-xs font-normal text-gray-500">كاميرا + ميكروفون</span>
-            </span>
-          </button>
-          <button
-            onClick={() => setBroadcastMode("rtmp")}
-            className="w-full py-4 rounded-2xl bg-red-600 text-white font-bold text-base flex items-center justify-center gap-2 active:scale-95 transition-transform"
-            data-testid="btn-start-rtmp"
-          >
-            <Radio className="w-5 h-5" />
-            بث من OBS / برنامج خارجي
-          </button>
-          <button
-            onClick={() => setLocation("/livestream")}
-            className="w-full py-3 rounded-2xl bg-white/5 text-white/60 text-sm"
-            data-testid="btn-cancel-mode"
-          >
-            إلغاء
-          </button>
-        </div>
+        {hasPending ? (
+          /* جاري تشغيل الكاميرا تلقائياً */
+          <>
+            <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mb-2 animate-pulse">
+              <Video className="w-8 h-8 text-red-400" />
+            </div>
+            <p className="text-white text-lg font-bold">جاري تشغيل الكاميرا...</p>
+            <div className="w-8 h-8 rounded-full border-2 border-red-500 border-t-transparent animate-spin" />
+          </>
+        ) : (
+          /* المستخدم وصل مباشرة لصفحة البث بدون كاميرا — يختار يدوياً */
+          <>
+            <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mb-2">
+              <Video className="w-8 h-8 text-red-400" />
+            </div>
+            <h2 className="text-white text-xl font-bold">اختر طريقة البث</h2>
+            <p className="text-white/60 text-sm text-center">اضغط لبدء البث — سيطلب المتصفح إذن الكاميرا والميكروفون</p>
+            <div className="flex flex-col gap-3 w-full max-w-xs">
+              {/* ✅ IMPORTANT: getUserMedia called directly in onClick for iOS/mobile compatibility */}
+              <button
+                onClick={startWebRTC}
+                className="w-full py-5 rounded-2xl bg-white text-black font-bold text-base flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-transform"
+                data-testid="btn-start-webrtc"
+              >
+                <Video className="w-6 h-6 text-red-500" />
+                <span>
+                  <span className="block text-base">بث من الكاميرا</span>
+                  <span className="block text-xs font-normal text-gray-500">كاميرا + ميكروفون</span>
+                </span>
+              </button>
+              <button
+                onClick={() => setBroadcastMode("rtmp")}
+                className="w-full py-4 rounded-2xl bg-red-600 text-white font-bold text-base flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                data-testid="btn-start-rtmp"
+              >
+                <Radio className="w-5 h-5" />
+                بث من OBS / برنامج خارجي
+              </button>
+              <button
+                onClick={() => setLocation("/livestream")}
+                className="w-full py-3 rounded-2xl bg-white/5 text-white/60 text-sm"
+                data-testid="btn-cancel-mode"
+              >
+                إلغاء
+              </button>
+            </div>
+          </>
+        )}
       </div>
     );
   }
