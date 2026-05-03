@@ -571,21 +571,22 @@ export default function LiveStream() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adVisible, streamAds]);
 
-  /* ─── auto-start WebRTC camera (fires only when user explicitly picks webrtc mode) ─── */
-  useEffect(() => {
-    if (!isBroadcast || broadcastMode !== "webrtc" || streamStarted.current) return;
-    // broadcastMode is set to "webrtc" only from user button click — safe to call getUserMedia
+  /* ─── startWebRTC: called directly from button click (not via useEffect) ─── */
+  const startWebRTC = useCallback(async () => {
+    if (streamStarted.current) return;
     streamStarted.current = true;
-    (async () => {
-      const ms = await startCamera(camFacing);
-      if (!ms) return;
-      setStreaming(true);
-      socketRef.current?.emit("broadcaster", id);
-      await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
-      toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
-    })();
+    setBroadcastMode("webrtc");
+    const ms = await startCamera(camFacing);
+    if (!ms) {
+      streamStarted.current = false;
+      return;
+    }
+    setStreaming(true);
+    socketRef.current?.emit("broadcaster", id);
+    await fetch(`/api/streams/${id}/start`, { method: "POST", credentials: "include" }).catch(() => {});
+    toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [broadcastMode]);
+  }, [camFacing, id, startCamera, toast]);
 
   /* ─── controls ───────────────────────────────────────── */
   const flipCamera = async () => {
@@ -1035,21 +1036,23 @@ export default function LiveStream() {
           <Video className="w-8 h-8 text-red-400" />
         </div>
         <h2 className="text-white text-xl font-bold">اختر طريقة البث</h2>
-        <p className="text-white/60 text-sm text-center">اضغط على طريقة البث وسيطلب المتصفح إذن الكاميرا والميكروفون</p>
+        <p className="text-white/60 text-sm text-center">اضغط لبدء البث — سيطلب المتصفح إذن الكاميرا والميكروفون</p>
         <div className="flex flex-col gap-3 w-full max-w-xs">
+          {/* ✅ IMPORTANT: getUserMedia called directly in onClick for iOS/mobile compatibility */}
           <button
-            onClick={() => {
-              setBroadcastMode("webrtc");
-            }}
-            className="w-full py-4 rounded-2xl bg-white text-black font-bold text-base flex items-center justify-center gap-2"
+            onClick={startWebRTC}
+            className="w-full py-5 rounded-2xl bg-white text-black font-bold text-base flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-transform"
             data-testid="btn-start-webrtc"
           >
-            <Monitor className="w-5 h-5" />
-            بث من المتصفح (كاميرا)
+            <Video className="w-6 h-6 text-red-500" />
+            <span>
+              <span className="block text-base">بث من الكاميرا</span>
+              <span className="block text-xs font-normal text-gray-500">كاميرا + ميكروفون</span>
+            </span>
           </button>
           <button
             onClick={() => setBroadcastMode("rtmp")}
-            className="w-full py-4 rounded-2xl bg-red-600 text-white font-bold text-base flex items-center justify-center gap-2"
+            className="w-full py-4 rounded-2xl bg-red-600 text-white font-bold text-base flex items-center justify-center gap-2 active:scale-95 transition-transform"
             data-testid="btn-start-rtmp"
           >
             <Radio className="w-5 h-5" />
