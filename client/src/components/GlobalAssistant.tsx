@@ -633,17 +633,16 @@ export function GlobalAssistant() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ message: q, context: AI_CONTEXT, history: messages.slice(-8) }),
+        body: JSON.stringify({ message: q, history: messages.slice(-8) }),
       });
       if (res.ok) {
         const d = await res.json();
-        setMessages(m => [...m, { role: "bot", text: d.reply || d.message || "عذراً، لم أفهم سؤالك. حاول بطريقة مختلفة أو تواصل مع الدعم." }]);
-      } else throw new Error();
+        setMessages(m => [...m, { role: "bot", text: d.reply || "مش قادر أرد دلوقتي، حاول تاني بعد شوية." }]);
+      } else {
+        setMessages(m => [...m, { role: "bot", text: "مش قادر أرد دلوقتي، حاول تاني بعد شوية. 🙏" }]);
+      }
     } catch {
-      setMessages(m => [...m, {
-        role: "bot",
-        text: "عذراً، حدث خطأ مؤقت. 😓\n\nللمساعدة الفورية:\n• راجع صفحة **دليل الربط**\n• تواصل معنا عبر **الرسائل الداخلية**\n• أو اتصل بنا على فودافون كاش: 01098553911",
-      }]);
+      setMessages(m => [...m, { role: "bot", text: "مش قادر أرد دلوقتي، حاول تاني بعد شوية. 🙏" }]);
     }
     setLoading(false);
   };
