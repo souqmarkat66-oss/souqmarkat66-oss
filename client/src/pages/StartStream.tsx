@@ -118,7 +118,11 @@ export default function StartStream() {
           </div>
         </div>
         <Button
-          onClick={() => createChannelMutation.mutate((user?.firstName || "قناتي") + " Channel")}
+          onClick={() => {
+            const rawName = user?.firstName;
+            const safeName = (rawName && rawName !== "null" && rawName !== "undefined") ? rawName : "قناتي";
+            createChannelMutation.mutate(safeName + " Channel");
+          }}
           disabled={createChannelMutation.isPending}
           size="lg"
           className="w-full gap-2 bg-gradient-to-r from-red-500 to-pink-600 hover:from-red-600 hover:to-pink-700 text-white font-extrabold text-base py-6 rounded-2xl shadow-xl shadow-red-500/25"
