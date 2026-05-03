@@ -120,6 +120,9 @@ export default function CreateAd() {
   const [ttsVoice, setTtsVoice] = useState<"nova" | "onyx">("nova");
   const [generatingViral, setGeneratingViral] = useState(false);
   const [viralResult, setViralResult] = useState<any>(null);
+  const [customPrompt, setCustomPrompt] = useState("");
+  const [generatingAll, setGeneratingAll] = useState(false);
+  const [generatingAllStep, setGeneratingAllStep] = useState("");
   // D-ID Talking Avatar
   const [didAvatarUrl, setDidAvatarUrl] = useState("");
   const [didUploading, setDidUploading] = useState(false);
@@ -249,7 +252,7 @@ export default function CreateAd() {
       const res = await fetch("/api/ai/generate-copy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productName, targetAudience, adTitle, language: lang }),
+        body: JSON.stringify({ productName, targetAudience, adTitle, language: lang, customPrompt: customPrompt.trim() || undefined }),
         credentials: "include"
       });
       const data = await res.json();
@@ -271,7 +274,9 @@ export default function CreateAd() {
 
   const handleGenerateImage = async () => {
     const { description, productName, adTitle, title } = form.getValues();
-    const prompt = `Professional Arabic advertisement image for ${adTitle || productName || title || description}. High quality, vibrant colors, suitable for Egyptian market.`;
+    const prompt = customPrompt.trim()
+      ? customPrompt.trim()
+      : `Professional Arabic advertisement image for ${adTitle || productName || title || description}. High quality, vibrant colors, suitable for Egyptian market.`;
     setGeneratingImage(true);
     try {
       const res = await fetch("/api/ai/generate-image", {
@@ -449,6 +454,66 @@ export default function CreateAd() {
     } catch (e: any) {
       toast({ variant: "destructive", title: "فشل التعديل", description: e.message });
     } finally { setEditingImage(false); }
+  };
+
+  // One-click: generate copy + image + video script all at once
+  const handleGenerateAll = async () => {
+    const { productName, targetAudience, adTitle, language: lang } = form.getValues();
+    if (!productName) { toast({ variant: "destructive", title: "أدخل اسم المنتج أولاً" }); return; }
+    setGeneratingAll(true);
+    try {
+      // Step 1: Generate copy
+      setGeneratingAllStep("📝 جارٍ توليد النص الإعلاني...");
+      const copyRes = await fetch("/api/ai/generate-copy", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ productName, targetAudience, adTitle, language: lang, customPrompt: customPrompt.trim() || undefined }),
+      });
+      const copyData = await copyRes.json();
+      if (copyRes.ok) {
+        if (copyData.title) form.setValue("title", copyData.title);
+        if (copyData.description) form.setValue("description", copyData.description);
+      }
+
+      // Step 2: Generate image
+      setGeneratingAllStep("🎨 جارٍ توليد الصورة...");
+      const imgPrompt = customPrompt.trim()
+        ? customPrompt.trim()
+        : `Professional Arabic advertisement image for ${adTitle || productName}. High quality, vibrant colors, suitable for Egyptian market.`;
+      const imgRes = await fetch("/api/ai/generate-image", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ prompt: imgPrompt, size: "1024x1024" }),
+      });
+      const imgData = await imgRes.json();
+      if (imgRes.ok && imgData.url) {
+        setAiImageUrl(imgData.url);
+        form.setValue("mediaUrl", imgData.url);
+        form.setValue("mediaType", "image");
+      }
+
+      // Step 3: Generate video script
+      setGeneratingAllStep("🎬 جارٍ توليد سكريبت الفيديو...");
+      const scriptRes = await fetch("/api/ai/generate-video-script", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ productName, adTitle, duration: 30, language: lang }),
+      });
+      const scriptData = await scriptRes.json();
+      if (scriptRes.ok) { setVideoScript(scriptData); }
+
+      toast({ title: "🚀 تم توليد كل شيء بنجاح! النص + الصورة + السكريبت", className: "bg-green-600 text-white border-none" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "حدث خطأ في التوليد التلقائي", description: e.message });
+    } finally { setGeneratingAll(false); setGeneratingAllStep(""); }
+  };
+
+  // Scene composer: compile all scenes narrations into TTS audio and play cinema mode
+  const handleComposeScenes = async () => {
+    if (!videoScript?.scenes?.length) {
+      toast({ variant: "destructive", title: "ولّد السكريبت أولاً" });
+      return;
+    }
+    setCinemaScene(0);
+    setCinemaPlaying(true);
+    toast({ title: "🎭 جارٍ تشغيل مركّب المشاهد السينمائي..." });
   };
 
   // Download generated text as file
@@ -629,6 +694,39 @@ export default function CreateAd() {
                         </FormItem>
                       )} />
                     </div>
+                    {/* Custom Prompt Field */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold flex items-center gap-1.5 text-primary">
+                        <Wand2 className="w-3 h-3" /> برومبت مخصص <span className="text-muted-foreground font-normal">(اختياري — يتحكم في كل توليد)</span>
+                      </label>
+                      <Textarea
+                        placeholder="مثال: إعلان احترافي لمنتج فاخر بألوان ذهبية وخلفية بيضاء، بأسلوب سينمائي راقٍ يستهدف الشباب المصري..."
+                        value={customPrompt}
+                        onChange={e => setCustomPrompt(e.target.value)}
+                        rows={2}
+                        className="text-sm resize-none border-primary/30 focus:border-primary"
+                        data-testid="input-custom-prompt"
+                      />
+                      {customPrompt.trim() && (
+                        <button type="button" onClick={() => setCustomPrompt("")} className="text-[10px] text-muted-foreground hover:text-destructive underline">مسح البرومبت</button>
+                      )}
+                    </div>
+
+                    {/* ONE-CLICK AUTO GENERATE ALL */}
+                    <button
+                      type="button"
+                      onClick={handleGenerateAll}
+                      disabled={generatingAll}
+                      className="w-full flex flex-col items-center justify-center gap-1 py-4 rounded-2xl bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 hover:from-green-600 hover:via-emerald-600 hover:to-teal-600 text-white font-extrabold text-base shadow-lg disabled:opacity-60 transition-all border-0"
+                      data-testid="btn-generate-all"
+                    >
+                      {generatingAll ? (
+                        <><Loader2 className="w-5 h-5 animate-spin" /> <span className="text-sm">{generatingAllStep || "جارٍ التوليد..."}</span></>
+                      ) : (
+                        <><span className="text-xl">🚀</span> ابدأ التوليد التلقائي — كل شيء بضغطة واحدة <span className="text-sm font-normal opacity-90">(نص + صورة + سكريبت)</span></>
+                      )}
+                    </button>
+
                     {/* Reference images upload */}
                     <div className="space-y-2">
                       <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
@@ -679,31 +777,44 @@ export default function CreateAd() {
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      <Button type="button" onClick={handleGenerateCopy} disabled={generatingCopy} size="sm" className="gap-2" data-testid="btn-gen-copy">
-                        {generatingCopy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                        توليد نص
-                      </Button>
-                      <Button type="button" onClick={handleGenerateImage} disabled={generatingImage} size="sm" variant="outline" className="gap-2" data-testid="btn-gen-image">
-                        {generatingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
-                        توليد صورة AI
-                      </Button>
-                      <Button type="button" onClick={handleGenerateVideoScript} disabled={generatingScript} size="sm" variant="outline" className="gap-2" data-testid="btn-gen-script">
-                        {generatingScript ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
-                        سكريبت فيديو سينمائي
-                      </Button>
-                      <Button type="button" onClick={handleGenerateViral} disabled={generatingViral} size="sm" className="gap-2 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white border-0" data-testid="btn-gen-viral">
-                        {generatingViral ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>🔥</span>}
-                        إعلان فيروسي
-                      </Button>
-                      <Button type="button" onClick={handleTranslate} disabled={translating} size="sm" variant="outline" className="gap-2" data-testid="btn-translate">
-                        {translating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Languages className="w-4 h-4" />}
-                        ترجمة النص
-                      </Button>
-                      <Button type="button" onClick={handleDownloadText} size="sm" variant="outline" className="gap-2" data-testid="btn-download-text">
-                        <Download className="w-4 h-4" />
-                        تحميل كملف
-                      </Button>
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">أدوات الذكاء الاصطناعي الفردية</p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" onClick={handleGenerateCopy} disabled={generatingCopy} size="sm" className="gap-2" data-testid="btn-gen-copy">
+                          {generatingCopy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                          توليد نص
+                        </Button>
+                        <Button type="button" onClick={handleGenerateImage} disabled={generatingImage} size="sm" variant="outline" className="gap-2" data-testid="btn-gen-image">
+                          {generatingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+                          توليد صورة AI
+                        </Button>
+                        <Button type="button" onClick={handleGenerateVideoScript} disabled={generatingScript} size="sm" variant="outline" className="gap-2" data-testid="btn-gen-script">
+                          {generatingScript ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
+                          سكريبت فيديو سينمائي
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={handleComposeScenes}
+                          size="sm"
+                          variant="outline"
+                          className="gap-2 border-violet-300 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/20"
+                          data-testid="btn-compose-scenes"
+                        >
+                          <span>🎭</span> مركّب مشاهد
+                        </Button>
+                        <Button type="button" onClick={handleGenerateViral} disabled={generatingViral} size="sm" className="gap-2 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white border-0" data-testid="btn-gen-viral">
+                          {generatingViral ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>🔥</span>}
+                          إعلان فيروسي
+                        </Button>
+                        <Button type="button" onClick={handleTranslate} disabled={translating} size="sm" variant="outline" className="gap-2" data-testid="btn-translate">
+                          {translating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Languages className="w-4 h-4" />}
+                          ترجمة النص
+                        </Button>
+                        <Button type="button" onClick={handleDownloadText} size="sm" variant="outline" className="gap-2" data-testid="btn-download-text">
+                          <Download className="w-4 h-4" />
+                          تحميل كملف
+                        </Button>
+                      </div>
                     </div>
 
                     {/* Viral Ad Result */}
