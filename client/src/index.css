@@ -81,6 +81,11 @@
 .combo-emoji   { animation: comboEmojiBounce 0.4s ease-out; }
 .combo-ring    { animation: comboRing 0.7s ease-out forwards; }
 
+@keyframes ticker {
+  0%   { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
+
 @keyframes marquee {
   0%   { transform: translateX(0); }
   100% { transform: translateX(-100%); }

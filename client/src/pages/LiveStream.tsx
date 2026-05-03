@@ -10,6 +10,7 @@ import {
   Copy, Check, Radio, Monitor, UserPlus, Users,
   Loader2, X, CheckCircle, XCircle,
   Share2, Gift, Megaphone, Swords, Trophy, Timer,
+  Layers, Tv2, Type, ChevronDown, ChevronUp, Palette,
 } from "lucide-react";
 import { SiWhatsapp, SiFacebook, SiX, SiTelegram, SiInstagram, SiTiktok, SiSnapchat } from "react-icons/si";
 import { Button } from "@/components/ui/button";
@@ -128,6 +129,21 @@ export default function LiveStream() {
   const [hlsUrl,          setHlsUrl]          = useState<string>("");
   const [rtmpSetup,       setRtmpSetup]       = useState(false); // broadcaster done picking mode
 
+  // ── Virtual Background & Green Screen ──
+  const [bgMode,          setBgMode]          = useState<"none"|"color"|"image"|"chroma">("none");
+  const [bgColor,         setBgColor]         = useState("#0d1117");
+  const [bgImageUrl,      setBgImageUrl]      = useState("");
+  const [showBgPanel,     setShowBgPanel]     = useState(false);
+  const [chromaThreshold, setChromaThreshold] = useState(90);
+
+  // ── Presenter Overlay (lower third + ticker) ──
+  const [presenterName,   setPresenterName]   = useState("");
+  const [presenterTitle,  setPresenterTitle]  = useState("");
+  const [showLowerThird,  setShowLowerThird]  = useState(false);
+  const [tickerText,      setTickerText]      = useState("");
+  const [showTicker,      setShowTicker]      = useState(false);
+  const [showPresenterPanel, setShowPresenterPanel] = useState(false);
+
   /* ── refs ── */
   const videoRef         = useRef<HTMLVideoElement>(null);
   const hlsVideoRef      = useRef<HTMLVideoElement>(null);
@@ -145,6 +161,12 @@ export default function LiveStream() {
   const peers            = useRef<Map<string, RTCPeerConnection>>(new Map());
   const streamStarted    = useRef(false);
   const hlsInstance      = useRef<any>(null);
+  // Virtual background canvas refs
+  const compositeCanvas  = useRef<HTMLCanvasElement>(null);
+  const animFrameRef     = useRef<number>(0);
+  const canvasStreamRef  = useRef<MediaStream | null>(null);
+  const bgImageElem      = useRef<HTMLImageElement | null>(null);
+  const bgInputRef       = useRef<HTMLInputElement>(null);
 
   /* ── stream data ── */
   const { data: stream } = useQuery<any>({
@@ -632,6 +654,100 @@ export default function LiveStream() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adVisible, streamAds]);
 
+  /* ─── Canvas virtual-background processing ───────────── */
+  useEffect(() => {
+    if (bgMode === "none" || !isBroadcast) {
+      cancelAnimationFrame(animFrameRef.current);
+      if (canvasStreamRef.current) {
+        canvasStreamRef.current.getTracks().forEach(t => t.stop());
+        canvasStreamRef.current = null;
+      }
+      return;
+    }
+    const canvas = compositeCanvas.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+    canvas.width = 1280;
+    canvas.height = 720;
+
+    // Load background image if needed
+    if ((bgMode === "image") && bgImageUrl && (!bgImageElem.current || bgImageElem.current.src !== bgImageUrl)) {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.src = bgImageUrl;
+      img.onload = () => { bgImageElem.current = img; };
+    }
+
+    const drawFrame = () => {
+      const video = videoRef.current;
+      if (!video || !video.videoWidth) { animFrameRef.current = requestAnimationFrame(drawFrame); return; }
+
+      // Draw background first
+      if (bgMode === "chroma" || bgMode === "image") {
+        if (bgImageElem.current) ctx.drawImage(bgImageElem.current, 0, 0, 1280, 720);
+        else { ctx.fillStyle = bgColor; ctx.fillRect(0, 0, 1280, 720); }
+      } else {
+        ctx.fillStyle = bgColor; ctx.fillRect(0, 0, 1280, 720);
+      }
+
+      if (bgMode === "chroma") {
+        // Draw camera to temp, apply green-screen keying
+        const tmp = document.createElement("canvas");
+        tmp.width = 1280; tmp.height = 720;
+        const tc = tmp.getContext("2d", { willReadFrequently: true })!;
+        tc.drawImage(video, 0, 0, 1280, 720);
+        const imgData = tc.getImageData(0, 0, 1280, 720);
+        const d = imgData.data;
+        const thr = chromaThreshold;
+        for (let i = 0; i < d.length; i += 4) {
+          const r = d[i], g = d[i + 1], b = d[i + 2];
+          if (g > thr && g > r * 1.3 && g > b * 1.3) d[i + 3] = 0;
+        }
+        tc.putImageData(imgData, 0, 0);
+        ctx.drawImage(tmp, 0, 0);
+      } else {
+        ctx.drawImage(video, 0, 0, 1280, 720);
+      }
+
+      animFrameRef.current = requestAnimationFrame(drawFrame);
+    };
+
+    // Start canvas stream and replace WebRTC video track
+    if (!canvasStreamRef.current) {
+      const cs = (canvas as any).captureStream(30) as MediaStream;
+      const audioTrk = localStream.current?.getAudioTracks()[0];
+      if (audioTrk) cs.addTrack(audioTrk);
+      canvasStreamRef.current = cs;
+      const newVid = cs.getVideoTracks()[0];
+      if (newVid) {
+        peers.current.forEach(pc => {
+          const s = pc.getSenders().find(s => s.track?.kind === "video");
+          if (s) s.replaceTrack(newVid);
+        });
+      }
+    }
+
+    cancelAnimationFrame(animFrameRef.current);
+    drawFrame();
+    return () => cancelAnimationFrame(animFrameRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bgMode, bgColor, bgImageUrl, chromaThreshold, isBroadcast]);
+
+  /* ─── When bg turned off — restore original track ────── */
+  useEffect(() => {
+    if (bgMode === "none" && localStream.current) {
+      const origVid = localStream.current.getVideoTracks()[0];
+      if (origVid) {
+        peers.current.forEach(pc => {
+          const s = pc.getSenders().find(s => s.track?.kind === "video");
+          if (s) s.replaceTrack(origVid);
+        });
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bgMode]);
+
   /* ─── startWebRTC: called directly from button click (not via useEffect) ─── */
   const startWebRTC = useCallback(async () => {
     if (streamStarted.current) return;
@@ -648,6 +764,14 @@ export default function LiveStream() {
     toast({ title: "🔴 البث مباشر الآن", description: "أنت على الهواء — يمكن للمشاهدين رؤيتك الآن" });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camFacing, id, startCamera, toast]);
+
+  /* ─── retryCamera: reset guard then start full WebRTC ── */
+  const retryCamera = useCallback(async () => {
+    streamStarted.current = false;
+    setCameraError("");
+    await startWebRTC();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startWebRTC]);
 
   /* ─── controls ───────────────────────────────────────── */
   const flipCamera = async () => {
@@ -1189,6 +1313,19 @@ export default function LiveStream() {
           style={{ backgroundColor: "#000", transform: (isBroadcast && camFacing === "user") ? "scaleX(-1)" : "none" }}
         />
 
+        {/* Hidden canvas for virtual background processing */}
+        <canvas ref={compositeCanvas} className="hidden" />
+        {/* Hidden bg image upload input */}
+        <input ref={bgInputRef} type="file" accept="image/*" className="hidden"
+          onChange={async (e) => {
+            const f = e.target.files?.[0]; if (!f) return; e.target.value = "";
+            const fd = new FormData(); fd.append("file", f);
+            const r = await fetch("/api/upload", { method: "POST", body: fd, credentials: "include" });
+            const d = await r.json();
+            if (d.url) { setBgImageUrl(d.url); bgImageElem.current = null; setBgMode("image"); }
+          }}
+        />
+
         {/* Camera error */}
         {isBroadcast && cameraError && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-6 gap-5 z-20">
@@ -1196,8 +1333,11 @@ export default function LiveStream() {
               <VideoOff className="w-10 h-10 text-red-400" />
             </div>
             <p className="text-white font-bold text-base">{cameraError}</p>
+            <p className="text-white/50 text-xs max-w-xs">
+              تأكد من أنك سمحت للمتصفح بالوصول للكاميرا في إعدادات الجهاز، ثم اضغط حاول مجدداً
+            </p>
             <button
-              onClick={() => startCamera(camFacing)}
+              onClick={retryCamera}
               className="flex items-center gap-2 px-6 py-3 rounded-full bg-white text-black font-bold text-sm"
               data-testid="btn-retry-camera"
             >
@@ -1907,6 +2047,39 @@ export default function LiveStream() {
           </button>
         )}
 
+        {/* ── LOWER THIRD presenter overlay ── */}
+        {showLowerThird && presenterName && (
+          <div className="absolute bottom-24 inset-x-0 z-20 px-4 pointer-events-none">
+            <div className="relative overflow-hidden rounded-xl"
+              style={{ background: "linear-gradient(90deg, rgba(220,38,38,0.92) 0%, rgba(0,0,0,0.88) 100%)" }}>
+              <div className="flex items-center gap-3 px-4 py-2.5">
+                <div className="w-1 self-stretch bg-white rounded-full flex-shrink-0" />
+                <div>
+                  <p className="text-white font-bold text-sm leading-tight">{presenterName}</p>
+                  {presenterTitle && <p className="text-white/70 text-[11px]">{presenterTitle}</p>}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── NEWS TICKER ── */}
+        {showTicker && tickerText && (
+          <div className="absolute bottom-0 inset-x-0 z-20 pointer-events-none overflow-hidden"
+            style={{ height: "32px", background: "linear-gradient(90deg, #dc2626, #991b1b)" }}>
+            <div className="flex items-center h-full gap-3">
+              <div className="flex-shrink-0 bg-white text-red-700 font-extrabold text-[11px] px-3 h-full flex items-center">
+                عاجل
+              </div>
+              <div className="overflow-hidden flex-1">
+                <p className="text-white text-xs font-bold whitespace-nowrap animate-[ticker_18s_linear_infinite]">
+                  {tickerText} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; {tickerText}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* BROADCASTER CONTROLS (WebRTC) */}
         {isBroadcast && streaming && broadcastMode === "webrtc" && !battleActive && (
           <div className="absolute inset-x-0 z-10 flex items-center justify-center gap-2 px-3" style={{ bottom: "84px" }}>
@@ -1933,6 +2106,22 @@ export default function LiveStream() {
                 <FlipHorizontal className="w-5 h-5 text-white" />
               </button>
             )}
+            {/* Background button */}
+            <button
+              onClick={() => { setShowBgPanel(p => !p); setShowPresenterPanel(false); }}
+              data-testid="btn-toggle-bg-panel"
+              className={`w-12 h-12 rounded-full flex items-center justify-center shadow-xl transition-all border-2 ${bgMode !== "none" ? "bg-violet-600 border-violet-400" : "bg-black/70 border-white/20"}`}
+            >
+              <Layers className="w-5 h-5 text-white" />
+            </button>
+            {/* Presenter overlay button */}
+            <button
+              onClick={() => { setShowPresenterPanel(p => !p); setShowBgPanel(false); }}
+              data-testid="btn-toggle-presenter-panel"
+              className={`w-12 h-12 rounded-full flex items-center justify-center shadow-xl transition-all border-2 ${showLowerThird || showTicker ? "bg-blue-600 border-blue-400" : "bg-black/70 border-white/20"}`}
+            >
+              <Tv2 className="w-5 h-5 text-white" />
+            </button>
             {/* Battle button — only if there are guests */}
             {activeCoHosts.length > 0 && (
               <button
@@ -1955,6 +2144,175 @@ export default function LiveStream() {
           </div>
         )}
       </div>
+
+      {/* ══ VIRTUAL BACKGROUND PANEL ══ */}
+      {isBroadcast && streaming && showBgPanel && (
+        <div className="fixed inset-x-0 bottom-0 z-50 flex items-end justify-center" onClick={() => setShowBgPanel(false)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-safe" onClick={e => e.stopPropagation()} dir="rtl">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Layers className="w-5 h-5 text-violet-400" />
+                <h3 className="text-white font-bold text-base">خلفية البث</h3>
+              </div>
+              <button onClick={() => setShowBgPanel(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+
+            {/* Mode selector */}
+            <div className="grid grid-cols-4 gap-2 mb-4">
+              {[
+                { key: "none",   label: "بدون",     emoji: "🚫" },
+                { key: "color",  label: "لون",       emoji: "🎨" },
+                { key: "image",  label: "صورة",      emoji: "🖼️" },
+                { key: "chroma", label: "خضار",      emoji: "🟩" },
+              ].map(m => (
+                <button key={m.key} onClick={() => setBgMode(m.key as any)}
+                  className={`flex flex-col items-center gap-1 py-3 rounded-2xl border text-xs font-bold transition-all ${
+                    bgMode === m.key ? "bg-violet-600 border-violet-400 text-white" : "bg-zinc-800 border-zinc-700 text-white/70"
+                  }`}
+                  data-testid={`btn-bg-mode-${m.key}`}
+                >
+                  <span className="text-xl">{m.emoji}</span>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Color picker (for color + chroma bg) */}
+            {(bgMode === "color" || bgMode === "chroma" || bgMode === "image") && (
+              <div className="mb-3">
+                <p className="text-white/60 text-xs mb-2">لون الخلفية</p>
+                <div className="flex flex-wrap gap-2">
+                  {["#0d1117","#1a1a2e","#16213e","#0f3460","#1a0a0a","#0a1a0a","#2d1b4e","#1a1a1a"].map(c => (
+                    <button key={c} onClick={() => setBgColor(c)}
+                      className={`w-10 h-10 rounded-xl border-2 transition-all ${bgColor === c ? "border-white scale-110" : "border-transparent"}`}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                  <label className="w-10 h-10 rounded-xl border-2 border-dashed border-white/30 flex items-center justify-center cursor-pointer">
+                    <Palette className="w-4 h-4 text-white/50" />
+                    <input type="color" className="sr-only" value={bgColor} onChange={e => setBgColor(e.target.value)} />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* Preset background images */}
+            {bgMode === "image" && (
+              <div className="mb-3">
+                <p className="text-white/60 text-xs mb-2">خلفيات جاهزة</p>
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {[
+                    { label: "استوديو إخباري", color: "#1a1a2e", grad: "linear-gradient(135deg,#1a1a2e,#16213e)" },
+                    { label: "خلفية دبي", color: "#0d1b2a", grad: "linear-gradient(135deg,#0d1b2a,#1b4332)" },
+                    { label: "تدرج أحمر", color: "#7f1d1d", grad: "linear-gradient(135deg,#7f1d1d,#1c1917)" },
+                    { label: "ذهبي فاخر", color: "#78350f", grad: "linear-gradient(135deg,#78350f,#1c1917)" },
+                  ].map((bg, i) => (
+                    <button key={i} onClick={() => setBgColor(bg.color)}
+                      className="flex-shrink-0 w-20 h-14 rounded-xl border border-white/10 overflow-hidden flex items-end p-1"
+                      style={{ background: bg.grad }}
+                    >
+                      <span className="text-white text-[9px] font-bold bg-black/40 px-1 rounded">{bg.label}</span>
+                    </button>
+                  ))}
+                  <button onClick={() => bgInputRef.current?.click()}
+                    className="flex-shrink-0 w-20 h-14 rounded-xl border-2 border-dashed border-violet-500/50 flex flex-col items-center justify-center gap-1"
+                  >
+                    <span className="text-violet-400 text-lg">+</span>
+                    <span className="text-violet-400 text-[10px]">رفع صورة</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Chroma key threshold */}
+            {bgMode === "chroma" && (
+              <div className="mb-3 bg-zinc-800 rounded-2xl p-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-lg">🟩</span>
+                  <p className="text-white text-sm font-bold">وضع الشاشة الخضراء</p>
+                </div>
+                <p className="text-white/50 text-xs mb-3">ضع خلفك شاشة خضراء — المنصة ستحذفها تلقائياً وتضع الخلفية بدلاً منها</p>
+                <p className="text-white/60 text-xs mb-1">حساسية الإزالة: {chromaThreshold}</p>
+                <input type="range" min="50" max="150" value={chromaThreshold}
+                  onChange={e => setChromaThreshold(Number(e.target.value))}
+                  className="w-full accent-green-500"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ PRESENTER OVERLAY PANEL ══ */}
+      {isBroadcast && streaming && showPresenterPanel && (
+        <div className="fixed inset-x-0 bottom-0 z-50 flex items-end justify-center" onClick={() => setShowPresenterPanel(false)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-safe" onClick={e => e.stopPropagation()} dir="rtl">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Tv2 className="w-5 h-5 text-blue-400" />
+                <h3 className="text-white font-bold text-base">عرض المقدّم (إخبارية)</h3>
+              </div>
+              <button onClick={() => setShowPresenterPanel(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+
+            {/* Lower third */}
+            <div className="bg-zinc-800 rounded-2xl p-4 mb-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-white font-bold text-sm">📺 بطاقة المقدّم (Lower Third)</p>
+                <button onClick={() => setShowLowerThird(p => !p)}
+                  className={`w-12 h-6 rounded-full transition-all relative ${showLowerThird ? "bg-blue-600" : "bg-zinc-600"}`}
+                >
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${showLowerThird ? "left-6" : "left-0.5"}`} />
+                </button>
+              </div>
+              <input
+                value={presenterName}
+                onChange={e => setPresenterName(e.target.value)}
+                placeholder="اسم المقدّم — مثال: أحمد محمود"
+                className="w-full bg-zinc-700 text-white text-sm rounded-xl px-3 py-2.5 outline-none placeholder:text-white/30"
+              />
+              <input
+                value={presenterTitle}
+                onChange={e => setPresenterTitle(e.target.value)}
+                placeholder="اللقب / الوصف — مثال: مراسل أخبار"
+                className="w-full bg-zinc-700 text-white text-sm rounded-xl px-3 py-2.5 outline-none placeholder:text-white/30"
+              />
+            </div>
+
+            {/* News ticker */}
+            <div className="bg-zinc-800 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-white font-bold text-sm">📰 شريط الأخبار العاجل</p>
+                <button onClick={() => setShowTicker(p => !p)}
+                  className={`w-12 h-6 rounded-full transition-all relative ${showTicker ? "bg-red-600" : "bg-zinc-600"}`}
+                >
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${showTicker ? "left-6" : "left-0.5"}`} />
+                </button>
+              </div>
+              <input
+                value={tickerText}
+                onChange={e => setTickerText(e.target.value)}
+                placeholder="نص الشريط — مثال: عروض حصرية على جميع المنتجات..."
+                className="w-full bg-zinc-700 text-white text-sm rounded-xl px-3 py-2.5 outline-none placeholder:text-white/30"
+              />
+              {showTicker && !tickerText && (
+                <p className="text-yellow-400 text-xs">⚠️ اكتب نص الشريط أولاً</p>
+              )}
+            </div>
+
+            {/* Preview note */}
+            <p className="text-white/30 text-[11px] text-center mt-3">
+              هذه العناصر تظهر على شاشتك وعلى شاشة المشاهدين
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* JOIN MODE DIALOG — guest chooses camera or audio-only */}
       {!isBroadcast && coHostStatus === "choosing" && (
