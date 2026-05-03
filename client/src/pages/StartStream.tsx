@@ -28,15 +28,41 @@ export default function StartStream() {
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
   const [permStatus, setPermStatus] = useState<"idle"|"requesting"|"granted"|"denied">("idle");
+  const [showPermDialog, setShowPermDialog] = useState(false);
+  // pending form data waiting for permission
+  const pendingFormData = useState<any>(null);
 
-  const requestCameraPermission = async () => {
+  const requestCameraPermission = async (formData?: any) => {
     setPermStatus("requesting");
     try {
       const ms = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       ms.getTracks().forEach(t => t.stop());
       setPermStatus("granted");
+      setShowPermDialog(false);
+      // Now create the stream with the pending data
+      const data = formData || pendingFormData[0];
+      if (data) createStreamMutation.mutate(data);
     } catch {
       setPermStatus("denied");
+    }
+  };
+
+  // Called on form submit — check permission first
+  const handleSubmit = async (data: any) => {
+    // Store form data
+    pendingFormData[1](data);
+    // Try getUserMedia immediately (must be in user-gesture context)
+    setPermStatus("requesting");
+    try {
+      const ms = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      ms.getTracks().forEach(t => t.stop());
+      setPermStatus("granted");
+      // Permission OK — create the stream
+      createStreamMutation.mutate(data);
+    } catch {
+      // Permission denied/not yet given — show dialog
+      setPermStatus("denied");
+      setShowPermDialog(true);
     }
   };
 
@@ -138,94 +164,6 @@ export default function StartStream() {
     );
   }
 
-  if (permStatus !== "granted") {
-    return (
-      <div className="fixed inset-0 bg-black/50 flex items-end justify-center z-50" dir="rtl">
-        {/* Dimmed background showing behind */}
-        <div className="absolute inset-0 bg-gradient-to-b from-zinc-900 to-black opacity-90" />
-
-        {/* Bottom sheet — mimics browser native permission popup */}
-        <div className="relative w-full max-w-sm bg-white dark:bg-zinc-100 rounded-t-3xl overflow-hidden shadow-2xl">
-          {/* Top drag handle */}
-          <div className="flex justify-center pt-3 pb-1">
-            <div className="w-10 h-1 rounded-full bg-zinc-300" />
-          </div>
-
-          {/* Site header */}
-          <div className="flex items-center gap-3 px-5 py-3 border-b border-zinc-200">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-red-500 to-pink-600 flex items-center justify-center shadow-md flex-shrink-0">
-              <span className="text-white text-base">📹</span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-zinc-900 font-bold text-sm leading-tight">ads-as.com يريد</p>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <Camera className="w-3.5 h-3.5 text-zinc-500" />
-                <Mic className="w-3.5 h-3.5 text-zinc-500" />
-                <p className="text-zinc-500 text-xs">الوصول للكاميرا والميكروفون</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Permission info */}
-          <div className="px-5 py-4">
-            <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-3 mb-4">
-              <span className="text-xl mt-0.5 flex-shrink-0">🎥</span>
-              <p className="text-zinc-700 text-xs leading-relaxed">
-                لبدء البث المباشر وإيصال صورتك وصوتك للمشاهدين، يحتاج الموقع إذنك للوصول للكاميرا والميكروفون. لن تُستخدم إلا أثناء البث فقط.
-              </p>
-            </div>
-
-            {permStatus === "denied" && (
-              <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-2xl p-3 mb-4">
-                <span className="text-base flex-shrink-0">⚠️</span>
-                <p className="text-red-700 text-xs leading-relaxed">
-                  تم رفض الإذن — اذهب لإعدادات المتصفح ← إعدادات الموقع ← الكاميرا والميكروفون ← "السماح"، ثم أعد المحاولة
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Options — exactly like browser popup */}
-          <div className="border-t border-zinc-200 divide-y divide-zinc-100">
-            <button
-              onClick={requestCameraPermission}
-              disabled={permStatus === "requesting"}
-              className="w-full px-5 py-4 text-right text-blue-600 font-medium text-[15px] hover:bg-zinc-50 active:bg-zinc-100 transition-colors flex items-center gap-3 disabled:opacity-60"
-              data-testid="btn-allow-always"
-            >
-              {permStatus === "requesting" ? (
-                <span className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin flex-shrink-0" />
-              ) : (
-                <Camera className="w-4 h-4 flex-shrink-0 text-blue-500" />
-              )}
-              {permStatus === "requesting" ? "جاري طلب الإذن..." : "السماح بالاستخدام أثناء زيارة الموقع"}
-            </button>
-            <button
-              onClick={requestCameraPermission}
-              disabled={permStatus === "requesting"}
-              className="w-full px-5 py-4 text-right text-blue-600 font-medium text-[15px] hover:bg-zinc-50 active:bg-zinc-100 transition-colors flex items-center gap-3 disabled:opacity-60"
-              data-testid="btn-allow-once"
-            >
-              <span className="text-blue-500 text-base flex-shrink-0">🔓</span>
-              السماح بالاستخدام هذه المرة
-            </button>
-            <button
-              onClick={() => setLocation("/")}
-              className="w-full px-5 py-4 text-right text-red-500 font-medium text-[15px] hover:bg-red-50 active:bg-red-100 transition-colors flex items-center gap-3"
-              data-testid="btn-deny-camera"
-            >
-              <span className="text-red-400 text-base flex-shrink-0">🚫</span>
-              عدم السماح مطلقاً
-            </button>
-          </div>
-
-          {/* iOS safe-area spacer */}
-          <div className="h-6 bg-white dark:bg-zinc-100" />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="container max-w-2xl px-4 py-12">
       <div className="flex items-center gap-3 mb-8">
@@ -242,7 +180,7 @@ export default function StartStream() {
         <CardHeader><CardTitle>تفاصيل البث</CardTitle></CardHeader>
         <CardContent>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(data => createStreamMutation.mutate(data))} className="space-y-5">
+            <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-5">
               <FormField control={form.control} name="title" render={({ field }) => (
                 <FormItem>
                   <FormLabel>عنوان البث</FormLabel>
@@ -287,14 +225,92 @@ export default function StartStream() {
                   </FormItem>
                 )} />
               </div>
-              <Button type="submit" disabled={createStreamMutation.isPending} size="lg" className="w-full bg-red-500 hover:bg-red-600 text-white gap-2">
+              <Button type="submit" disabled={createStreamMutation.isPending || permStatus === "requesting"} size="lg" className="w-full bg-red-500 hover:bg-red-600 text-white gap-2">
                 <Video className="w-5 h-5" />
-                {createStreamMutation.isPending ? "جاري الإعداد..." : "ابدأ البث الآن 🔴"}
+                {permStatus === "requesting" ? "جاري التحقق من الإذن..." : createStreamMutation.isPending ? "جاري الإعداد..." : "ابدأ البث الآن 🔴"}
               </Button>
             </form>
           </Form>
         </CardContent>
       </Card>
+
+      {/* ── Permission dialog — overlay on top of form, shown ONLY after user clicks submit ── */}
+      {showPermDialog && (
+        <div className="fixed inset-0 bg-black/60 flex items-end justify-center z-50" dir="rtl">
+          <div className="w-full max-w-sm bg-white rounded-t-3xl overflow-hidden shadow-2xl">
+            {/* Drag handle */}
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="w-10 h-1 rounded-full bg-zinc-300" />
+            </div>
+
+            {/* Site header */}
+            <div className="flex items-center gap-3 px-5 py-3 border-b border-zinc-200">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-red-500 to-pink-600 flex items-center justify-center shadow-md flex-shrink-0">
+                <span className="text-white text-base">📹</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-zinc-900 font-bold text-sm leading-tight">ads-as.com يريد</p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <Camera className="w-3.5 h-3.5 text-zinc-500" />
+                  <Mic className="w-3.5 h-3.5 text-zinc-500" />
+                  <p className="text-zinc-500 text-xs">الوصول للكاميرا والميكروفون</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Info */}
+            <div className="px-5 py-4">
+              <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-3 mb-3">
+                <span className="text-xl mt-0.5 flex-shrink-0">🎥</span>
+                <p className="text-zinc-700 text-xs leading-relaxed">
+                  لبدء البث المباشر وإيصال صورتك وصوتك للمشاهدين، يحتاج الموقع إذنك للوصول للكاميرا والميكروفون.
+                </p>
+              </div>
+              {permStatus === "denied" && (
+                <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-2xl p-3">
+                  <span className="text-base flex-shrink-0">⚠️</span>
+                  <p className="text-red-700 text-xs leading-relaxed">
+                    تم رفض الإذن — اذهب لإعدادات المتصفح ← الكاميرا والميكروفون ← "السماح"، ثم أعد المحاولة
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Options */}
+            <div className="border-t border-zinc-200 divide-y divide-zinc-100">
+              <button
+                onClick={() => requestCameraPermission(pendingFormData[0])}
+                disabled={permStatus === "requesting"}
+                className="w-full px-5 py-4 text-right text-blue-600 font-medium text-[15px] hover:bg-zinc-50 active:bg-zinc-100 transition-colors flex items-center gap-3 disabled:opacity-60"
+                data-testid="btn-allow-always"
+              >
+                {permStatus === "requesting"
+                  ? <span className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin flex-shrink-0" />
+                  : <Camera className="w-4 h-4 flex-shrink-0 text-blue-500" />}
+                {permStatus === "requesting" ? "جاري طلب الإذن..." : "السماح بالاستخدام أثناء زيارة الموقع"}
+              </button>
+              <button
+                onClick={() => requestCameraPermission(pendingFormData[0])}
+                disabled={permStatus === "requesting"}
+                className="w-full px-5 py-4 text-right text-blue-600 font-medium text-[15px] hover:bg-zinc-50 active:bg-zinc-100 transition-colors flex items-center gap-3 disabled:opacity-60"
+                data-testid="btn-allow-once"
+              >
+                <span className="text-blue-500 text-base flex-shrink-0">🔓</span>
+                السماح بالاستخدام هذه المرة
+              </button>
+              <button
+                onClick={() => { setShowPermDialog(false); setPermStatus("idle"); }}
+                className="w-full px-5 py-4 text-right text-red-500 font-medium text-[15px] hover:bg-red-50 active:bg-red-100 transition-colors flex items-center gap-3"
+                data-testid="btn-deny-camera"
+              >
+                <span className="text-red-400 text-base flex-shrink-0">🚫</span>
+                عدم السماح مطلقاً
+              </button>
+            </div>
+            <div className="h-6" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
