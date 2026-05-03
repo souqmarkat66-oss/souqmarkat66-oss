@@ -20,6 +20,17 @@ import express from "express";
 import * as webpushModule from "web-push";
 const webpush: typeof webpushModule = (webpushModule as any).default || webpushModule;
 
+// Convert snake_case DB row keys to camelCase for frontend
+function toCamel(row: any): any {
+  if (!row || typeof row !== 'object') return row;
+  return Object.fromEntries(
+    Object.entries(row).map(([k, v]) => [
+      k.replace(/_([a-z])/g, (_, c) => c.toUpperCase()),
+      v
+    ])
+  );
+}
+
 // Admin user ID
 const ADMIN_USER_ID = "54219806";
 const ADMIN_EMAIL   = "souqmarkat66@gmail.com";
@@ -1038,7 +1049,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
         ORDER BY trending_score DESC
         LIMIT $1
       `, [limit]);
-      res.json(rows.rows);
+      res.json(rows.rows.map(toCamel));
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -1139,7 +1150,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
               ORDER BY created_at DESC LIMIT 50`
         );
       }
-      res.json(result.rows);
+      res.json(result.rows.map(toCamel));
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -1253,7 +1264,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       );
 
       res.json({
-        ads:   dataRes.rows,
+        ads:   dataRes.rows.map(toCamel),
         total,
         page,
         limit,
@@ -2464,7 +2475,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       } else {
         result = await db.execute(sql`SELECT * FROM ads ORDER BY created_at DESC LIMIT 50`);
       }
-      res.json(result.rows);
+      res.json(result.rows.map(toCamel));
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -4166,7 +4177,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const result = await db.execute(
         sql`SELECT * FROM ads WHERE user_id = ${userId} AND status = 'active' ORDER BY created_at DESC LIMIT 20`
       );
-      res.json(result.rows);
+      res.json(result.rows.map(toCamel));
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -4425,7 +4436,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
             )
             ORDER BY created_at DESC LIMIT 6`
       );
-      res.json(similar.rows);
+      res.json(similar.rows.map(toCamel));
     } catch { res.json([]); }
   });
 
