@@ -57,25 +57,70 @@ export default function StartStream() {
     onError: (e: any) => toast({ variant: "destructive", title: "خطأ", description: e.message }),
   });
 
-  /* زر "ابدأ البث" — onClick مباشر يفتح الكاميرا ثم ينشئ البث */
+  /* زر "ابدأ البث" — onClick مباشر يفتح الكاميرا ثم ينشئ البث
+     CRITICAL: getUserMedia يجب أن يُستدعى مباشرة داخل الـ user gesture (الضغطة)
+     بدون أي await قبله، وإلا iOS Safari يرفض بصمت                        */
   const handleStart = async () => {
-    const valid = await form.trigger();
-    if (!valid) return;
-    const data = form.getValues();
+    /* تحقق متزامن من البيانات (sync) — مش بيكسر الـ user-gesture */
+    const parsed = schema.safeParse(form.getValues());
+    if (!parsed.success) {
+      /* عرض أخطاء النموذج للمستخدم */
+      await form.trigger();
+      const firstError = parsed.error.errors[0]?.message || "تأكد من ملء البيانات";
+      toast({ variant: "destructive", title: "بيانات ناقصة", description: firstError });
+      return;
+    }
+    const data = parsed.data;
+
+    /* تحقق إن الموقع HTTPS — getUserMedia مش بيشتغل على HTTP */
+    if (typeof window !== "undefined" && window.location.protocol !== "https:" && window.location.hostname !== "localhost") {
+      toast({ variant: "destructive", title: "⚠️ يجب استخدام HTTPS", description: "الكاميرا تعمل فقط على المواقع المؤمّنة (https). جرّب فتح الموقع بـ https" });
+      return;
+    }
+
+    /* تحقق من دعم المتصفح */
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast({ variant: "destructive", title: "المتصفح غير مدعوم", description: "متصفحك لا يدعم البث المباشر. جرّب Chrome أو Safari الحديث" });
+      return;
+    }
+
     setLoading(true);
+
+    /* فتح الكاميرا في لحظة الضغط (user-gesture) ونحتفظ بالـ stream */
+    let ms: MediaStream;
     try {
-      /* فتح الكاميرا في لحظة الضغط (user-gesture) ونحتفظ بالـ stream */
-      const ms = await navigator.mediaDevices.getUserMedia({
+      ms = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
-      /* نخزّن الـ stream في window عشان LiveStream يستخدمه مباشرة بدون ما يطلب الكاميرا تاني */
-      (window as any).__pendingCameraStream = ms;
-    } catch {
-      toast({ variant: "destructive", title: "⚠️ الكاميرا محجوبة", description: "افتح إعدادات المتصفح وأعطِ الموقع إذن الكاميرا والميكروفون، ثم أعد المحاولة" });
+    } catch (err: any) {
       setLoading(false);
+      const name = err?.name || "";
+      let title = "⚠️ تعذّر فتح الكاميرا";
+      let description = "حدث خطأ غير متوقع. أعد المحاولة";
+      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        title = "🚫 الإذن مرفوض";
+        description = "افتح إعدادات المتصفح → إعدادات الموقع → اسمح بالكاميرا والميكروفون، ثم أعد المحاولة";
+      } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        title = "📷 لا توجد كاميرا";
+        description = "لم نجد كاميرا في جهازك. تأكد إنها متصلة وغير مستخدمة من تطبيق آخر";
+      } else if (name === "NotReadableError" || name === "TrackStartError") {
+        title = "🔒 الكاميرا مشغولة";
+        description = "الكاميرا مستخدمة بواسطة تطبيق آخر. اقفله ثم أعد المحاولة";
+      } else if (name === "OverconstrainedError") {
+        title = "⚙️ إعدادات غير مدعومة";
+        description = "كاميرتك لا تدعم الإعدادات المطلوبة. أعد المحاولة";
+      } else if (name === "SecurityError") {
+        title = "🔐 مشكلة أمان";
+        description = "تأكد إن الموقع مفتوح بـ https وليس http";
+      }
+      toast({ variant: "destructive", title, description });
       return;
     }
+
+    /* نخزّن الـ stream في window عشان LiveStream يستخدمه مباشرة بدون ما يطلب الكاميرا تاني */
+    (window as any).__pendingCameraStream = ms;
+
     try {
       const res = await fetch("/api/streams", {
         method: "POST",
@@ -83,12 +128,18 @@ export default function StartStream() {
         body: JSON.stringify(data),
         credentials: "include",
       });
-      if (!res.ok) { const e = await res.json(); throw new Error(e.message); }
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({ message: "فشل إنشاء البث" }));
+        throw new Error(e.message || "فشل إنشاء البث");
+      }
       const stream = await res.json();
-      toast({ title: "تم إنشاء البث!", description: "سيبدأ البث المباشر الآن" });
+      toast({ title: "✅ تم إنشاء البث!", description: "سيبدأ البث المباشر الآن" });
       setLocation(`/streams/${stream.id}?mode=broadcast`);
     } catch (e: any) {
-      toast({ variant: "destructive", title: "خطأ", description: e.message });
+      /* لو فشل إنشاء البث، نقفل الكاميرا علشان مفضلش شغالة في الخلفية */
+      try { ms.getTracks().forEach(t => t.stop()); } catch {}
+      delete (window as any).__pendingCameraStream;
+      toast({ variant: "destructive", title: "خطأ", description: e?.message || "حدث خطأ" });
       setLoading(false);
     }
   };
