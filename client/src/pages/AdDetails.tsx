@@ -490,10 +490,18 @@ function VideoPlayer({ src }: { src: string }) {
 
   useEffect(() => {
     const v = videoRef.current;
-    if (!v) return;
+    if (!v || !src) return;
     v.muted = true;
     v.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
   }, [src]);
+
+  if (!src || !src.trim()) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-black text-muted-foreground/50" data-testid="video-empty-placeholder">
+        <span className="text-6xl">🎬</span>
+      </div>
+    );
+  }
 
   const toggleMute = () => {
     if (videoRef.current) {
@@ -913,7 +921,7 @@ export default function AdDetails() {
           <div className="bg-card border rounded-3xl overflow-hidden shadow-sm">
             {/* Media */}
             <div className="aspect-video bg-black relative overflow-hidden rounded-t-3xl">
-              {ad.mediaType === 'video' ? (
+              {ad.mediaType === 'video' && ad.mediaUrl ? (
                 <VideoPlayer src={ad.mediaUrl} />
               ) : ad.mediaUrl ? (
                 <ImageSlideshow images={[ad.mediaUrl]} />

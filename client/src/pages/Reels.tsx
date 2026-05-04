@@ -321,7 +321,7 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
 
   // Auto-play/pause video when active — honour global mute state
   useEffect(() => {
-    if (!videoRef.current || isImageMode) return;
+    if (!videoRef.current || isImageMode || !reel.videoUrl) return;
     if (isActive) {
       videoRef.current.muted = globalMuted;
       videoRef.current.volume = globalMuted ? 0 : 1;
@@ -329,7 +329,7 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
     } else {
       videoRef.current.pause();
     }
-  }, [isActive, isImageMode, globalMuted]);
+  }, [isActive, isImageMode, globalMuted, reel.videoUrl]);
 
   // Auto-advance slideshow every 3s when active
   useEffect(() => {
@@ -557,7 +557,7 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
               allowFullScreen
               style={{ border: 'none' }}
             />
-          ) : (
+          ) : reel.videoUrl ? (
             <video
               ref={videoRef}
               src={reel.videoUrl}
@@ -568,6 +568,10 @@ function ReelCard({ reel, isActive, isOwner, onEdit, onDelete, onEnded, globalMu
               onEnded={() => onEnded?.()}
               onClick={() => videoRef.current?.paused ? videoRef.current.play() : videoRef.current?.pause()}
             />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-black text-white/30" data-testid="reel-video-empty">
+              <span className="text-6xl">🎬</span>
+            </div>
           )}
           {/* TAP TO UNMUTE — only for local videos */}
           {!isYouTube && muted && showUnmuteHint && (
