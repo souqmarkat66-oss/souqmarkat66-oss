@@ -1,4 +1,5 @@
 import { Switch, Route } from "wouter";
+import { lazy, Suspense } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -9,36 +10,44 @@ import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
 
 import Home from "@/pages/Home";
-import Ads from "@/pages/Ads";
-import AdDetails from "@/pages/AdDetails";
-import CreateAd from "@/pages/CreateAd";
-import Channels from "@/pages/Channels";
-import ChannelPage from "@/pages/ChannelPage";
-import LiveStream from "@/pages/LiveStream";
-import LiveStreamList from "@/pages/LiveStreamList";
-import StartStream from "@/pages/StartStream";
-import Campaigns from "@/pages/Campaigns";
-import AdminPanel from "@/pages/AdminPanel";
-import Revenue from "@/pages/Revenue";
-import Payments from "@/pages/Payments";
-import Reels from "@/pages/Reels";
-import Login from "@/pages/Login";
-import MyContent from "@/pages/MyContent";
-import EmbedGuide from "@/pages/EmbedGuide";
-import MediaLibrary from "@/pages/MediaLibrary";
-import Messages from "@/pages/Messages";
-import Profile from "@/pages/Profile";
-import MyDashboard from "@/pages/MyDashboard";
-import Social from "@/pages/Social";
-import Help from "@/pages/Help";
-import Consultations from "@/pages/Consultations";
-import Coupons from "@/pages/Coupons";
+import NotFound from "@/pages/not-found";
+
+const Ads = lazy(() => import("@/pages/Ads"));
+const AdDetails = lazy(() => import("@/pages/AdDetails"));
+const CreateAd = lazy(() => import("@/pages/CreateAd"));
+const Channels = lazy(() => import("@/pages/Channels"));
+const ChannelPage = lazy(() => import("@/pages/ChannelPage"));
+const LiveStream = lazy(() => import("@/pages/LiveStream"));
+const LiveStreamList = lazy(() => import("@/pages/LiveStreamList"));
+const StartStream = lazy(() => import("@/pages/StartStream"));
+const Campaigns = lazy(() => import("@/pages/Campaigns"));
+const AdminPanel = lazy(() => import("@/pages/AdminPanel"));
+const Revenue = lazy(() => import("@/pages/Revenue"));
+const Payments = lazy(() => import("@/pages/Payments"));
+const Reels = lazy(() => import("@/pages/Reels"));
+const Login = lazy(() => import("@/pages/Login"));
+const MyContent = lazy(() => import("@/pages/MyContent"));
+const EmbedGuide = lazy(() => import("@/pages/EmbedGuide"));
+const MediaLibrary = lazy(() => import("@/pages/MediaLibrary"));
+const Messages = lazy(() => import("@/pages/Messages"));
+const Profile = lazy(() => import("@/pages/Profile"));
+const MyDashboard = lazy(() => import("@/pages/MyDashboard"));
+const Social = lazy(() => import("@/pages/Social"));
+const Help = lazy(() => import("@/pages/Help"));
+const Consultations = lazy(() => import("@/pages/Consultations"));
+const Coupons = lazy(() => import("@/pages/Coupons"));
+
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import { GlobalAssistant } from "@/components/GlobalAssistant";
 import { PushSetup } from "@/components/PushSetup";
 import { InterestOnboarding } from "@/components/InterestOnboarding";
 import BottomNav from "@/components/BottomNav";
-import NotFound from "@/pages/not-found";
+
+const PageLoader = () => (
+  <div className="flex h-[60vh] items-center justify-center" data-testid="page-loader">
+    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+  </div>
+);
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { user, isLoading } = useAuth();
@@ -55,7 +64,11 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
 function ReelsPage() {
   const { user, isLoading } = useAuth();
   if (isLoading) return <div className="h-screen bg-black flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-white" /></div>;
-  return <Reels />;
+  return (
+    <Suspense fallback={<div className="h-screen bg-black flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-white" /></div>}>
+      <Reels />
+    </Suspense>
+  );
 }
 
 function Router() {
@@ -70,6 +83,7 @@ function Router() {
           <PushSetup />
           <InterestOnboarding />
           <main className="flex-1 bg-background pb-16 lg:pb-0">
+            <Suspense fallback={<PageLoader />}>
             <Switch>
               <Route path="/" component={Home} />
               <Route path="/ads" component={Ads} />
@@ -127,6 +141,7 @@ function Router() {
               </Route>
               <Route component={NotFound} />
             </Switch>
+            </Suspense>
           </main>
           <AppFooter />
           <BottomNav />
