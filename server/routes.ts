@@ -3657,13 +3657,48 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
-  // ─── AI TEXT-TO-SPEECH (Egyptian Arabic via gpt-audio) ───────
+  // ─── AI TEXT-TO-SPEECH (Egyptian Arabic — high quality via gpt-4o-mini-tts) ───────
   app.post("/api/ai/tts", isAuthenticated, async (req: any, res) => {
     try {
       const { text, voice = "nova" } = req.body;
       if (!text || text.trim().length < 2) return res.status(400).json({ message: "النص مطلوب" });
 
-      const audioBuffer = await textToSpeech(text.trim(), voice as any, "mp3");
+      // Map our gender voices to OpenAI voices that handle Arabic well
+      // nova = warm female, onyx = deep male — both speak clear Egyptian when instructed
+      const voiceMap: Record<string, string> = {
+        nova:    "nova",     // أنثى دافئة
+        onyx:    "onyx",     // ذكر عميق
+        shimmer: "shimmer",
+        alloy:   "alloy",
+        echo:    "echo",
+        fable:   "fable",
+      };
+      const ttsVoice = voiceMap[voice] || "nova";
+      const isFemale = ttsVoice === "nova" || ttsVoice === "shimmer" || ttsVoice === "alloy";
+
+      // Egyptian Arabic accent instructions — applied via the dedicated TTS instructions param
+      const instructions = isFemale
+        ? "Speak in clear, warm, friendly Egyptian Arabic (اللهجة المصرية القاهرية العامية). Use a natural conversational tone like an Egyptian woman speaking to a friend. Pronounce every word clearly with proper Egyptian intonation — say 'ج' as hard G (gim), 'ق' softly, drop formal endings. Sound expressive, energetic, and engaging like a TV ad presenter from Cairo. Do not use Standard/Classical Arabic (فصحى)."
+        : "Speak in clear, confident Egyptian Arabic (اللهجة المصرية القاهرية العامية). Use a natural, friendly tone like an Egyptian man presenting an ad on TV. Pronounce every word clearly with authentic Egyptian intonation — 'ج' as hard G (gim), 'ق' softly, drop formal endings. Sound warm, trustworthy, and energetic. Do not use Standard/Classical Arabic (فصحى).";
+
+      const { openai } = await import("./replit_integrations/audio");
+      let audioBuffer: Buffer;
+
+      try {
+        // Preferred path: dedicated TTS endpoint with instructions (much better quality)
+        const speech = await openai.audio.speech.create({
+          model: "gpt-4o-mini-tts",
+          voice: ttsVoice as any,
+          input: text.trim(),
+          instructions,
+          response_format: "mp3",
+        } as any);
+        audioBuffer = Buffer.from(await speech.arrayBuffer());
+      } catch (primaryErr: any) {
+        console.warn("[TTS] gpt-4o-mini-tts failed, falling back:", primaryErr?.message);
+        // Fallback to gpt-audio
+        audioBuffer = await textToSpeech(text.trim(), ttsVoice as any, "mp3");
+      }
 
       if (!audioBuffer || audioBuffer.length < 100) {
         return res.status(500).json({ message: "الصوت لم يتم توليده بشكل صحيح، حاول مرة أخرى" });
