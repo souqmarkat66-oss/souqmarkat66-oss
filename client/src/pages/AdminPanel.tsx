@@ -14,6 +14,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 import AdminPinLock from "@/components/AdminPinLock";
+import AdminAiControl from "@/pages/AdminAiControl";
 import {
   LayoutDashboard, Users, Megaphone, Film, Tv, Radio, Flag, Banknote,
   ShieldX, Settings, Bell, BarChart2, Eye, TrendingUp, DollarSign,
@@ -40,8 +41,10 @@ const NAV = [
   { key: "payments",       label: "طلبات السحب",          icon: Banknote,        color: "text-green-400" },
   { key: "boostorders",    label: "طلبات التعزيز",         icon: Zap,             color: "text-orange-400" },
   { key: "payreceipts",    label: "إيصالات الدفع",          icon: Banknote,        color: "text-emerald-500" },
+  { key: "walletcharges",  label: "طلبات شحن المحفظة",    icon: Banknote,        color: "text-emerald-400" },
   { key: "renewalorders",  label: "طلبات التجديد",           icon: RefreshCw,       color: "text-blue-400" },
   { key: "reports",        label: "البلاغات",             icon: Flag,            color: "text-yellow-400" },
+  { key: "ratings",        label: "تقييمات البائعين",      icon: Star,            color: "text-yellow-400" },
   { key: "fraud",          label: "كشف الاحتيال",         icon: ShieldX,         color: "text-red-500" },
   { key: "analytics",      label: "تقرير الأداء",          icon: PieChart,        color: "text-sky-400" },
   { key: "revenue",        label: "الإيرادات",            icon: DollarSign,      color: "text-emerald-400" },
@@ -49,9 +52,11 @@ const NAV = [
   { key: "media",          label: "مكتبة الملفات",         icon: FolderOpen,      color: "text-lime-400" },
   { key: "pricing",        label: "إدارة الأسعار",          icon: DollarSign,      color: "text-yellow-400" },
   { key: "aipricing",      label: "أسعار الذكاء الاصطناعي", icon: Sparkles,       color: "text-violet-400" },
+  { key: "ai_control",     label: "تحكم الذكاء الاصطناعي", icon: Sparkles,        color: "text-violet-400" },
   { key: "coins",          label: "نظام العملات",          icon: Gift,            color: "text-yellow-400" },
   { key: "settings",       label: "إعدادات المنصة",       icon: Settings,        color: "text-gray-400" },
   { key: "activity",       label: "سجل النشاط",           icon: Activity,        color: "text-slate-400" },
+  { key: "admins",         label: "إدارة الأدمن",          icon: Shield,          color: "text-red-400" },
 ];
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -202,8 +207,10 @@ export default function AdminPanel() {
           {section === "payments"   && <PaymentsSection logAction={logAction} />}
           {section === "boostorders" && <BoostOrdersSection logAction={logAction} />}
           {section === "payreceipts"   && <PayReceiptsSection />}
+          {section === "walletcharges" && <WalletChargesSection logAction={logAction} />}
           {section === "renewalorders" && <RenewalOrdersSection />}
           {section === "reports"       && <ReportsSection logAction={logAction} />}
+          {section === "ratings"       && <RatingsSection logAction={logAction} />}
           {section === "fraud"      && <FraudSection />}
           {section === "analytics"  && <AnalyticsSection />}
           {section === "revenue"    && <RevenueSection />}
@@ -211,9 +218,11 @@ export default function AdminPanel() {
           {section === "media"      && <MediaSection logAction={logAction} />}
           {section === "pricing"    && <PricingSection />}
           {section === "aipricing"  && <AiPricingSection />}
+          {section === "ai_control" && <AdminAiControl />}
           {section === "coins"      && <CoinsSection logAction={logAction} />}
           {section === "settings"   && <SettingsSection logAction={logAction} />}
           {section === "activity"   && <ActivitySection />}
+          {section === "admins"     && <AdminsSection />}
         </div>
       </main>
     </div>
@@ -3541,6 +3550,599 @@ function CoinsSection({ logAction }: { logAction: any }) {
         </div>
       )}
 
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 💰 WALLET CHARGES SECTION — طلبات شحن المحفظة
+// ═══════════════════════════════════════════════════════════════
+function WalletChargesSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [note, setNote] = useState<Record<number, string>>({});
+
+  const { data: orders = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/wallet-topups"],
+    queryFn: () => fetch("/api/admin/wallet-topups", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 30_000,
+  });
+
+  const { data: ws } = useQuery<any>({
+    queryKey: ["/api/admin/wallet-stats"],
+    queryFn: () => fetch("/api/admin/wallet-stats", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 30_000,
+  });
+
+  const pending = (Array.isArray(orders) ? orders : []).filter((o: any) => o.status === "pending");
+  const done    = (Array.isArray(orders) ? orders : []).filter((o: any) => o.status !== "pending");
+
+  const handleAction = async (id: number, action: "approve" | "reject") => {
+    try {
+      const res = await fetch(`/api/admin/wallet-topups/${id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, adminNote: note[id] || undefined }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        qc.invalidateQueries({ queryKey: ["/api/admin/wallet-topups"] });
+        qc.invalidateQueries({ queryKey: ["/api/admin/wallet-stats"] });
+        toast({ title: action === "approve" ? "✅ تمت الموافقة وإضافة الرصيد" : "✅ تم الرفض" });
+        logAction?.(`wallet_topup_${action}`, `طلب #${id}`);
+      } else {
+        toast({ variant: "destructive", title: data.message || "خطأ" });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "خطأ في الاتصال" });
+    }
+  };
+
+  return (
+    <div className="space-y-4" dir="rtl">
+      <div className="flex items-center gap-3">
+        <h2 className="font-bold text-lg">طلبات شحن المحفظة</h2>
+        {pending.length > 0 && (
+          <span className="bg-emerald-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pending.length} معلق</span>
+        )}
+      </div>
+
+      {ws && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-gradient-to-br from-emerald-500/10 to-transparent p-4">
+            <div className="text-xs text-muted-foreground mb-0.5">💰 إجمالي ما استلمته</div>
+            <div className="text-2xl font-bold text-emerald-600">{Number(ws.totalCollectedEGP || 0).toFixed(2)}</div>
+            <div className="text-xs text-muted-foreground">ج.م · {ws.totalApprovedCount || 0} عملية مقبولة</div>
+          </div>
+          <div className="rounded-2xl border border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-500/10 to-transparent p-4">
+            <div className="text-xs text-muted-foreground mb-0.5">🏦 رصيد في المحافظ</div>
+            <div className="text-2xl font-bold text-blue-600">{Number(ws.totalCurrentBalanceEGP || 0).toFixed(2)}</div>
+            <div className="text-xs text-muted-foreground">ج.م لدى {ws.usersWithBalance || 0} مستخدم</div>
+          </div>
+          <div className="rounded-2xl border border-purple-200 dark:border-purple-800 bg-gradient-to-br from-purple-500/10 to-transparent p-4">
+            <div className="text-xs text-muted-foreground mb-0.5">⚡ أُنفق على الخدمات</div>
+            <div className="text-2xl font-bold text-purple-600">{Number(ws.totalSpentEGP || 0).toFixed(2)}</div>
+            <div className="text-xs text-muted-foreground">ج.م (تعزيز + تجديد + AI)</div>
+          </div>
+          <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-gradient-to-br from-amber-500/10 to-transparent p-4">
+            <div className="text-xs text-muted-foreground mb-0.5">⏳ طلبات معلقة</div>
+            <div className="text-2xl font-bold text-amber-600">{Number(ws.pendingAmountEGP || 0).toFixed(2)}</div>
+            <div className="text-xs text-muted-foreground">ج.م · {ws.pendingCount || 0} طلب</div>
+          </div>
+        </div>
+      )}
+
+      {isLoading && <div className="text-center py-12 text-muted-foreground">جارٍ التحميل...</div>}
+
+      {!isLoading && pending.length === 0 && done.length === 0 && (
+        <Card className="rounded-2xl border border-border/50">
+          <CardContent className="py-12 text-center text-muted-foreground">
+            <Banknote className="w-10 h-10 mx-auto mb-3 opacity-30" />
+            لا يوجد طلبات شحن محفظة حتى الآن
+          </CardContent>
+        </Card>
+      )}
+
+      {pending.length > 0 && (
+        <Card className="rounded-2xl border border-emerald-200 dark:border-emerald-800">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base text-emerald-600">🕐 طلبات قيد المراجعة ({pending.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {pending.map((o: any) => (
+              <div key={o.id} className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 space-y-2">
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-xs font-bold text-emerald-700 dark:text-emerald-400" data-testid={`text-wallet-order-${o.id}`}>{o.order_number}</span>
+                      <span className="text-xs font-bold text-green-600">{o.amount_egp} ج.م</span>
+                      <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded-full font-bold">{o.payment_method}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {o.first_name} {o.last_name}
+                      {o.email && <span className="ml-1">({o.email})</span>}
+                      {o.payment_ref && <span> — مرجع: <span className="font-mono font-bold">{o.payment_ref}</span></span>}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      رصيد حالي: <span className="font-bold text-primary">{o.balance_egp || 0} ج.م</span>
+                      {" | "}{o.created_at ? new Date(o.created_at).toLocaleString("ar-EG") : ""}
+                    </div>
+                    <input
+                      value={note[o.id] || ""}
+                      onChange={e => setNote(n => ({ ...n, [o.id]: e.target.value }))}
+                      placeholder="ملاحظة للمستخدم (اختياري)"
+                      className="mt-1.5 w-full text-xs border rounded-lg px-2 py-1 bg-background"
+                      data-testid={`input-wallet-note-${o.id}`}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => handleAction(o.id, "approve")}
+                      className="px-3 py-1.5 rounded-lg bg-green-500 hover:bg-green-600 text-white text-xs font-bold transition-all flex items-center gap-1"
+                      data-testid={`btn-approve-wallet-${o.id}`}
+                    >
+                      <CheckCircle className="w-3 h-3" /> قبول ✓
+                    </button>
+                    <button
+                      onClick={() => handleAction(o.id, "reject")}
+                      className="px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-bold transition-all flex items-center gap-1"
+                      data-testid={`btn-reject-wallet-${o.id}`}
+                    >
+                      <XCircle className="w-3 h-3" /> رفض ✗
+                    </button>
+                  </div>
+                </div>
+                {o.screenshot_url && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1 font-semibold">📸 صورة الإيصال:</p>
+                    <a href={o.screenshot_url} target="_blank" rel="noopener noreferrer">
+                      <img
+                        src={o.screenshot_url}
+                        alt="إيصال الدفع"
+                        className="w-full max-h-48 object-contain rounded-lg border border-emerald-200 dark:border-emerald-800 cursor-pointer hover:opacity-90 transition-opacity"
+                        data-testid={`img-wallet-receipt-${o.id}`}
+                      />
+                    </a>
+                  </div>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {done.length > 0 && (
+        <Card className="rounded-2xl border border-border/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base text-muted-foreground">سجل الطلبات المكتملة</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {done.slice(0, 30).map((o: any) => (
+              <div key={o.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-muted/30 border border-border/40">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-xs">{o.order_number}</span>
+                    <span className="font-bold text-xs text-green-600">{o.amount_egp} ج.م</span>
+                    <span className="text-xs text-muted-foreground">{o.payment_method}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">{o.first_name} {o.last_name}</div>
+                </div>
+                <StatusBadge status={o.status === "approved" ? "approved" : o.status === "rejected" ? "rejected" : "pending"} />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ⭐ RATINGS SECTION — تقييمات البائعين
+// ═══════════════════════════════════════════════════════════════
+function RatingsSection({ logAction }: { logAction: any }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState<"all" | "user" | "ad">("all");
+
+  const { data: ratings = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/ratings", filterType],
+    queryFn: () => fetch(`/api/admin/ratings?type=${filterType}`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  const deleteRatingMutation = useMutation({
+    mutationFn: (id: number) => fetch(`/api/admin/ratings/${id}`, { method: "DELETE", credentials: "include" }).then(r => r.json()),
+    onSuccess: (_: any, id: number) => {
+      toast({ title: "✅ تم حذف التقييم" });
+      logAction?.("delete_rating", { id });
+      qc.invalidateQueries({ queryKey: ["/api/admin/ratings"] });
+    },
+  });
+
+  function StarDisplay({ value }: { value: number }) {
+    return (
+      <div className="flex gap-0.5">
+        {[1,2,3,4,5].map(n => (
+          <Star key={n} className={`w-3.5 h-3.5 ${n <= value ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground/20"}`} />
+        ))}
+      </div>
+    );
+  }
+
+  const safeRatings: any[] = Array.isArray(ratings) ? ratings : [];
+  const getName  = (r: any) => r.userName  ?? r.user_name  ?? "";
+  const getType  = (r: any) => r.targetType ?? r.target_type ?? "";
+  const getId    = (r: any) => r.targetId   ?? r.target_id   ?? "";
+  const getDate  = (r: any) => r.createdAt  ?? r.created_at  ?? null;
+
+  const filtered = safeRatings.filter((r: any) =>
+    !search ||
+    getName(r).toLowerCase().includes(search.toLowerCase()) ||
+    r.review?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const avgRating = safeRatings.length > 0
+    ? (safeRatings.reduce((s: number, r: any) => s + r.rating, 0) / safeRatings.length).toFixed(1)
+    : "0.0";
+
+  const dist = [5,4,3,2,1].map(star => ({
+    star,
+    count: safeRatings.filter((r: any) => r.rating === star).length,
+    pct: safeRatings.length ? Math.round(safeRatings.filter((r: any) => r.rating === star).length / safeRatings.length * 100) : 0,
+  }));
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="rounded-2xl border-border/50">
+          <CardContent className="p-4 text-center">
+            <Star className="w-6 h-6 mx-auto mb-2 fill-yellow-400 text-yellow-400" />
+            <p className="text-3xl font-black text-yellow-500">{avgRating}</p>
+            <p className="text-xs text-muted-foreground">متوسط التقييم</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-2xl border-border/50">
+          <CardContent className="p-4 text-center">
+            <MessageSquare className="w-6 h-6 mx-auto mb-2 text-blue-500" />
+            <p className="text-3xl font-black">{safeRatings.length}</p>
+            <p className="text-xs text-muted-foreground">إجمالي التقييمات</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-2xl border-border/50">
+          <CardContent className="p-4 text-center">
+            <Users className="w-6 h-6 mx-auto mb-2 text-purple-500" />
+            <p className="text-3xl font-black">{safeRatings.filter((r: any) => getType(r) === "user").length}</p>
+            <p className="text-xs text-muted-foreground">تقييمات البائعين</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-2xl border-border/50">
+          <CardContent className="p-4 text-center">
+            <Megaphone className="w-6 h-6 mx-auto mb-2 text-orange-500" />
+            <p className="text-3xl font-black">{safeRatings.filter((r: any) => getType(r) === "ad").length}</p>
+            <p className="text-xs text-muted-foreground">تقييمات الإعلانات</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {safeRatings.length > 0 && (
+        <Card className="rounded-2xl border-border/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">توزيع التقييمات</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {dist.map(({ star, count, pct }) => (
+                <div key={star} className="flex items-center gap-3">
+                  <div className="flex items-center gap-1 w-12 shrink-0">
+                    <Star className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" />
+                    <span className="text-sm font-bold">{star}</span>
+                  </div>
+                  <div className="flex-1 bg-muted rounded-full h-2.5 overflow-hidden">
+                    <div className="h-full bg-yellow-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-xs text-muted-foreground w-16 text-left">{count} ({pct}%)</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="flex gap-3 flex-wrap items-center">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            placeholder="ابحث في التقييمات..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="pr-9 h-9 rounded-xl"
+            data-testid="input-search-ratings"
+          />
+        </div>
+        <div className="flex gap-2">
+          {(["all","user","ad"] as const).map(type => (
+            <button
+              key={type}
+              onClick={() => setFilterType(type)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+                filterType === type ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/50"
+              }`}
+              data-testid={`filter-ratings-${type}`}
+            >
+              {type === "all" ? "الكل" : type === "user" ? "تقييمات البائعين" : "تقييمات الإعلانات"}
+            </button>
+          ))}
+        </div>
+        <Badge variant="secondary">{filtered.length} تقييم</Badge>
+      </div>
+
+      {isLoading ? (
+        <div className="text-center py-12 text-muted-foreground">جارٍ التحميل...</div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-16 text-muted-foreground">
+          <Star className="w-12 h-12 mx-auto mb-3 opacity-20" />
+          <p>لا توجد تقييمات</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((r: any) => (
+            <div
+              key={r.id}
+              className="flex items-start gap-4 p-4 bg-card border border-border/60 rounded-2xl hover:shadow-sm transition-all"
+              data-testid={`rating-${r.id}`}
+            >
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/30 to-secondary/30 flex items-center justify-center text-white font-bold text-sm shrink-0">
+                {getName(r)?.[0] || "م"}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className="font-semibold text-sm">{getName(r)}</span>
+                  <StarDisplay value={r.rating} />
+                  <Badge variant="outline" className="text-[10px] h-4">
+                    {getType(r) === "user" ? "بائع" : "إعلان"}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {getDate(r) ? (() => { try { return format(new Date(getDate(r)), "d MMM yyyy", { locale: ar }); } catch { return ""; } })() : ""}
+                  </span>
+                </div>
+                {r.review && (
+                  <p className="text-sm text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">{r.review}</p>
+                )}
+                <p className="text-xs text-muted-foreground/60 mt-1">
+                  المستهدف: {getType(r) === "user" ? "مستخدم" : "إعلان"} #{getId(r)}
+                </p>
+              </div>
+              <Button
+                size="sm" variant="ghost"
+                className="text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 h-8 w-8 p-0 shrink-0"
+                onClick={() => deleteRatingMutation.mutate(r.id)}
+                disabled={deleteRatingMutation.isPending}
+                data-testid={`btn-delete-rating-${r.id}`}
+                title="حذف التقييم"
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 🛡️ ADMINS SECTION — إدارة الأدمن
+// ═══════════════════════════════════════════════════════════════
+function AdminsSection() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [searchUser, setSearchUser] = useState("");
+  const [selectedUser, setSelectedUser] = useState<any>(null);
+
+  const { data: adminsData, isLoading } = useQuery<any>({
+    queryKey: ["/api/admin/admins"],
+    queryFn: () => fetch("/api/admin/admins", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const { data: allUsers = [] } = useQuery<any[]>({
+    queryKey: ["/api/admin/users", searchUser],
+    queryFn: () => fetch(`/api/admin/users?search=${encodeURIComponent(searchUser)}`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  const addMutation = useMutation({
+    mutationFn: (userId: string) =>
+      fetch("/api/admin/admins/add", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId }) }).then(r => r.json()),
+    onSuccess: () => {
+      toast({ title: "✅ تم منح صلاحية الأدمن" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/admins"] });
+      setSelectedUser(null);
+      setSearchUser("");
+    },
+    onError: () => toast({ variant: "destructive", title: "خطأ في إضافة الأدمن" }),
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (userId: string) =>
+      fetch("/api/admin/admins/remove", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId }) }).then(r => r.json()),
+    onSuccess: () => {
+      toast({ title: "✅ تم سحب صلاحية الأدمن" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/admins"] });
+    },
+    onError: () => toast({ variant: "destructive", title: "خطأ في إزالة الأدمن" }),
+  });
+
+  const extraAdmins: any[] = adminsData?.extra || [];
+  const hardcoded: any[]   = adminsData?.hardcoded || [];
+
+  const safeUsers: any[] = Array.isArray(allUsers) ? allUsers : [];
+  const filteredUsers = safeUsers.filter(u =>
+    !hardcoded.some(h => h.id === u.id) &&
+    !extraAdmins.some(e => e.id === u.id)
+  );
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      <div>
+        <h2 className="text-2xl font-bold flex items-center gap-2">
+          <Shield className="w-6 h-6 text-red-500" />
+          إدارة الأدمن
+        </h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          أضف أو أزل صلاحيات الأدمن لأي مستخدم في المنصة
+        </p>
+      </div>
+
+      <div className="rounded-2xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 p-5 space-y-3">
+        <div className="flex items-center gap-2 mb-1">
+          <Shield className="w-4 h-4 text-red-500" />
+          <h3 className="font-bold text-red-700 dark:text-red-400">سوبر أدمن (لا يمكن إزالتهم)</h3>
+        </div>
+        {hardcoded.map((h: any) => (
+          <div key={h.id} className="flex items-center gap-3 bg-white dark:bg-black/30 rounded-xl px-4 py-2.5 border border-red-200/50">
+            <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center">
+              <Shield className="w-4 h-4 text-red-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-bold text-sm">{h.email}</p>
+              <p className="text-[10px] text-muted-foreground font-mono">{h.id}</p>
+            </div>
+            <span className="text-[10px] bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 font-bold px-2 py-0.5 rounded-full">
+              سوبر أدمن
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-2xl border bg-card p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <Users className="w-4 h-4 text-primary" />
+          <h3 className="font-bold">الأدمن المضافون ({extraAdmins.length})</h3>
+        </div>
+        {isLoading ? (
+          <div className="text-sm text-muted-foreground py-4 text-center">جاري التحميل...</div>
+        ) : extraAdmins.length === 0 ? (
+          <div className="text-sm text-muted-foreground py-6 text-center border-2 border-dashed rounded-xl">
+            لا يوجد أدمن مضافون بعد — أضف من القائمة أدناه
+          </div>
+        ) : (
+          extraAdmins.map((u: any) => (
+            <div key={u.id} className="flex items-center gap-3 bg-muted/30 rounded-xl px-4 py-2.5 border">
+              {u.profile_image_url ? (
+                <img src={u.profile_image_url} className="w-9 h-9 rounded-full object-cover" alt="" />
+              ) : (
+                <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Users className="w-4 h-4 text-primary" />
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="font-bold text-sm">{u.first_name} {u.last_name}</p>
+                <p className="text-[10px] text-muted-foreground">{u.email || u.phone || "—"}</p>
+                <p className="text-[10px] text-muted-foreground font-mono">{u.id}</p>
+              </div>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="text-xs h-8 gap-1"
+                onClick={() => removeMutation.mutate(u.id)}
+                disabled={removeMutation.isPending}
+                data-testid={`btn-remove-admin-${u.id}`}
+              >
+                <Trash2 className="w-3 h-3" />
+                إزالة
+              </Button>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="rounded-2xl border bg-card p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Plus className="w-4 h-4 text-green-500" />
+          <h3 className="font-bold">إضافة أدمن جديد</h3>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs font-bold">ابحث عن المستخدم</label>
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="ابحث بالاسم أو الإيميل أو رقم التليفون..."
+              value={searchUser}
+              onChange={e => { setSearchUser(e.target.value); setSelectedUser(null); }}
+              className="w-full rounded-xl border-2 px-3 py-2.5 text-sm outline-none transition-colors bg-background"
+              data-testid="input-admin-search"
+            />
+          </div>
+        </div>
+
+        {searchUser.trim().length >= 2 && (
+          <div className="border rounded-xl overflow-hidden divide-y max-h-64 overflow-y-auto">
+            {filteredUsers.length === 0 ? (
+              <p className="text-sm text-muted-foreground p-4 text-center">لا يوجد مستخدمون بهذا الاسم</p>
+            ) : filteredUsers.slice(0, 20).map((u: any) => (
+              <div
+                key={u.id}
+                className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors hover:bg-primary/5 ${selectedUser?.id === u.id ? "bg-primary/10 border-r-2 border-primary" : ""}`}
+                onClick={() => setSelectedUser(u)}
+                data-testid={`user-row-${u.id}`}
+              >
+                {u.profile_image_url ? (
+                  <img src={u.profile_image_url} className="w-8 h-8 rounded-full object-cover" alt="" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
+                    {(u.first_name?.[0] || "؟")}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-sm">{u.first_name} {u.last_name}</p>
+                  <p className="text-[10px] text-muted-foreground">{u.email || u.phone || "—"}</p>
+                </div>
+                <p className="text-[10px] font-mono text-muted-foreground">{u.id}</p>
+                {selectedUser?.id === u.id && (
+                  <Check className="w-4 h-4 text-primary" />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {selectedUser && (
+          <div className="rounded-xl bg-green-50 dark:bg-green-950/20 border-2 border-green-400/50 p-4 space-y-3">
+            <p className="text-xs font-bold text-green-700 dark:text-green-400">✅ المستخدم المختار:</p>
+            <div className="flex items-center gap-3">
+              {selectedUser.profile_image_url ? (
+                <img src={selectedUser.profile_image_url} className="w-12 h-12 rounded-full object-cover border-2 border-green-400" alt="" />
+              ) : (
+                <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center text-lg font-bold text-green-600">
+                  {selectedUser.first_name?.[0] || "؟"}
+                </div>
+              )}
+              <div>
+                <p className="font-bold">{selectedUser.first_name} {selectedUser.last_name}</p>
+                <p className="text-xs text-muted-foreground">{selectedUser.email || selectedUser.phone || "—"}</p>
+                <p className="text-[10px] font-mono text-muted-foreground">{selectedUser.id}</p>
+              </div>
+            </div>
+            <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-300/50 rounded-lg px-3 py-2 text-xs text-amber-800 dark:text-amber-400">
+              ⚠️ سيحصل هذا المستخدم على <strong>صلاحيات أدمن كاملة</strong> — تأكد من اختيار الشخص الصحيح
+            </div>
+            <Button
+              className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white"
+              onClick={() => addMutation.mutate(selectedUser.id)}
+              disabled={addMutation.isPending}
+              data-testid="btn-confirm-add-admin"
+            >
+              {addMutation.isPending ? (
+                <><RefreshCw className="w-4 h-4 animate-spin" /> جاري الإضافة...</>
+              ) : (
+                <><Shield className="w-4 h-4" /> منح صلاحية الأدمن</>
+              )}
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

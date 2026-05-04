@@ -5392,5 +5392,233 @@ ${reelTags}
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // ═══════════════════════════════════════════════════════════════
+  // RESTORED ADMIN ENDPOINTS (Phase 1 — restoration of removed tabs)
+  // ═══════════════════════════════════════════════════════════════
+
+  // ── AI Settings (for ai_control tab) ─────────────────────────
+  app.get("/api/admin/ai-settings", isAuthenticated, requireAdmin, async (_req: any, res) => {
+    try {
+      const [imgQuality, imgSize, dailyCap, monthlyCap, kill] = await Promise.all([
+        storage.getSetting("ai_image_quality"),
+        storage.getSetting("ai_image_size"),
+        storage.getSetting("ai_daily_cap_usd"),
+        storage.getSetting("ai_monthly_cap_usd"),
+        storage.getSetting("ai_kill_switch"),
+      ]);
+      res.json({
+        imageQuality: imgQuality || "medium",
+        imageSize: imgSize || "1024x1024",
+        dailyCapUsd: parseFloat(dailyCap || "5"),
+        monthlyCapUsd: parseFloat(monthlyCap || "50"),
+        killSwitch: kill === "1",
+      });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/admin/ai-settings", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      const { imageQuality, imageSize, dailyCapUsd, monthlyCapUsd, killSwitch } = req.body || {};
+      const validQ = ["low", "medium", "high"];
+      const validS = ["1024x1024", "1024x1536", "1536x1024", "auto"];
+      if (imageQuality && validQ.includes(imageQuality)) await storage.setSetting("ai_image_quality", imageQuality);
+      if (imageSize && validS.includes(imageSize)) await storage.setSetting("ai_image_size", imageSize);
+      if (dailyCapUsd !== undefined) await storage.setSetting("ai_daily_cap_usd", String(dailyCapUsd));
+      if (monthlyCapUsd !== undefined) await storage.setSetting("ai_monthly_cap_usd", String(monthlyCapUsd));
+      if (killSwitch !== undefined) await storage.setSetting("ai_kill_switch", killSwitch ? "1" : "0");
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.get("/api/admin/ai-usage-stats", isAuthenticated, requireAdmin, async (_req: any, res) => {
+    try {
+      const today = await pool.query(`
+        SELECT type, COUNT(*)::int AS count, COALESCE(SUM(cost),0)::float AS cost
+        FROM ai_usage WHERE created_at >= CURRENT_DATE GROUP BY type
+      `);
+      const month = await pool.query(`
+        SELECT type, COUNT(*)::int AS count, COALESCE(SUM(cost),0)::float AS cost
+        FROM ai_usage WHERE created_at >= date_trunc('month', CURRENT_DATE) GROUP BY type
+      `);
+      const totalToday = await pool.query(`SELECT COUNT(*)::int AS count, COALESCE(SUM(cost),0)::float AS cost FROM ai_usage WHERE created_at >= CURRENT_DATE`);
+      const totalMonth = await pool.query(`SELECT COUNT(*)::int AS count, COALESCE(SUM(cost),0)::float AS cost FROM ai_usage WHERE created_at >= date_trunc('month', CURRENT_DATE)`);
+      const topUsers = await pool.query(`
+        SELECT au.user_id, u.first_name, u.last_name, COUNT(*)::int AS count, COALESCE(SUM(au.cost),0)::float AS cost
+        FROM ai_usage au LEFT JOIN users u ON u.id::text = au.user_id::text
+        WHERE au.created_at >= date_trunc('month', CURRENT_DATE)
+        GROUP BY au.user_id, u.first_name, u.last_name
+        ORDER BY count DESC LIMIT 10
+      `);
+      res.json({
+        today: { byType: today.rows, total: totalToday.rows[0] },
+        month: { byType: month.rows, total: totalMonth.rows[0] },
+        topUsers: topUsers.rows,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ── Wallet Top-ups (for walletcharges tab) ────────────────────
+  app.get("/api/admin/wallet-topups", isAuthenticated, requireAdmin, async (_req: any, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT o.*, u.first_name, u.last_name, u.email, u.balance_egp
+         FROM wallet_top_up_orders o
+         LEFT JOIN users u ON u.id = o.user_id
+         ORDER BY o.created_at DESC
+         LIMIT 200`
+      );
+      res.json(r.rows);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.patch("/api/admin/wallet-topups/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const { action, adminNote } = req.body || {};
+    const orderId = parseInt(req.params.id);
+    if (!action || !["approve", "reject"].includes(action)) return res.status(400).json({ message: "إجراء غير صالح" });
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const orderR = await client.query(
+        `SELECT * FROM wallet_top_up_orders WHERE id = $1 FOR UPDATE`,
+        [orderId]
+      );
+      if (orderR.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "الطلب غير موجود" });
+      }
+      const order = orderR.rows[0];
+      if (order.status !== "pending") {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ message: "تم معالجة هذا الطلب مسبقاً" });
+      }
+
+      if (action === "approve") {
+        await client.query(
+          `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) + $1 WHERE id = $2`,
+          [order.amount_egp, order.user_id]
+        );
+        await client.query(
+          `INSERT INTO wallet_transactions (user_id, type, amount_egp, description, ref_id)
+           VALUES ($1, 'top_up', $2, $3, $4)`,
+          [order.user_id, order.amount_egp, `شحن محفظة — ${order.payment_method}`, order.order_number]
+        );
+        await client.query(
+          `UPDATE wallet_top_up_orders SET status = 'approved', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
+          [adminNote || null, req.user.claims.sub, orderId]
+        );
+        await client.query("COMMIT");
+        return res.json({ success: true, message: "تمت الموافقة وإضافة الرصيد" });
+      } else {
+        await client.query(
+          `UPDATE wallet_top_up_orders SET status = 'rejected', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
+          [adminNote || null, req.user.claims.sub, orderId]
+        );
+        await client.query("COMMIT");
+        return res.json({ success: true, message: "تم رفض الطلب" });
+      }
+    } catch (e: any) {
+      try { await client.query("ROLLBACK"); } catch {}
+      res.status(500).json({ message: e.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.get("/api/admin/wallet-stats", isAuthenticated, requireAdmin, async (_req, res) => {
+    try {
+      const [topupRes, spendRes, balanceRes, pendingRes] = await Promise.all([
+        pool.query(`SELECT COALESCE(SUM(amount_egp),0) as total_approved, COUNT(*) FILTER (WHERE status='approved') as count_approved FROM wallet_top_up_orders WHERE status = 'approved'`),
+        pool.query(`SELECT COALESCE(SUM(amount_egp),0) as total_spent FROM wallet_transactions WHERE type IN ('boost_debit','renewal_debit','ai_debit')`),
+        pool.query(`SELECT COALESCE(SUM(balance_egp),0) as total_wallet_balance, COUNT(*) as users_with_balance FROM users WHERE balance_egp > 0`),
+        pool.query(`SELECT COALESCE(SUM(amount_egp),0) as pending_amount, COUNT(*) as pending_count FROM wallet_top_up_orders WHERE status = 'pending'`),
+      ]);
+      const t = topupRes.rows[0] as any;
+      const s = spendRes.rows[0] as any;
+      const b = balanceRes.rows[0] as any;
+      const p = pendingRes.rows[0] as any;
+      res.json({
+        totalCollectedEGP:    Number(t.total_approved),
+        totalApprovedCount:   Number(t.count_approved),
+        totalSpentEGP:        Number(s.total_spent),
+        totalCurrentBalanceEGP: Number(b.total_wallet_balance),
+        usersWithBalance:     Number(b.users_with_balance),
+        pendingAmountEGP:     Number(p.pending_amount),
+        pendingCount:         Number(p.pending_count),
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ── Ratings (for ratings tab) ─────────────────────────────────
+  app.get("/api/admin/ratings", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      const { type } = req.query;
+      const { ratings } = await import("@shared/schema");
+      const { desc, eq } = await import("drizzle-orm");
+      let query = db.select().from(ratings).orderBy(desc(ratings.createdAt)).$dynamic();
+      if (type && type !== "all") {
+        query = query.where(eq(ratings.targetType, type as string));
+      }
+      const rows = await query.limit(500);
+      res.json(rows);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.delete("/api/admin/ratings/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      const { ratings } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      await db.delete(ratings).where(eq(ratings.id, Number(req.params.id)));
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ── Admins management (for admins tab) ────────────────────────
+  app.get("/api/admin/admins", isAuthenticated, requireAdmin, async (req: any, res) => {
+    if (!isSuperAdmin(req)) return res.status(403).json({ message: "superadmin only" });
+    try {
+      if (!_extraAdminLoaded) await loadExtraAdminIds();
+      const extraIds = Array.from(_extraAdminIds);
+      let extraUsers: any[] = [];
+      if (extraIds.length > 0) {
+        const idsLiteral = extraIds.map(id => `'${id.replace(/'/g,"''")}'`).join(",");
+        const rows = await db.execute(sql.raw(`
+          SELECT id, email, first_name, last_name, profile_image_url, phone, created_at
+          FROM users WHERE id IN (${idsLiteral})`));
+        extraUsers = rows.rows as any[];
+      }
+      const hardcoded = [
+        { id: ADMIN_USER_ID,  email: ADMIN_EMAIL,  superAdmin: true },
+        { id: ADMIN_USER_ID2, email: ADMIN_EMAIL2, superAdmin: true },
+      ];
+      res.json({ hardcoded, extra: extraUsers });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/admin/admins/add", isAuthenticated, requireAdmin, async (req: any, res) => {
+    if (!isSuperAdmin(req)) return res.status(403).json({ message: "superadmin only" });
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ message: "userId مطلوب" });
+    if (!_extraAdminLoaded) await loadExtraAdminIds();
+    _extraAdminIds.add(String(userId));
+    await saveExtraAdminIds();
+    res.json({ success: true, adminCount: _extraAdminIds.size });
+  });
+
+  app.post("/api/admin/admins/remove", isAuthenticated, requireAdmin, async (req: any, res) => {
+    if (!isSuperAdmin(req)) return res.status(403).json({ message: "superadmin only" });
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ message: "userId مطلوب" });
+    _extraAdminIds.delete(String(userId));
+    await saveExtraAdminIds();
+    res.json({ success: true });
+  });
+
   return httpServer;
 }
