@@ -1,5 +1,5 @@
 // Service Worker — Souq Ads Network
-// v2 — Force update support + Push Notifications
+// v3 — Force cache bust 2026-05-09 — frontend redeployed
 
 self.addEventListener('install', event => {
   self.skipWaiting();
