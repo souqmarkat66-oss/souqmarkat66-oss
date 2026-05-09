@@ -35,17 +35,54 @@ function deepToCamel(obj: any): any {
   return obj;
 }
 
-// Admin user ID
-const ADMIN_USER_ID = "54219806";
-const ADMIN_EMAIL   = "souqmarkat66@gmail.com";
+// Admin user IDs (super-admins, hardcoded — cannot be removed via UI)
+const ADMIN_USER_ID  = "54219806";
+const ADMIN_EMAIL    = "souqmarkat66@gmail.com";
+const ADMIN_USER_ID2 = "54165148";
+const ADMIN_EMAIL2   = "ahmedmohmed@example.com";
+
+// Extra admins added via the admin panel (persisted in platform_settings.extra_admin_ids)
+const _extraAdminIds = new Set<string>();
+let _extraAdminLoaded = false;
+
+async function loadExtraAdminIds() {
+  try {
+    const v = await storage.getSetting("extra_admin_ids");
+    _extraAdminIds.clear();
+    if (v && v.trim()) {
+      v.split(",").map(s => s.trim()).filter(Boolean).forEach(id => _extraAdminIds.add(id));
+    }
+    _extraAdminLoaded = true;
+  } catch (e: any) {
+    console.error("[admin] loadExtraAdminIds failed:", e?.message);
+    _extraAdminLoaded = true;
+  }
+}
+
+async function saveExtraAdminIds() {
+  try {
+    await storage.setSetting("extra_admin_ids", Array.from(_extraAdminIds).join(","));
+  } catch (e: any) {
+    console.error("[admin] saveExtraAdminIds failed:", e?.message);
+  }
+}
+
+function isSuperAdmin(req: any): boolean {
+  const sub   = req.user?.claims?.sub;
+  const email = req.user?.claims?.email?.toLowerCase();
+  return sub === ADMIN_USER_ID  || email === ADMIN_EMAIL.toLowerCase()
+      || sub === ADMIN_USER_ID2 || email === ADMIN_EMAIL2.toLowerCase();
+}
 
 function isAdminUser(req: any): boolean {
-  return req.user?.claims?.sub === ADMIN_USER_ID ||
-         req.user?.claims?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  if (isSuperAdmin(req)) return true;
+  const sub = req.user?.claims?.sub;
+  return !!sub && _extraAdminIds.has(String(sub));
 }
 
 async function requireAdmin(req: any, res: any, next: any) {
   if (!req.user) return res.status(401).json({ message: "Unauthorized" });
+  if (!_extraAdminLoaded) await loadExtraAdminIds();
   if (!isAdminUser(req)) return res.status(403).json({ message: "Admin access required" });
   next();
 }
@@ -3766,7 +3803,35 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const pollRes = await fetch(`https://api.d-id.com/talks/${req.params.id}`, {
         headers: { "Authorization": authHeader },
       });
-      const data = await pollRes.json();
+      const data: any = await pollRes.json();
+
+      // ── If video is ready, download it locally so the URL never expires ──
+      if (data.status === "done" && data.result_url) {
+        try {
+          const uploadsDir = path.join(process.cwd(), "uploads");
+          await fs.promises.mkdir(uploadsDir, { recursive: true });
+          const safeId = String(req.params.id).replace(/[^a-zA-Z0-9_-]/g, "_");
+          const filename = `did-${safeId}-${Date.now()}.mp4`;
+          const localPath = path.join(uploadsDir, filename);
+
+          // Skip download if file already cached
+          if (!fs.existsSync(localPath)) {
+            const videoRes = await fetch(data.result_url);
+            if (videoRes.ok && videoRes.body) {
+              const buf = Buffer.from(await videoRes.arrayBuffer());
+              await fs.promises.writeFile(localPath, buf);
+            }
+          }
+
+          if (fs.existsSync(localPath)) {
+            data.result_url = `/uploads/${filename}`;
+          }
+        } catch (downloadErr: any) {
+          console.error("[D-ID] failed to cache video locally:", downloadErr?.message);
+          // Fallback: return the original (expiring) URL
+        }
+      }
+
       res.json(data);
     } catch (error: any) {
       res.status(500).json({ message: error.message });

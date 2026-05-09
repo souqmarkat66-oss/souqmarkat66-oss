@@ -306,7 +306,7 @@ export const paymentRequests = pgTable("payment_requests", {
   adId: integer("ad_id"),
   type: text("type", { enum: ["withdrawal", "top_up"] }).notNull(),
   amountEGP: real("amount_egp").notNull(),
-  method: text("method", { enum: ["vodafone", "etisalat", "instapay", "souq"] }).notNull(),
+  method: text("method", { enum: ["vodafone", "etisalat", "instapay", "souq", "visa_bank"] }).notNull(),
   phoneNumber: text("phone_number"),
   serviceType: text("service_type"),
   screenshotUrl: text("screenshot_url"),
