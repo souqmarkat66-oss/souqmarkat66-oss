@@ -513,8 +513,7 @@ function VideoPlayer({ src }: { src: string }) {
   const togglePlay = () => {
     if (!videoRef.current) return;
     if (videoRef.current.paused) {
-      videoRef.current.play();
-      setPlaying(true);
+      videoRef.current.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
     } else {
       videoRef.current.pause();
       setPlaying(false);

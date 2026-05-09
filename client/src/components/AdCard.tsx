@@ -181,9 +181,13 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
       setMuted(false);
       videoRef.current.play().then(() => setPlaying(true)).catch(() => {
         // If autoplay blocked, try muted
-        videoRef.current!.muted = true;
+        if (!videoRef.current) return;
+        videoRef.current.muted = true;
         setMuted(true);
-        videoRef.current!.play().then(() => setPlaying(true));
+        videoRef.current.play().then(() => setPlaying(true)).catch(() => {
+          // Source unsupported / broken — fail silently
+          setPlaying(false);
+        });
       });
     }
   };
