@@ -466,12 +466,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserBalanceEGP(userId: string): Promise<number> {
-    const txs = await this.getRevenueTransactions(userId);
-    return txs.reduce((sum, tx) => {
-      if (tx.type === 'earning') return sum + (tx.amountEGP || 0);
-      if (tx.type === 'spending' || tx.type === 'withdrawal' || tx.type === 'ai_charge') return sum - (tx.amountEGP || 0);
-      return sum;
-    }, 0);
+    const [row] = await db
+      .select({
+        balance: sql<number>`COALESCE(SUM(CASE WHEN ${revenueTransactions.type} = 'earning' THEN ${revenueTransactions.amountEGP} WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP} ELSE 0 END), 0)`,
+      })
+      .from(revenueTransactions)
+      .where(eq(revenueTransactions.userId, userId));
+    return Number(row?.balance ?? 0);
   }
 
   async createTransaction(tx: Omit<RevenueTransaction, 'id' | 'createdAt'>): Promise<RevenueTransaction> {

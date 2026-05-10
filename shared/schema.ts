@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, varchar, real, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, varchar, real, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -258,7 +258,9 @@ export const revenueTransactions = pgTable("revenue_transactions", {
   campaignId: integer("campaign_id"),
   channelId: integer("channel_id"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  userTypeIdx: index("revenue_transactions_user_id_type_idx").on(table.userId, table.type),
+}));
 
 export type RevenueTransaction = typeof revenueTransactions.$inferSelect;
 
