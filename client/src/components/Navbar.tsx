@@ -5,13 +5,19 @@ import { Button } from "@/components/ui/button";
 import { NotificationBell } from "./NotificationBell";
 import {
   LogIn, LogOut, PlusCircle, Globe, LayoutGrid, Megaphone,
-  Radio, BarChart2, ShieldCheck, DollarSign, Menu, X, Tv, UserCircle2, MessageSquare, Receipt, FolderOpen, PieChart, Users, HelpCircle, Cast
+  Radio, BarChart2, ShieldCheck, DollarSign, Menu, X, Tv, UserCircle2, MessageSquare, Receipt, FolderOpen, PieChart, Users, HelpCircle, Cast, Loader2, AlertOctagon
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 const ADMIN_USER_ID = "54219806";
 
@@ -64,6 +70,77 @@ function LiveClock() {
       <span className="text-sm font-bold tabular-nums text-foreground tracking-wide">{cairoTime}</span>
       <span className="text-[10px] text-muted-foreground mt-0.5">{cairoDate}</span>
     </div>
+  );
+}
+
+function QuickBroadcastButton() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+
+  const broadcastM = useMutation({
+    mutationFn: async (msg: string) => {
+      const r = await apiRequest("POST", "/api/ticker-ads", { text: msg, budgetEGP: 0, pricePerSecondEGP: 0 });
+      const ad = await r.json();
+      await apiRequest("POST", `/api/admin/ticker-ads/${ad.id}/start`);
+      return ad;
+    },
+    onSuccess: () => {
+      toast({ title: "🔴 الشريط شغال دلوقتي", description: "تم بث إعلانك المجاني فوراً" });
+      setText("");
+      setOpen(false);
+      qc.invalidateQueries({ queryKey: ["/api/admin/ticker-ads/history"] });
+      qc.invalidateQueries({ queryKey: ["/api/admin/ticker-ads/stats"] });
+    },
+    onError: (e: any) => toast({ title: "فشل البث", description: e?.message || "خطأ", variant: "destructive" }),
+  });
+
+  return (
+    <>
+      <Button
+        size="icon"
+        onClick={() => setOpen(true)}
+        className="flex w-9 h-9 rounded-full bg-red-600 hover:bg-red-700 text-white shadow-md shadow-red-600/30"
+        title="بث عاجل مجاني (أدمن)"
+        data-testid="btn-nav-quick-broadcast"
+      >
+        <AlertOctagon className="w-4 h-4 animate-pulse" />
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent dir="rtl" className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertOctagon className="w-5 h-5 animate-pulse" /> بث شريط عاجل مجاني
+            </DialogTitle>
+            <DialogDescription>
+              النص هيظهر فوراً في شريط الأخبار العاجلة عند كل المشاهدين بدون أي خصم.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="اكتب الخبر العاجل هنا..."
+            rows={3}
+            data-testid="input-quick-broadcast"
+          />
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={() => setOpen(false)} data-testid="btn-quick-broadcast-cancel">
+              إلغاء
+            </Button>
+            <Button
+              onClick={() => broadcastM.mutate(text.trim())}
+              disabled={text.trim().length < 5 || broadcastM.isPending}
+              className="bg-red-600 hover:bg-red-700 text-white"
+              data-testid="btn-quick-broadcast-send"
+            >
+              {broadcastM.isPending ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : <Radio className="w-4 h-4 ml-2" />}
+              بث الآن
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -143,6 +220,9 @@ export function Navbar() {
         <div className="flex items-center gap-1.5">
           {/* Clock */}
           <LiveClock />
+
+          {/* Admin Quick Broadcast */}
+          {user && (user.isAdmin === true || user.id === ADMIN_USER_ID) && <QuickBroadcastButton />}
 
           {/* Live Stream */}
           {user && feat("feature_livestream") && (

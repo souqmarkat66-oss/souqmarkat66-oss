@@ -5917,6 +5917,7 @@ ${reelTags}
     const userId = req.user.claims.sub;
     const { text, budgetEGP } = req.body || {};
     const txt = String(text || "").trim();
+    if (!_extraAdminLoaded) await loadExtraAdminIds();
     const isAdmin = isAdminUserId(userId);
     // Price is ALWAYS taken from server settings (admin-controlled), never trusted from client
     const price = isAdmin ? 0 : await getCurrentTickerPrice();

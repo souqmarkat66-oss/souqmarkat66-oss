@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
+import { checkIsAdmin } from "./adminCheck";
 
 // ── Extend session ────────────────────────────────────────────────
 declare module "express-session" {
@@ -50,15 +51,17 @@ export function registerCustomAuthRoutes(app: Express) {
   ensureColumns().catch(console.error);
 
   // ── GET /api/auth/user ──────────────────────────────────────────
-  app.get("/api/auth/user", (req: Request, res: Response) => {
+  app.get("/api/auth/user", async (req: Request, res: Response) => {
     const u = (req.session as any).customUser;
     if (u) {
+      const isAdmin = await checkIsAdmin({ id: u.id, email: u.email });
       return res.json({
         id:              u.id,
         email:           u.email,
         firstName:       u.firstName,
         lastName:        u.lastName,
         profileImageUrl: u.profileImageUrl,
+        isAdmin,
         createdAt:       new Date().toISOString(),
         updatedAt:       new Date().toISOString(),
       });
@@ -66,12 +69,14 @@ export function registerCustomAuthRoutes(app: Express) {
     // Replit passport fallback
     if ((req as any).user) {
       const c = (req as any).user.claims;
+      const isAdmin = await checkIsAdmin({ id: c.sub, email: c.email });
       return res.json({
         id:              c.sub,
         email:           c.email,
         firstName:       c.first_name,
         lastName:        c.last_name,
         profileImageUrl: c.profile_image_url,
+        isAdmin,
         createdAt:       new Date().toISOString(),
         updatedAt:       new Date().toISOString(),
       });
