@@ -17,7 +17,6 @@ import type { TickerAd } from "@shared/schema";
 const schema = z.object({
   text: z.string().min(5, "النص يجب أن يكون 5 أحرف على الأقل").max(220, "حد أقصى 220 حرف"),
   budgetEGP: z.coerce.number().min(1, "الميزانية مطلوبة"),
-  pricePerSecondEGP: z.coerce.number().min(0.1, "سعر الثانية مطلوب"),
 });
 type FormValues = z.infer<typeof schema>;
 
@@ -48,6 +47,14 @@ export default function TickerAds() {
   });
   const balanceEGP = typeof balance === "number" ? balance : (balance?.balance ?? 0);
 
+  // Live price-per-second (admin-controlled, refreshes every 10s)
+  const { data: priceData } = useQuery<{ pricePerSecondEGP: number }>({
+    queryKey: ["/api/ticker-ads/price"],
+    queryFn: () => fetch("/api/ticker-ads/price").then(r => r.json()),
+    refetchInterval: 10000,
+  });
+  const currentPrice = priceData?.pricePerSecondEGP ?? 1;
+
   const { data: myAds = [], isLoading } = useQuery<TickerAd[]>({
     queryKey: ["/api/ticker-ads/my"],
     queryFn: () => fetch("/api/ticker-ads/my", { credentials: "include" }).then(r => r.json()),
@@ -55,7 +62,7 @@ export default function TickerAds() {
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { text: "", budgetEGP: 50, pricePerSecondEGP: 1 },
+    defaultValues: { text: "", budgetEGP: 50 },
   });
 
   const createMutation = useMutation({
@@ -83,8 +90,7 @@ export default function TickerAds() {
   };
 
   const budget = form.watch("budgetEGP") || 0;
-  const price  = form.watch("pricePerSecondEGP") || 0;
-  const estSeconds = price > 0 ? Math.floor(budget / price) : 0;
+  const estSeconds = currentPrice > 0 ? Math.floor(budget / currentPrice) : 0;
 
   return (
     <div className="container mx-auto py-6 px-3 max-w-4xl space-y-6" dir="rtl">
@@ -139,15 +145,11 @@ export default function TickerAds() {
                   </FormItem>
                 )} />
 
-                <FormField control={form.control} name="pricePerSecondEGP" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="flex items-center gap-1"><Clock className="w-3 h-3" /> سعر الثانية (ج.م)</FormLabel>
-                    <FormControl>
-                      <Input type="number" step="0.1" min="0.1" {...field} data-testid="input-ticker-price" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
+                <div className="rounded-xl border-2 border-amber-200 dark:border-amber-900/40 bg-amber-50/60 dark:bg-amber-950/20 p-3 flex flex-col justify-center" data-testid="display-current-price">
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground"><Clock className="w-3 h-3" /> سعر الثانية (تحدده الإدارة)</div>
+                  <div className="text-2xl font-bold text-amber-700 dark:text-amber-400 mt-1">{currentPrice.toFixed(2)} ج.م</div>
+                  <div className="text-[10px] text-muted-foreground">يتغير لحظياً حسب إعدادات المنصة</div>
+                </div>
               </div>
 
               <div className="rounded-xl bg-muted/50 p-3 text-sm flex items-center justify-between">

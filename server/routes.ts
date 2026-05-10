@@ -5807,6 +5807,17 @@ ${reelTags}
     }
   }
 
+  // ── Live ticker price (admin-controlled) ────────────────────────
+  const TICKER_PRICE_KEY = "ticker_price_per_second_egp";
+  const TICKER_PRICE_DEFAULT = 1;
+  async function getCurrentTickerPrice(): Promise<number> {
+    try {
+      const v = await storage.getSetting(TICKER_PRICE_KEY);
+      const n = parseFloat(v || "");
+      return Number.isFinite(n) && n > 0 ? n : TICKER_PRICE_DEFAULT;
+    } catch { return TICKER_PRICE_DEFAULT; }
+  }
+
   // Helper: start billing for a ticker ad
   function startTickerBilling(adId: number) {
     stopTickerBilling(adId);
@@ -5834,8 +5845,10 @@ ${reelTags}
           return;
         }
 
+        // Always read the CURRENT price from settings — admin can change it any time
+        const currentPrice = await getCurrentTickerPrice();
         const remaining = (ad.budgetEGP || 0) - (ad.spentEGP || 0);
-        if (remaining < ad.pricePerSecondEGP) {
+        if (remaining < currentPrice) {
           // Budget exhausted → stop & notify
           await storage.updateTickerAd(adId, { status: "completed", stoppedAt: new Date() });
           stopTickerBilling(adId);
@@ -5844,19 +5857,19 @@ ${reelTags}
         }
         // Verify advertiser still has wallet balance
         const balance = await storage.getUserBalanceEGP(ad.advertiserId);
-        if (balance < ad.pricePerSecondEGP) {
+        if (balance < currentPrice) {
           await storage.updateTickerAd(adId, { status: "paused", stoppedAt: new Date() });
           stopTickerBilling(adId);
           io.emit("ticker:remove", { id: adId });
           return;
         }
-        // Deduct 1 second
-        const updated = await storage.deductTickerAdSecond(adId, ad.pricePerSecondEGP);
+        // Deduct 1 second at the current admin-controlled price
+        const updated = await storage.deductTickerAdSecond(adId, currentPrice);
         // Advertiser spending tx
         await storage.createTransaction({
           userId: ad.advertiserId,
           type: "spending",
-          amountEGP: ad.pricePerSecondEGP,
+          amountEGP: currentPrice,
           description: `Ticker ad #${adId} — second`,
           campaignId: null as any,
           channelId: null as any,
@@ -5865,7 +5878,7 @@ ${reelTags}
         await storage.createTransaction({
           userId: ADMIN_USER_ID,
           type: "earning",
-          amountEGP: ad.pricePerSecondEGP,
+          amountEGP: currentPrice,
           description: `Ticker ad #${adId} — platform fee`,
           campaignId: null as any,
           channelId: null as any,
@@ -5876,6 +5889,7 @@ ${reelTags}
           spentEGP: updated?.spentEGP,
           secondsShown: updated?.secondsShown,
           remainingEGP: (ad.budgetEGP || 0) - (updated?.spentEGP || 0),
+          pricePerSecondEGP: currentPrice,
           isFree: false,
         });
       } catch (e: any) {
@@ -5896,19 +5910,24 @@ ${reelTags}
   })();
 
   // ─── ADVERTISER ROUTES ─────────────────────────────────────────
+  // Public: current price-per-second so advertiser UI can display & estimate
+  app.get("/api/ticker-ads/price", async (_req, res) => {
+    const price = await getCurrentTickerPrice();
+    res.json({ pricePerSecondEGP: price });
+  });
+
   app.post("/api/ticker-ads", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
-    const { text, budgetEGP, pricePerSecondEGP } = req.body || {};
+    const { text, budgetEGP } = req.body || {};
     const txt = String(text || "").trim();
     const isAdmin = isAdminUserId(userId);
-    // For admins: ignore budget/price → free ticker
+    // Price is ALWAYS taken from server settings (admin-controlled), never trusted from client
+    const price = isAdmin ? 0 : await getCurrentTickerPrice();
     const budget = isAdmin ? 0 : Number(budgetEGP);
-    const price  = isAdmin ? 0 : Number(pricePerSecondEGP);
     if (!txt || txt.length < 5) return res.status(400).json({ message: "نص الإعلان مطلوب (5 أحرف على الأقل)" });
     if (!isAdmin) {
       if (!Number.isFinite(budget) || budget <= 0) return res.status(400).json({ message: "الميزانية مطلوبة" });
-      if (!Number.isFinite(price)  || price  <= 0) return res.status(400).json({ message: "سعر الثانية مطلوب" });
-      if (price > budget) return res.status(400).json({ message: "سعر الثانية أكبر من الميزانية" });
+      if (price > budget) return res.status(400).json({ message: "الميزانية أقل من سعر الثانية الحالي" });
       const balance = await storage.getUserBalanceEGP(userId);
       if (balance < budget) {
         return res.status(402).json({ message: "رصيد المحفظة غير كافٍ — اشحن محفظتك أولاً", balance, required: budget });
@@ -5993,6 +6012,22 @@ ${reelTags}
   });
 
   // ── LIVE STATS for admin dashboard ──────────────────────────────
+  // Admin: read current ticker price-per-second
+  app.get("/api/admin/ticker-ads/price", isAuthenticated, requireAdmin, async (_req, res) => {
+    const price = await getCurrentTickerPrice();
+    res.json({ pricePerSecondEGP: price });
+  });
+  // Admin: update ticker price-per-second (takes effect on next tick globally)
+  app.put("/api/admin/ticker-ads/price", isAuthenticated, requireAdmin, async (req, res) => {
+    const n = Number(req.body?.pricePerSecondEGP);
+    if (!Number.isFinite(n) || n <= 0) {
+      return res.status(400).json({ message: "السعر يجب أن يكون رقم أكبر من صفر" });
+    }
+    await storage.setSetting(TICKER_PRICE_KEY, String(n));
+    io.emit("ticker:price-changed", { pricePerSecondEGP: n });
+    res.json({ ok: true, pricePerSecondEGP: n });
+  });
+
   app.get("/api/admin/ticker-ads/stats", isAuthenticated, requireAdmin, async (_req, res) => {
     try {
       const active = await storage.getActiveTickerAds();

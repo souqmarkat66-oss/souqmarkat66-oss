@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import {
   Check, Play, Pause, X, Trash2, Megaphone, Loader2, ShieldCheck,
-  Activity, DollarSign, Radio, Plus, History, AlertOctagon,
+  Activity, DollarSign, Radio, Plus, History, AlertOctagon, Settings,
 } from "lucide-react";
 import type { TickerAd } from "@shared/schema";
 
@@ -37,8 +37,28 @@ export default function TickerAdsAdminSection() {
   const [liveSpend, setLiveSpend] = useState<Record<number, { spentEGP?: number; secondsShown?: number }>>({});
   const [todayLive, setTodayLive] = useState<number | null>(null);
   const [adminText, setAdminText] = useState("");
+  const [priceInput, setPriceInput] = useState<string>("");
   // Per-component prev spent cache (avoids stale global state across remounts)
   const prevSpentRef = useRef<Record<number, number>>({});
+
+  // Current admin-controlled price-per-second
+  const { data: priceData } = useQuery<{ pricePerSecondEGP: number }>({
+    queryKey: ["/api/admin/ticker-ads/price"],
+    queryFn: () => fetch("/api/admin/ticker-ads/price", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 10000,
+  });
+  const currentPrice = priceData?.pricePerSecondEGP ?? 1;
+  useEffect(() => { if (priceData) setPriceInput(String(priceData.pricePerSecondEGP)); }, [priceData?.pricePerSecondEGP]);
+
+  const updatePriceM = useMutation({
+    mutationFn: async (n: number) => (await apiRequest("PUT", "/api/admin/ticker-ads/price", { pricePerSecondEGP: n })).json(),
+    onSuccess: (data: any) => {
+      toast({ title: "تم التحديث ✅", description: `سعر الثانية الجديد: ${data?.pricePerSecondEGP} ج.م — يطبق فوراً على كل الإعلانات النشطة` });
+      qc.invalidateQueries({ queryKey: ["/api/admin/ticker-ads/price"] });
+      qc.invalidateQueries({ queryKey: ["/api/ticker-ads/price"] });
+    },
+    onError: (e: any) => toast({ title: "فشل التحديث", description: e?.message || "خطأ", variant: "destructive" }),
+  });
 
   // Live stats — refresh every 3s for accurate live monitor
   const { data: stats } = useQuery<StatsResponse>({
@@ -140,6 +160,42 @@ export default function TickerAdsAdminSection() {
           <p className="text-xs text-muted-foreground">يظهر فقط فوق مشغل البث المباشر</p>
         </div>
       </div>
+
+      {/* ═══ PRICE CONTROL ═══ */}
+      <Card className="border-2 border-amber-300 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/10">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Settings className="w-4 h-4 text-amber-600" /> مفتاح السعر — تحكم كامل
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            أنت تحدد سعر الثانية الذي يُخصم من المعلنين. أي تغيير يطبّق <b>فوراً</b> على كل الإعلانات النشطة وعند المعلنين الجدد.
+          </p>
+          <div className="flex items-end gap-2 flex-wrap">
+            <div className="flex-1 min-w-[180px]">
+              <label className="text-xs text-muted-foreground mb-1 block">سعر الثانية الحالي (ج.م)</label>
+              <Input
+                type="number" step="0.1" min="0.1"
+                value={priceInput}
+                onChange={(e) => setPriceInput(e.target.value)}
+                data-testid="input-ticker-price-setting"
+              />
+            </div>
+            <Button
+              onClick={() => updatePriceM.mutate(Number(priceInput))}
+              disabled={updatePriceM.isPending || !priceInput || Number(priceInput) <= 0 || Number(priceInput) === currentPrice}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              data-testid="btn-save-ticker-price"
+            >
+              {updatePriceM.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "حفظ السعر الجديد"}
+            </Button>
+            <div className="text-xs text-muted-foreground">
+              السعر النشط دلوقتي: <b className="text-amber-700 dark:text-amber-400">{currentPrice.toFixed(2)} ج.م/ثانية</b>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* ═══ STATS ROW ═══ */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
