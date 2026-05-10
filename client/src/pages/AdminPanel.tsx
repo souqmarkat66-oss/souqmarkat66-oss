@@ -15,6 +15,7 @@ import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 import AdminPinLock from "@/components/AdminPinLock";
 import AdminAiControl from "@/pages/AdminAiControl";
+import TickerAdsAdminSection from "@/components/admin/TickerAdsAdminSection";
 import {
   LayoutDashboard, Users, Megaphone, Film, Tv, Radio, Flag, Banknote,
   ShieldX, Settings, Bell, BarChart2, Eye, TrendingUp, DollarSign,
@@ -38,6 +39,7 @@ const NAV = [
   { key: "channels",       label: "القنوات",              icon: Tv,              color: "text-indigo-400" },
   { key: "streams",        label: "البث المباشر",          icon: Radio,           color: "text-red-400" },
   { key: "campaigns",      label: "الحملات الإعلانية",    icon: BarChart2,       color: "text-teal-400" },
+  { key: "ticker_ads",     label: "شريط الإعلان العاجل",   icon: Megaphone,       color: "text-red-500" },
   { key: "payments",       label: "طلبات السحب",          icon: Banknote,        color: "text-green-400" },
   { key: "boostorders",    label: "طلبات التعزيز",         icon: Zap,             color: "text-orange-400" },
   { key: "payreceipts",    label: "إيصالات الدفع",          icon: Banknote,        color: "text-emerald-500" },
@@ -204,6 +206,7 @@ export default function AdminPanel() {
           {section === "channels"   && <ChannelsSection logAction={logAction} />}
           {section === "streams"    && <StreamsSection logAction={logAction} />}
           {section === "campaigns"  && <CampaignsSection logAction={logAction} />}
+          {section === "ticker_ads" && <TickerAdsAdminSection />}
           {section === "payments"   && <PaymentsSection logAction={logAction} />}
           {section === "boostorders" && <BoostOrdersSection logAction={logAction} />}
           {section === "payreceipts"   && <PayReceiptsSection />}
