@@ -5777,11 +5777,26 @@ ${reelTags}
     res.json({ success: true });
   });
 
+  // ── Wallet balance endpoint (used by ticker UI + others) ──
+  app.get("/api/wallet/balance", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const balance = await storage.getUserBalanceEGP(userId);
+    res.json({ balance });
+  });
+
   // ================================================================
   // GLOBAL TICKER ADS — Real-time breaking-news ticker
   // ================================================================
   // In-memory map of active billing intervals per ticker ad
   const tickerIntervals = new Map<number, NodeJS.Timeout>();
+  // Re-entrancy guard: prevents overlapping ticks for the same ad if DB is slow
+  const tickInProgress = new Set<number>();
+
+  // Helper: check if a userId is admin (super-admins + extra admins from settings)
+  function isAdminUserId(userId: string): boolean {
+    if (!userId) return false;
+    return userId === ADMIN_USER_ID || userId === ADMIN_USER_ID2 || _extraAdminIds.has(String(userId));
+  }
 
   // Helper: stop billing for a ticker ad
   function stopTickerBilling(id: number) {
@@ -5796,12 +5811,29 @@ ${reelTags}
   function startTickerBilling(adId: number) {
     stopTickerBilling(adId);
     const intv = setInterval(async () => {
+      // Re-entrancy guard: skip this tick if previous is still running
+      if (tickInProgress.has(adId)) return;
+      tickInProgress.add(adId);
       try {
         const ad = await storage.getTickerAd(adId);
         if (!ad || ad.status !== "active") {
           stopTickerBilling(adId);
           return;
         }
+
+        // ── ADMIN BYPASS: free ticker, no deduction, no platform earning ──
+        if (isAdminUserId(ad.advertiserId)) {
+          const updated = await storage.deductTickerAdSecond(adId, 0); // increments seconds_shown only
+          io.emit("ticker:tick", {
+            id: adId,
+            spentEGP: 0,
+            secondsShown: updated?.secondsShown,
+            remainingEGP: ad.budgetEGP || 0,
+            isFree: true,
+          });
+          return;
+        }
+
         const remaining = (ad.budgetEGP || 0) - (ad.spentEGP || 0);
         if (remaining < ad.pricePerSecondEGP) {
           // Budget exhausted → stop & notify
@@ -5829,7 +5861,7 @@ ${reelTags}
           campaignId: null as any,
           channelId: null as any,
         });
-        // Admin (platform) earning tx — 100%
+        // Admin (platform) earning tx — 100% (skipped for admin advertisers above)
         await storage.createTransaction({
           userId: ADMIN_USER_ID,
           type: "earning",
@@ -5844,9 +5876,12 @@ ${reelTags}
           spentEGP: updated?.spentEGP,
           secondsShown: updated?.secondsShown,
           remainingEGP: (ad.budgetEGP || 0) - (updated?.spentEGP || 0),
+          isFree: false,
         });
       } catch (e: any) {
         console.error("[ticker billing] tick failed:", e?.message);
+      } finally {
+        tickInProgress.delete(adId);
       }
     }, 1000);
     tickerIntervals.set(adId, intv);
@@ -5865,17 +5900,25 @@ ${reelTags}
     const userId = req.user.claims.sub;
     const { text, budgetEGP, pricePerSecondEGP } = req.body || {};
     const txt = String(text || "").trim();
-    const budget = Number(budgetEGP);
-    const price  = Number(pricePerSecondEGP);
+    const isAdmin = isAdminUserId(userId);
+    // For admins: ignore budget/price → free ticker
+    const budget = isAdmin ? 0 : Number(budgetEGP);
+    const price  = isAdmin ? 0 : Number(pricePerSecondEGP);
     if (!txt || txt.length < 5) return res.status(400).json({ message: "نص الإعلان مطلوب (5 أحرف على الأقل)" });
-    if (!Number.isFinite(budget) || budget <= 0) return res.status(400).json({ message: "الميزانية مطلوبة" });
-    if (!Number.isFinite(price)  || price  <= 0) return res.status(400).json({ message: "سعر الثانية مطلوب" });
-    if (price > budget) return res.status(400).json({ message: "سعر الثانية أكبر من الميزانية" });
-    const balance = await storage.getUserBalanceEGP(userId);
-    if (balance < budget) {
-      return res.status(402).json({ message: "رصيد المحفظة غير كافٍ — اشحن محفظتك أولاً", balance, required: budget });
+    if (!isAdmin) {
+      if (!Number.isFinite(budget) || budget <= 0) return res.status(400).json({ message: "الميزانية مطلوبة" });
+      if (!Number.isFinite(price)  || price  <= 0) return res.status(400).json({ message: "سعر الثانية مطلوب" });
+      if (price > budget) return res.status(400).json({ message: "سعر الثانية أكبر من الميزانية" });
+      const balance = await storage.getUserBalanceEGP(userId);
+      if (balance < budget) {
+        return res.status(402).json({ message: "رصيد المحفظة غير كافٍ — اشحن محفظتك أولاً", balance, required: budget });
+      }
     }
     const ad = await storage.createTickerAd({ advertiserId: userId, text: txt, budgetEGP: budget, pricePerSecondEGP: price });
+    // Admin tickers are auto-approved (still need admin to "start" to broadcast)
+    if (isAdmin) {
+      await storage.updateTickerAd(ad.id, { status: "approved", approvedBy: userId, approvedAt: new Date() });
+    }
     res.json(ad);
   });
 
@@ -5947,6 +5990,64 @@ ${reelTags}
     io.emit("ticker:remove", { id });
     await storage.deleteTickerAd(id);
     res.json({ success: true });
+  });
+
+  // ── LIVE STATS for admin dashboard ──────────────────────────────
+  app.get("/api/admin/ticker-ads/stats", isAuthenticated, requireAdmin, async (_req, res) => {
+    try {
+      const active = await storage.getActiveTickerAds();
+      // Today's revenue from paid tickers (skip admin tickers since they don't bill)
+      const today = await db.execute(sql`
+        SELECT COALESCE(SUM(rt.amount_egp), 0)::float AS today_revenue
+        FROM revenue_transactions rt
+        WHERE rt.user_id = ${ADMIN_USER_ID}
+          AND rt.type = 'earning'
+          AND rt.description LIKE 'Ticker ad %'
+          AND rt.created_at >= CURRENT_DATE
+      `);
+      const allTime = await db.execute(sql`
+        SELECT COALESCE(SUM(rt.amount_egp), 0)::float AS total_revenue
+        FROM revenue_transactions rt
+        WHERE rt.user_id = ${ADMIN_USER_ID}
+          AND rt.type = 'earning'
+          AND rt.description LIKE 'Ticker ad %'
+      `);
+      const todayRevenue: number = (today.rows?.[0] as any)?.today_revenue || 0;
+      const totalRevenue: number = (allTime.rows?.[0] as any)?.total_revenue || 0;
+      // Enrich active tickers with advertiser info + admin flag
+      const enriched = await Promise.all(active.map(async (ad) => {
+        const u = await db.execute(sql`SELECT id, first_name, last_name, email FROM users WHERE id = ${ad.advertiserId} LIMIT 1`);
+        const row: any = u.rows?.[0] || {};
+        const fullName = [row.first_name, row.last_name].filter(Boolean).join(" ") || row.email || ad.advertiserId;
+        return { ...ad, advertiserName: fullName, isAdminAd: isAdminUserId(ad.advertiserId) };
+      }));
+      res.json({
+        activeCount: active.length,
+        todayRevenueEGP: todayRevenue,
+        totalRevenueEGP: totalRevenue,
+        active: enriched,
+      });
+    } catch (e: any) {
+      console.error("[ticker stats] failed:", e?.message);
+      res.status(500).json({ message: "stats failed" });
+    }
+  });
+
+  // ── HISTORY (completed/rejected/paused) with advertiser names ──
+  app.get("/api/admin/ticker-ads/history", isAuthenticated, requireAdmin, async (_req, res) => {
+    try {
+      const all = await storage.getAllTickerAds();
+      const enriched = await Promise.all(all.map(async (ad) => {
+        const u = await db.execute(sql`SELECT id, first_name, last_name, email FROM users WHERE id = ${ad.advertiserId} LIMIT 1`);
+        const row: any = u.rows?.[0] || {};
+        const fullName = [row.first_name, row.last_name].filter(Boolean).join(" ") || row.email || ad.advertiserId;
+        return { ...ad, advertiserName: fullName, isAdminAd: isAdminUserId(ad.advertiserId) };
+      }));
+      res.json(enriched);
+    } catch (e: any) {
+      console.error("[ticker history] failed:", e?.message);
+      res.status(500).json({ message: "history failed" });
+    }
   });
 
   return httpServer;

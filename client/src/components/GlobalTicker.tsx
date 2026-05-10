@@ -44,7 +44,7 @@ export default function GlobalTicker() {
 
   return (
     <div
-      className="sticky top-0 z-[60] w-full bg-gradient-to-r from-red-600 via-rose-600 to-red-600 text-white shadow-md border-b border-red-800"
+      className="absolute top-0 left-0 right-0 z-30 w-full bg-gradient-to-r from-red-600/95 via-rose-600/95 to-red-600/95 backdrop-blur-sm text-white shadow-lg border-b border-red-800"
       data-testid="global-ticker"
       dir="rtl"
     >

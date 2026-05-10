@@ -16,6 +16,7 @@ import { SiWhatsapp, SiFacebook, SiX, SiTelegram, SiInstagram, SiTiktok, SiSnapc
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import GlobalTicker from "@/components/GlobalTicker";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 
@@ -1401,6 +1402,9 @@ export default function LiveStream() {
           className="absolute inset-0 w-full h-full object-cover"
           style={{ backgroundColor: "#000", transform: (isBroadcast && camFacing === "user") ? "scaleX(-1)" : "none" }}
         />
+
+        {/* GLOBAL TICKER — appears ONLY above the live video player */}
+        <GlobalTicker />
 
         {/* Hidden canvas for virtual background processing */}
         <canvas ref={compositeCanvas} className="hidden" />

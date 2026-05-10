@@ -38,7 +38,6 @@ const Coupons = lazy(() => import("@/pages/Coupons"));
 const TickerAds = lazy(() => import("@/pages/TickerAds"));
 
 import BottomNav from "@/components/BottomNav";
-import GlobalTicker from "@/components/GlobalTicker";
 
 const PWAInstallPrompt = lazy(() => import("@/components/PWAInstallPrompt").then(m => ({ default: m.PWAInstallPrompt })));
 const GlobalAssistant = lazy(() => import("@/components/GlobalAssistant").then(m => ({ default: m.GlobalAssistant })));
@@ -80,7 +79,6 @@ function Router() {
       <Route path="/reels" component={ReelsPage} />
       <Route>
         <div className="flex flex-col min-h-screen font-sans">
-          <GlobalTicker />
           <Navbar />
           <Suspense fallback={null}>
             <GlobalAssistant />
