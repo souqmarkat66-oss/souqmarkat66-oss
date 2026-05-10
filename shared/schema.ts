@@ -260,6 +260,7 @@ export const revenueTransactions = pgTable("revenue_transactions", {
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   userTypeIdx: index("revenue_transactions_user_id_type_idx").on(table.userId, table.type),
+  userCreatedIdx: index("revenue_transactions_user_id_created_at_idx").on(table.userId, table.createdAt),
 }));
 
 export type RevenueTransaction = typeof revenueTransactions.$inferSelect;

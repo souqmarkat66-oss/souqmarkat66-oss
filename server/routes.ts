@@ -1820,10 +1820,14 @@ Sitemap: ${BASE}/sitemap-pages.xml
     const ch = await storage.getChannel(Number(req.params.id));
     if (!ch) return res.status(404).json({ message: "Not found" });
     if (ch.userId !== req.user.claims.sub && !isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
-    const transactions = await storage.getRevenueTransactions(ch.userId);
-    const channelTransactions = transactions.filter(t => t.channelId === Number(req.params.id));
-    const totalEarningsEGP = channelTransactions.filter(t => t.type === 'earning').reduce((s, t) => s + (t.amountEGP || 0), 0);
-    res.json({ channel: ch, earnings: totalEarningsEGP, transactions: channelTransactions });
+    const channelId = Number(req.params.id);
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+    const [channelTransactions, totals] = await Promise.all([
+      storage.getRevenueTransactions(ch.userId, { channelId, limit, offset }),
+      storage.getRevenueTotals(ch.userId, { channelId }),
+    ]);
+    res.json({ channel: ch, earnings: totals.earning, transactions: channelTransactions, hasMore: channelTransactions.length === limit });
   });
 
   // ================================================================
@@ -2776,10 +2780,22 @@ Sitemap: ${BASE}/sitemap-pages.xml
   // ================================================================
   app.get("/api/revenue", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
-    const transactions = await storage.getRevenueTransactions(userId);
-    const balanceEGP = await storage.getUserBalanceEGP(userId);
-    const channel = await storage.getChannelByUserId(userId);
-    res.json({ transactions, balanceEGP, channel });
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+    const allowedTypes = ['earning', 'spending', 'withdrawal', 'ai_charge'] as const;
+    type RevenueTxType = typeof allowedTypes[number];
+    const rawType = typeof req.query.type === 'string' ? req.query.type : undefined;
+    const type: RevenueTxType | undefined = rawType && (allowedTypes as readonly string[]).includes(rawType)
+      ? (rawType as RevenueTxType)
+      : undefined;
+    const txOptions: { limit: number; offset: number; type?: RevenueTxType } = { limit, offset };
+    if (type) txOptions.type = type;
+    const [transactions, balanceEGP, channel] = await Promise.all([
+      storage.getRevenueTransactions(userId, txOptions),
+      storage.getUserBalanceEGP(userId),
+      storage.getChannelByUserId(userId),
+    ]);
+    res.json({ transactions, balanceEGP, channel, hasMore: transactions.length === limit, limit, offset });
   });
 
   // ── تقرير المعلن التفصيلي ──────────────────────────────────────
@@ -2821,12 +2837,23 @@ Sitemap: ${BASE}/sitemap-pages.xml
         };
       });
 
-      // معاملات الإنفاق فقط
-      const txs = (await storage.getRevenueTransactions(userId)).filter(t => t.type === 'spending');
-      const totalSpent = txs.reduce((s, t) => s + (t.amountEGP || 0), 0);
-      const balance = await storage.getUserBalanceEGP(userId);
+      // معاملات الإنفاق فقط (الصفحة الأولى فقط — استخدم /api/revenue?type=spending للترقيم)
+      const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 30, 1), 100);
+      const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+      const [txs, totals, balance] = await Promise.all([
+        storage.getRevenueTransactions(userId, { type: 'spending', limit, offset }),
+        storage.getRevenueTotals(userId),
+        storage.getUserBalanceEGP(userId),
+      ]);
 
-      res.json({ campaigns: merged, transactions: txs, totalSpentEGP: totalSpent, balanceEGP: balance });
+      res.json({
+        campaigns: merged,
+        transactions: txs,
+        totalSpentEGP: totals.spending,
+        balanceEGP: balance,
+        hasMore: txs.length === limit,
+        limit, offset,
+      });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -2851,16 +2878,22 @@ Sitemap: ${BASE}/sitemap-pages.xml
         channelStats = statsResult.rows[0] || {};
       }
 
-      // معاملات الأرباح فقط
-      const txs = (await storage.getRevenueTransactions(userId)).filter(t => t.type === 'earning');
-      const totalEarned = txs.reduce((s, t) => s + (t.amountEGP || 0), 0);
-      const withdrawn = (await storage.getRevenueTransactions(userId))
-        .filter(t => t.type === 'withdrawal').reduce((s, t) => s + (t.amountEGP || 0), 0);
-      const balance = await storage.getUserBalanceEGP(userId);
+      // معاملات الأرباح فقط (الصفحة الأولى فقط — استخدم /api/revenue?type=earning للترقيم)
+      const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 30, 1), 100);
+      const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+      const [txs, totals, balance] = await Promise.all([
+        storage.getRevenueTransactions(userId, { type: 'earning', limit, offset }),
+        storage.getRevenueTotals(userId),
+        storage.getUserBalanceEGP(userId),
+      ]);
 
       res.json({
-        channel, channelStats, transactions: txs, totalEarnedEGP: totalEarned,
-        withdrawnEGP: withdrawn, balanceEGP: balance
+        channel, channelStats, transactions: txs,
+        totalEarnedEGP: totals.earning,
+        withdrawnEGP: totals.withdrawal,
+        balanceEGP: balance,
+        hasMore: txs.length === limit,
+        limit, offset,
       });
     } catch (e: any) {
       res.status(500).json({ message: e.message });

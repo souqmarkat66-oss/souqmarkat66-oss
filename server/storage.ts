@@ -68,7 +68,8 @@ export interface IStorage {
   recordClick(campaignId: number, channelId?: number, userId?: string): Promise<{ budgetWarning?: boolean; budgetRatio?: number; advertiserId?: string; campaignName?: string }>;
 
   // Revenue
-  getRevenueTransactions(userId: string): Promise<RevenueTransaction[]>;
+  getRevenueTransactions(userId: string, options?: { limit?: number; offset?: number; type?: 'earning' | 'spending' | 'withdrawal' | 'ai_charge'; channelId?: number }): Promise<RevenueTransaction[]>;
+  getRevenueTotals(userId: string, options?: { channelId?: number }): Promise<{ earning: number; spending: number; withdrawal: number; ai_charge: number }>;
   getUserBalanceEGP(userId: string): Promise<number>;
   createTransaction(tx: Omit<RevenueTransaction, 'id' | 'createdAt'>): Promise<RevenueTransaction>;
 
@@ -461,8 +462,43 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ─── REVENUE ──────────────────────────────────────────────────
-  async getRevenueTransactions(userId: string): Promise<RevenueTransaction[]> {
-    return db.select().from(revenueTransactions).where(eq(revenueTransactions.userId, userId)).orderBy(desc(revenueTransactions.createdAt));
+  async getRevenueTransactions(
+    userId: string,
+    options: { limit?: number; offset?: number; type?: 'earning' | 'spending' | 'withdrawal' | 'ai_charge'; channelId?: number } = {}
+  ): Promise<RevenueTransaction[]> {
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+    const offset = Math.max(options.offset ?? 0, 0);
+    const conds = [eq(revenueTransactions.userId, userId)];
+    if (options.type) conds.push(eq(revenueTransactions.type, options.type));
+    if (options.channelId !== undefined) conds.push(eq(revenueTransactions.channelId, options.channelId));
+    return db.select().from(revenueTransactions)
+      .where(and(...conds))
+      .orderBy(desc(revenueTransactions.createdAt))
+      .limit(limit)
+      .offset(offset);
+  }
+
+  async getRevenueTotals(
+    userId: string,
+    options: { channelId?: number } = {}
+  ): Promise<{ earning: number; spending: number; withdrawal: number; ai_charge: number }> {
+    const conds = [eq(revenueTransactions.userId, userId)];
+    if (options.channelId !== undefined) conds.push(eq(revenueTransactions.channelId, options.channelId));
+    const [row] = await db
+      .select({
+        earning: sql<number>`COALESCE(SUM(CASE WHEN ${revenueTransactions.type} = 'earning' THEN ${revenueTransactions.amountEGP} ELSE 0 END), 0)`,
+        spending: sql<number>`COALESCE(SUM(CASE WHEN ${revenueTransactions.type} = 'spending' THEN ${revenueTransactions.amountEGP} ELSE 0 END), 0)`,
+        withdrawal: sql<number>`COALESCE(SUM(CASE WHEN ${revenueTransactions.type} = 'withdrawal' THEN ${revenueTransactions.amountEGP} ELSE 0 END), 0)`,
+        ai_charge: sql<number>`COALESCE(SUM(CASE WHEN ${revenueTransactions.type} = 'ai_charge' THEN ${revenueTransactions.amountEGP} ELSE 0 END), 0)`,
+      })
+      .from(revenueTransactions)
+      .where(and(...conds));
+    return {
+      earning: Number(row?.earning) || 0,
+      spending: Number(row?.spending) || 0,
+      withdrawal: Number(row?.withdrawal) || 0,
+      ai_charge: Number(row?.ai_charge) || 0,
+    };
   }
 
   async getUserBalanceEGP(userId: string): Promise<number> {
