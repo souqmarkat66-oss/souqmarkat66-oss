@@ -10,11 +10,21 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
+// On local Windows dev, connecting to a remote Postgres (e.g. Neon/Replit DB)
+// often hits 5s timeout. Bumped to 30s + keepAlive to survive flaky home networks.
+// SSL is enabled when the connection string targets a managed host (neon, replit,
+// supabase, render, railway, *.cloud) — required for those providers.
+const connStr = process.env.DATABASE_URL!;
+const needsSsl = /neon\.tech|replit|supabase|render\.com|railway|amazonaws|\.cloud(\b|\/|:)/i.test(connStr)
+  || /sslmode=require/i.test(connStr);
+
 export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: connStr,
   max: 10,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
+  connectionTimeoutMillis: 30000,
+  keepAlive: true,
+  ssl: needsSsl ? { rejectUnauthorized: false } : undefined,
 });
 
 pool.on("error", (err) => {
