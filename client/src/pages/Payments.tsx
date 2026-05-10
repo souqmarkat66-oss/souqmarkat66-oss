@@ -139,7 +139,19 @@ export default function Payments() {
   const noneSelected = selectedServices.size === 0;
 
   const createMutation = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/payments", data),
+    mutationFn: async (data: any) => {
+      const res = await fetch("/api/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(data),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body?.message || "فشل إرسال الطلب");
+      }
+      return body;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
       toast({ title: "✅ تم إرسال طلب الدفع", description: "سيتم مراجعته فوراً وتفعيل الخدمة عند القبول" });
@@ -151,12 +163,27 @@ export default function Payments() {
       setScreenshotUrl("");
       setScreenshotPreview("");
     },
-    onError: () => toast({ title: "خطأ", description: "فشل إرسال الطلب", variant: "destructive" }),
+    onError: (err: Error) => toast({
+      title: "تعذّر إرسال الطلب",
+      description: err.message,
+      variant: "destructive",
+    }),
   });
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Client-side validation: image only, max 5MB
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "نوع الملف غير صحيح", description: "ارفع صورة بصيغة PNG / JPG / WEBP فقط", variant: "destructive" });
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: "الصورة كبيرة جداً", description: "الحد الأقصى 5 ميجابايت", variant: "destructive" });
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
     setUploading(true);
     try {
       const preview = URL.createObjectURL(file);
@@ -175,6 +202,33 @@ export default function Payments() {
       setUploading(false);
     }
   };
+
+  // Egyptian wallet number validation: 11 digits starting with 010/011/012/015
+  const EG_PHONE_REGEX = /^01[0125]\d{8}$/;
+  const phoneTrimmed = formData.phoneNumber.trim();
+  const phoneRequired = formData.method !== "souq";
+  const phoneError = phoneRequired
+    ? (!phoneTrimmed
+        ? "أدخل رقم محفظتك"
+        : !EG_PHONE_REGEX.test(phoneTrimmed)
+          ? "رقم غير صحيح — لازم 11 رقم يبدأ بـ 010/011/012/015"
+          : "")
+    : "";
+  const amountNum = Number(effectiveAmount);
+  const amountError = !effectiveAmount || amountNum <= 0
+    ? ""
+    : amountNum < 10
+      ? "الحد الأدنى 10 جنيه"
+      : amountNum > 1_000_000
+        ? "المبلغ كبير جداً"
+        : "";
+  const servicesError = formData.type === "top_up" && selectedServices.size === 0
+    ? "اختر خدمة واحدة على الأقل"
+    : "";
+  const screenshotError = !screenshotUrl ? "ارفع صورة الإيصال بعد إتمام التحويل" : "";
+
+  const formValid = !phoneError && !amountError && !servicesError && !screenshotError
+    && effectiveAmount && amountNum > 0;
 
   const removeScreenshot = () => {
     setScreenshotUrl("");
@@ -528,19 +582,25 @@ export default function Payments() {
                   placeholder={autoTotal > 0 ? `مجموع الخدمات: ${autoTotal} ج.م` : "مثال: 500"}
                   value={effectiveAmount}
                   onChange={e => { setManualAmount(e.target.value); setAmountOverride(true); }}
-                  className={`text-sm h-9 ${autoTotal > 0 && !amountOverride ? "border-primary/50 bg-primary/5" : ""}`}
+                  className={`text-sm h-9 ${amountError ? "border-red-500" : (autoTotal > 0 && !amountOverride ? "border-primary/50 bg-primary/5" : "")}`}
                   data-testid="input-amount"
                 />
-                {autoTotal > 0 && !amountOverride && (
+                {autoTotal > 0 && !amountOverride && !amountError && (
                   <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-primary font-bold bg-primary/10 px-1.5 py-0.5 rounded">
                     تلقائي
                   </span>
                 )}
               </div>
-              {autoTotal > 0 && !amountOverride && (
+              {amountError && (
+                <p className="text-[10px] text-red-600 font-bold" data-testid="error-amount">⚠️ {amountError}</p>
+              )}
+              {!amountError && autoTotal > 0 && !amountOverride && (
                 <p className="text-[10px] text-muted-foreground">
                   المبلغ محسوب تلقائياً من الخدمات المختارة · يمكنك تعديله يدوياً
                 </p>
+              )}
+              {servicesError && (
+                <p className="text-[10px] text-red-600 font-bold" data-testid="error-services">⚠️ {servicesError}</p>
               )}
             </div>
 
@@ -572,13 +632,18 @@ export default function Payments() {
                 </label>
                 <Input
                   type="tel"
+                  inputMode="numeric"
+                  maxLength={11}
                   placeholder="01XXXXXXXXX"
                   value={formData.phoneNumber}
-                  onChange={e => setFormData(f => ({ ...f, phoneNumber: e.target.value }))}
-                  className="text-sm h-9 font-mono"
+                  onChange={e => setFormData(f => ({ ...f, phoneNumber: e.target.value.replace(/\D/g, "") }))}
+                  className={`text-sm h-9 font-mono ${phoneError && phoneTrimmed ? "border-red-500 focus-visible:ring-red-500" : ""}`}
                   dir="ltr"
                   data-testid="input-phone"
                 />
+                {phoneError && phoneTrimmed && (
+                  <p className="text-[10px] text-red-600 font-bold" data-testid="error-phone">⚠️ {phoneError}</p>
+                )}
                 {selectedMethod?.number && (
                   <p className="text-[10px] text-muted-foreground">
                     حوّل المبلغ على: <span className="font-mono font-bold">{selectedMethod.number}</span>
@@ -688,15 +753,20 @@ export default function Payments() {
             </div>
 
 
-            {/* Submit */}
+            {/* Submit — show first blocking reason */}
+            {!formValid && (phoneError || amountError || servicesError || screenshotError) && (
+              <div className="rounded-xl border border-red-300 bg-red-50 dark:bg-red-950/30 px-3 py-2 text-[11px] text-red-700 dark:text-red-300 font-bold" data-testid="error-summary">
+                ⚠️ {phoneError || amountError || servicesError || screenshotError}
+              </div>
+            )}
             <Button
               className="w-full gap-2"
-              disabled={!effectiveAmount || Number(effectiveAmount) <= 0 || !screenshotUrl || uploading || createMutation.isPending}
+              disabled={!formValid || uploading || createMutation.isPending}
               onClick={() => createMutation.mutate({
                 type: formData.type,
                 amountEGP: Number(effectiveAmount),
                 method: formData.method,
-                phoneNumber: formData.phoneNumber || undefined,
+                phoneNumber: phoneTrimmed || undefined,
                 adId: formData.adId && formData.adId !== "none" ? Number(formData.adId) : undefined,
                 serviceType: selectedServices.size > 0 ? Array.from(selectedServices).join(",") : undefined,
                 screenshotUrl: screenshotUrl || undefined,

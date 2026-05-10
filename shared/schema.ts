@@ -315,7 +315,54 @@ export const paymentRequests = pgTable("payment_requests", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const insertPaymentRequestSchema = createInsertSchema(paymentRequests).omit({ id: true, createdAt: true, status: true, adminNote: true });
+// Egyptian mobile: 11 digits starting with 010/011/012/015
+const EG_PHONE_REGEX = /^01[0125]\d{8}$/;
+
+export const insertPaymentRequestSchema = createInsertSchema(paymentRequests)
+  .omit({ id: true, createdAt: true, status: true, adminNote: true })
+  .extend({
+    amountEGP: z.coerce.number()
+      .positive("المبلغ لازم يكون أكبر من صفر")
+      .min(10, "الحد الأدنى للمبلغ هو 10 جنيه")
+      .max(1_000_000, "المبلغ كبير جداً، تواصل مع الإدارة"),
+    phoneNumber: z.string().trim().optional().nullable(),
+    screenshotUrl: z.string().trim().min(1, "صورة الإيصال مطلوبة"),
+    serviceType: z.string().trim().optional().nullable(),
+  })
+  .superRefine((data, ctx) => {
+    // Phone required for all methods EXCEPT in-app souq market payment
+    if (data.method !== "souq") {
+      if (!data.phoneNumber || data.phoneNumber.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["phoneNumber"],
+          message: "رقم محفظتك مطلوب لإتمام التحويل",
+        });
+      } else if (!EG_PHONE_REGEX.test(data.phoneNumber)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["phoneNumber"],
+          message: "رقم المحفظة غير صحيح — لازم يبدأ بـ 010/011/012/015 ويكون 11 رقم",
+        });
+      }
+    }
+    // Screenshot must point to a server-uploaded file (not an external URL)
+    if (!data.screenshotUrl.startsWith("/uploads/")) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["screenshotUrl"],
+        message: "صورة الإيصال لازم ترفعها من الزرار، مش رابط خارجي",
+      });
+    }
+    // Top-up requires at least one service selected
+    if (data.type === "top_up" && (!data.serviceType || data.serviceType.length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["serviceType"],
+        message: "اختر خدمة واحدة على الأقل",
+      });
+    }
+  });
 export type PaymentRequest = typeof paymentRequests.$inferSelect;
 export type InsertPaymentRequest = z.infer<typeof insertPaymentRequestSchema>;
 

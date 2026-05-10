@@ -2849,66 +2849,126 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   app.post("/api/payments", isAuthenticated, async (req: any, res) => {
     try {
-      const { insertPaymentRequestSchema } = await import("@shared/schema");
+      const { insertPaymentRequestSchema, uploadedFiles } = await import("@shared/schema");
+      const { eq, and } = await import("drizzle-orm");
+      const userId = req.user.claims.sub;
+
       // Generate unique order number: ORD-YYYYMMDD-XXXX
       const now = new Date();
       const datePart = now.toISOString().slice(0,10).replace(/-/g,"");
       const rand = Math.floor(1000 + Math.random() * 9000);
       const orderNumber = `ORD-${datePart}-${rand}`;
-      const input = insertPaymentRequestSchema.parse({
+
+      const parsed = insertPaymentRequestSchema.safeParse({
         ...req.body,
-        userId: req.user.claims.sub,
+        userId,
         orderNumber,
       });
+      if (!parsed.success) {
+        const first = parsed.error.errors[0];
+        return res.status(400).json({
+          message: first?.message || "بيانات غير صحيحة",
+          field: first?.path?.[0],
+          errors: parsed.error.errors,
+        });
+      }
+      const input = parsed.data;
+
+      // Anti-fraud: verify the receipt screenshot was actually uploaded by THIS user.
+      // Prevents users from pasting a URL of someone else's receipt.
+      const filename = input.screenshotUrl.replace(/^\/uploads\//, "");
+      const ownedFile = await db
+        .select({ id: uploadedFiles.id, mimeType: uploadedFiles.mimeType })
+        .from(uploadedFiles)
+        .where(and(eq(uploadedFiles.userId, userId), eq(uploadedFiles.filename, filename)))
+        .limit(1);
+
+      if (ownedFile.length === 0) {
+        return res.status(400).json({
+          message: "صورة الإيصال غير صالحة — لازم ترفعها من نفس حسابك دلوقتي",
+          field: "screenshotUrl",
+        });
+      }
+      // Receipt must be an image, not a video / pdf / random file
+      if (ownedFile[0].mimeType && !ownedFile[0].mimeType.startsWith("image/")) {
+        return res.status(400).json({
+          message: "صورة الإيصال لازم تكون صورة (PNG / JPG / WEBP) — مش فيديو أو ملف تاني",
+          field: "screenshotUrl",
+        });
+      }
+
+      // Anti-fraud: if adId provided, must belong to the same user
+      // (prevents paying to boost/renew someone else's ad)
+      if (input.adId) {
+        const adRow = await pool.query(`SELECT user_id FROM ads WHERE id = $1`, [input.adId]);
+        if (adRow.rows.length === 0) {
+          return res.status(400).json({ message: "الإعلان المحدد غير موجود", field: "adId" });
+        }
+        if (adRow.rows[0].user_id !== userId) {
+          return res.status(403).json({ message: "لا يمكنك ربط الطلب بإعلان مش بتاعك", field: "adId" });
+        }
+      }
+
       const payment = await storage.createPaymentRequest(input);
       res.status(201).json(payment);
     } catch (err: any) {
-      res.status(400).json({ message: err.message });
+      res.status(400).json({ message: err.message || "فشل إنشاء الطلب" });
     }
   });
 
   // ── Helper: activate service after payment approval ──
   async function activateServiceForPayment(p: any) {
     if (!p || p.type !== 'top_up') return;
-    const svcType   = (p.serviceType || "").split(",")[0].trim();
-    const adId      = p.adId ? Number(p.adId) : null;
-    const userId    = p.userId;
+    const adId   = p.adId ? Number(p.adId) : null;
+    const userId = p.userId;
+    const services = (p.serviceType || "")
+      .split(",")
+      .map((s: string) => s.trim())
+      .filter(Boolean);
 
-    try {
-      if (svcType === 'ad_boost' && adId) {
-        await pool.query(
-          `UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '30 days' WHERE id = $1`,
-          [adId]
-        );
-        await createNotification(userId, 'system', '⚡ تم تعزيز إعلانك!',
-          `إعلانك #${adId} أصبح مميزاً في الصدارة لمدة 30 يوماً`, `/ads/${adId}`);
-      } else if (svcType === 'renewal' && adId) {
-        await pool.query(
-          `UPDATE ads SET status = 'active', expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + INTERVAL '30 days' WHERE id = $1`,
-          [adId]
-        );
-        await createNotification(userId, 'system', '🔄 تم تجديد إعلانك!',
-          `إعلانك #${adId} تم تجديده لمدة 30 يوماً إضافية`, `/ads/${adId}`);
-      } else if (svcType === 'ai_credits') {
-        const creditsRow = await pool.query(
-          `SELECT value FROM platform_settings WHERE key = 'ai_free_credits' LIMIT 1`
-        );
-        const credits = parseInt(creditsRow.rows[0]?.value || '3');
-        await pool.query(
-          `INSERT INTO ai_usage (user_id, credits_used, credits_limit)
-           VALUES ($1, 0, $2)
-           ON CONFLICT (user_id) DO UPDATE SET credits_limit = ai_usage.credits_limit + $2`,
-          [userId, credits]
-        );
-        await createNotification(userId, 'system', '🤖 تم إضافة رصيد AI!',
-          `تمت إضافة ${credits} كريديت للذكاء الاصطناعي لحسابك`, '/create');
-      } else {
-        // Generic: just notify
-        await createNotification(userId, 'payment', '✅ تم تفعيل خدمتك!',
-          `تم تفعيل خدمة "${svcType}" — رقم الطلب: ${p.orderNumber}`, '/payments');
+    if (services.length === 0) {
+      await createNotification(userId, 'payment', '✅ تم استلام الدفع',
+        `تم تأكيد دفعتك — رقم الطلب: ${p.orderNumber}`, '/payments');
+      return;
+    }
+
+    for (const svcType of services) {
+      try {
+        if (svcType === 'ad_boost' && adId) {
+          await pool.query(
+            `UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '30 days' WHERE id = $1`,
+            [adId]
+          );
+          await createNotification(userId, 'system', '⚡ تم تعزيز إعلانك!',
+            `إعلانك #${adId} أصبح مميزاً في الصدارة لمدة 30 يوماً`, `/ads/${adId}`);
+        } else if (svcType === 'renewal' && adId) {
+          await pool.query(
+            `UPDATE ads SET status = 'active', expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + INTERVAL '30 days' WHERE id = $1`,
+            [adId]
+          );
+          await createNotification(userId, 'system', '🔄 تم تجديد إعلانك!',
+            `إعلانك #${adId} تم تجديده لمدة 30 يوماً إضافية`, `/ads/${adId}`);
+        } else if (svcType === 'ai_credits') {
+          const creditsRow = await pool.query(
+            `SELECT value FROM platform_settings WHERE key = 'ai_free_credits' LIMIT 1`
+          );
+          const credits = parseInt(creditsRow.rows[0]?.value || '3');
+          await pool.query(
+            `INSERT INTO ai_usage (user_id, credits_used, credits_limit)
+             VALUES ($1, 0, $2)
+             ON CONFLICT (user_id) DO UPDATE SET credits_limit = ai_usage.credits_limit + $2`,
+            [userId, credits]
+          );
+          await createNotification(userId, 'system', '🤖 تم إضافة رصيد AI!',
+            `تمت إضافة ${credits} كريديت للذكاء الاصطناعي لحسابك`, '/create');
+        } else {
+          // Generic: just notify
+          await createNotification(userId, 'payment', '✅ تم تفعيل خدمتك!',
+            `تم تفعيل خدمة "${svcType}" — رقم الطلب: ${p.orderNumber}`, '/payments');
+        }
+      } catch (e: any) {
+        console.error(`[activateService] error for ${svcType}:`, e?.message);
       }
-    } catch (e: any) {
-      console.error('[activateService] error:', e?.message);
     }
   }
 
