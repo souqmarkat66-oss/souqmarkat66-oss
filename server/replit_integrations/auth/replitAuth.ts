@@ -1,25 +1,20 @@
-import * as client from "openid-client";
-import { Strategy, type VerifyFunction } from "openid-client/passport";
+// Replit OIDC integration — fully optional.
+// On local dev / VPS where REPL_ID is missing or empty, openid-client is
+// NEVER imported and no discovery is performed. Custom email/password auth
+// (server/customAuth.ts) remains fully functional.
 
 import passport from "passport";
 import session from "express-session";
 import type { Express, RequestHandler } from "express";
-import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import { randomBytes } from "crypto";
 import { authStorage } from "./storage";
 
-const getOidcConfig = memoize(
-  async () => {
-    const replId = process.env.REPL_ID;
-    if (!replId) throw new Error("REPL_ID not set — Replit Auth disabled");
-    return await client.discovery(
-      new URL(process.env.ISSUER_URL ?? "https://replit.com/oidc"),
-      replId
-    );
-  },
-  { maxAge: 3600 * 1000 }
-);
+// Treat undefined OR empty string as "not set"
+function getReplId(): string | null {
+  const v = process.env.REPL_ID;
+  return v && v.trim().length > 0 ? v.trim() : null;
+}
 
 const SESSION_SECRET_FALLBACK = randomBytes(32).toString("hex");
 
@@ -33,6 +28,7 @@ export function getSession() {
     tableName: "sessions",
   });
   const secret = process.env.SESSION_SECRET || SESSION_SECRET_FALLBACK;
+  const isProd = process.env.NODE_ENV === "production";
   return session({
     secret,
     store: sessionStore,
@@ -40,16 +36,29 @@ export function getSession() {
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: true,
+      // secure cookies require HTTPS — break local http://localhost dev
+      secure: isProd,
       maxAge: sessionTtl,
     },
   });
 }
 
-function updateUserSession(
-  user: any,
-  tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers
-) {
+// Lazy holder — populated only when REPL_ID is present
+let oidcModule: typeof import("openid-client") | null = null;
+let oidcConfig: any = null;
+
+async function loadOidcConfig(replId: string) {
+  if (oidcConfig) return oidcConfig;
+  // Dynamic import — openid-client is NOT loaded at module init time
+  oidcModule = await import("openid-client");
+  oidcConfig = await oidcModule.discovery(
+    new URL(process.env.ISSUER_URL ?? "https://replit.com/oidc"),
+    replId
+  );
+  return oidcConfig;
+}
+
+function updateUserSession(user: any, tokens: any) {
   user.claims = tokens.claims();
   user.access_token = tokens.access_token;
   user.refresh_token = tokens.refresh_token;
@@ -66,6 +75,14 @@ async function upsertUser(claims: any) {
   });
 }
 
+function registerNoopAuthRoutes(app: Express) {
+  app.get("/api/login", (_req, res) => res.redirect("/"));
+  app.get("/api/callback", (_req, res) => res.redirect("/"));
+  app.get("/api/logout", (req, res) => {
+    req.logout(() => res.redirect("/"));
+  });
+}
+
 export async function setupAuth(app: Express) {
   app.set("trust proxy", 1);
   app.use(getSession());
@@ -75,46 +92,40 @@ export async function setupAuth(app: Express) {
   passport.serializeUser((user: Express.User, cb) => cb(null, user));
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
-  // If REPL_ID is missing (local dev / VPS without Replit env), skip Replit OIDC gracefully
-  if (!process.env.REPL_ID) {
+  const replId = getReplId();
+  if (!replId) {
     console.log("[Auth] Replit OIDC disabled (REPL_ID not set). Custom email/password auth still active.");
-    app.get("/api/login", (_req, res) => res.redirect("/"));
-    app.get("/api/callback", (_req, res) => res.redirect("/"));
-    app.get("/api/logout", (req, res) => {
-      req.logout(() => res.redirect("/"));
-    });
+    registerNoopAuthRoutes(app);
     return;
   }
 
-  let config: Awaited<ReturnType<typeof getOidcConfig>>;
+  // From here on REPL_ID is guaranteed to be a non-empty string.
+  let config: any;
+  let StrategyCtor: any;
+  let clientLib: typeof import("openid-client");
   try {
-    config = await getOidcConfig();
+    config = await loadOidcConfig(replId);
+    clientLib = oidcModule!;
+    const passportMod = await import("openid-client/passport");
+    StrategyCtor = passportMod.Strategy;
   } catch (e) {
-    console.warn("[Auth] Replit OIDC setup failed:", (e as Error).message);
-    app.get("/api/login", (_req, res) => res.redirect("/"));
-    app.get("/api/callback", (_req, res) => res.redirect("/"));
-    app.get("/api/logout", (req, res) => {
-      req.logout(() => res.redirect("/"));
-    });
+    console.warn("[Auth] Replit OIDC setup failed, falling back to no-op:", (e as Error).message);
+    registerNoopAuthRoutes(app);
     return;
   }
 
-  const verify: VerifyFunction = async (
-    tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers,
-    verified: passport.AuthenticateCallback
-  ) => {
-    const user = {};
+  const verify = async (tokens: any, verified: any) => {
+    const user: any = {};
     updateUserSession(user, tokens);
     await upsertUser(tokens.claims());
     verified(null, user);
   };
 
   const registeredStrategies = new Set<string>();
-
   const ensureStrategy = (domain: string) => {
     const strategyName = `replitauth:${domain}`;
     if (!registeredStrategies.has(strategyName)) {
-      const strategy = new Strategy(
+      const strategy = new StrategyCtor(
         {
           name: strategyName,
           config,
@@ -147,8 +158,8 @@ export async function setupAuth(app: Express) {
   app.get("/api/logout", (req, res) => {
     req.logout(() => {
       res.redirect(
-        client.buildEndSessionUrl(config, {
-          client_id: process.env.REPL_ID!,
+        clientLib.buildEndSessionUrl(config, {
+          client_id: replId,
           post_logout_redirect_uri: `${req.protocol}://${req.hostname}`,
         }).href
       );
@@ -159,7 +170,7 @@ export async function setupAuth(app: Express) {
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
   const user = req.user as any;
 
-  if (!req.isAuthenticated() || !user.expires_at) {
+  if (!req.isAuthenticated() || !user?.expires_at) {
     return res.status(401).json({ message: "Unauthorized" });
   }
 
@@ -174,9 +185,14 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
     return;
   }
 
+  const replId = getReplId();
+  if (!replId || !oidcModule || !oidcConfig) {
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+
   try {
-    const config = await getOidcConfig();
-    const tokenResponse = await client.refreshTokenGrant(config, refreshToken);
+    const tokenResponse = await oidcModule.refreshTokenGrant(oidcConfig, refreshToken);
     updateUserSession(user, tokenResponse);
     return next();
   } catch (error) {
