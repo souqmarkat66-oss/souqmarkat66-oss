@@ -5842,6 +5842,11 @@ ${reelTags}
             chargeAdvertiser: false,
             creditAdmin: false,
           });
+          if (!updated) {
+            // Status changed (paused/completed) between checks → stop ticking
+            stopTickerBilling(adId);
+            return;
+          }
           io.emit("ticker:tick", {
             id: adId,
             spentEGP: 0,
@@ -5880,6 +5885,11 @@ ${reelTags}
           chargeAdvertiser: true,
           creditAdmin: true,
         });
+        if (!updated) {
+          // Status changed (paused/completed) between checks → stop ticking, no charge
+          stopTickerBilling(adId);
+          return;
+        }
         // Optional live tick to admin dashboards
         io.emit("ticker:tick", {
           id: adId,

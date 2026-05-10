@@ -617,6 +617,17 @@ export class DatabaseStorage implements IStorage {
   }): Promise<TickerAd | undefined> {
     const { adId, amountEGP, advertiserId, adminUserId, chargeAdvertiser, creditAdmin } = params;
     return await db.transaction(async (tx) => {
+      // Lock the row & verify it's still active before charging.
+      // Prevents a race where stopTickerBilling/admin-pause runs between
+      // the pre-check and the deduction, causing an extra second to be billed.
+      const [locked] = await tx
+        .select({ status: tickerAds.status })
+        .from(tickerAds)
+        .where(eq(tickerAds.id, adId))
+        .for("update");
+      if (!locked || locked.status !== "active") {
+        return undefined;
+      }
       const [updated] = await tx.update(tickerAds).set({
         spentEGP: sql`${tickerAds.spentEGP} + ${amountEGP}`,
         secondsShown: sql`${tickerAds.secondsShown} + 1`,
