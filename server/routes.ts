@@ -3139,7 +3139,30 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   app.get("/api/admin/payments", isAuthenticated, requireAdmin, async (req: any, res) => {
     const payments = await storage.getPaymentRequests();
-    res.json(payments);
+    // ضم رصيد المستخدم الحالي بجوار طلبات السحب المعلقة لتحذير الأدمن قبل الموافقة
+    const withdrawalUserIds = Array.from(new Set(
+      payments
+        .filter((p: any) => p.type === 'withdrawal' && p.status === 'pending' && p.userId)
+        .map((p: any) => p.userId)
+    ));
+    const balances: Record<string, number | null> = {};
+    await Promise.all(withdrawalUserIds.map(async (uid: string) => {
+      try { balances[uid] = await storage.getUserBalanceEGP(uid); }
+      catch { balances[uid] = null; }
+    }));
+    const enriched = payments.map((p: any) => {
+      if (p.type === 'withdrawal' && p.status === 'pending' && p.userId && p.userId in balances) {
+        const bal = balances[p.userId];
+        const requested = Number(p.amountEGP || 0);
+        return {
+          ...p,
+          currentBalanceEGP: bal,
+          insufficientBalance: bal === null ? null : requested > bal,
+        };
+      }
+      return p;
+    });
+    res.json(enriched);
   });
 
   app.put("/api/admin/payments/:id", isAuthenticated, requireAdmin, async (req: any, res) => {

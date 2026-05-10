@@ -1126,10 +1126,50 @@ function PaymentsSection({ logAction }: { logAction: any }) {
   });
 
   const updatePayment = useMutation({
-    mutationFn: ({ id, status }: any) =>
-      fetch(`/api/admin/payments/${id}`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }).then(r => r.json()),
-    onSuccess: (_, vars) => { qc.invalidateQueries({ queryKey: ["/api/admin/payments"] }); toast({ title: vars.status === "approved" ? "✅ تمت الموافقة" : "❌ تم الرفض" }); logAction("update_payment", `pay#${vars.id}`, vars.status); },
+    mutationFn: async ({ id, status }: any) => {
+      const r = await fetch(`/api/admin/payments/${id}`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+      const data = await r.json().catch(() => ({} as any));
+      if (!r.ok) {
+        const err: any = new Error(data?.message || "فشل تحديث الطلب");
+        err.payload = data;
+        err.status = r.status;
+        throw err;
+      }
+      return data;
+    },
+    onSuccess: (_data: any, vars) => {
+      qc.invalidateQueries({ queryKey: ["/api/admin/payments"] });
+      toast({ title: vars.status === "approved" ? "✅ تمت الموافقة" : "❌ تم الرفض" });
+      logAction("update_payment", `pay#${vars.id}`, vars.status);
+    },
+    onError: (err: any, vars) => {
+      qc.invalidateQueries({ queryKey: ["/api/admin/payments"] });
+      const p = err?.payload;
+      if (p && p.currentBalanceEGP !== undefined) {
+        toast({ title: "❗ رصيد غير كافٍ", description: p.message, variant: "destructive" });
+      } else {
+        toast({ title: "حدث خطأ", description: err?.message || "فشل تحديث الطلب", variant: "destructive" });
+      }
+      logAction("update_payment_failed", `pay#${vars.id}`, vars.status);
+    },
   });
+
+  const handleApprove = (p: any) => {
+    if (p.type === 'withdrawal') {
+      if (p.insufficientBalance === true) {
+        const ok = confirm(
+          `⚠️ تحذير: رصيد المستخدم الحالي ${Number(p.currentBalanceEGP || 0).toFixed(2)} ج.م، لكن المبلغ المطلوب ${Number(p.amountEGP).toFixed(2)} ج.م.\n\nالموافقة على الأرجح سيتم رفضها من السيرفر. هل تريد المتابعة؟`
+        );
+        if (!ok) return;
+      } else if (p.currentBalanceEGP === null || p.insufficientBalance === null) {
+        const ok = confirm(
+          `⚠️ تعذر التحقق من رصيد المستخدم الحالي. هل تريد متابعة الموافقة؟ (السيرفر سيتحقق مرة أخرى قبل الصرف).`
+        );
+        if (!ok) return;
+      }
+    }
+    updatePayment.mutate({ id: p.id, status: "approved" });
+  };
 
   const pending = payments.filter((p: any) => p.status === "pending");
   const done = payments.filter((p: any) => p.status !== "pending");
@@ -1161,10 +1201,40 @@ function PaymentsSection({ logAction }: { logAction: any }) {
                         </span>
                       )}
                       <div className="text-xs text-muted-foreground opacity-60 mt-0.5">ORD: {p.orderNumber || p.id} · ID: {p.userId}</div>
+                      {p.type === 'withdrawal' && p.currentBalanceEGP !== undefined && (
+                        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap" data-testid={`balance-info-${p.id}`}>
+                          {p.currentBalanceEGP === null ? (
+                            <span
+                              className="text-[11px] px-2 py-0.5 rounded-full font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-400/50"
+                              data-testid={`badge-balance-unknown-${p.id}`}
+                            >
+                              ⓘ تعذر التحقق من رصيد المستخدم
+                            </span>
+                          ) : (
+                            <>
+                              <span
+                                className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${
+                                  p.insufficientBalance
+                                    ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border border-red-400'
+                                    : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-400/40'
+                                }`}
+                                data-testid={`badge-balance-${p.id}`}
+                              >
+                                💰 رصيد المستخدم: {Number(p.currentBalanceEGP).toFixed(2)} ج.م
+                              </span>
+                              {p.insufficientBalance && (
+                                <span className="text-[11px] px-2 py-0.5 rounded-full font-bold bg-red-500 text-white animate-pulse" data-testid={`badge-warning-${p.id}`}>
+                                  ⚠️ الرصيد أقل من المطلوب
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="flex gap-1.5 flex-shrink-0">
-                      <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "approved" })}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
-                      <Button size="sm" variant="destructive" className="text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "rejected" })}><XCircle className="w-3 h-3 me-1" />رفض</Button>
+                      <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => handleApprove(p)} data-testid={`button-approve-payment-${p.id}`}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
+                      <Button size="sm" variant="destructive" className="text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "rejected" })} data-testid={`button-reject-payment-${p.id}`}><XCircle className="w-3 h-3 me-1" />رفض</Button>
                     </div>
                   </div>
                   {p.screenshotUrl && (
