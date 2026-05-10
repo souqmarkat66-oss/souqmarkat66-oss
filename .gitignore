@@ -4,3 +4,29 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Secrets & env
+.env
+.env.*
+!.env.example
+
+# User-uploaded media (large, not source)
+uploads/
+attached_assets/
+
+# Logs
+*.log
+logs/
+
+# Replit-internal state (tasks, session, validation logs)
+.local/
+.cache/
+.upm/
+.config/
+.breakpoints
+
+# OS / editor
+Thumbs.db
+.idea/
+.vscode/
+*.swp
