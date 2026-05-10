@@ -101,6 +101,8 @@ export interface IStorage {
   getPaymentRequests(userId?: string): Promise<PaymentRequest[]>;
   createPaymentRequest(req: InsertPaymentRequest): Promise<PaymentRequest>;
   updatePaymentRequest(id: number, status: string, adminNote?: string): Promise<PaymentRequest | undefined>;
+  approvePaymentRequestAtomic(id: number, adminNote?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean }>;
+  rejectPaymentRequestAtomic(id: number, adminNote?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean }>;
 
   // Ticker Ads
   createTickerAd(data: InsertTickerAd): Promise<TickerAd>;
@@ -365,69 +367,97 @@ export class DatabaseStorage implements IStorage {
   }
 
   async recordImpression(campaignId: number, channelId?: number, userId?: string): Promise<{ budgetWarning?: boolean; budgetRatio?: number; advertiserId?: string; campaignName?: string }> {
-    const campaign = await this.getAdCampaign(campaignId);
-    if (!campaign) return {};
-
     // ── أسعار المنصة من لوحة الأدمن (تُحدَّث فوراً) ──
     const { cpmRate, pubPct } = await this.getPlatformRates();
     const revenueEGP = cpmRate / 1000;
     const publisherShareEGP = revenueEGP * pubPct;
 
-    const newSpent = (campaign.spentEGP || 0) + revenueEGP;
-    await db.update(adCampaigns).set({
-      impressions: sql`${adCampaigns.impressions} + 1`,
-      spentEGP: sql`${adCampaigns.spentEGP} + ${revenueEGP}`
-    }).where(eq(adCampaigns.id, campaignId));
-    if (channelId) {
-      const ch = await this.getChannel(channelId);
-      if (ch) {
-        await db.update(channels).set({ earningsEGP: sql`${channels.earningsEGP} + ${publisherShareEGP}` }).where(eq(channels.id, channelId));
-        await db.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id, channel_id)
-          VALUES (${ch.userId}, 'earning', ${publisherShareEGP}, ${publisherShareEGP}, ${'إيراد إعلان - حملة #' + campaignId + ' (CPM=' + cpmRate + ' ج.م)'}, ${campaignId}, ${channelId})`);
+    return await db.transaction(async (tx) => {
+      // Lock the campaign row to prevent races with concurrent
+      // impression/click recording or admin pause/budget updates.
+      const [locked] = await tx
+        .select()
+        .from(adCampaigns)
+        .where(eq(adCampaigns.id, campaignId))
+        .for("update");
+      if (!locked) return {};
+      // If the campaign is no longer active, or its budget is exhausted,
+      // do not charge for this impression.
+      if (locked.status !== 'active') return {};
+      const currentSpent = locked.spentEGP || 0;
+      const budget = locked.budgetEGP || 0;
+      if (budget > 0 && currentSpent >= budget) return {};
+
+      const newSpent = currentSpent + revenueEGP;
+      await tx.update(adCampaigns).set({
+        impressions: sql`${adCampaigns.impressions} + 1`,
+        spentEGP: sql`${adCampaigns.spentEGP} + ${revenueEGP}`,
+      }).where(eq(adCampaigns.id, campaignId));
+
+      if (channelId) {
+        const [ch] = await tx.select().from(channels).where(eq(channels.id, channelId)).for("update");
+        if (ch) {
+          await tx.update(channels).set({
+            earningsEGP: sql`${channels.earningsEGP} + ${publisherShareEGP}`,
+          }).where(eq(channels.id, channelId));
+          await tx.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id, channel_id)
+            VALUES (${ch.userId}, 'earning', ${publisherShareEGP}, ${publisherShareEGP}, ${'إيراد إعلان - حملة #' + campaignId + ' (CPM=' + cpmRate + ' ج.م)'}, ${campaignId}, ${channelId})`);
+        }
       }
-    }
-    await db.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id)
-      VALUES (${campaign.advertiserId}, 'spending', ${revenueEGP}, ${revenueEGP}, ${'تكلفة مشاهدة - حملة ' + campaign.name + ' (CPM=' + cpmRate + ' ج.م)'}, ${campaignId})`);
-    const budget = campaign.budgetEGP || 0;
-    if (budget > 0) {
-      const ratio = newSpent / budget;
-      if (ratio >= 0.8) {
-        return { budgetWarning: true, budgetRatio: ratio, advertiserId: campaign.advertiserId, campaignName: campaign.name };
+      await tx.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id)
+        VALUES (${locked.advertiserId}, 'spending', ${revenueEGP}, ${revenueEGP}, ${'تكلفة مشاهدة - حملة ' + locked.name + ' (CPM=' + cpmRate + ' ج.م)'}, ${campaignId})`);
+
+      if (budget > 0) {
+        const ratio = newSpent / budget;
+        if (ratio >= 0.8) {
+          return { budgetWarning: true, budgetRatio: ratio, advertiserId: locked.advertiserId, campaignName: locked.name };
+        }
       }
-    }
-    return {};
+      return {};
+    });
   }
 
   async recordClick(campaignId: number, channelId?: number, userId?: string): Promise<{ budgetWarning?: boolean; budgetRatio?: number; advertiserId?: string; campaignName?: string }> {
-    const campaign = await this.getAdCampaign(campaignId);
-    if (!campaign) return {};
-
     // ── أسعار المنصة من لوحة الأدمن (تُحدَّث فوراً) ──
     const { cpcRate, pubPct } = await this.getPlatformRates();
     const publisherShareEGP = cpcRate * pubPct;
 
-    await db.update(adCampaigns).set({
-      clicks: sql`${adCampaigns.clicks} + 1`,
-      spentEGP: sql`${adCampaigns.spentEGP} + ${cpcRate}`
-    }).where(eq(adCampaigns.id, campaignId));
-    if (channelId) {
-      const ch = await this.getChannel(channelId);
-      if (ch) {
-        await db.update(channels).set({
-          earningsEGP: sql`${channels.earningsEGP} + ${publisherShareEGP}`
-        }).where(eq(channels.id, channelId));
-        await db.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id, channel_id)
-          VALUES (${ch.userId}, 'earning', ${publisherShareEGP}, ${publisherShareEGP}, ${'إيراد نقرة - حملة #' + campaignId + ' (CPC=' + cpcRate + ' ج.م)'}, ${campaignId}, ${channelId})`);
+    return await db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select()
+        .from(adCampaigns)
+        .where(eq(adCampaigns.id, campaignId))
+        .for("update");
+      if (!locked) return {};
+      if (locked.status !== 'active') return {};
+      const currentSpent = locked.spentEGP || 0;
+      const budget = locked.budgetEGP || 0;
+      if (budget > 0 && currentSpent >= budget) return {};
+
+      const newSpent = currentSpent + cpcRate;
+      await tx.update(adCampaigns).set({
+        clicks: sql`${adCampaigns.clicks} + 1`,
+        spentEGP: sql`${adCampaigns.spentEGP} + ${cpcRate}`,
+      }).where(eq(adCampaigns.id, campaignId));
+
+      if (channelId) {
+        const [ch] = await tx.select().from(channels).where(eq(channels.id, channelId)).for("update");
+        if (ch) {
+          await tx.update(channels).set({
+            earningsEGP: sql`${channels.earningsEGP} + ${publisherShareEGP}`,
+          }).where(eq(channels.id, channelId));
+          await tx.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id, channel_id)
+            VALUES (${ch.userId}, 'earning', ${publisherShareEGP}, ${publisherShareEGP}, ${'إيراد نقرة - حملة #' + campaignId + ' (CPC=' + cpcRate + ' ج.م)'}, ${campaignId}, ${channelId})`);
+        }
       }
-    }
-    await db.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id)
-      VALUES (${campaign.advertiserId}, 'spending', ${cpcRate}, ${cpcRate}, ${'تكلفة نقرة - حملة ' + campaign.name + ' (CPC=' + cpcRate + ' ج.م)'}, ${campaignId})`);
-    const newSpent = (campaign.spentEGP || 0) + cpcRate;
-    const budget = campaign.budgetEGP || 0;
-    if (budget > 0 && newSpent / budget >= 0.8) {
-      return { budgetWarning: true, budgetRatio: newSpent / budget, advertiserId: campaign.advertiserId, campaignName: campaign.name };
-    }
-    return {};
+      await tx.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id)
+        VALUES (${locked.advertiserId}, 'spending', ${cpcRate}, ${cpcRate}, ${'تكلفة نقرة - حملة ' + locked.name + ' (CPC=' + cpcRate + ' ج.م)'}, ${campaignId})`);
+
+      if (budget > 0 && newSpent / budget >= 0.8) {
+        return { budgetWarning: true, budgetRatio: newSpent / budget, advertiserId: locked.advertiserId, campaignName: locked.name };
+      }
+      return {};
+    });
   }
 
   // ─── REVENUE ──────────────────────────────────────────────────
@@ -550,6 +580,74 @@ export class DatabaseStorage implements IStorage {
   async updatePaymentRequest(id: number, status: string, adminNote?: string): Promise<PaymentRequest | undefined> {
     const [r] = await db.update(paymentRequests).set({ status: status as any, adminNote }).where(eq(paymentRequests.id, id)).returning();
     return r;
+  }
+
+  /**
+   * Approve a payment request and write the matching revenue transaction
+   * in a single DB transaction so the wallet ledger never drifts.
+   * Locks the row and is idempotent: if it's already approved/rejected
+   * the existing record is returned and no extra ledger entry is written.
+   */
+  async approvePaymentRequestAtomic(id: number, adminNote?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean }> {
+    return await db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select()
+        .from(paymentRequests)
+        .where(eq(paymentRequests.id, id))
+        .for("update");
+      if (!locked) return { payment: undefined, alreadyProcessed: false };
+      if (locked.status !== 'pending') {
+        return { payment: locked, alreadyProcessed: true };
+      }
+      const [updated] = await tx.update(paymentRequests)
+        .set({ status: 'approved', adminNote })
+        .where(eq(paymentRequests.id, id))
+        .returning();
+
+      if (locked.type === 'withdrawal') {
+        await tx.insert(revenueTransactions).values({
+          userId: locked.userId,
+          type: 'withdrawal',
+          amountEGP: locked.amountEGP,
+          description: `سحب رصيد - ${locked.method}`,
+          campaignId: null,
+          channelId: null,
+        });
+      } else if (locked.type === 'top_up') {
+        await tx.insert(revenueTransactions).values({
+          userId: locked.userId,
+          type: 'earning',
+          amountEGP: locked.amountEGP,
+          description: `شحن رصيد - ${locked.method}`,
+          campaignId: null,
+          channelId: null,
+        });
+      }
+      return { payment: updated, alreadyProcessed: false };
+    });
+  }
+
+  /**
+   * Reject a payment request atomically and idempotently.
+   * No ledger side-effect — just a guarded status update.
+   */
+  async rejectPaymentRequestAtomic(id: number, adminNote?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean }> {
+    return await db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select()
+        .from(paymentRequests)
+        .where(eq(paymentRequests.id, id))
+        .for("update");
+      if (!locked) return { payment: undefined, alreadyProcessed: false };
+      if (locked.status !== 'pending') {
+        return { payment: locked, alreadyProcessed: true };
+      }
+      const [updated] = await tx.update(paymentRequests)
+        .set({ status: 'rejected', adminNote })
+        .where(eq(paymentRequests.id, id))
+        .returning();
+      return { payment: updated, alreadyProcessed: false };
+    });
   }
 
   // ─── ADMIN ────────────────────────────────────────────────────

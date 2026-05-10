@@ -3006,51 +3006,36 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   app.put("/api/payments/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { status, adminNote } = req.body;
-    const payment = await storage.updatePaymentRequest(Number(req.params.id), status, adminNote);
-    if (status === 'approved' || status === 'rejected') {
-      const pr = await storage.getPaymentRequests(undefined);
-      const p = pr.find(x => x.id === Number(req.params.id));
-      if (p) {
-        if (status === 'approved') {
-          if (p.type === 'withdrawal') {
-            await storage.createTransaction({
-              userId: p.userId,
-              type: 'withdrawal',
-              amountEGP: p.amountEGP,
-              description: `سحب رصيد - ${p.method}`,
-              channelId: null,
-              campaignId: null,
-            });
-          } else if (p.type === 'top_up') {
-            await storage.createTransaction({
-              userId: p.userId,
-              type: 'earning',
-              amountEGP: p.amountEGP,
-              description: `شحن رصيد - ${p.method}`,
-              channelId: null,
-              campaignId: null,
-            });
-          }
-          // ── Auto-activate the paid service ──
-          await activateServiceForPayment(p);
-          await createNotification(
-            p.userId,
-            'payment',
-            '✅ تم قبول طلب الدفع وتفعيل الخدمة',
-            `رقم الطلب ${p.orderNumber} — تمت الموافقة وتفعيل الخدمة تلقائياً`,
-            '/payments'
-          );
-        } else {
-          await createNotification(
-            p.userId,
-            'payment',
-            '❌ تم رفض طلب الدفع',
-            `رقم الطلب ${p.orderNumber} — تم رفض الطلب. ${adminNote || 'للاستفسار تواصل مع الإدارة.'}`,
-            '/payments'
-          );
-        }
+    const id = Number(req.params.id);
+    if (status === 'approved') {
+      const { payment: p, alreadyProcessed } = await storage.approvePaymentRequestAtomic(id, adminNote);
+      if (p && !alreadyProcessed) {
+        // ── Auto-activate the paid service ──
+        await activateServiceForPayment(p);
+        await createNotification(
+          p.userId,
+          'payment',
+          '✅ تم قبول طلب الدفع وتفعيل الخدمة',
+          `رقم الطلب ${p.orderNumber} — تمت الموافقة وتفعيل الخدمة تلقائياً`,
+          '/payments'
+        );
       }
+      return res.json(p);
     }
+    if (status === 'rejected') {
+      const { payment: p, alreadyProcessed } = await storage.rejectPaymentRequestAtomic(id, adminNote);
+      if (p && !alreadyProcessed) {
+        await createNotification(
+          p.userId,
+          'payment',
+          '❌ تم رفض طلب الدفع',
+          `رقم الطلب ${p.orderNumber} — تم رفض الطلب. ${adminNote || 'للاستفسار تواصل مع الإدارة.'}`,
+          '/payments'
+        );
+      }
+      return res.json(p);
+    }
+    const payment = await storage.updatePaymentRequest(id, status, adminNote);
     res.json(payment);
   });
 
@@ -3119,11 +3104,10 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   app.put("/api/admin/payments/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { status, adminNote } = req.body;
-    const payment = await storage.updatePaymentRequest(Number(req.params.id), status, adminNote);
+    const id = Number(req.params.id);
     if (status === 'approved') {
-      const pr = await storage.getPaymentRequests(undefined);
-      const p = pr.find(x => x.id === Number(req.params.id));
-      if (p) {
+      const { payment: p, alreadyProcessed } = await storage.approvePaymentRequestAtomic(id, adminNote);
+      if (p && !alreadyProcessed) {
         await activateServiceForPayment(p);
         await createNotification(
           p.userId,
@@ -3133,10 +3117,11 @@ Sitemap: ${BASE}/sitemap-pages.xml
           '/payments'
         );
       }
-    } else if (status === 'rejected') {
-      const pr = await storage.getPaymentRequests(undefined);
-      const p = pr.find(x => x.id === Number(req.params.id));
-      if (p) {
+      return res.json(p);
+    }
+    if (status === 'rejected') {
+      const { payment: p, alreadyProcessed } = await storage.rejectPaymentRequestAtomic(id, adminNote);
+      if (p && !alreadyProcessed) {
         await createNotification(
           p.userId,
           'payment',
@@ -3145,7 +3130,9 @@ Sitemap: ${BASE}/sitemap-pages.xml
           '/payments'
         );
       }
+      return res.json(p);
     }
+    const payment = await storage.updatePaymentRequest(id, status, adminNote);
     res.json(payment);
   });
 
