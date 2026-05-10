@@ -101,7 +101,7 @@ export interface IStorage {
   getPaymentRequests(userId?: string): Promise<PaymentRequest[]>;
   createPaymentRequest(req: InsertPaymentRequest): Promise<PaymentRequest>;
   updatePaymentRequest(id: number, status: string, adminNote?: string): Promise<PaymentRequest | undefined>;
-  approvePaymentRequestAtomic(id: number, adminNote?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean }>;
+  approvePaymentRequestAtomic(id: number, adminNote?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean; insufficientBalance?: boolean; currentBalanceEGP?: number }>;
   rejectPaymentRequestAtomic(id: number, adminNote?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean }>;
 
   // Ticker Ads
@@ -589,7 +589,7 @@ export class DatabaseStorage implements IStorage {
    * Locks the row and is idempotent: if it's already approved/rejected
    * the existing record is returned and no extra ledger entry is written.
    */
-  async approvePaymentRequestAtomic(id: number, adminNote?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean }> {
+  async approvePaymentRequestAtomic(id: number, adminNote?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean; insufficientBalance?: boolean; currentBalanceEGP?: number }> {
     return await db.transaction(async (tx) => {
       const [locked] = await tx
         .select()
@@ -600,6 +600,26 @@ export class DatabaseStorage implements IStorage {
       if (locked.status !== 'pending') {
         return { payment: locked, alreadyProcessed: true };
       }
+
+      if (locked.type === 'withdrawal') {
+        // Serialize concurrent withdrawal approvals for the same user
+        // by acquiring a transaction-scoped advisory lock keyed by userId.
+        // Uses hashtextextended to map the userId string to a bigint key.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${'withdrawal:' + locked.userId}, 0))`);
+
+        const [balRow] = await tx
+          .select({
+            balance: sql<number>`COALESCE(SUM(CASE WHEN ${revenueTransactions.type} = 'earning' THEN ${revenueTransactions.amountEGP} WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP} ELSE 0 END), 0)`,
+          })
+          .from(revenueTransactions)
+          .where(eq(revenueTransactions.userId, locked.userId));
+        const currentBalanceEGP = Number(balRow?.balance ?? 0);
+        const requested = Number(locked.amountEGP ?? 0);
+        if (requested > currentBalanceEGP) {
+          return { payment: locked, alreadyProcessed: false, insufficientBalance: true, currentBalanceEGP };
+        }
+      }
+
       const [updated] = await tx.update(paymentRequests)
         .set({ status: 'approved', adminNote })
         .where(eq(paymentRequests.id, id))

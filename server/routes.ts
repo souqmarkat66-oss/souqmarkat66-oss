@@ -3008,7 +3008,14 @@ Sitemap: ${BASE}/sitemap-pages.xml
     const { status, adminNote } = req.body;
     const id = Number(req.params.id);
     if (status === 'approved') {
-      const { payment: p, alreadyProcessed } = await storage.approvePaymentRequestAtomic(id, adminNote);
+      const { payment: p, alreadyProcessed, insufficientBalance, currentBalanceEGP } = await storage.approvePaymentRequestAtomic(id, adminNote);
+      if (insufficientBalance) {
+        return res.status(400).json({
+          message: `الرصيد غير كافٍ — رصيد المستخدم الحالي ${currentBalanceEGP} ج.م والمبلغ المطلوب ${p?.amountEGP} ج.م`,
+          currentBalanceEGP,
+          requestedAmountEGP: p?.amountEGP,
+        });
+      }
       if (p && !alreadyProcessed) {
         // ── Auto-activate the paid service ──
         await activateServiceForPayment(p);
@@ -3106,7 +3113,14 @@ Sitemap: ${BASE}/sitemap-pages.xml
     const { status, adminNote } = req.body;
     const id = Number(req.params.id);
     if (status === 'approved') {
-      const { payment: p, alreadyProcessed } = await storage.approvePaymentRequestAtomic(id, adminNote);
+      const { payment: p, alreadyProcessed, insufficientBalance, currentBalanceEGP } = await storage.approvePaymentRequestAtomic(id, adminNote);
+      if (insufficientBalance) {
+        return res.status(400).json({
+          message: `الرصيد غير كافٍ — رصيد المستخدم الحالي ${currentBalanceEGP} ج.م والمبلغ المطلوب ${p?.amountEGP} ج.م`,
+          currentBalanceEGP,
+          requestedAmountEGP: p?.amountEGP,
+        });
+      }
       if (p && !alreadyProcessed) {
         await activateServiceForPayment(p);
         await createNotification(
