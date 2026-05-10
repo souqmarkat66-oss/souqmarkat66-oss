@@ -1554,6 +1554,37 @@ function SettingsSection({ logAction }: { logAction: any }) {
 
   const q = search.trim().toLowerCase();
 
+  // ── System deploy (VPS git pull + npm install + pm2 restart) ──
+  const deployMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/system-deploy", {
+        method: "POST",
+        credentials: "include",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.success) {
+        console.error("[Deploy] FAILED:", body);
+        throw new Error(body?.message || body?.error || "فشل التحديث");
+      }
+      console.log("[Deploy] SUCCESS:", body.output);
+      return body;
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "✅ Success — تم تحديث النظام",
+        description: "تم سحب آخر تعديلات GitHub وإعادة تشغيل السيرفر",
+      });
+      logAction("system_deploy", "vps", data?.output?.slice(0, 200) || "");
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "❌ فشل التحديث",
+        description: err.message + " — افتح الكونسول للتفاصيل",
+        variant: "destructive",
+      });
+    },
+  });
+
   const features = [
     { key: "feature_reels",         label: "ريلز",            desc: "السماح برفع ومشاهدة الريلز",           icon: Film },
     { key: "feature_livestream",    label: "البث المباشر",    desc: "السماح بإنشاء وعرض البث المباشر",       icon: Radio },
@@ -1623,6 +1654,43 @@ function SettingsSection({ logAction }: { logAction: any }) {
           }
         </div>
       )}
+
+      {/* ── 🚀 Deploy Now — تحديث VPS بضغطة واحدة ── */}
+      <Card className="rounded-2xl border-2 border-primary/30 bg-gradient-to-br from-primary/5 to-transparent" data-testid="card-system-deploy">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center flex-shrink-0">
+              <RefreshCw className={`w-5 h-5 text-primary ${deployMutation.isPending ? "animate-spin" : ""}`} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-sm font-bold mb-0.5">🚀 تحديث النظام ومزامنة GitHub</h3>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                ينفّذ على السيرفر: <code className="text-[10px] bg-muted px-1 rounded">git pull</code> ثم <code className="text-[10px] bg-muted px-1 rounded">npm install</code> ثم <code className="text-[10px] bg-muted px-1 rounded">pm2 restart all</code>
+              </p>
+            </div>
+          </div>
+          <Button
+            className="w-full gap-2"
+            disabled={deployMutation.isPending}
+            onClick={() => {
+              if (deployMutation.isPending) return;
+              if (confirm("هتسحب آخر تعديلات GitHub وتعيد تشغيل السيرفر دلوقتي. متأكد؟")) {
+                deployMutation.mutate();
+              }
+            }}
+            data-testid="btn-system-deploy"
+          >
+            {deployMutation.isPending ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> جاري التحديث... (قد يستغرق دقيقتين)</>
+            ) : (
+              <><RefreshCw className="w-4 h-4" /> تحديث النظام ومزامنة GitHub</>
+            )}
+          </Button>
+          <p className="text-[10px] text-muted-foreground text-center">
+            💡 يعمل على VPS فقط — في بيئة Replit Dev الأمر هيرجع خطأ متوقع
+          </p>
+        </CardContent>
+      </Card>
 
       {/* ── No results ── */}
       {noResults && (

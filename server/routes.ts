@@ -1013,6 +1013,38 @@ Sitemap: ${BASE}/sitemap-pages.xml
     res.json({ success: true, publishedAt: now });
   });
 
+  // ────────────────────────────────────────────────────────────────
+  // SYSTEM DEPLOY — pull latest code, install deps, restart pm2
+  // Admin-only. Designed for the VPS environment.
+  // ────────────────────────────────────────────────────────────────
+  app.post("/api/admin/system-deploy", isAuthenticated, requireAdmin, async (_req: any, res) => {
+    const { exec } = await import("child_process");
+    const cmd = "git pull origin main && npm install && pm2 restart all";
+    console.log(`[system-deploy] starting: ${cmd}`);
+    exec(cmd, { cwd: process.cwd(), timeout: 5 * 60 * 1000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        console.error("[system-deploy] FAILED:", err.message);
+        if (stderr) console.error("[system-deploy] stderr:", stderr);
+        if (stdout) console.error("[system-deploy] stdout:", stdout);
+        return res.status(500).json({
+          success: false,
+          message: "فشل التحديث — راجع الكونسول",
+          error: err.message,
+          stderr: stderr?.slice(-2000),
+          stdout: stdout?.slice(-2000),
+        });
+      }
+      console.log("[system-deploy] SUCCESS");
+      console.log("[system-deploy] stdout:", stdout);
+      if (stderr) console.log("[system-deploy] stderr:", stderr);
+      res.json({
+        success: true,
+        message: "تم تحديث النظام بنجاح",
+        output: stdout?.slice(-2000),
+      });
+    });
+  });
+
   app.post("/api/admin/pin/set", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { pin, recoveryEmail, recoveryPhone } = req.body;
     if (!pin || pin.length < 4) return res.status(400).json({ message: "PIN لازم يكون 4 أرقام على الأقل" });
