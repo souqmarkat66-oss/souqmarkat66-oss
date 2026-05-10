@@ -535,3 +535,33 @@ export const coinTransactions = pgTable("coin_transactions", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 export type CoinTransaction = typeof coinTransactions.$inferSelect;
+
+// ============================================================
+// TICKER ADS TABLE — Global breaking-news style ticker ads
+// ============================================================
+export const tickerAds = pgTable("ticker_ads", {
+  id: serial("id").primaryKey(),
+  advertiserId: varchar("advertiser_id").references(() => users.id).notNull(),
+  text: text("text").notNull(),
+  budgetEGP: real("budget_egp").notNull(),
+  pricePerSecondEGP: real("price_per_second_egp").notNull(),
+  spentEGP: real("spent_egp").default(0).notNull(),
+  secondsShown: integer("seconds_shown").default(0).notNull(),
+  status: text("status", {
+    enum: ["pending", "approved", "active", "paused", "completed", "rejected"],
+  }).default("pending").notNull(),
+  approvedBy: varchar("approved_by"),
+  approvedAt: timestamp("approved_at"),
+  startedAt: timestamp("started_at"),
+  stoppedAt: timestamp("stopped_at"),
+  rejectionReason: text("rejection_reason"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertTickerAdSchema = createInsertSchema(tickerAds).omit({
+  id: true, createdAt: true, spentEGP: true, secondsShown: true,
+  status: true, approvedBy: true, approvedAt: true, startedAt: true,
+  stoppedAt: true, rejectionReason: true,
+});
+export type TickerAd = typeof tickerAds.$inferSelect;
+export type InsertTickerAd = z.infer<typeof insertTickerAdSchema>;

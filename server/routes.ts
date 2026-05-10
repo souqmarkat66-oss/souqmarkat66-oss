@@ -5777,5 +5777,177 @@ ${reelTags}
     res.json({ success: true });
   });
 
+  // ================================================================
+  // GLOBAL TICKER ADS — Real-time breaking-news ticker
+  // ================================================================
+  // In-memory map of active billing intervals per ticker ad
+  const tickerIntervals = new Map<number, NodeJS.Timeout>();
+
+  // Helper: stop billing for a ticker ad
+  function stopTickerBilling(id: number) {
+    const intv = tickerIntervals.get(id);
+    if (intv) {
+      clearInterval(intv);
+      tickerIntervals.delete(id);
+    }
+  }
+
+  // Helper: start billing for a ticker ad
+  function startTickerBilling(adId: number) {
+    stopTickerBilling(adId);
+    const intv = setInterval(async () => {
+      try {
+        const ad = await storage.getTickerAd(adId);
+        if (!ad || ad.status !== "active") {
+          stopTickerBilling(adId);
+          return;
+        }
+        const remaining = (ad.budgetEGP || 0) - (ad.spentEGP || 0);
+        if (remaining < ad.pricePerSecondEGP) {
+          // Budget exhausted → stop & notify
+          await storage.updateTickerAd(adId, { status: "completed", stoppedAt: new Date() });
+          stopTickerBilling(adId);
+          io.emit("ticker:remove", { id: adId });
+          return;
+        }
+        // Verify advertiser still has wallet balance
+        const balance = await storage.getUserBalanceEGP(ad.advertiserId);
+        if (balance < ad.pricePerSecondEGP) {
+          await storage.updateTickerAd(adId, { status: "paused", stoppedAt: new Date() });
+          stopTickerBilling(adId);
+          io.emit("ticker:remove", { id: adId });
+          return;
+        }
+        // Deduct 1 second
+        const updated = await storage.deductTickerAdSecond(adId, ad.pricePerSecondEGP);
+        // Advertiser spending tx
+        await storage.createTransaction({
+          userId: ad.advertiserId,
+          type: "spending",
+          amountEGP: ad.pricePerSecondEGP,
+          description: `Ticker ad #${adId} — second`,
+          campaignId: null as any,
+          channelId: null as any,
+        });
+        // Admin (platform) earning tx — 100%
+        await storage.createTransaction({
+          userId: ADMIN_USER_ID,
+          type: "earning",
+          amountEGP: ad.pricePerSecondEGP,
+          description: `Ticker ad #${adId} — platform fee`,
+          campaignId: null as any,
+          channelId: null as any,
+        });
+        // Optional live tick to admin dashboards
+        io.emit("ticker:tick", {
+          id: adId,
+          spentEGP: updated?.spentEGP,
+          secondsShown: updated?.secondsShown,
+          remainingEGP: (ad.budgetEGP || 0) - (updated?.spentEGP || 0),
+        });
+      } catch (e: any) {
+        console.error("[ticker billing] tick failed:", e?.message);
+      }
+    }, 1000);
+    tickerIntervals.set(adId, intv);
+  }
+
+  // On boot: resume any tickers that were 'active' before restart
+  (async () => {
+    try {
+      const active = await storage.getActiveTickerAds();
+      for (const ad of active) startTickerBilling(ad.id);
+    } catch (e) { /* ignore */ }
+  })();
+
+  // ─── ADVERTISER ROUTES ─────────────────────────────────────────
+  app.post("/api/ticker-ads", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const { text, budgetEGP, pricePerSecondEGP } = req.body || {};
+    const txt = String(text || "").trim();
+    const budget = Number(budgetEGP);
+    const price  = Number(pricePerSecondEGP);
+    if (!txt || txt.length < 5) return res.status(400).json({ message: "نص الإعلان مطلوب (5 أحرف على الأقل)" });
+    if (!Number.isFinite(budget) || budget <= 0) return res.status(400).json({ message: "الميزانية مطلوبة" });
+    if (!Number.isFinite(price)  || price  <= 0) return res.status(400).json({ message: "سعر الثانية مطلوب" });
+    if (price > budget) return res.status(400).json({ message: "سعر الثانية أكبر من الميزانية" });
+    const balance = await storage.getUserBalanceEGP(userId);
+    if (balance < budget) {
+      return res.status(402).json({ message: "رصيد المحفظة غير كافٍ — اشحن محفظتك أولاً", balance, required: budget });
+    }
+    const ad = await storage.createTickerAd({ advertiserId: userId, text: txt, budgetEGP: budget, pricePerSecondEGP: price });
+    res.json(ad);
+  });
+
+  app.get("/api/ticker-ads/my", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    res.json(await storage.getMyTickerAds(userId));
+  });
+
+  app.get("/api/ticker-ads/active", async (_req, res) => {
+    res.json(await storage.getActiveTickerAds());
+  });
+
+  // ─── ADMIN ROUTES ──────────────────────────────────────────────
+  app.get("/api/admin/ticker-ads", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const status = req.query.status as string | undefined;
+    res.json(await storage.getAllTickerAds(status));
+  });
+
+  app.post("/api/admin/ticker-ads/:id/approve", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const id = Number(req.params.id);
+    const adminId = req.user.claims.sub;
+    const ad = await storage.getTickerAd(id);
+    if (!ad) return res.status(404).json({ message: "غير موجود" });
+    if (ad.status !== "pending") return res.status(400).json({ message: "الحالة لا تسمح بالموافقة" });
+    const updated = await storage.updateTickerAd(id, { status: "approved", approvedBy: adminId, approvedAt: new Date() });
+    res.json(updated);
+  });
+
+  app.post("/api/admin/ticker-ads/:id/reject", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const id = Number(req.params.id);
+    const reason = String(req.body?.reason || "").trim() || null;
+    const updated = await storage.updateTickerAd(id, { status: "rejected", rejectionReason: reason });
+    res.json(updated);
+  });
+
+  app.post("/api/admin/ticker-ads/:id/start", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const id = Number(req.params.id);
+    const ad = await storage.getTickerAd(id);
+    if (!ad) return res.status(404).json({ message: "غير موجود" });
+    if (!["approved", "paused"].includes(ad.status)) return res.status(400).json({ message: "لازم يكون معتمد أو متوقف مؤقتاً" });
+    // Revalidate budget vs spent
+    if ((ad.spentEGP || 0) >= (ad.budgetEGP || 0)) {
+      await storage.updateTickerAd(id, { status: "completed" });
+      return res.status(400).json({ message: "الميزانية انتهت" });
+    }
+    const updated = await storage.updateTickerAd(id, { status: "active", startedAt: ad.startedAt || new Date() });
+    startTickerBilling(id);
+    io.emit("ticker:show", {
+      id: updated!.id,
+      text: updated!.text,
+      advertiserId: updated!.advertiserId,
+    });
+    res.json(updated);
+  });
+
+  app.post("/api/admin/ticker-ads/:id/stop", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const id = Number(req.params.id);
+    const ad = await storage.getTickerAd(id);
+    if (!ad) return res.status(404).json({ message: "غير موجود" });
+    stopTickerBilling(id);
+    const updated = await storage.updateTickerAd(id, { status: "paused", stoppedAt: new Date() });
+    io.emit("ticker:remove", { id });
+    res.json(updated);
+  });
+
+  app.delete("/api/admin/ticker-ads/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const id = Number(req.params.id);
+    stopTickerBilling(id);
+    io.emit("ticker:remove", { id });
+    await storage.deleteTickerAd(id);
+    res.json({ success: true });
+  });
+
   return httpServer;
 }

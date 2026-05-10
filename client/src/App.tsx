@@ -35,8 +35,10 @@ const Social = lazy(() => import("@/pages/Social"));
 const Help = lazy(() => import("@/pages/Help"));
 const Consultations = lazy(() => import("@/pages/Consultations"));
 const Coupons = lazy(() => import("@/pages/Coupons"));
+const TickerAds = lazy(() => import("@/pages/TickerAds"));
 
 import BottomNav from "@/components/BottomNav";
+import GlobalTicker from "@/components/GlobalTicker";
 
 const PWAInstallPrompt = lazy(() => import("@/components/PWAInstallPrompt").then(m => ({ default: m.PWAInstallPrompt })));
 const GlobalAssistant = lazy(() => import("@/components/GlobalAssistant").then(m => ({ default: m.GlobalAssistant })));
@@ -78,6 +80,7 @@ function Router() {
       <Route path="/reels" component={ReelsPage} />
       <Route>
         <div className="flex flex-col min-h-screen font-sans">
+          <GlobalTicker />
           <Navbar />
           <Suspense fallback={null}>
             <GlobalAssistant />
@@ -140,6 +143,9 @@ function Router() {
               </Route>
               <Route path="/coupons">
                 <ProtectedRoute component={Coupons} />
+              </Route>
+              <Route path="/ticker-ads">
+                <ProtectedRoute component={TickerAds} />
               </Route>
               <Route component={NotFound} />
             </Switch>

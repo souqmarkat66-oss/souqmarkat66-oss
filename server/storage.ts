@@ -2,13 +2,14 @@ import { db } from "./db";
 import { 
   ads, channels, liveStreams, chatMessages, likes, comments, follows, 
   adCampaigns, revenueTransactions, reports, uploadedFiles,
-  platformSettings, aiUsage, reels, paymentRequests,
+  platformSettings, aiUsage, reels, paymentRequests, tickerAds,
   type Ad, type InsertAd, type Channel, type InsertChannel,
   type LiveStream, type InsertLiveStream, type ChatMessage, type Like,
   type Comment, type InsertComment, type Follow, type AdCampaign, 
   type InsertAdCampaign, type RevenueTransaction, type Report, 
   type InsertReport, type UploadedFile, type Reel, type InsertReel,
-  type PaymentRequest, type InsertPaymentRequest
+  type PaymentRequest, type InsertPaymentRequest,
+  type TickerAd, type InsertTickerAd
 } from "@shared/schema";
 import { eq, desc, and, sql, ne } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
@@ -100,6 +101,16 @@ export interface IStorage {
   getPaymentRequests(userId?: string): Promise<PaymentRequest[]>;
   createPaymentRequest(req: InsertPaymentRequest): Promise<PaymentRequest>;
   updatePaymentRequest(id: number, status: string, adminNote?: string): Promise<PaymentRequest | undefined>;
+
+  // Ticker Ads
+  createTickerAd(data: InsertTickerAd): Promise<TickerAd>;
+  getTickerAd(id: number): Promise<TickerAd | undefined>;
+  getMyTickerAds(advertiserId: string): Promise<TickerAd[]>;
+  getAllTickerAds(status?: string): Promise<TickerAd[]>;
+  getActiveTickerAds(): Promise<TickerAd[]>;
+  updateTickerAd(id: number, data: Partial<TickerAd>): Promise<TickerAd | undefined>;
+  deleteTickerAd(id: number): Promise<void>;
+  deductTickerAdSecond(id: number, amountEGP: number): Promise<TickerAd | undefined>;
 
   // Admin
   getAllUsers(): Promise<any[]>;
@@ -544,6 +555,55 @@ export class DatabaseStorage implements IStorage {
   async getAllUsers(): Promise<any[]> {
     const { users } = await import("@shared/schema");
     return db.select().from(users).orderBy(desc(users.createdAt));
+  }
+
+  // ─── TICKER ADS ───────────────────────────────────────────────
+  async createTickerAd(data: InsertTickerAd): Promise<TickerAd> {
+    const [t] = await db.insert(tickerAds).values(data).returning();
+    return t;
+  }
+
+  async getTickerAd(id: number): Promise<TickerAd | undefined> {
+    const [t] = await db.select().from(tickerAds).where(eq(tickerAds.id, id));
+    return t;
+  }
+
+  async getMyTickerAds(advertiserId: string): Promise<TickerAd[]> {
+    return db.select().from(tickerAds)
+      .where(eq(tickerAds.advertiserId, advertiserId))
+      .orderBy(desc(tickerAds.createdAt));
+  }
+
+  async getAllTickerAds(status?: string): Promise<TickerAd[]> {
+    if (status) {
+      return db.select().from(tickerAds)
+        .where(eq(tickerAds.status, status as any))
+        .orderBy(desc(tickerAds.createdAt));
+    }
+    return db.select().from(tickerAds).orderBy(desc(tickerAds.createdAt));
+  }
+
+  async getActiveTickerAds(): Promise<TickerAd[]> {
+    return db.select().from(tickerAds)
+      .where(eq(tickerAds.status, 'active'))
+      .orderBy(desc(tickerAds.startedAt));
+  }
+
+  async updateTickerAd(id: number, data: Partial<TickerAd>): Promise<TickerAd | undefined> {
+    const [t] = await db.update(tickerAds).set(data).where(eq(tickerAds.id, id)).returning();
+    return t;
+  }
+
+  async deleteTickerAd(id: number): Promise<void> {
+    await db.delete(tickerAds).where(eq(tickerAds.id, id));
+  }
+
+  async deductTickerAdSecond(id: number, amountEGP: number): Promise<TickerAd | undefined> {
+    const [t] = await db.update(tickerAds).set({
+      spentEGP: sql`${tickerAds.spentEGP} + ${amountEGP}`,
+      secondsShown: sql`${tickerAds.secondsShown} + 1`,
+    }).where(eq(tickerAds.id, id)).returning();
+    return t;
   }
 
   async getStats(): Promise<any> {
