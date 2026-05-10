@@ -51,6 +51,7 @@ const NAV = [
   { key: "analytics",      label: "تقرير الأداء",          icon: PieChart,        color: "text-sky-400" },
   { key: "revenue",        label: "الإيرادات",            icon: DollarSign,      color: "text-emerald-400" },
   { key: "broadcast",      label: "إشعارات جماعية",       icon: Bell,            color: "text-cyan-400" },
+  { key: "ticker_ads",     label: "شريط الإعلان العاجل",  icon: Megaphone,       color: "text-red-400" },
   { key: "media",          label: "مكتبة الملفات",         icon: FolderOpen,      color: "text-lime-400" },
   { key: "pricing",        label: "إدارة الأسعار",          icon: DollarSign,      color: "text-yellow-400" },
   { key: "aipricing",      label: "أسعار الذكاء الاصطناعي", icon: Sparkles,       color: "text-violet-400" },
@@ -218,6 +219,7 @@ export default function AdminPanel() {
           {section === "analytics"  && <AnalyticsSection />}
           {section === "revenue"    && <RevenueSection />}
           {section === "broadcast"  && <BroadcastSection logAction={logAction} />}
+          {section === "ticker_ads" && <TickerAdsAdminSection />}
           {section === "media"      && <MediaSection logAction={logAction} />}
           {section === "pricing"    && <PricingSection />}
           {section === "aipricing"  && <AiPricingSection />}
