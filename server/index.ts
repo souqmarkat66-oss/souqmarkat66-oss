@@ -1,11 +1,42 @@
+import path from "path";
+import fs from "fs";
+
+// --- Tiny .env loader (runs BEFORE any other import that reads process.env) ---
+// On Replit/VPS env vars are injected by the platform, so .env is optional.
+// On local Windows dev .env in the project root is the only source of truth.
+(function loadDotEnv() {
+  try {
+    const envPath = path.resolve(process.cwd(), ".env");
+    if (!fs.existsSync(envPath)) return;
+    const content = fs.readFileSync(envPath, "utf8");
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      const eq = line.indexOf("=");
+      if (eq === -1) continue;
+      const key = line.slice(0, eq).trim();
+      let val = line.slice(eq + 1).trim();
+      // strip surrounding quotes
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      if (key && process.env[key] === undefined) {
+        process.env[key] = val;
+      }
+    }
+    console.log(`[env] Loaded .env from ${envPath}`);
+  } catch (e) {
+    console.warn("[env] Failed to load .env:", (e as Error).message);
+  }
+})();
+// --- end .env loader ---
+
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import path from "path";
-import fs from "fs";
 
 const app = express();
 const httpServer = createServer(app);
