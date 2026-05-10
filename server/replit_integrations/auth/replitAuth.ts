@@ -10,6 +10,15 @@ import connectPg from "connect-pg-simple";
 import { randomBytes } from "crypto";
 import { authStorage } from "./storage";
 
+// Type-only imports keep compile-time safety without loading the modules
+// at runtime. The actual modules are loaded via dynamic import below.
+import type * as OidcClient from "openid-client";
+import type { Strategy as OidcStrategy, VerifyFunction } from "openid-client/passport";
+
+type OidcModule = typeof OidcClient;
+type OidcConfig = Awaited<ReturnType<OidcModule["discovery"]>>;
+type OidcTokens = OidcClient.TokenEndpointResponse & OidcClient.TokenEndpointResponseHelpers;
+
 // Treat undefined OR empty string as "not set"
 function getReplId(): string | null {
   const v = process.env.REPL_ID;
@@ -43,14 +52,14 @@ export function getSession() {
   });
 }
 
-// Lazy holder — populated only when REPL_ID is present
-let oidcModule: typeof import("openid-client") | null = null;
-let oidcConfig: any = null;
+// Lazy holders — populated only when REPL_ID is present.
+let oidcModule: OidcModule | null = null;
+let oidcConfig: OidcConfig | null = null;
 
-async function loadOidcConfig(replId: string) {
+async function loadOidcConfig(replId: string): Promise<OidcConfig> {
   if (oidcConfig) return oidcConfig;
   // Dynamic import — openid-client is NOT loaded at module init time
-  oidcModule = await import("openid-client");
+  oidcModule = (await import("openid-client")) as OidcModule;
   oidcConfig = await oidcModule.discovery(
     new URL(process.env.ISSUER_URL ?? "https://replit.com/oidc"),
     replId
@@ -58,20 +67,27 @@ async function loadOidcConfig(replId: string) {
   return oidcConfig;
 }
 
-function updateUserSession(user: any, tokens: any) {
-  user.claims = tokens.claims();
+interface SessionUser {
+  claims?: Record<string, unknown> & { exp?: number };
+  access_token?: string;
+  refresh_token?: string;
+  expires_at?: number;
+}
+
+function updateUserSession(user: SessionUser, tokens: OidcTokens) {
+  user.claims = tokens.claims() as SessionUser["claims"];
   user.access_token = tokens.access_token;
   user.refresh_token = tokens.refresh_token;
   user.expires_at = user.claims?.exp;
 }
 
-async function upsertUser(claims: any) {
+async function upsertUser(claims: Record<string, unknown>) {
   await authStorage.upsertUser({
-    id: claims["sub"],
-    email: claims["email"],
-    firstName: claims["first_name"],
-    lastName: claims["last_name"],
-    profileImageUrl: claims["profile_image_url"],
+    id: claims["sub"] as string,
+    email: claims["email"] as string | undefined,
+    firstName: claims["first_name"] as string | undefined,
+    lastName: claims["last_name"] as string | undefined,
+    profileImageUrl: claims["profile_image_url"] as string | undefined,
   });
 }
 
@@ -100,13 +116,13 @@ export async function setupAuth(app: Express) {
   }
 
   // From here on REPL_ID is guaranteed to be a non-empty string.
-  let config: any;
-  let StrategyCtor: any;
-  let clientLib: typeof import("openid-client");
+  let config: OidcConfig;
+  let clientLib: OidcModule;
+  let StrategyCtor: typeof OidcStrategy;
   try {
     config = await loadOidcConfig(replId);
     clientLib = oidcModule!;
-    const passportMod = await import("openid-client/passport");
+    const passportMod = (await import("openid-client/passport")) as typeof import("openid-client/passport");
     StrategyCtor = passportMod.Strategy;
   } catch (e) {
     console.warn("[Auth] Replit OIDC setup failed, falling back to no-op:", (e as Error).message);
@@ -114,10 +130,13 @@ export async function setupAuth(app: Express) {
     return;
   }
 
-  const verify = async (tokens: any, verified: any) => {
-    const user: any = {};
+  const verify: VerifyFunction = async (
+    tokens: OidcTokens,
+    verified: passport.AuthenticateCallback
+  ) => {
+    const user: SessionUser = {};
     updateUserSession(user, tokens);
-    await upsertUser(tokens.claims());
+    await upsertUser(tokens.claims() as Record<string, unknown>);
     verified(null, user);
   };
 
@@ -168,7 +187,7 @@ export async function setupAuth(app: Express) {
 }
 
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
-  const user = req.user as any;
+  const user = req.user as SessionUser | undefined;
 
   if (!req.isAuthenticated() || !user?.expires_at) {
     return res.status(401).json({ message: "Unauthorized" });

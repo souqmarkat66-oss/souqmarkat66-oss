@@ -11,7 +11,12 @@ echo "▶ Installing dependencies..."
 npm install --no-audit --no-fund
 
 echo "▶ Pushing DB schema..."
-npm run db:push -- --force
+# NOTE: --force was removed intentionally. Forced schema pushes can drop
+# columns / truncate tables on schema drift, which is unacceptable on a
+# production database with real user data. If a destructive change is
+# genuinely required, run `npm run db:push -- --force` MANUALLY after
+# reviewing the diff.
+npm run db:push
 
 if [ -n "${VPS_SSH_PRIVATE_KEY:-}" ]; then
   echo "▶ VPS_SSH_PRIVATE_KEY detected — running auto-deploy to VPS..."
