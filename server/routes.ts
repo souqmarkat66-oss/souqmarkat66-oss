@@ -5834,7 +5834,14 @@ ${reelTags}
 
         // ── ADMIN BYPASS: free ticker, no deduction, no platform earning ──
         if (isAdminUserId(ad.advertiserId)) {
-          const updated = await storage.deductTickerAdSecond(adId, 0); // increments seconds_shown only
+          const updated = await storage.deductTickerAdSecondAtomic({
+            adId,
+            amountEGP: 0,
+            advertiserId: ad.advertiserId,
+            adminUserId: ADMIN_USER_ID,
+            chargeAdvertiser: false,
+            creditAdmin: false,
+          });
           io.emit("ticker:tick", {
             id: adId,
             spentEGP: 0,
@@ -5863,25 +5870,15 @@ ${reelTags}
           io.emit("ticker:remove", { id: adId });
           return;
         }
-        // Deduct 1 second at the current admin-controlled price
-        const updated = await storage.deductTickerAdSecond(adId, currentPrice);
-        // Advertiser spending tx
-        await storage.createTransaction({
-          userId: ad.advertiserId,
-          type: "spending",
+        // Deduct 1 second + record both transactions atomically
+        // (DB transaction → either all 3 ops succeed or none, even on crash)
+        const updated = await storage.deductTickerAdSecondAtomic({
+          adId,
           amountEGP: currentPrice,
-          description: `Ticker ad #${adId} — second`,
-          campaignId: null as any,
-          channelId: null as any,
-        });
-        // Admin (platform) earning tx — 100% (skipped for admin advertisers above)
-        await storage.createTransaction({
-          userId: ADMIN_USER_ID,
-          type: "earning",
-          amountEGP: currentPrice,
-          description: `Ticker ad #${adId} — platform fee`,
-          campaignId: null as any,
-          channelId: null as any,
+          advertiserId: ad.advertiserId,
+          adminUserId: ADMIN_USER_ID,
+          chargeAdvertiser: true,
+          creditAdmin: true,
         });
         // Optional live tick to admin dashboards
         io.emit("ticker:tick", {

@@ -111,6 +111,7 @@ export interface IStorage {
   updateTickerAd(id: number, data: Partial<TickerAd>): Promise<TickerAd | undefined>;
   deleteTickerAd(id: number): Promise<void>;
   deductTickerAdSecond(id: number, amountEGP: number): Promise<TickerAd | undefined>;
+  deductTickerAdSecondAtomic(params: { adId: number; amountEGP: number; advertiserId: string; adminUserId: string; chargeAdvertiser: boolean; creditAdmin: boolean; }): Promise<TickerAd | undefined>;
 
   // Admin
   getAllUsers(): Promise<any[]>;
@@ -604,6 +605,44 @@ export class DatabaseStorage implements IStorage {
       secondsShown: sql`${tickerAds.secondsShown} + 1`,
     }).where(eq(tickerAds.id, id)).returning();
     return t;
+  }
+
+  async deductTickerAdSecondAtomic(params: {
+    adId: number;
+    amountEGP: number;
+    advertiserId: string;
+    adminUserId: string;
+    chargeAdvertiser: boolean;
+    creditAdmin: boolean;
+  }): Promise<TickerAd | undefined> {
+    const { adId, amountEGP, advertiserId, adminUserId, chargeAdvertiser, creditAdmin } = params;
+    return await db.transaction(async (tx) => {
+      const [updated] = await tx.update(tickerAds).set({
+        spentEGP: sql`${tickerAds.spentEGP} + ${amountEGP}`,
+        secondsShown: sql`${tickerAds.secondsShown} + 1`,
+      }).where(eq(tickerAds.id, adId)).returning();
+      if (chargeAdvertiser && amountEGP > 0) {
+        await tx.insert(revenueTransactions).values({
+          userId: advertiserId,
+          type: "spending",
+          amountEGP,
+          description: `Ticker ad #${adId} — second`,
+          campaignId: null as any,
+          channelId: null as any,
+        } as any);
+      }
+      if (creditAdmin && amountEGP > 0) {
+        await tx.insert(revenueTransactions).values({
+          userId: adminUserId,
+          type: "earning",
+          amountEGP,
+          description: `Ticker ad #${adId} — platform fee`,
+          campaignId: null as any,
+          channelId: null as any,
+        } as any);
+      }
+      return updated;
+    });
   }
 
   async getStats(): Promise<any> {
