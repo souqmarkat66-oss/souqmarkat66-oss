@@ -72,13 +72,17 @@ export async function setupAuth(app: Express) {
   app.use(passport.initialize());
   app.use(passport.session());
 
-  // If REPL_ID is missing (e.g. VPS deploy), skip Replit OIDC setup gracefully
+  passport.serializeUser((user: Express.User, cb) => cb(null, user));
+  passport.deserializeUser((user: Express.User, cb) => cb(null, user));
+
+  // If REPL_ID is missing (local dev / VPS without Replit env), skip Replit OIDC gracefully
   if (!process.env.REPL_ID) {
-    passport.serializeUser((user: Express.User, cb) => cb(null, user));
-    passport.deserializeUser((user: Express.User, cb) => cb(null, user));
+    console.log("[Auth] Replit OIDC disabled (REPL_ID not set). Custom email/password auth still active.");
     app.get("/api/login", (_req, res) => res.redirect("/"));
     app.get("/api/callback", (_req, res) => res.redirect("/"));
-    app.get("/api/logout", (_req, res) => res.redirect("/"));
+    app.get("/api/logout", (req, res) => {
+      req.logout(() => res.redirect("/"));
+    });
     return;
   }
 
@@ -87,11 +91,11 @@ export async function setupAuth(app: Express) {
     config = await getOidcConfig();
   } catch (e) {
     console.warn("[Auth] Replit OIDC setup failed:", (e as Error).message);
-    passport.serializeUser((user: Express.User, cb) => cb(null, user));
-    passport.deserializeUser((user: Express.User, cb) => cb(null, user));
     app.get("/api/login", (_req, res) => res.redirect("/"));
     app.get("/api/callback", (_req, res) => res.redirect("/"));
-    app.get("/api/logout", (_req, res) => res.redirect("/"));
+    app.get("/api/logout", (req, res) => {
+      req.logout(() => res.redirect("/"));
+    });
     return;
   }
 
@@ -123,9 +127,6 @@ export async function setupAuth(app: Express) {
       registeredStrategies.add(strategyName);
     }
   };
-
-  passport.serializeUser((user: Express.User, cb) => cb(null, user));
-  passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
   app.get("/api/login", (req, res, next) => {
     ensureStrategy(req.hostname);
