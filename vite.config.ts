@@ -33,21 +33,19 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
-        manualChunks: {
-          "react-vendor": ["react", "react-dom", "wouter"],
-          "ui-vendor": [
-            "@radix-ui/react-dialog",
-            "@radix-ui/react-dropdown-menu",
-            "@radix-ui/react-popover",
-            "@radix-ui/react-select",
-            "@radix-ui/react-tabs",
-            "@radix-ui/react-toast",
-            "@radix-ui/react-tooltip",
-            "lucide-react",
-          ],
-          "form-vendor": ["react-hook-form", "@hookform/resolvers", "zod"],
-          "query-vendor": ["@tanstack/react-query"],
-          "chart-vendor": ["recharts"],
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("react-dom") || id.match(/[\\/]react[\\/]/) || id.includes("/wouter/") || id.includes("scheduler")) {
+            return "react-vendor";
+          }
+          if (id.includes("@radix-ui")) return "radix-vendor";
+          if (id.includes("lucide-react") || id.includes("react-icons")) return "icons-vendor";
+          if (id.includes("react-hook-form") || id.includes("@hookform") || id.includes("/zod/")) return "form-vendor";
+          if (id.includes("@tanstack")) return "query-vendor";
+          if (id.includes("recharts") || id.includes("d3-")) return "chart-vendor";
+          if (id.includes("framer-motion")) return "motion-vendor";
+          if (id.includes("socket.io-client") || id.includes("engine.io-client")) return "socket-vendor";
+          if (id.includes("date-fns")) return "date-vendor";
         },
       },
     },

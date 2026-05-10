@@ -9,9 +9,8 @@ import { Navbar } from "@/components/Navbar";
 import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
 
-import Home from "@/pages/Home";
-import NotFound from "@/pages/not-found";
-
+const NotFound = lazy(() => import("@/pages/not-found"));
+const Home = lazy(() => import("@/pages/Home"));
 const Ads = lazy(() => import("@/pages/Ads"));
 const AdDetails = lazy(() => import("@/pages/AdDetails"));
 const CreateAd = lazy(() => import("@/pages/CreateAd"));
@@ -37,11 +36,12 @@ const Help = lazy(() => import("@/pages/Help"));
 const Consultations = lazy(() => import("@/pages/Consultations"));
 const Coupons = lazy(() => import("@/pages/Coupons"));
 
-import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
-import { GlobalAssistant } from "@/components/GlobalAssistant";
-import { PushSetup } from "@/components/PushSetup";
-import { InterestOnboarding } from "@/components/InterestOnboarding";
 import BottomNav from "@/components/BottomNav";
+
+const PWAInstallPrompt = lazy(() => import("@/components/PWAInstallPrompt").then(m => ({ default: m.PWAInstallPrompt })));
+const GlobalAssistant = lazy(() => import("@/components/GlobalAssistant").then(m => ({ default: m.GlobalAssistant })));
+const PushSetup = lazy(() => import("@/components/PushSetup").then(m => ({ default: m.PushSetup })));
+const InterestOnboarding = lazy(() => import("@/components/InterestOnboarding").then(m => ({ default: m.InterestOnboarding })));
 
 const PageLoader = () => (
   <div className="flex h-[60vh] items-center justify-center" data-testid="page-loader">
@@ -79,9 +79,11 @@ function Router() {
       <Route>
         <div className="flex flex-col min-h-screen font-sans">
           <Navbar />
-          <GlobalAssistant />
-          <PushSetup />
-          <InterestOnboarding />
+          <Suspense fallback={null}>
+            <GlobalAssistant />
+            <PushSetup />
+            <InterestOnboarding />
+          </Suspense>
           <main className="flex-1 bg-background pb-16 lg:pb-0">
             <Suspense fallback={<PageLoader />}>
             <Switch>
@@ -148,7 +150,9 @@ function Router() {
         </div>
       </Route>
     </Switch>
-    <PWAInstallPrompt />
+    <Suspense fallback={null}>
+      <PWAInstallPrompt />
+    </Suspense>
     </>
   );
 }
