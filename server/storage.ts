@@ -116,6 +116,10 @@ export interface IStorage {
   deductTickerAdSecond(id: number, amountEGP: number): Promise<TickerAd | undefined>;
   deductTickerAdSecondAtomic(params: { adId: number; amountEGP: number; advertiserId: string; adminUserId: string; chargeAdvertiser: boolean; creditAdmin: boolean; }): Promise<TickerAd | undefined>;
 
+  // Subscription
+  updateUserSubscription(userId: string, endsAt: Date): Promise<void>;
+  getUserSubscriptionInfo(userId: string): Promise<{ createdAt: Date; subscriptionEndsAt: Date | null }>;
+
   // Admin
   getAllUsers(): Promise<any[]>;
   getStats(): Promise<any>;
@@ -831,6 +835,19 @@ export class DatabaseStorage implements IStorage {
       totalImpressions: Number(totalImpressions.total || 0),
       totalRevenueEGP: Number(totalRevenueEGP.total || 0),
       pendingPayments: Number(pendingPayments.count),
+    };
+  }
+  // ─── SUBSCRIPTION ─────────────────────────────────────────────
+  async updateUserSubscription(userId: string, endsAt: Date): Promise<void> {
+    await db.execute(sql`UPDATE users SET subscription_ends_at = ${endsAt} WHERE id = ${userId}`);
+  }
+
+  async getUserSubscriptionInfo(userId: string): Promise<{ createdAt: Date; subscriptionEndsAt: Date | null }> {
+    const rows = await db.execute(sql`SELECT created_at, subscription_ends_at FROM users WHERE id = ${userId} LIMIT 1`);
+    const row = rows.rows[0] as any;
+    return {
+      createdAt: new Date(row.created_at),
+      subscriptionEndsAt: row.subscription_ends_at ? new Date(row.subscription_ends_at) : null,
     };
   }
 }

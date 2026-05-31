@@ -27,6 +27,7 @@ export const users = pgTable("users", {
   role: text("role").default("user"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  subscriptionEndsAt: timestamp("subscription_ends_at"),
 });
 
 export type UpsertUser = typeof users.$inferInsert;

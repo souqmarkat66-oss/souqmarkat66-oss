@@ -87,6 +87,34 @@ async function requireAdmin(req: any, res: any, next: any) {
   next();
 }
 
+// ── Subscription check middleware ──────────────────────────────
+// Free trial: 7 days from createdAt. After that: needs active subscription (250 EGP/week).
+const TRIAL_DAYS = 7;
+const SUB_PRICE_EGP = 250;
+const SUB_DURATION_DAYS = 7;
+
+async function requireSubscription(req: any, res: any, next: any) {
+  if (!req.user) return res.status(401).json({ message: "Unauthorized" });
+  if (isAdminUser(req)) return next(); // admins bypass
+  const userId = req.user.claims.sub;
+  try {
+    const info = await storage.getUserSubscriptionInfo(userId);
+    const now = new Date();
+    const trialEnd = new Date(info.createdAt.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+    if (now <= trialEnd) return next(); // still in free trial
+    if (info.subscriptionEndsAt && now <= info.subscriptionEndsAt) return next(); // active subscription
+    return res.status(402).json({
+      message: "subscription_required",
+      trialEnd: trialEnd.toISOString(),
+      subscriptionEndsAt: info.subscriptionEndsAt?.toISOString() ?? null,
+      priceEGP: SUB_PRICE_EGP,
+    });
+  } catch (e) {
+    console.error("[requireSubscription] error:", e);
+    return next(); // fail open — don't block on errors
+  }
+}
+
 // AI credit check middleware
 async function checkAiCredits(req: any, res: any, next: any) {
   if (!req.user) return res.status(401).json({ message: "Unauthorized" });
@@ -165,6 +193,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS company text`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS city text`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS relationship_status text`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_ends_at timestamp`);
   } catch { /* columns may already exist */ }
 
   // ── Auto-cleanup stale live streams (older than 12 hours) ──
@@ -1519,7 +1548,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   // Rate limited: max once every 30 days per ad. Admin can enable/disable + set price.
   // ================================================================
   // POST /api/boost/pay-order — create payment order, notify admin, return order number
-  app.post("/api/boost/pay-order", isAuthenticated, async (req: any, res) => {
+  app.post("/api/boost/pay-order", isAuthenticated, requireSubscription, async (req: any, res) => {
     const userId = req.user.claims.sub;
     const { adId, paymentRef, amount, paymentMethod, screenshotUrl } = req.body;
     if (!adId || !paymentRef) return res.status(400).json({ message: "بيانات ناقصة" });
@@ -2776,6 +2805,72 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // ================================================================
+  // ================================================================
+  // SUBSCRIPTION ROUTES
+  // ================================================================
+
+  // GET /api/subscription/status — return trial/subscription info for current user
+  app.get("/api/subscription/status", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    try {
+      const info = await storage.getUserSubscriptionInfo(userId);
+      const balance = await storage.getUserBalanceEGP(userId);
+      const now = new Date();
+      const trialEnd = new Date(info.createdAt.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+      const inTrial = now <= trialEnd;
+      const hasActiveSub = !inTrial && info.subscriptionEndsAt != null && now <= info.subscriptionEndsAt;
+      const isExpired = !inTrial && !hasActiveSub;
+      const trialDaysLeft = inTrial ? Math.max(0, Math.ceil((trialEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))) : 0;
+      const subDaysLeft = hasActiveSub
+        ? Math.max(0, Math.ceil((info.subscriptionEndsAt!.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
+        : 0;
+      res.json({
+        inTrial,
+        hasActiveSub,
+        isExpired,
+        trialEnd: trialEnd.toISOString(),
+        trialDaysLeft,
+        subscriptionEndsAt: info.subscriptionEndsAt?.toISOString() ?? null,
+        subDaysLeft,
+        priceEGP: SUB_PRICE_EGP,
+        balance,
+        isAdmin: isAdminUser(req),
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // POST /api/subscription/renew — deduct 250 EGP and extend subscription by 7 days
+  app.post("/api/subscription/renew", isAuthenticated, async (req: any, res) => {
+    if (isAdminUser(req)) return res.json({ ok: true, message: "الأدمن مش محتاج اشتراك" });
+    const userId = req.user.claims.sub;
+    try {
+      const balance = await storage.getUserBalanceEGP(userId);
+      if (balance < SUB_PRICE_EGP) {
+        return res.status(402).json({ message: "رصيد المحفظة غير كافٍ", balance, required: SUB_PRICE_EGP });
+      }
+      // Deduct subscription fee
+      await storage.createTransaction({
+        userId,
+        type: 'spending',
+        amountEGP: SUB_PRICE_EGP,
+        description: `اشتراك أسبوعي — ${SUB_DURATION_DAYS} أيام`,
+        channelId: null,
+        campaignId: null,
+      });
+      // Extend subscription
+      const info = await storage.getUserSubscriptionInfo(userId);
+      const now = new Date();
+      const base = info.subscriptionEndsAt && info.subscriptionEndsAt > now ? info.subscriptionEndsAt : now;
+      const newEndsAt = new Date(base.getTime() + SUB_DURATION_DAYS * 24 * 60 * 60 * 1000);
+      await storage.updateUserSubscription(userId, newEndsAt);
+      res.json({ ok: true, subscriptionEndsAt: newEndsAt.toISOString(), deducted: SUB_PRICE_EGP });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   // REVENUE ROUTES (isolated per user)
   // ================================================================
   app.get("/api/revenue", isAuthenticated, async (req: any, res) => {
@@ -3507,7 +3602,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   // ================================================================
   // AI ROUTES (with credit tracking)
   // ================================================================
-  app.post("/api/ai/generate-copy", isAuthenticated, checkAiCredits, async (req: any, res) => {
+  app.post("/api/ai/generate-copy", isAuthenticated, requireSubscription, checkAiCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const { productName, targetAudience, adTitle, language } = req.body;
@@ -3531,7 +3626,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
-  app.post("/api/ai/generate-viral-ad", isAuthenticated, checkAiCredits, async (req: any, res) => {
+  app.post("/api/ai/generate-viral-ad", isAuthenticated, requireSubscription, checkAiCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const { productName, adTitle, targetAudience, language } = req.body;
@@ -3563,7 +3658,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
-  app.post("/api/ai/generate-article", isAuthenticated, checkAiCredits, async (req: any, res) => {
+  app.post("/api/ai/generate-article", isAuthenticated, requireSubscription, checkAiCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const { topic, language, tone } = req.body;
@@ -3586,7 +3681,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
     }
   });
 
-  app.post("/api/ai/generate-video-script", isAuthenticated, checkAiCredits, async (req: any, res) => {
+  app.post("/api/ai/generate-video-script", isAuthenticated, requireSubscription, checkAiCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const { productName, adTitle, duration, language } = req.body;
@@ -3611,7 +3706,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // AI Image generation (uses DALL-E via image routes, but track usage here)
-  app.post("/api/ai/generate-image", isAuthenticated, checkAiCredits, async (req: any, res) => {
+  app.post("/api/ai/generate-image", isAuthenticated, requireSubscription, checkAiCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const { prompt, size } = req.body;
@@ -3647,7 +3742,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // ─── AI ANALYZE IMAGE → generate ad copy ─────────────────────
-  app.post("/api/ai/analyze-image", isAuthenticated, checkAiCredits, async (req: any, res) => {
+  app.post("/api/ai/analyze-image", isAuthenticated, requireSubscription, checkAiCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const { imageUrls, productName, targetAudience, language = "ar" } = req.body;
@@ -3688,7 +3783,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   // ─── AI TRANSLATE ─────────────────────────────────────────────
-  app.post("/api/ai/translate", isAuthenticated, checkAiCredits, async (req: any, res) => {
+  app.post("/api/ai/translate", isAuthenticated, requireSubscription, checkAiCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const { title, description, targetLanguage = "en" } = req.body;

@@ -1,14 +1,16 @@
 import { useAuth } from "@/hooks/use-auth";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 import {
   Megaphone, Eye, Heart, MessageSquare, BarChart2, TrendingUp,
   DollarSign, Radio, Film, Tv, PlusCircle, ArrowUpRight,
-  Loader2, Star, Users, MousePointerClick, Wallet, PieChart
+  Loader2, Star, Users, MousePointerClick, Wallet, PieChart,
+  ShieldCheck, Clock, AlertTriangle, RefreshCw
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -52,6 +54,133 @@ function MetricCard({ label, value, prev, fmt, color, icon: Icon, sub }: {
 }
 
 type Tab = "overview" | "advertiser" | "publisher";
+
+function SubscriptionCard() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: sub, isLoading: subLoading } = useQuery<any>({
+    queryKey: ["/api/subscription/status"],
+    queryFn: () => fetch("/api/subscription/status", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 60_000,
+  });
+
+  const renewMutation = useMutation({
+    mutationFn: () => fetch("/api/subscription/renew", { method: "POST", credentials: "include" }).then(async r => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.message || "حدث خطأ");
+      return data;
+    }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/revenue"] });
+      toast({ title: "✅ تم تجديد الاشتراك", description: `خُصم ${data.deducted} ج.م من محفظتك` });
+    },
+    onError: (e: Error) => {
+      toast({ title: "❌ فشل التجديد", description: e.message, variant: "destructive" });
+    },
+  });
+
+  if (subLoading) return (
+    <Card className="border-border/60 rounded-2xl animate-pulse bg-muted/30 h-24" />
+  );
+  if (!sub) return null;
+  if (sub.isAdmin) return null;
+
+  // In trial
+  if (sub.inTrial) {
+    return (
+      <Card className="border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/20 rounded-2xl">
+        <CardContent className="p-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-500/15">
+              <Clock className="w-5 h-5 text-blue-500" />
+            </div>
+            <div>
+              <p className="font-bold text-sm">الفترة التجريبية المجانية</p>
+              <p className="text-xs text-muted-foreground">
+                متبقي <span className="font-bold text-blue-500">{sub.trialDaysLeft} يوم</span> من التجربة المجانية
+              </p>
+              <p className="text-[11px] text-muted-foreground/70 mt-0.5">
+                بعدها: 250 ج.م أسبوعياً من المحفظة للذكاء الاصطناعي والبوست
+              </p>
+            </div>
+          </div>
+          <Badge className="bg-blue-500/20 text-blue-600 border-blue-500/30 text-xs shrink-0">مجاني</Badge>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Active subscription
+  if (sub.hasActiveSub) {
+    return (
+      <Card className="border-green-500/40 bg-green-50/50 dark:bg-green-950/20 rounded-2xl">
+        <CardContent className="p-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-green-500/15">
+              <ShieldCheck className="w-5 h-5 text-green-500" />
+            </div>
+            <div>
+              <p className="font-bold text-sm">اشتراك فعّال ✅</p>
+              <p className="text-xs text-muted-foreground">
+                صالح لـ <span className="font-bold text-green-500">{sub.subDaysLeft} يوم</span> آخر
+              </p>
+              <p className="text-[11px] text-muted-foreground/70 mt-0.5">
+                رصيد المحفظة: {Number(sub.balance).toFixed(2)} ج.م
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-green-500/40 text-green-600 hover:bg-green-500/10 text-xs shrink-0"
+            onClick={() => renewMutation.mutate()}
+            disabled={renewMutation.isPending || sub.balance < 250}
+          >
+            {renewMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+            <span className="mr-1">جدّد مبكراً</span>
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Expired
+  const canAfford = sub.balance >= 250;
+  return (
+    <Card className="border-red-500/50 bg-red-50/50 dark:bg-red-950/20 rounded-2xl">
+      <CardContent className="p-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-red-500/15">
+            <AlertTriangle className="w-5 h-5 text-red-500" />
+          </div>
+          <div>
+            <p className="font-bold text-sm text-red-600">الاشتراك منتهي ⛔</p>
+            <p className="text-xs text-muted-foreground">
+              الذكاء الاصطناعي والبوست متوقفان
+            </p>
+            <p className="text-[11px] mt-0.5">
+              {canAfford
+                ? <span className="text-muted-foreground">رصيدك: <b className="text-foreground">{Number(sub.balance).toFixed(2)} ج.م</b> — اضغط جدّد الاشتراك</span>
+                : <span className="text-red-500">رصيدك {Number(sub.balance).toFixed(2)} ج.م — تحتاج {250 - Number(sub.balance)} ج.م إضافية</span>
+              }
+            </p>
+          </div>
+        </div>
+        <Button
+          size="sm"
+          className="bg-red-500 hover:bg-red-600 text-white text-xs shrink-0"
+          onClick={() => renewMutation.mutate()}
+          disabled={renewMutation.isPending || !canAfford}
+        >
+          {renewMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+          جدّد — 250 ج.م
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function MyDashboard() {
   const { user, isLoading } = useAuth();
@@ -128,6 +257,11 @@ export default function MyDashboard() {
               <PlusCircle className="w-4 h-4" /> إعلان جديد
             </Button>
           </Link>
+        </div>
+
+        {/* Subscription Status */}
+        <div className="mb-4">
+          <SubscriptionCard />
         </div>
 
         {/* Tabs */}
