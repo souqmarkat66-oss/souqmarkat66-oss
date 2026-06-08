@@ -11,7 +11,7 @@ import {
   type PaymentRequest, type InsertPaymentRequest,
   type TickerAd, type InsertTickerAd
 } from "@shared/schema";
-import { eq, desc, and, sql, ne } from "drizzle-orm";
+import { eq, desc, and, sql, ne, gte, lte } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 
 export interface IStorage {
@@ -68,7 +68,7 @@ export interface IStorage {
   recordClick(campaignId: number, channelId?: number, userId?: string): Promise<{ budgetWarning?: boolean; budgetRatio?: number; advertiserId?: string; campaignName?: string }>;
 
   // Revenue
-  getRevenueTransactions(userId: string, options?: { limit?: number; offset?: number; type?: 'earning' | 'spending' | 'withdrawal' | 'ai_charge'; channelId?: number }): Promise<RevenueTransaction[]>;
+  getRevenueTransactions(userId: string, options?: { limit?: number; offset?: number; type?: 'earning' | 'spending' | 'withdrawal' | 'ai_charge'; channelId?: number; from?: Date; to?: Date }): Promise<RevenueTransaction[]>;
   getRevenueTotals(userId: string, options?: { channelId?: number }): Promise<{ earning: number; spending: number; withdrawal: number; ai_charge: number }>;
   getUserBalanceEGP(userId: string): Promise<number>;
   createTransaction(tx: Omit<RevenueTransaction, 'id' | 'createdAt'>): Promise<RevenueTransaction>;
@@ -468,13 +468,15 @@ export class DatabaseStorage implements IStorage {
   // ─── REVENUE ──────────────────────────────────────────────────
   async getRevenueTransactions(
     userId: string,
-    options: { limit?: number; offset?: number; type?: 'earning' | 'spending' | 'withdrawal' | 'ai_charge'; channelId?: number } = {}
+    options: { limit?: number; offset?: number; type?: 'earning' | 'spending' | 'withdrawal' | 'ai_charge'; channelId?: number; from?: Date; to?: Date } = {}
   ): Promise<RevenueTransaction[]> {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
     const offset = Math.max(options.offset ?? 0, 0);
     const conds = [eq(revenueTransactions.userId, userId)];
     if (options.type) conds.push(eq(revenueTransactions.type, options.type));
     if (options.channelId !== undefined) conds.push(eq(revenueTransactions.channelId, options.channelId));
+    if (options.from) conds.push(gte(revenueTransactions.createdAt, options.from));
+    if (options.to) conds.push(lte(revenueTransactions.createdAt, options.to));
     return db.select().from(revenueTransactions)
       .where(and(...conds))
       .orderBy(desc(revenueTransactions.createdAt))

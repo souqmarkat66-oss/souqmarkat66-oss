@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import {
   TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight, Loader2, CreditCard,
   Banknote, PhoneCall, AlertCircle, BarChart2, Eye, MousePointer,
-  ShieldX, Tv, Megaphone, Receipt
+  ShieldX, Tv, Megaphone, Receipt, Filter, X
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -123,8 +123,179 @@ function WithdrawDialog({ balanceEGP, label }: { balanceEGP: number; label: stri
   );
 }
 
-// ── ناشر ──────────────────────────────────────────────────────────────
+// ── كشف حساب مع فلاتر (نوع + من/إلى) ─────────────────────────────────
 const TX_PAGE_SIZE = 30;
+
+const TX_TYPE_OPTIONS: { value: 'earning' | 'spending' | 'withdrawal' | 'ai_charge'; label: string }[] = [
+  { value: 'earning', label: 'أرباح' },
+  { value: 'spending', label: 'إنفاق' },
+  { value: 'withdrawal', label: 'سحب' },
+  { value: 'ai_charge', label: 'شحن AI' },
+];
+
+type RevenueTxFilterType = 'earning' | 'spending' | 'withdrawal' | 'ai_charge';
+const REVENUE_TX_FILTER_TYPES: readonly RevenueTxFilterType[] = ['earning', 'spending', 'withdrawal', 'ai_charge'];
+type TxKind = 'earning' | 'spending';
+function TransactionList({
+  defaultType,
+  emptyText,
+  testIdPrefix,
+}: {
+  defaultType: TxKind;
+  emptyText: string;
+  testIdPrefix: string;
+}) {
+  const { toast } = useToast();
+  const [type, setType] = useState<RevenueTxFilterType>(defaultType);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [pages, setPages] = useState<any[][]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+
+  const queryString = useMemo(() => {
+    const p = new URLSearchParams();
+    p.set('type', type);
+    p.set('limit', String(TX_PAGE_SIZE));
+    if (from) p.set('from', from);
+    if (to) p.set('to', to);
+    return p.toString();
+  }, [type, from, to]);
+
+  // إعادة تحميل الصفحة الأولى عند تغيّر الفلاتر
+  useEffect(() => {
+    let cancelled = false;
+    setInitialLoading(true);
+    setPages([]);
+    setHasMore(true);
+    (async () => {
+      try {
+        const res = await fetch(`/api/revenue?${queryString}&offset=0`, { credentials: 'include' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        if (cancelled) return;
+        setPages([json.transactions || []]);
+        setHasMore(!!json.hasMore);
+      } catch (e: any) {
+        if (!cancelled) toast({ variant: 'destructive', title: 'تعذر تحميل المعاملات', description: e.message });
+      } finally {
+        if (!cancelled) setInitialLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [queryString, toast]);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const offset = pages.reduce((sum, p) => sum + p.length, 0);
+      const res = await fetch(`/api/revenue?${queryString}&offset=${offset}`, { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      setPages(prev => [...prev, json.transactions || []]);
+      setHasMore(!!json.hasMore);
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'تعذر تحميل المزيد', description: e.message });
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const all = pages.flat();
+  const hasFilters = !!from || !!to || type !== defaultType;
+
+  return (
+    <>
+      {/* شريط الفلاتر */}
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto] gap-2 mb-4">
+        <div>
+          <label className="text-[10px] text-muted-foreground flex items-center gap-1 mb-1">
+            <Filter className="w-3 h-3" /> النوع
+          </label>
+          <Select value={type} onValueChange={(v) => {
+            if ((REVENUE_TX_FILTER_TYPES as readonly string[]).includes(v)) {
+              setType(v as RevenueTxFilterType);
+            }
+          }}>
+            <SelectTrigger className="h-9 text-xs" data-testid={`${testIdPrefix}-filter-type`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TX_TYPE_OPTIONS.map(o => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="text-[10px] text-muted-foreground mb-1 block">من تاريخ</label>
+          <Input type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)}
+            className="h-9 text-xs" data-testid={`${testIdPrefix}-filter-from`} />
+        </div>
+        <div>
+          <label className="text-[10px] text-muted-foreground mb-1 block">إلى تاريخ</label>
+          <Input type="date" value={to} min={from || undefined} onChange={e => setTo(e.target.value)}
+            className="h-9 text-xs" data-testid={`${testIdPrefix}-filter-to`} />
+        </div>
+        {hasFilters && (
+          <div className="flex items-end">
+            <Button type="button" variant="outline" size="sm" className="h-9 gap-1"
+              onClick={() => { setType(defaultType); setFrom(''); setTo(''); }}
+              data-testid={`${testIdPrefix}-filter-reset`}>
+              <X className="w-3.5 h-3.5" /> مسح
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {initialLoading ? (
+        <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+      ) : all.length === 0 ? (
+        <div className="text-center py-8 text-muted-foreground">
+          <TrendingUp className="w-10 h-10 mx-auto mb-2 opacity-30" />
+          <p className="text-sm">{hasFilters ? 'لا توجد معاملات تطابق الفلاتر المختارة' : emptyText}</p>
+        </div>
+      ) : (
+        <>
+          <div className="space-y-1 max-h-72 overflow-y-auto">
+            {all.map((t: any) => (
+              <div key={t.id} className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-muted/50 text-sm" data-testid={`${testIdPrefix}-tx-${t.id}`}>
+                <div className="flex items-center gap-2">
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center ${
+                    t.type === 'earning' ? 'bg-green-100 dark:bg-green-900/30'
+                    : 'bg-red-100 dark:bg-red-900/30'
+                  }`}>
+                    {t.type === 'earning'
+                      ? <ArrowUpRight className="w-3.5 h-3.5 text-green-600" />
+                      : <ArrowDownLeft className="w-3.5 h-3.5 text-red-500" />}
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium">{t.description}</div>
+                    <div className="text-[10px] text-muted-foreground">{t.createdAt ? format(new Date(t.createdAt), 'dd/MM/yy HH:mm', { locale: ar }) : ''}</div>
+                  </div>
+                </div>
+                <div className={`font-bold text-xs ${t.type === 'earning' ? 'text-green-600' : 'text-red-500'}`}>
+                  {t.type === 'earning' ? '+' : '-'}{(t.amountEGP || 0).toFixed(4)} ج.م
+                </div>
+              </div>
+            ))}
+          </div>
+          {hasMore && (
+            <div className="flex justify-center mt-3">
+              <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore} data-testid={`btn-load-more-${testIdPrefix}-tx`}>
+                {loadingMore ? <Loader2 className="w-4 h-4 animate-spin me-2" /> : null}
+                تحميل المزيد
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+// ── ناشر ──────────────────────────────────────────────────────────────
 function PublisherTab() {
   const { data, isLoading } = useQuery<any>({
     queryKey: ['/api/publisher/report'],
@@ -134,33 +305,6 @@ function PublisherTab() {
     queryKey: ['/api/payments'],
     queryFn: () => fetch('/api/payments', { credentials: 'include' }).then(r => r.json()),
   });
-  const [extraTxs, setExtraTxs] = useState<any[]>([]);
-  const [txOffset, setTxOffset] = useState(TX_PAGE_SIZE);
-  const [txHasMore, setTxHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const { toast } = useToast();
-
-  useEffect(() => {
-    setExtraTxs([]);
-    setTxOffset(TX_PAGE_SIZE);
-    setTxHasMore(true);
-  }, [data?.transactions]);
-
-  const loadMore = async () => {
-    setLoadingMore(true);
-    try {
-      const res = await fetch(`/api/revenue?type=earning&limit=${TX_PAGE_SIZE}&offset=${txOffset}`, { credentials: 'include' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setExtraTxs(prev => [...prev, ...(json.transactions || [])]);
-      setTxOffset(o => o + TX_PAGE_SIZE);
-      setTxHasMore(!!json.hasMore);
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "تعذر تحميل المزيد", description: e.message });
-    } finally {
-      setLoadingMore(false);
-    }
-  };
 
   if (isLoading) return <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   if (!data?.channel) return (
@@ -171,9 +315,7 @@ function PublisherTab() {
     </div>
   );
 
-  const { channel, channelStats, totalEarnedEGP, withdrawnEGP, balanceEGP, transactions, hasMore } = data;
-  const allTransactions = [...transactions, ...extraTxs];
-  const showLoadMore = (txOffset === TX_PAGE_SIZE ? hasMore : txHasMore);
+  const { channel, channelStats, totalEarnedEGP, withdrawnEGP, balanceEGP } = data;
   const realImpr = Number(channelStats?.real_impressions || 0);
   const realClicks = Number(channelStats?.real_clicks || 0);
   const fraudImpr = Number(channelStats?.fraud_impressions || 0);
@@ -265,39 +407,11 @@ function PublisherTab() {
       <Card className="rounded-2xl">
         <CardHeader><CardTitle className="text-base flex items-center gap-2"><Receipt className="w-4 h-4" /> كشف حساب الأرباح</CardTitle></CardHeader>
         <CardContent>
-          {allTransactions.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <TrendingUp className="w-10 h-10 mx-auto mb-2 opacity-30" />
-              <p className="text-sm">لا توجد أرباح بعد — الإيرادات ستظهر هنا عند عرض الإعلانات</p>
-            </div>
-          ) : (
-            <>
-              <div className="space-y-1 max-h-72 overflow-y-auto">
-                {allTransactions.map((t: any) => (
-                  <div key={t.id} className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-muted/50 text-sm" data-testid={`pub-tx-${t.id}`}>
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                        <ArrowUpRight className="w-3.5 h-3.5 text-green-600" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-medium">{t.description}</div>
-                        <div className="text-[10px] text-muted-foreground">{t.createdAt ? format(new Date(t.createdAt), 'dd/MM/yy HH:mm', { locale: ar }) : ''}</div>
-                      </div>
-                    </div>
-                    <div className="font-bold text-xs text-green-600">+{(t.amountEGP || 0).toFixed(4)} ج.م</div>
-                  </div>
-                ))}
-              </div>
-              {showLoadMore && (
-                <div className="flex justify-center mt-3">
-                  <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore} data-testid="btn-load-more-pub-tx">
-                    {loadingMore ? <Loader2 className="w-4 h-4 animate-spin me-2" /> : null}
-                    تحميل المزيد
-                  </Button>
-                </div>
-              )}
-            </>
-          )}
+          <TransactionList
+            defaultType="earning"
+            emptyText="لا توجد أرباح بعد — الإيرادات ستظهر هنا عند عرض الإعلانات"
+            testIdPrefix="pub"
+          />
         </CardContent>
       </Card>
     </div>
@@ -310,37 +424,6 @@ function AdvertiserTab() {
     queryKey: ['/api/advertiser/report'],
     queryFn: () => fetch('/api/advertiser/report', { credentials: 'include' }).then(r => r.json()),
   });
-  const { data: payments = [] } = useQuery<any[]>({
-    queryKey: ['/api/payments'],
-    queryFn: () => fetch('/api/payments', { credentials: 'include' }).then(r => r.json()),
-  });
-  const [extraTxs, setExtraTxs] = useState<any[]>([]);
-  const [txOffset, setTxOffset] = useState(TX_PAGE_SIZE);
-  const [txHasMore, setTxHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const { toast } = useToast();
-
-  useEffect(() => {
-    setExtraTxs([]);
-    setTxOffset(TX_PAGE_SIZE);
-    setTxHasMore(true);
-  }, [data?.transactions]);
-
-  const loadMore = async () => {
-    setLoadingMore(true);
-    try {
-      const res = await fetch(`/api/revenue?type=spending&limit=${TX_PAGE_SIZE}&offset=${txOffset}`, { credentials: 'include' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setExtraTxs(prev => [...prev, ...(json.transactions || [])]);
-      setTxOffset(o => o + TX_PAGE_SIZE);
-      setTxHasMore(!!json.hasMore);
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "تعذر تحميل المزيد", description: e.message });
-    } finally {
-      setLoadingMore(false);
-    }
-  };
 
   if (isLoading) return <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   if (!data?.campaigns?.length) return (
@@ -351,9 +434,7 @@ function AdvertiserTab() {
     </div>
   );
 
-  const { campaigns, totalSpentEGP, balanceEGP, transactions, hasMore } = data;
-  const allTransactions = [...transactions, ...extraTxs];
-  const showLoadMore = (txOffset === TX_PAGE_SIZE ? hasMore : txHasMore);
+  const { campaigns, totalSpentEGP, balanceEGP } = data;
 
   return (
     <div className="space-y-6">
@@ -504,36 +585,11 @@ function AdvertiserTab() {
       <Card className="rounded-2xl">
         <CardHeader><CardTitle className="text-base flex items-center gap-2"><Receipt className="w-4 h-4" /> كشف حساب الإنفاق</CardTitle></CardHeader>
         <CardContent>
-          {allTransactions.length === 0 ? (
-            <p className="text-center py-8 text-sm text-muted-foreground">لا توجد معاملات بعد</p>
-          ) : (
-            <>
-              <div className="space-y-1 max-h-64 overflow-y-auto">
-                {allTransactions.map((t: any) => (
-                  <div key={t.id} className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-muted/50 text-sm" data-testid={`adv-tx-${t.id}`}>
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-                        <ArrowDownLeft className="w-3.5 h-3.5 text-red-500" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-medium">{t.description}</div>
-                        <div className="text-[10px] text-muted-foreground">{t.createdAt ? format(new Date(t.createdAt), 'dd/MM/yy HH:mm', { locale: ar }) : ''}</div>
-                      </div>
-                    </div>
-                    <div className="font-bold text-xs text-red-500">-{(t.amountEGP || 0).toFixed(4)} ج.م</div>
-                  </div>
-                ))}
-              </div>
-              {showLoadMore && (
-                <div className="flex justify-center mt-3">
-                  <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore} data-testid="btn-load-more-adv-tx">
-                    {loadingMore ? <Loader2 className="w-4 h-4 animate-spin me-2" /> : null}
-                    تحميل المزيد
-                  </Button>
-                </div>
-              )}
-            </>
-          )}
+          <TransactionList
+            defaultType="spending"
+            emptyText="لا توجد معاملات بعد"
+            testIdPrefix="adv"
+          />
         </CardContent>
       </Card>
     </div>

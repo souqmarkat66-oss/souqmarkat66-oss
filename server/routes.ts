@@ -2883,8 +2883,23 @@ Sitemap: ${BASE}/sitemap-pages.xml
     const type: RevenueTxType | undefined = rawType && (allowedTypes as readonly string[]).includes(rawType)
       ? (rawType as RevenueTxType)
       : undefined;
-    const txOptions: { limit: number; offset: number; type?: RevenueTxType } = { limit, offset };
+    const txOptions: { limit: number; offset: number; type?: RevenueTxType; from?: Date; to?: Date } = { limit, offset };
     if (type) txOptions.type = type;
+    const parseDate = (v: unknown): Date | undefined => {
+      if (typeof v !== 'string' || !v) return undefined;
+      const d = new Date(v);
+      return isNaN(d.getTime()) ? undefined : d;
+    };
+    const fromDate = parseDate(req.query.from);
+    const toDate = parseDate(req.query.to);
+    if (fromDate) txOptions.from = fromDate;
+    if (toDate) {
+      // إذا أُرسلت تاريخ فقط (YYYY-MM-DD) نعتبر نهاية اليوم شامل
+      if (typeof req.query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to)) {
+        toDate.setHours(23, 59, 59, 999);
+      }
+      txOptions.to = toDate;
+    }
     const [transactions, balanceEGP, channel] = await Promise.all([
       storage.getRevenueTransactions(userId, txOptions),
       storage.getUserBalanceEGP(userId),
