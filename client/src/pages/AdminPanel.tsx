@@ -24,7 +24,7 @@ import {
   AlertTriangle, Activity, Menu, ChevronLeft, VideoOff, PieChart,
   Star, MessageSquare, Clock, BanIcon, UserCheck, FolderOpen, FileImage,
   FileVideo, File, Lock, Phone, Mail, Shield, RefreshCw, ToggleLeft, ToggleRight, Zap,
-  Sparkles, Image, Video, Wand2, FileText, Gift, Check, Globe, Plus
+  Sparkles, Image, Video, Wand2, FileText, Gift, Check, Globe, Plus, PlusCircle
 } from "lucide-react";
 
 const ADMIN_ID = "54219806";
@@ -2645,6 +2645,17 @@ function PricingSection() {
       </div>
 
       {/* ── تجديد الإعلانات ── */}
+      <div>
+        <h3 className="font-bold text-base mb-3 flex items-center gap-2">
+          <PlusCircle className="w-4 h-4 text-emerald-500" /> نشر إعلان جديد (رسوم النشر)
+        </h3>
+        <PriceCard icon={PlusCircle} color="bg-emerald-500" label="أسعار نشر الإعلانات" desc="ما يدفعه العميل عند نشر إعلان — يُخصم من المحفظة. الأدمن ينشر مجاناً بلا مدة.">
+          <NumInput k="listing_price_7d"  label="نشر 7 أيام"   unit="ج.م" def="400" step="25" />
+          <NumInput k="listing_price_15d" label="نشر 15 يوماً" unit="ج.م" def="700" step="25" />
+          <NumInput k="listing_price_30d" label="نشر 30 يوماً" unit="ج.م" def="900" step="25" />
+        </PriceCard>
+      </div>
+
       <div>
         <h3 className="font-bold text-base mb-3 flex items-center gap-2">
           <RefreshCw className="w-4 h-4 text-blue-500" /> تجديد الإعلانات

@@ -192,8 +192,46 @@ export function Navbar() {
     return true;
   });
 
+  const bannerEnabled = settings?.promoBannerEnabled !== "0";
+  const bannerText = settings?.promoBannerText || "";
+  const bannerUrl  = settings?.promoBannerUrl  || "https://play.google.com/store/apps/details?id=com.apmo.souqmarket";
+  const whatsapp   = settings?.contactWhatsapp || "";
+  const instapay   = settings?.contactInstapay || "01285558567";
+
+  const tickerParts = [
+    ...(bannerText ? bannerText.split("|").map(s => s.trim()).filter(Boolean) : []),
+    ...(whatsapp  ? [`📱 واتساب: ${whatsapp}`]  : []),
+    ...(instapay  ? [`💳 InstaPay: ${instapay}`] : []),
+  ];
+
   return (
     <nav className="sticky top-0 z-50 w-full border-b bg-background/90 backdrop-blur-md">
+      {/* ── Contact/Promo Ticker ─────────────────────────────────────── */}
+      {bannerEnabled && tickerParts.length > 0 && (
+        <a
+          href={bannerUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block w-full overflow-hidden bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 py-1.5 cursor-pointer hover:brightness-110 transition-all"
+          data-testid="promo-ticker"
+        >
+          <div
+            className="flex gap-12 whitespace-nowrap text-white text-xs font-bold animate-[marquee_30s_linear_infinite]"
+            style={{ direction: "rtl" }}
+          >
+            {[...Array(4)].map((_, i) => (
+              <span key={i} className="flex items-center gap-6 shrink-0">
+                {tickerParts.map((part, j) => (
+                  <span key={j} className="flex items-center gap-1.5">
+                    {part}
+                    <span className="text-white/50 mx-1">◆</span>
+                  </span>
+                ))}
+              </span>
+            ))}
+          </div>
+        </a>
+      )}
       <div className="container mx-auto px-4 h-16 flex items-center justify-between gap-4">
         <Link href="/" className="flex items-center gap-2 group shrink-0">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center text-white shadow-lg">

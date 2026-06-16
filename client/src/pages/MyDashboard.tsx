@@ -630,13 +630,16 @@ export default function MyDashboard() {
                   </thead>
                   <tbody>
                     {[
-                      { label: "⚡ تعزيز إعلان (Boost)",  price: `${pricing.boost_price_egp ?? '250'} ج.م`,   desc: "ظهور في المقدمة لمدة 7 أيام" },
-                      { label: "🔥 إشعار ناري (Fire)",    price: `${pricing.fire_price_egp ?? '100'} ج.م`,    desc: "إشعار فوري لجميع المستخدمين" },
-                      { label: "🔄 تجديد 7 أيام",         price: `${pricing.renewal_price_7d ?? '20'} ج.م`,   desc: "تمديد صلاحية إعلانك" },
-                      { label: "🔄 تجديد 15 يوماً",       price: `${pricing.renewal_price_15d ?? '35'} ج.م`,  desc: "تمديد صلاحية إعلانك" },
-                      { label: "🔄 تجديد 30 يوماً",       price: `${pricing.renewal_price_30d ?? '60'} ج.م`,  desc: "تمديد صلاحية إعلانك" },
-                      { label: "📣 حملة إعلانية (CPM)",   price: `${pricing.cpm_rate_egp ?? '15'} ج.م/1000`, desc: "لكل 1000 مشاهدة" },
-                      { label: "📣 حملة إعلانية (CPC)",   price: `${pricing.cpc_rate_egp ?? '0.75'} ج.م`,     desc: "لكل نقرة" },
+                      { label: "📢 نشر إعلان 7 أيام",     price: `${pricing.listingPrice7d ?? '400'} ج.م`,  desc: "🌱 خطة أساسية — يُخصم من المحفظة" },
+                      { label: "📢 نشر إعلان 15 يوماً",   price: `${pricing.listingPrice15d ?? '700'} ج.م`, desc: "⚡ خطة مميزة — يُخصم من المحفظة" },
+                      { label: "📢 نشر إعلان 30 يوماً",   price: `${pricing.listingPrice30d ?? '900'} ج.م`, desc: "🔥 خطة احترافية — يُخصم من المحفظة" },
+                      { label: "⚡ تعزيز إعلان (Boost)",  price: `${pricing.boostPriceEgp ?? '250'} ج.م`,   desc: "ظهور في المقدمة لمدة 7 أيام" },
+                      { label: "🔥 إشعار ناري (Fire)",    price: `${pricing.firePriceEgp ?? '100'} ج.م`,    desc: "إشعار فوري لجميع المستخدمين" },
+                      { label: "🔄 تجديد 7 أيام",         price: `${pricing.renewalPrice7d ?? '20'} ج.م`,   desc: "تمديد صلاحية إعلانك" },
+                      { label: "🔄 تجديد 15 يوماً",       price: `${pricing.renewalPrice15d ?? '35'} ج.م`,  desc: "تمديد صلاحية إعلانك" },
+                      { label: "🔄 تجديد 30 يوماً",       price: `${pricing.renewalPrice30d ?? '60'} ج.م`,  desc: "تمديد صلاحية إعلانك" },
+                      { label: "📣 حملة إعلانية (CPM)",   price: `${pricing.cpmRateEgp ?? '15'} ج.م/1000`, desc: "لكل 1000 مشاهدة" },
+                      { label: "📣 حملة إعلانية (CPC)",   price: `${pricing.cpcRateEgp ?? '0.75'} ج.م`,     desc: "لكل نقرة" },
                     ].map((row, i) => (
                       <tr key={i} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
                         <td className="px-4 py-2.5 font-medium">{row.label}</td>
@@ -667,11 +670,11 @@ export default function MyDashboard() {
                   </thead>
                   <tbody>
                     {[
-                      { label: "🖼️ توليد صورة",         price: `${pricing.ai_price_image ?? '10'} ج.م`,         desc: "صورة إعلانية بالذكاء" },
-                      { label: "🎬 توليد فيديو",         price: `${pricing.ai_price_video ?? '25'} ج.م`,         desc: "مقطع فيديو قصير" },
-                      { label: "✨ تأثير متحرك",          price: `${pricing.ai_price_animation ?? '20'} ج.م`,     desc: "صورة بتأثير بصري" },
-                      { label: "✍️ كتابة محتوى",        price: `${pricing.ai_price_content ?? '5'} ج.م`,          desc: "نص إعلاني احترافي" },
-                      { label: "🤖 كريدت ذكاء اصطناعي", price: `${pricing.ai_price_per_credit_egp ?? '5'} ج.م/كريدت`, desc: `${pricing.ai_free_credits ?? '3'} كريدت مجاناً عند التسجيل` },
+                      { label: "🖼️ توليد صورة",         price: `${pricing.aiPriceImage ?? '10'} ج.م`,         desc: "صورة إعلانية بالذكاء" },
+                      { label: "🎬 توليد فيديو",         price: `${pricing.aiPriceVideo ?? '25'} ج.م`,         desc: "مقطع فيديو قصير" },
+                      { label: "✨ تأثير متحرك",          price: `${pricing.aiPriceAnimation ?? '20'} ج.م`,     desc: "صورة بتأثير بصري" },
+                      { label: "✍️ كتابة محتوى",        price: `${pricing.aiPriceContent ?? '5'} ج.م`,          desc: "نص إعلاني احترافي" },
+                      { label: "🤖 كريدت ذكاء اصطناعي", price: `${pricing.aiPricePerCreditEgp ?? '5'} ج.م/كريدت`, desc: `${pricing.aiFreeCredits ?? '3'} كريدت مجاناً عند التسجيل` },
                     ].map((row, i) => (
                       <tr key={i} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
                         <td className="px-4 py-2.5 font-medium">{row.label}</td>
@@ -702,8 +705,8 @@ export default function MyDashboard() {
                   </thead>
                   <tbody>
                     {[
-                      { label: "🔑 الاشتراك الأسبوعي",    price: `${pricing.subscription_price_egp ?? '250'} ج.م/أسبوع`, desc: "للوصول لخدمات الذكاء والتعزيز" },
-                      { label: "💰 الحد الأدنى للسحب",    price: `${pricing.wallet_min_withdrawal_egp ?? '100'} ج.م`,       desc: "أقل مبلغ يمكن سحبه" },
+                      { label: "🔑 الاشتراك الأسبوعي",    price: `${pricing.subscriptionPriceEgp ?? '250'} ج.م/أسبوع`, desc: "للوصول لخدمات الذكاء والتعزيز" },
+                      { label: "💰 الحد الأدنى للسحب",    price: `${pricing.walletMinWithdrawalEgp ?? '100'} ج.م`,       desc: "أقل مبلغ يمكن سحبه" },
                     ].map((row, i) => (
                       <tr key={i} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
                         <td className="px-4 py-2.5 font-medium">{row.label}</td>

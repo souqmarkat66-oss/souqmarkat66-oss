@@ -246,7 +246,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('app_huawei', 'https://app.as-souqmarkat.com/?from-splash=false') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_vodafone_cash', '01098553911') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_instapay', '01285558567') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_whatsapp', '') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_whatsapp', '01126665741') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('listing_price_7d',  '400') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('listing_price_15d', '700') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('listing_price_30d', '900') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_ads', '1') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_reels', '1') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_channels', '1') ON CONFLICT (key) DO NOTHING`);
@@ -264,7 +267,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('subscription_price_egp', '250') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('boost_price_egp', '250') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('promo_banner_enabled', '1') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('promo_banner_text', '🎉 قسّط على 18 شهر بدون فوائد | حمّل تطبيق سوق ماركات الآن | عروض حصرية لفترة محدودة | ads-as.com') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('promo_banner_text', '🎉 قسّط على 18 شهر بدون فوائد | حمّل تطبيق سوق ماركات | واتساب: 01126665741 | InstaPay: 01285558567 | ads-as.com') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('promo_banner_url', 'https://play.google.com/store/apps/details?id=com.apmo.souqmarket') ON CONFLICT (key) DO NOTHING`);
   } catch { /* table may already exist */ }
 
@@ -1465,8 +1468,40 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.post("/api/ads", isAuthenticated, async (req: any, res) => {
     try {
       const { insertAdSchema } = await import("@shared/schema");
+      const userId = req.user.claims.sub;
+      const isAdmin = userId === process.env.ADMIN_USER_ID;
+
+      // ── Listing fee: charge wallet for non-admin users ─────────────────
+      const listingDurationDays = parseInt(req.body.listingDurationDays) || 7;
+      if (!isAdmin) {
+        const validDurations = [7, 15, 30];
+        if (!validDurations.includes(listingDurationDays)) {
+          return res.status(400).json({ message: "مدة الإعلان يجب أن تكون 7 أو 15 أو 30 يوماً" });
+        }
+        const priceKey = `listing_price_${listingDurationDays}d`;
+        const priceRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = ${priceKey}`);
+        const listingPrice = parseFloat((priceRow.rows[0] as any)?.value ?? (listingDurationDays === 7 ? '400' : listingDurationDays === 15 ? '700' : '900'));
+        const balance = await storage.getUserBalanceEGP(userId);
+        if (balance < listingPrice) {
+          return res.status(402).json({
+            message: `رصيد غير كافٍ — يلزم ${listingPrice} ج.م لنشر الإعلان ${listingDurationDays} يوماً، رصيدك الحالي: ${balance.toFixed(2)} ج.م`,
+            required: listingPrice, balance,
+          });
+        }
+        // Deduct from wallet
+        await storage.createTransaction({
+          userId, type: "spending", amountEGP: -listingPrice,
+          description: `نشر إعلان ${listingDurationDays} يوماً`,
+        });
+        // Force expires_at based on chosen duration
+        req.body.expiresAt = new Date(Date.now() + listingDurationDays * 24 * 60 * 60 * 1000).toISOString();
+      } else {
+        // Admin ads have no expiry by default
+        if (!req.body.expiresAt) req.body.expiresAt = null;
+      }
+
       const input = insertAdSchema.parse(req.body);
-      const ad = await storage.createAd({ ...input, userId: req.user.claims.sub });
+      const ad = await storage.createAd({ ...input, userId });
       res.status(201).json(ad);
 
       // ── Notify targeted users about the new ad (async, non-blocking) ──
@@ -4727,6 +4762,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const allowedKeys = new Set([
         'boost_price_egp','boost_enabled','fire_price_egp',
         'renewal_price_7d','renewal_price_15d','renewal_price_30d',
+        'listing_price_7d','listing_price_15d','listing_price_30d',
         'campaign_min_budget_egp','wallet_min_withdrawal_egp',
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
         'ai_free_credits','ai_price_per_credit_egp',
@@ -4742,6 +4778,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const defaults: Record<string, string> = {
         boost_price_egp: '250', boost_enabled: 'true', fire_price_egp: '100',
         renewal_price_7d: '20', renewal_price_15d: '35', renewal_price_30d: '60',
+        listing_price_7d: '400', listing_price_15d: '700', listing_price_30d: '900',
         campaign_min_budget_egp: '100', wallet_min_withdrawal_egp: '100',
         ai_price_image: '10', ai_price_video: '25', ai_price_animation: '20',
         ai_price_content: '5', ai_price_post: '5',
@@ -4760,6 +4797,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
         'cpm_rate_egp','cpc_rate_egp','publisher_share_pct','campaign_min_budget_egp',
         'boost_price_egp','boost_enabled','fire_price_egp',
         'renewal_price_7d','renewal_price_15d','renewal_price_30d',
+        'listing_price_7d','listing_price_15d','listing_price_30d',
         'wallet_min_withdrawal_egp','wallet_max_deposit_egp',
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
         'ai_free_credits','ai_price_per_credit_egp','ai_referral_bonus_egp',
@@ -4781,6 +4819,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
         'cpm_rate_egp','cpc_rate_egp','publisher_share_pct','campaign_min_budget_egp',
         'boost_price_egp','boost_enabled','fire_price_egp',
         'renewal_price_7d','renewal_price_15d','renewal_price_30d',
+        'listing_price_7d','listing_price_15d','listing_price_30d',
         'wallet_min_withdrawal_egp','wallet_max_deposit_egp',
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
         'ai_free_credits','ai_price_per_credit_egp','ai_referral_bonus_egp',

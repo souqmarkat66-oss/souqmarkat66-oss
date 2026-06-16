@@ -7,6 +7,7 @@ import { useCreateAd } from "@/hooks/use-ads";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -84,7 +85,7 @@ export default function CreateAd() {
   const [cinemaFullscreen, setCinemaFullscreen] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [paymentMode, setPaymentMode] = useState<"cash" | "installment">("cash");
-  const [adDuration, setAdDuration] = useState<number>(30); // days, 0 = no expiry
+  const [adDuration, setAdDuration] = useState<number>(7); // days, 0 = no expiry (admin only)
   const [addCoupon, setAddCoupon] = useState(false);
   const [couponDiscountType, setCouponDiscountType] = useState("percentage");
   const [couponDiscountValue, setCouponDiscountValue] = useState("");
@@ -202,6 +203,19 @@ export default function CreateAd() {
   });
   const aiEnabled = platformSettings?.["feature_ai"] !== "0";
 
+  const { user } = useAuth();
+  const ADMIN_ID = "54219806";
+  const isAdmin = (user as any)?.id === ADMIN_ID || (user as any)?.email === "souqmarkat66@gmail.com";
+
+  const { data: pricingData } = useQuery<Record<string, string>>({
+    queryKey: ["/api/pricing"],
+    queryFn: () => fetch("/api/pricing").then(r => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+  const listingPrice7  = parseFloat(pricingData?.listingPrice7d  ?? "400");
+  const listingPrice15 = parseFloat(pricingData?.listingPrice15d ?? "700");
+  const listingPrice30 = parseFloat(pricingData?.listingPrice30d ?? "900");
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -216,9 +230,10 @@ export default function CreateAd() {
   const onSubmit = async (values: FormValues) => {
     try {
       const { productName, targetAudience, adTitle, ...adData } = values;
-      const expiresAt = adDuration > 0
-        ? new Date(Date.now() + adDuration * 24 * 60 * 60 * 1000)
-        : null;
+      // Admin: can choose custom duration or unlimited; customers: 7/15/30 days enforced server-side
+      const expiresAt = isAdmin && adDuration === 0
+        ? null
+        : new Date(Date.now() + adDuration * 24 * 60 * 60 * 1000);
       const newAd = await createAd({
         ...adData,
         userId: "temp",
@@ -226,6 +241,7 @@ export default function CreateAd() {
         targetInterests: targetInterests.join(",") || "",
         targetAges: targetAges.join(",") || "",
         expiresAt,
+        listingDurationDays: isAdmin ? undefined : adDuration,
         ...(locationTarget ? {
           targetLat: locationTarget.lat,
           targetLng: locationTarget.lng,
@@ -1861,68 +1877,79 @@ export default function CreateAd() {
             </div>
           )}
 
-          {/* Ad Duration Selector */}
-          <div className="border rounded-2xl p-4 bg-blue-50/40 dark:bg-blue-950/10 space-y-3">
-            <h3 className="font-bold text-sm flex items-center gap-2">⏳ مدة الإعلان</h3>
-            <p className="text-xs text-muted-foreground">حدد عدد الأيام اللي تريد إعلانك يظهر فيها — أي عدد تختاره</p>
-
-            {/* اختصارات سريعة */}
-            <div className="flex flex-wrap gap-1.5">
-              {[7, 14, 30, 60, 90, 180, 365].map(d => (
-                <button
-                  key={d}
-                  type="button"
-                  onClick={() => setAdDuration(d)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition-all ${
-                    adDuration === d
-                      ? "border-primary bg-primary text-white shadow shadow-primary/30"
-                      : "border-border bg-white dark:bg-background hover:border-primary/50"
-                  }`}
-                  data-testid={`duration-${d}`}
-                >
-                  {d} يوم
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setAdDuration(0)}
-                className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition-all ${
-                  adDuration === 0
-                    ? "border-primary bg-primary text-white shadow shadow-primary/30"
-                    : "border-border bg-white dark:bg-background hover:border-primary/50"
-                }`}
-                data-testid="duration-0"
-              >
-                ♾️ بلا حد
-              </button>
+          {/* Ad Duration / Listing Plans */}
+          <div className="border rounded-2xl overflow-hidden">
+            <div className="p-4 bg-emerald-50/60 dark:bg-emerald-950/10 border-b border-emerald-100/60 dark:border-emerald-900/20">
+              <h3 className="font-bold text-sm flex items-center gap-2">⏳ مدة الإعلان وسعر النشر</h3>
+              {!isAdmin && (
+                <p className="text-xs text-muted-foreground mt-1">اختر المدة المناسبة — سيُخصم المبلغ من محفظتك عند النشر</p>
+              )}
             </div>
+            <div className="p-4 space-y-3">
+              {isAdmin ? (
+                /* ─── Admin: flexible duration selector ─── */
+                <>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[7, 15, 30, 60, 90, 180, 365].map(d => (
+                      <button key={d} type="button" onClick={() => setAdDuration(d)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition-all ${adDuration === d ? "border-primary bg-primary text-white" : "border-border bg-white dark:bg-background hover:border-primary/50"}`}
+                        data-testid={`duration-${d}`}>{d} يوم</button>
+                    ))}
+                    <button type="button" onClick={() => setAdDuration(0)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition-all ${adDuration === 0 ? "border-primary bg-primary text-white" : "border-border bg-white dark:bg-background hover:border-primary/50"}`}
+                      data-testid="duration-0">♾️ بلا حد</button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input type="number" min={1} max={3650} placeholder="أو اكتب عدد الأيام..."
+                      value={adDuration > 0 ? adDuration : ""}
+                      onChange={e => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) setAdDuration(v); else if (e.target.value === "") setAdDuration(0); }}
+                      className="h-9 text-sm" data-testid="input-duration-custom" />
+                    <span className="text-xs text-muted-foreground font-bold shrink-0">يوم</span>
+                  </div>
+                  <div className="flex items-center gap-2 bg-emerald-100/60 dark:bg-emerald-900/20 rounded-xl px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">
+                    <span>🛡️</span> أدمن — النشر مجاناً بلا حد زمني {adDuration === 0 ? "♾️" : `(${adDuration} يوم)`}
+                  </div>
+                </>
+              ) : (
+                /* ─── Customer: 3 plan cards ─── */
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { days: 7,  price: listingPrice7,  badge: "🌱 أساسي",  color: "border-blue-400   bg-blue-50/60   dark:bg-blue-950/20   text-blue-700   dark:text-blue-300" },
+                    { days: 15, price: listingPrice15, badge: "⚡ مميز",   color: "border-orange-400 bg-orange-50/60 dark:bg-orange-950/20 text-orange-700 dark:text-orange-300" },
+                    { days: 30, price: listingPrice30, badge: "🔥 احترافي", color: "border-rose-400   bg-rose-50/60   dark:bg-rose-950/20   text-rose-700   dark:text-rose-300" },
+                  ].map(plan => (
+                    <button
+                      key={plan.days}
+                      type="button"
+                      onClick={() => setAdDuration(plan.days)}
+                      data-testid={`plan-${plan.days}`}
+                      className={`flex flex-col items-center gap-1 p-3 rounded-2xl border-2 transition-all text-center ${
+                        adDuration === plan.days
+                          ? "border-primary bg-primary text-white shadow-lg shadow-primary/20 scale-[1.03]"
+                          : `${plan.color} hover:scale-[1.02]`
+                      }`}
+                    >
+                      <span className="text-[10px] font-bold">{plan.badge}</span>
+                      <span className="text-2xl font-extrabold">{plan.days}</span>
+                      <span className="text-[10px] font-medium">يوماً</span>
+                      <div className={`mt-1 text-xs font-extrabold ${adDuration === plan.days ? "text-white" : "text-foreground"}`}>
+                        {plan.price} ج.م
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
 
-            {/* إدخال حر */}
-            <div className="flex items-center gap-2">
-              <div className="flex-1 relative">
-                <Input
-                  type="number"
-                  min={1}
-                  max={3650}
-                  placeholder="أو اكتب عدد الأيام يدوياً..."
-                  value={adDuration > 0 ? adDuration : ""}
-                  onChange={e => {
-                    const v = parseInt(e.target.value);
-                    if (!isNaN(v) && v > 0) setAdDuration(v);
-                    else if (e.target.value === "") setAdDuration(0);
-                  }}
-                  className="h-10 text-sm ps-4"
-                  data-testid="input-duration-custom"
-                />
-              </div>
-              <span className="text-xs text-muted-foreground font-bold flex-shrink-0">يوم</span>
-            </div>
-
-            <div className="flex items-center gap-2 bg-blue-100/60 dark:bg-blue-900/20 rounded-xl px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
-              <span>📅</span>
-              {adDuration > 0
-                ? `سينتهي إعلانك في: ${new Date(Date.now() + adDuration * 86400000).toLocaleDateString("ar-EG", { day: "numeric", month: "long", year: "numeric" })} (${adDuration} يوم)`
-                : "إعلانك سيظل نشطاً إلى أجل غير مسمى ♾️"}
+              {!isAdmin && adDuration > 0 && (
+                <div className="flex items-center gap-2 bg-blue-100/60 dark:bg-blue-900/20 rounded-xl px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
+                  <span>📅</span>
+                  سينتهي إعلانك في: {new Date(Date.now() + adDuration * 86400000).toLocaleDateString("ar-EG", { day: "numeric", month: "long", year: "numeric" })}
+                  &nbsp;·&nbsp;
+                  <span className="font-bold">
+                    {adDuration === 7 ? listingPrice7 : adDuration === 15 ? listingPrice15 : listingPrice30} ج.م تُخصم من محفظتك
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 

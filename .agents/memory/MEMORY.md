@@ -1,0 +1,1 @@
+- [Settings API camelCase keys](settings-api-camelcase.md) — deepToCamel middleware converts ALL /api/* JSON responses; use camelCase keys in frontend (contactWhatsapp not contact_whatsapp)
