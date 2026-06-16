@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { walletEmitter } from "./wallet-events";
 import { Server as SocketServer } from "socket.io";
 import { storage } from "./storage";
 import { z } from "zod";
@@ -303,6 +304,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     cors: { origin: "*", methods: ["GET", "POST"] },
   });
 
+  // ── ربط المحفظة بالـ Socket.IO — تحديث لحظي عند أي خصم ────────
+  walletEmitter.on("wallet:update", (payload) => {
+    io.to(`user:${payload.userId}`).emit("wallet:update", {
+      amountEGP: payload.amountEGP,
+      type: payload.type,
+      description: payload.description,
+      newBalance: payload.newBalance,
+    });
+  });
+
   const streamRooms: Map<string, {
     broadcasterId: string | null;
     cohostIds: string[];
@@ -344,6 +355,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   }
 
   io.on("connection", (socket) => {
+    // ── المستخدم ينضم لغرفته الخاصة عشان يستقبل تحديثات المحفظة ──
+    socket.on("join-user-room", (userId: string) => {
+      if (userId && typeof userId === "string") {
+        socket.join(`user:${userId}`);
+      }
+    });
+
     socket.on("join-stream", (streamId: string) => {
       socket.join(`stream:${streamId}`);
       const room = getOrCreateRoom(streamId);

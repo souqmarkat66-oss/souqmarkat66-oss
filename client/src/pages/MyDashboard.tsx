@@ -2,6 +2,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { useState } from "react";
+import { useWalletSocket } from "@/hooks/use-wallet-socket";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -185,6 +186,9 @@ function SubscriptionCard() {
 export default function MyDashboard() {
   const { user, isLoading } = useAuth();
   const [tab, setTab] = useState<Tab>("overview");
+
+  // ── تحديث المحفظة لحظياً عبر Socket.IO ──────────────────────
+  useWalletSocket(user?.id);
 
   const { data: ads = [] } = useQuery<any[]>({
     queryKey: ["/api/ads/mine"],

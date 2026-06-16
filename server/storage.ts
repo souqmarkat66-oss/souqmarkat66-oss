@@ -13,6 +13,7 @@ import {
 } from "@shared/schema";
 import { eq, desc, and, sql, ne, gte, lte } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
+import { walletEmitter } from "./wallet-events";
 
 export interface IStorage {
   // Ads
@@ -518,7 +519,31 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createTransaction(tx: Omit<RevenueTransaction, 'id' | 'createdAt'>): Promise<RevenueTransaction> {
+    // ── الحارس: لا خصم بقيمة صفر أو سالب ──────────────────────
+    if (tx.amountEGP === undefined || tx.amountEGP === null) {
+      throw new Error("createTransaction: amountEGP مطلوب");
+    }
+    if (Number(tx.amountEGP) <= 0) {
+      throw new Error("createTransaction: المبلغ يجب أن يكون أكبر من صفر");
+    }
+
+    // ── تسجيل المعاملة في قاعدة البيانات ────────────────────────
     const [t] = await db.insert(revenueTransactions).values(tx).returning();
+
+    // ── حساب الرصيد الجديد وإطلاق حدث لحظي ─────────────────────
+    try {
+      const newBalance = await this.getUserBalanceEGP(tx.userId);
+      walletEmitter.emit("wallet:update", {
+        userId: tx.userId,
+        amountEGP: Number(tx.amountEGP),
+        type: tx.type,
+        description: tx.description ?? null,
+        newBalance,
+      });
+    } catch {
+      // الـ emit اختياري — لا نوقف العملية لو فشل
+    }
+
     return t;
   }
 
