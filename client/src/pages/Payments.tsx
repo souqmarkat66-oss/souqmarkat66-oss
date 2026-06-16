@@ -12,15 +12,16 @@ import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartp
 import { SiGoogleplay, SiHuawei } from "react-icons/si";
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {
-  ad_boost:   "⚡ تعزيز إعلان",
-  campaign:   "📣 حملة إعلانية",
-  renewal:    "🔄 تجديد إعلان",
-  ai_image:   "🖼️ ذكاء: صورة",
-  ai_video:   "🎬 ذكاء: فيديو",
-  ai_content: "✍️ ذكاء: محتوى",
-  ai_credits: "🤖 رصيد ذكاء",
-  withdrawal: "🏧 سحب أرباح",
-  other:      "📦 أخرى",
+  ad_boost:        "⚡ تعزيز إعلان",
+  fire_notify:     "🔥 إشعار ناري",
+  campaign:        "📣 حملة إعلانية",
+  renewal:         "🔄 تجديد إعلان",
+  ai_image:        "🖼️ ذكاء: صورة",
+  ai_video:        "🎬 ذكاء: فيديو",
+  ai_content:      "✍️ ذكاء: محتوى",
+  ai_credits:      "🤖 رصيد ذكاء",
+  withdrawal:      "🏧 سحب أرباح",
+  wallet_recharge: "💰 شحن محفظة",
 };
 
 function buildServiceTypes(p: Record<string, string>) {
@@ -30,16 +31,16 @@ function buildServiceTypes(p: Record<string, string>) {
     top_up: [
       { value: "ad_boost",   label: "⚡ تعزيز إعلان",    price: fmt(p.boost_price_egp),         desc: "ظهور مميز لإعلانك",        amount: num(p.boost_price_egp) },
       { value: "campaign",   label: "📣 حملة إعلانية",    price: `من ${fmt(p.campaign_min_budget_egp)}`, desc: "CPM=" + fmt(p.cpm_rate_egp) + " / نقرة=" + fmt(p.cpc_rate_egp), amount: num(p.campaign_min_budget_egp) },
-      { value: "renewal",    label: "🔄 تجديد 30 يوم",    price: fmt(p.renewal_price_30),        desc: "تمديد صلاحية إعلانك",       amount: num(p.renewal_price_30) },
-      { value: "ai_image",   label: "🖼️ ذكاء: صورة",     price: fmt(p.ai_price_image),          desc: "توليد صورة بالذكاء",        amount: num(p.ai_price_image) },
-      { value: "ai_video",   label: "🎬 ذكاء: فيديو",     price: fmt(p.ai_price_video),          desc: "إنشاء مقطع فيديو",          amount: num(p.ai_price_video) },
-      { value: "ai_content", label: "✍️ ذكاء: محتوى",    price: fmt(p.ai_price_content),        desc: "كتابة نص إعلاني",           amount: num(p.ai_price_content) },
-      { value: "ai_credits", label: "🤖 رصيد ذكاء",      price: fmt(p.ai_price_per_credit_egp) + "/كريدت", desc: `${p.ai_free_credits || 3} مجاناً`, amount: num(p.ai_price_per_credit_egp) },
-      { value: "other",      label: "📦 أخرى",            price: "",                              desc: "أي خدمة أخرى",              amount: 0 },
+      { value: "renewal",         label: "🔄 تجديد إعلان",    price: `من ${fmt(p.renewal_price_7d)}`, desc: "تمديد صلاحية إعلانك (7/15/30 يوم)", amount: num(p.renewal_price_7d) },
+      { value: "fire_notify",     label: "🔥 إشعار ناري",     price: fmt(p.fire_price_egp),          desc: "إشعار فوري لكل المستخدمين",          amount: num(p.fire_price_egp) },
+      { value: "ai_image",        label: "🖼️ ذكاء: صورة",    price: fmt(p.ai_price_image),          desc: "توليد صورة بالذكاء",                 amount: num(p.ai_price_image) },
+      { value: "ai_video",        label: "🎬 ذكاء: فيديو",    price: fmt(p.ai_price_video),          desc: "إنشاء مقطع فيديو",                   amount: num(p.ai_price_video) },
+      { value: "ai_content",      label: "✍️ ذكاء: محتوى",   price: fmt(p.ai_price_content),        desc: "كتابة نص إعلاني",                    amount: num(p.ai_price_content) },
+      { value: "ai_credits",      label: "🤖 رصيد ذكاء",     price: fmt(p.ai_price_per_credit_egp) + "/كريدت", desc: `${p.ai_free_credits || 3} مجاناً`, amount: num(p.ai_price_per_credit_egp) },
+      { value: "wallet_recharge", label: "💰 شحن محفظة",     price: "",                              desc: "شحن رصيد المحفظة",                   amount: 0 },
     ],
     withdrawal: [
-      { value: "withdrawal", label: "🏧 سحب أرباح",  price: `أدنى ${fmt(p.wallet_min_withdrawal_egp || "100")}`, desc: "تحويل أرباحك", amount: 0 },
-      { value: "other",      label: "📦 أخرى",        price: "",                                                   desc: "",              amount: 0 },
+      { value: "withdrawal", label: "🏧 سحب أرباح", price: `أدنى ${fmt(p.wallet_min_withdrawal_egp || "100")}`, desc: "تحويل أرباحك", amount: 0 },
     ],
   };
 }

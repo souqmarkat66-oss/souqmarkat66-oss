@@ -604,7 +604,7 @@ function AuthenticatedContent({ user }: { user: any }) {
             {/* السعر */}
             <div className="bg-orange-50 dark:bg-orange-950/20 rounded-xl p-3 text-center border border-orange-200 dark:border-orange-800">
               <p className="text-3xl font-black text-orange-600">{boostSettings?.price} ج.م</p>
-              <p className="text-xs text-muted-foreground mt-1">تعزيز لمدة 30 يوماً — إعلانك في أعلى القائمة 📣</p>
+              <p className="text-xs text-muted-foreground mt-1">تعزيز لمدة 7 أيام — إعلانك في أعلى القائمة 📣</p>
             </div>
 
             {/* اختيار طريقة الدفع */}
@@ -770,9 +770,9 @@ function AuthenticatedContent({ user }: { user: any }) {
               <p className="text-sm font-semibold mb-2">اختر مدة التجديد:</p>
               <div className="grid grid-cols-3 gap-2">
                 {(renewalSettings?.options ?? [
-                  { days: 30, price: 50, label: "30 يوماً" },
-                  { days: 60, price: 90, label: "60 يوماً" },
-                  { days: 90, price: 130, label: "90 يوماً" },
+                  { days: 7,  price: 20, label: "7 أيام"   },
+                  { days: 15, price: 35, label: "15 يوماً" },
+                  { days: 30, price: 60, label: "30 يوماً" },
                 ]).map(opt => (
                   <button
                     key={opt.days}

@@ -257,6 +257,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_registration', '1') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_boost', '1') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_assistant', '1') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('fire_price_egp', '100') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('renewal_price_7d', '20') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('renewal_price_15d', '35') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('renewal_price_30d', '60') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('subscription_price_egp', '250') ON CONFLICT (key) DO NOTHING`);
+    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('boost_price_egp', '250') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('promo_banner_enabled', '1') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('promo_banner_text', '🎉 قسّط على 18 شهر بدون فوائد | حمّل تطبيق سوق ماركات الآن | عروض حصرية لفترة محدودة | ads-as.com') ON CONFLICT (key) DO NOTHING`);
     await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('promo_banner_url', 'https://play.google.com/store/apps/details?id=com.apmo.souqmarket') ON CONFLICT (key) DO NOTHING`);
@@ -4719,12 +4725,13 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.get("/api/pricing", async (_req, res) => {
     try {
       const allowedKeys = new Set([
-        'boost_price_egp','boost_enabled',
-        'renewal_price_30','renewal_price_60','renewal_price_90',
+        'boost_price_egp','boost_enabled','fire_price_egp',
+        'renewal_price_7d','renewal_price_15d','renewal_price_30d',
         'campaign_min_budget_egp','wallet_min_withdrawal_egp',
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
         'ai_free_credits','ai_price_per_credit_egp',
         'cpm_rate_egp','cpc_rate_egp',
+        'subscription_price_egp',
       ]);
       // Fetch all settings and filter client-side to avoid ANY(array) SQL issue
       const rows = await db.execute(sql`SELECT key, value FROM platform_settings`);
@@ -4733,13 +4740,14 @@ Sitemap: ${BASE}/sitemap-pages.xml
         if (allowedKeys.has(r.key)) settings[r.key] = r.value;
       }
       const defaults: Record<string, string> = {
-        boost_price_egp: '250', boost_enabled: 'true',
-        renewal_price_30: '30', renewal_price_60: '55', renewal_price_90: '75',
+        boost_price_egp: '250', boost_enabled: 'true', fire_price_egp: '100',
+        renewal_price_7d: '20', renewal_price_15d: '35', renewal_price_30d: '60',
         campaign_min_budget_egp: '100', wallet_min_withdrawal_egp: '100',
         ai_price_image: '10', ai_price_video: '25', ai_price_animation: '20',
         ai_price_content: '5', ai_price_post: '5',
         ai_free_credits: '3', ai_price_per_credit_egp: '5',
         cpm_rate_egp: '15', cpc_rate_egp: '0.75',
+        subscription_price_egp: '250',
       };
       res.json({ ...defaults, ...settings });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -4750,11 +4758,12 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const keys = [
         'cpm_rate_egp','cpc_rate_egp','publisher_share_pct','campaign_min_budget_egp',
-        'boost_price_egp','boost_enabled',
-        'renewal_price_30','renewal_price_60','renewal_price_90',
+        'boost_price_egp','boost_enabled','fire_price_egp',
+        'renewal_price_7d','renewal_price_15d','renewal_price_30d',
         'wallet_min_withdrawal_egp','wallet_max_deposit_egp',
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
         'ai_free_credits','ai_price_per_credit_egp','ai_referral_bonus_egp',
+        'subscription_price_egp',
       ];
       const rows = await db.execute(sql`SELECT key, value FROM platform_settings WHERE key IN (${sql.join(keys.map(k => sql`${k}`), sql`, `)})`);
       const settings: Record<string, string> = {};
@@ -4770,11 +4779,12 @@ Sitemap: ${BASE}/sitemap-pages.xml
       const { settings } = req.body;
       const allowed = [
         'cpm_rate_egp','cpc_rate_egp','publisher_share_pct','campaign_min_budget_egp',
-        'boost_price_egp','boost_enabled',
-        'renewal_price_30','renewal_price_60','renewal_price_90',
+        'boost_price_egp','boost_enabled','fire_price_egp',
+        'renewal_price_7d','renewal_price_15d','renewal_price_30d',
         'wallet_min_withdrawal_egp','wallet_max_deposit_egp',
         'ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post',
         'ai_free_credits','ai_price_per_credit_egp','ai_referral_bonus_egp',
+        'subscription_price_egp',
       ];
       for (const [key, value] of Object.entries(settings)) {
         if (!allowed.includes(key)) continue;
@@ -5092,15 +5102,15 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const rows = await db.execute(sql`
         SELECT key, value FROM platform_settings
-        WHERE key IN ('renewal_price_30', 'renewal_price_60', 'renewal_price_90')
+        WHERE key IN ('renewal_price_7d', 'renewal_price_15d', 'renewal_price_30d')
       `);
       const settings: Record<string, number> = {};
       for (const r of rows.rows as any[]) settings[r.key] = parseFloat(r.value);
       res.json({
         options: [
-          { days: 30, price: settings['renewal_price_30'] ?? 50, label: "30 يوماً" },
-          { days: 60, price: settings['renewal_price_60'] ?? 90, label: "60 يوماً" },
-          { days: 90, price: settings['renewal_price_90'] ?? 130, label: "90 يوماً" },
+          { days: 7,  price: settings['renewal_price_7d']  ?? 20,  label: "7 أيام"   },
+          { days: 15, price: settings['renewal_price_15d'] ?? 35,  label: "15 يوماً" },
+          { days: 30, price: settings['renewal_price_30d'] ?? 60,  label: "30 يوماً" },
         ]
       });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -5848,6 +5858,12 @@ ${reelTags}
           `INSERT INTO wallet_transactions (user_id, type, amount_egp, description, ref_id)
            VALUES ($1, 'top_up', $2, $3, $4)`,
           [order.user_id, order.amount_egp, `شحن محفظة — ${order.payment_method}`, order.order_number]
+        );
+        // ── تسجيل في revenue_transactions كـ wallet_recharge ──
+        await client.query(
+          `INSERT INTO revenue_transactions (user_id, type, amount_egp, description)
+           VALUES ($1, 'wallet_recharge', $2, $3)`,
+          [order.user_id, order.amount_egp, `شحن محفظة — ${order.payment_method} — ${order.order_number}`]
         );
         await client.query(
           `UPDATE wallet_top_up_orders SET status = 'approved', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,

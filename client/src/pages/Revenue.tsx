@@ -126,15 +126,16 @@ function WithdrawDialog({ balanceEGP, label }: { balanceEGP: number; label: stri
 // ── كشف حساب مع فلاتر (نوع + من/إلى) ─────────────────────────────────
 const TX_PAGE_SIZE = 30;
 
-const TX_TYPE_OPTIONS: { value: 'earning' | 'spending' | 'withdrawal' | 'ai_charge'; label: string }[] = [
-  { value: 'earning', label: 'أرباح' },
-  { value: 'spending', label: 'إنفاق' },
-  { value: 'withdrawal', label: 'سحب' },
-  { value: 'ai_charge', label: 'شحن AI' },
+const TX_TYPE_OPTIONS: { value: 'earning' | 'spending' | 'withdrawal' | 'ai_charge' | 'wallet_recharge'; label: string }[] = [
+  { value: 'earning',         label: 'أرباح' },
+  { value: 'spending',        label: 'إنفاق' },
+  { value: 'withdrawal',      label: 'سحب' },
+  { value: 'ai_charge',       label: 'شحن AI' },
+  { value: 'wallet_recharge', label: '💰 شحن محفظة' },
 ];
 
-type RevenueTxFilterType = 'earning' | 'spending' | 'withdrawal' | 'ai_charge';
-const REVENUE_TX_FILTER_TYPES: readonly RevenueTxFilterType[] = ['earning', 'spending', 'withdrawal', 'ai_charge'];
+type RevenueTxFilterType = 'earning' | 'spending' | 'withdrawal' | 'ai_charge' | 'wallet_recharge';
+const REVENUE_TX_FILTER_TYPES: readonly RevenueTxFilterType[] = ['earning', 'spending', 'withdrawal', 'ai_charge', 'wallet_recharge'];
 type TxKind = 'earning' | 'spending';
 function TransactionList({
   defaultType,
@@ -263,20 +264,23 @@ function TransactionList({
               <div key={t.id} className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-muted/50 text-sm" data-testid={`${testIdPrefix}-tx-${t.id}`}>
                 <div className="flex items-center gap-2">
                   <div className={`w-7 h-7 rounded-full flex items-center justify-center ${
-                    t.type === 'earning' ? 'bg-green-100 dark:bg-green-900/30'
+                    (t.type === 'earning' || t.type === 'wallet_recharge') ? 'bg-green-100 dark:bg-green-900/30'
                     : 'bg-red-100 dark:bg-red-900/30'
                   }`}>
-                    {t.type === 'earning'
+                    {(t.type === 'earning' || t.type === 'wallet_recharge')
                       ? <ArrowUpRight className="w-3.5 h-3.5 text-green-600" />
                       : <ArrowDownLeft className="w-3.5 h-3.5 text-red-500" />}
                   </div>
                   <div>
-                    <div className="text-xs font-medium">{t.description}</div>
+                    <div className="text-xs font-medium flex items-center gap-1">
+                      {t.type === 'wallet_recharge' && <span className="text-[9px] bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 px-1.5 py-0.5 rounded-full font-bold">شحن محفظة</span>}
+                      {t.description}
+                    </div>
                     <div className="text-[10px] text-muted-foreground">{t.createdAt ? format(new Date(t.createdAt), 'dd/MM/yy HH:mm', { locale: ar }) : ''}</div>
                   </div>
                 </div>
-                <div className={`font-bold text-xs ${t.type === 'earning' ? 'text-green-600' : 'text-red-500'}`}>
-                  {t.type === 'earning' ? '+' : '-'}{(t.amountEGP || 0).toFixed(4)} ج.م
+                <div className={`font-bold text-xs ${(t.type === 'earning' || t.type === 'wallet_recharge') ? 'text-green-600' : 'text-red-500'}`}>
+                  {(t.type === 'earning' || t.type === 'wallet_recharge') ? '+' : '-'}{(t.amountEGP || 0).toFixed(4)} ج.م
                 </div>
               </div>
             ))}

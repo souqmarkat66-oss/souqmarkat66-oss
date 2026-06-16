@@ -2624,19 +2624,24 @@ function PricingSection() {
         <h3 className="font-bold text-base mb-3 flex items-center gap-2">
           <Zap className="w-4 h-4 text-orange-500" /> تعزيز الإعلان (Boost)
         </h3>
-        <PriceCard icon={Zap} color="bg-orange-500" label="إعدادات التعزيز" desc="سعر وتفعيل خاصية تعزيز الإعلانات">
-          <NumInput k="boost_price_egp" label="سعر التعزيز" unit="ج.م" def="0" step="5" />
-          <div className="flex items-center justify-between mt-2">
-            <span className="text-xs text-muted-foreground">تفعيل التعزيز</span>
-            <button
-              onClick={() => set("boost_enabled", v("boost_enabled", "1") === "0" ? "1" : "0")}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-colors ${v("boost_enabled", "1") !== "0" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}
-              data-testid="btn-toggle-boost"
-            >
-              {v("boost_enabled", "1") !== "0" ? <><ToggleRight className="w-4 h-4" /> مفعّل</> : <><ToggleLeft className="w-4 h-4" /> معطّل</>}
-            </button>
-          </div>
-        </PriceCard>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <PriceCard icon={Zap} color="bg-orange-500" label="تعزيز الإعلان (Boost)" desc="سعر الظهور في المقدمة لمدة 7 أيام">
+            <NumInput k="boost_price_egp" label="سعر التعزيز" unit="ج.م" def="250" step="5" />
+            <div className="flex items-center justify-between mt-2">
+              <span className="text-xs text-muted-foreground">تفعيل التعزيز</span>
+              <button
+                onClick={() => set("boost_enabled", v("boost_enabled", "1") === "0" ? "1" : "0")}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-colors ${v("boost_enabled", "1") !== "0" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}
+                data-testid="btn-toggle-boost"
+              >
+                {v("boost_enabled", "1") !== "0" ? <><ToggleRight className="w-4 h-4" /> مفعّل</> : <><ToggleLeft className="w-4 h-4" /> معطّل</>}
+              </button>
+            </div>
+          </PriceCard>
+          <PriceCard icon={Zap} color="bg-red-500" label="الإشعار الناري 🔥" desc="سعر إرسال إشعار لجميع المستخدمين">
+            <NumInput k="fire_price_egp" label="سعر الإشعار الناري" unit="ج.م" def="100" step="5" />
+          </PriceCard>
+        </div>
       </div>
 
       {/* ── تجديد الإعلانات ── */}
@@ -2645,9 +2650,9 @@ function PricingSection() {
           <RefreshCw className="w-4 h-4 text-blue-500" /> تجديد الإعلانات
         </h3>
         <PriceCard icon={RefreshCw} color="bg-blue-500" label="أسعار تجديد الإعلان" desc="تكلفة تمديد مدة الإعلان لكل فترة">
-          <NumInput k="renewal_price_30" label="تجديد 30 يوماً" unit="ج.م" def="50" step="5" />
-          <NumInput k="renewal_price_60" label="تجديد 60 يوماً" unit="ج.م" def="90" step="5" />
-          <NumInput k="renewal_price_90" label="تجديد 90 يوماً" unit="ج.م" def="130" step="5" />
+          <NumInput k="renewal_price_7d"  label="تجديد 7 أيام"   unit="ج.م" def="20" step="5" />
+          <NumInput k="renewal_price_15d" label="تجديد 15 يوماً" unit="ج.م" def="35" step="5" />
+          <NumInput k="renewal_price_30d" label="تجديد 30 يوماً" unit="ج.م" def="60" step="5" />
         </PriceCard>
       </div>
 

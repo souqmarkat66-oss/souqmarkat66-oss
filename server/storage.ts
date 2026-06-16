@@ -69,8 +69,8 @@ export interface IStorage {
   recordClick(campaignId: number, channelId?: number, userId?: string): Promise<{ budgetWarning?: boolean; budgetRatio?: number; advertiserId?: string; campaignName?: string }>;
 
   // Revenue
-  getRevenueTransactions(userId: string, options?: { limit?: number; offset?: number; type?: 'earning' | 'spending' | 'withdrawal' | 'ai_charge'; channelId?: number; from?: Date; to?: Date }): Promise<RevenueTransaction[]>;
-  getRevenueTotals(userId: string, options?: { channelId?: number }): Promise<{ earning: number; spending: number; withdrawal: number; ai_charge: number }>;
+  getRevenueTransactions(userId: string, options?: { limit?: number; offset?: number; type?: 'earning' | 'spending' | 'withdrawal' | 'ai_charge' | 'wallet_recharge'; channelId?: number; from?: Date; to?: Date }): Promise<RevenueTransaction[]>;
+  getRevenueTotals(userId: string, options?: { channelId?: number }): Promise<{ earning: number; spending: number; withdrawal: number; ai_charge: number; wallet_recharge: number }>;
   getUserBalanceEGP(userId: string): Promise<number>;
   createTransaction(tx: Omit<RevenueTransaction, 'id' | 'createdAt'>): Promise<RevenueTransaction>;
 
@@ -469,7 +469,7 @@ export class DatabaseStorage implements IStorage {
   // ─── REVENUE ──────────────────────────────────────────────────
   async getRevenueTransactions(
     userId: string,
-    options: { limit?: number; offset?: number; type?: 'earning' | 'spending' | 'withdrawal' | 'ai_charge'; channelId?: number; from?: Date; to?: Date } = {}
+    options: { limit?: number; offset?: number; type?: 'earning' | 'spending' | 'withdrawal' | 'ai_charge' | 'wallet_recharge'; channelId?: number; from?: Date; to?: Date } = {}
   ): Promise<RevenueTransaction[]> {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
     const offset = Math.max(options.offset ?? 0, 0);
@@ -488,7 +488,7 @@ export class DatabaseStorage implements IStorage {
   async getRevenueTotals(
     userId: string,
     options: { channelId?: number } = {}
-  ): Promise<{ earning: number; spending: number; withdrawal: number; ai_charge: number }> {
+  ): Promise<{ earning: number; spending: number; withdrawal: number; ai_charge: number; wallet_recharge: number }> {
     const conds = [eq(revenueTransactions.userId, userId)];
     if (options.channelId !== undefined) conds.push(eq(revenueTransactions.channelId, options.channelId));
     const [row] = await db
@@ -497,6 +497,7 @@ export class DatabaseStorage implements IStorage {
         spending: sql<number>`COALESCE(SUM(CASE WHEN ${revenueTransactions.type} = 'spending' THEN ${revenueTransactions.amountEGP} ELSE 0 END), 0)`,
         withdrawal: sql<number>`COALESCE(SUM(CASE WHEN ${revenueTransactions.type} = 'withdrawal' THEN ${revenueTransactions.amountEGP} ELSE 0 END), 0)`,
         ai_charge: sql<number>`COALESCE(SUM(CASE WHEN ${revenueTransactions.type} = 'ai_charge' THEN ${revenueTransactions.amountEGP} ELSE 0 END), 0)`,
+        wallet_recharge: sql<number>`COALESCE(SUM(CASE WHEN ${revenueTransactions.type} = 'wallet_recharge' THEN ${revenueTransactions.amountEGP} ELSE 0 END), 0)`,
       })
       .from(revenueTransactions)
       .where(and(...conds));
@@ -505,13 +506,21 @@ export class DatabaseStorage implements IStorage {
       spending: Number(row?.spending) || 0,
       withdrawal: Number(row?.withdrawal) || 0,
       ai_charge: Number(row?.ai_charge) || 0,
+      wallet_recharge: Number(row?.wallet_recharge) || 0,
     };
   }
 
   async getUserBalanceEGP(userId: string): Promise<number> {
     const [row] = await db
       .select({
-        balance: sql<number>`COALESCE(SUM(CASE WHEN ${revenueTransactions.type} = 'earning' THEN ${revenueTransactions.amountEGP} WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP} ELSE 0 END), 0)`,
+        // wallet_recharge = إيداع (موجب) مثل earning
+        balance: sql<number>`COALESCE(SUM(
+          CASE
+            WHEN ${revenueTransactions.type} IN ('earning', 'wallet_recharge') THEN ${revenueTransactions.amountEGP}
+            WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
+            ELSE 0
+          END
+        ), 0)`,
       })
       .from(revenueTransactions)
       .where(eq(revenueTransactions.userId, userId));

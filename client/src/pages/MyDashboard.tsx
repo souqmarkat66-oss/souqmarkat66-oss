@@ -54,7 +54,7 @@ function MetricCard({ label, value, prev, fmt, color, icon: Icon, sub }: {
   );
 }
 
-type Tab = "overview" | "advertiser" | "publisher";
+type Tab = "overview" | "advertiser" | "publisher" | "prices";
 
 function SubscriptionCard() {
   const { toast } = useToast();
@@ -235,10 +235,17 @@ export default function MyDashboard() {
   const adv = analytics?.advertiser;
   const pub = analytics?.publisher;
 
+  const { data: pricing = {} } = useQuery<Record<string, string>>({
+    queryKey: ["/api/pricing"],
+    queryFn: () => fetch("/api/pricing").then(r => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const TABS: { key: Tab; label: string; icon: any; color: string }[] = [
     { key: "overview",   label: "نظرة عامة",  icon: PieChart,      color: "text-primary"   },
     { key: "advertiser", label: "كمعلن",       icon: Megaphone,     color: "text-teal-500"  },
     { key: "publisher",  label: "كناشر",       icon: DollarSign,    color: "text-green-500" },
+    { key: "prices",     label: "الأسعار",     icon: Wallet,        color: "text-amber-500" },
   ];
 
   return (
@@ -597,6 +604,117 @@ export default function MyDashboard() {
                 </Card>
               </>
             )}
+          </div>
+        )}
+
+        {/* ══ PRICES TAB ════════════════════════════════════════ */}
+        {tab === "prices" && (
+          <div className="space-y-5" dir="rtl">
+            <p className="text-sm text-muted-foreground">الأسعار أدناه تُحدَّث تلقائياً من لوحة التحكم.</p>
+
+            {/* الخدمات الإعلانية */}
+            <Card className="rounded-2xl">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Megaphone className="w-4 h-4 text-primary" /> الخدمات الإعلانية
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-xs text-muted-foreground">
+                      <th className="text-right px-4 py-2 font-medium">الخدمة</th>
+                      <th className="text-right px-4 py-2 font-medium">السعر</th>
+                      <th className="text-right px-4 py-2 font-medium hidden sm:table-cell">الوصف</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      { label: "⚡ تعزيز إعلان (Boost)",  price: `${pricing.boost_price_egp ?? '250'} ج.م`,   desc: "ظهور في المقدمة لمدة 7 أيام" },
+                      { label: "🔥 إشعار ناري (Fire)",    price: `${pricing.fire_price_egp ?? '100'} ج.م`,    desc: "إشعار فوري لجميع المستخدمين" },
+                      { label: "🔄 تجديد 7 أيام",         price: `${pricing.renewal_price_7d ?? '20'} ج.م`,   desc: "تمديد صلاحية إعلانك" },
+                      { label: "🔄 تجديد 15 يوماً",       price: `${pricing.renewal_price_15d ?? '35'} ج.م`,  desc: "تمديد صلاحية إعلانك" },
+                      { label: "🔄 تجديد 30 يوماً",       price: `${pricing.renewal_price_30d ?? '60'} ج.م`,  desc: "تمديد صلاحية إعلانك" },
+                      { label: "📣 حملة إعلانية (CPM)",   price: `${pricing.cpm_rate_egp ?? '15'} ج.م/1000`, desc: "لكل 1000 مشاهدة" },
+                      { label: "📣 حملة إعلانية (CPC)",   price: `${pricing.cpc_rate_egp ?? '0.75'} ج.م`,     desc: "لكل نقرة" },
+                    ].map((row, i) => (
+                      <tr key={i} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
+                        <td className="px-4 py-2.5 font-medium">{row.label}</td>
+                        <td className="px-4 py-2.5 font-bold text-primary">{row.price}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground text-xs hidden sm:table-cell">{row.desc}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+
+            {/* خدمات الذكاء الاصطناعي */}
+            <Card className="rounded-2xl">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Star className="w-4 h-4 text-violet-500" /> خدمات الذكاء الاصطناعي
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-xs text-muted-foreground">
+                      <th className="text-right px-4 py-2 font-medium">الخدمة</th>
+                      <th className="text-right px-4 py-2 font-medium">السعر</th>
+                      <th className="text-right px-4 py-2 font-medium hidden sm:table-cell">الوصف</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      { label: "🖼️ توليد صورة",         price: `${pricing.ai_price_image ?? '10'} ج.م`,         desc: "صورة إعلانية بالذكاء" },
+                      { label: "🎬 توليد فيديو",         price: `${pricing.ai_price_video ?? '25'} ج.م`,         desc: "مقطع فيديو قصير" },
+                      { label: "✨ تأثير متحرك",          price: `${pricing.ai_price_animation ?? '20'} ج.م`,     desc: "صورة بتأثير بصري" },
+                      { label: "✍️ كتابة محتوى",        price: `${pricing.ai_price_content ?? '5'} ج.م`,          desc: "نص إعلاني احترافي" },
+                      { label: "🤖 كريدت ذكاء اصطناعي", price: `${pricing.ai_price_per_credit_egp ?? '5'} ج.م/كريدت`, desc: `${pricing.ai_free_credits ?? '3'} كريدت مجاناً عند التسجيل` },
+                    ].map((row, i) => (
+                      <tr key={i} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
+                        <td className="px-4 py-2.5 font-medium">{row.label}</td>
+                        <td className="px-4 py-2.5 font-bold text-violet-600">{row.price}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground text-xs hidden sm:table-cell">{row.desc}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+
+            {/* الاشتراك والمحفظة */}
+            <Card className="rounded-2xl">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Wallet className="w-4 h-4 text-green-500" /> الاشتراك والمحفظة
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-xs text-muted-foreground">
+                      <th className="text-right px-4 py-2 font-medium">البند</th>
+                      <th className="text-right px-4 py-2 font-medium">القيمة</th>
+                      <th className="text-right px-4 py-2 font-medium hidden sm:table-cell">الوصف</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      { label: "🔑 الاشتراك الأسبوعي",    price: `${pricing.subscription_price_egp ?? '250'} ج.م/أسبوع`, desc: "للوصول لخدمات الذكاء والتعزيز" },
+                      { label: "💰 الحد الأدنى للسحب",    price: `${pricing.wallet_min_withdrawal_egp ?? '100'} ج.م`,       desc: "أقل مبلغ يمكن سحبه" },
+                    ].map((row, i) => (
+                      <tr key={i} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
+                        <td className="px-4 py-2.5 font-medium">{row.label}</td>
+                        <td className="px-4 py-2.5 font-bold text-green-600">{row.price}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground text-xs hidden sm:table-cell">{row.desc}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
           </div>
         )}
 

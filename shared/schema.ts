@@ -252,7 +252,7 @@ export type InsertAdCampaign = z.infer<typeof insertAdCampaignSchema>;
 export const revenueTransactions = pgTable("revenue_transactions", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").references(() => users.id).notNull(),
-  type: text("type", { enum: ["earning", "spending", "withdrawal", "ai_charge"] }).notNull(),
+  type: text("type", { enum: ["earning", "spending", "withdrawal", "ai_charge", "wallet_recharge"] }).notNull(),
   amountEGP: real("amount_egp").notNull(),
   description: text("description"),
   campaignId: integer("campaign_id"),
