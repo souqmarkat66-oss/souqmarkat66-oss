@@ -36,6 +36,7 @@ const Help = lazy(() => import("@/pages/Help"));
 const Consultations = lazy(() => import("@/pages/Consultations"));
 const Coupons = lazy(() => import("@/pages/Coupons"));
 const TickerAds = lazy(() => import("@/pages/TickerAds"));
+const AiAgent = lazy(() => import("@/pages/AiAgent"));
 
 import BottomNav from "@/components/BottomNav";
 
@@ -144,6 +145,9 @@ function Router() {
               </Route>
               <Route path="/ticker-ads">
                 <ProtectedRoute component={TickerAds} />
+              </Route>
+              <Route path="/admin/ai-agent">
+                <ProtectedRoute component={AiAgent} />
               </Route>
               <Route component={NotFound} />
             </Switch>

@@ -8,6 +8,7 @@ import { z } from "zod";
 import { setupAuth } from "./replit_integrations/auth";
 import { isAuthenticated, registerCustomAuthRoutes } from "./customAuth";
 import { registerImageRoutes, openai } from "./replit_integrations/image";
+import { registerAiAgentRoutes } from "./ai-agent-routes";
 import { textToSpeech } from "./replit_integrations/audio";
 import { spawn } from "child_process";
 import { writeFile, unlink, readFile, mkdir } from "fs/promises";
@@ -145,6 +146,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   await setupAuth(app);
   registerCustomAuthRoutes(app);
   registerImageRoutes(app);
+  registerAiAgentRoutes(app, isAuthenticated, requireAdmin);
 
   // ── Redirect www.ads-as.com → ads-as.com (permanent 301) ──
   app.use((req, res, next) => {
