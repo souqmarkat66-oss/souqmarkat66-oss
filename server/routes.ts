@@ -1491,10 +1491,12 @@ Sitemap: ${BASE}/sitemap-pages.xml
           });
         }
         // Deduct from wallet
-        await storage.createTransaction({
-          userId, type: "spending", amountEGP: -listingPrice,
-          description: `نشر إعلان ${listingDurationDays} يوماً`,
-        });
+       await storage.createTransaction({
+  userId, type: "spending", amountEGP: listingPrice, channelId: null, campaignId: null,
+  description: `نشر إعلان ${listingDurationDays} يوماً`,
+});
+
+
         // Force expires_at based on chosen duration
         req.body.expiresAt = new Date(Date.now() + listingDurationDays * 24 * 60 * 60 * 1000).toISOString();
       } else {

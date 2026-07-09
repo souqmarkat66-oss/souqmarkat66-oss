@@ -1673,7 +1673,7 @@ function SettingsSection({ logAction }: { logAction: any }) {
   ].filter(f => !q || f.label.includes(q) || f.desc.includes(q) || f.key.includes(q));
 
   const numFields = [
-    { key: "cpm_rate_egp",            label: "سعر الألف مشاهدة (CPM)",       suffix: "ج.م",         default: "15",   group: "الأسعار" },
+    { key: "cpm_rate_egp",            label: "سعر الألف مشاهدة (CPM)",       suffix: "ج.م",         default: "50",   group: "الأسعار" },
     { key: "publisher_rev_share",     label: "نسبة الناشر من الإعلانات",    suffix: "مثال: 0.60",  default: "0.60", group: "الأسعار" },
     { key: "boost_price_egp",         label: "سعر تعزيز الإعلان 🚀",         suffix: "ج.م (0 = مجاني)", default: "0", group: "الأسعار" },
     { key: "min_withdrawal_egp",      label: "الحد الأدنى للسحب",            suffix: "ج.م",         default: "50",   group: "المحفظة" },
@@ -1688,9 +1688,9 @@ function SettingsSection({ logAction }: { logAction: any }) {
     { key: "app_play_store",      label: "Google Play",              group: "روابط التطبيق",            default: "https://play.google.com/store/apps/details?id=com.apmo.souqmarket", dir: "ltr" as const },
     { key: "app_app_store",       label: "App Store (iOS)",          group: "روابط التطبيق",            default: "https://apps.apple.com/eg/app/as-souqmarket/id6740153334",          dir: "ltr" as const },
     { key: "app_huawei",          label: "AppGallery (Huawei)",      group: "روابط التطبيق",            default: "https://app.as-souqmarkat.com/?from-splash=false",                  dir: "ltr" as const },
-    { key: "contact_whatsapp",    label: "رقم واتساب الدعم",         group: "أرقام التواصل والدفع",     default: "",                                                                 dir: "ltr" as const },
+    { key: "contact_whatsapp",    label: "رقم واتساب الدعم",         group: "أرقام التواصل والدفع",     default: "01126665741",                                                                 dir: "ltr" as const },
     { key: "contact_vodafone_cash", label: "رقم فودافون كاش",       group: "أرقام التواصل والدفع",     default: "01098553911",                                                      dir: "ltr" as const },
-    { key: "contact_instapay",    label: "رقم إنستاباي",             group: "أرقام التواصل والدفع",     default: "",                                                                 dir: "ltr" as const },
+    { key: "contact_instapay",    label: "رقم إنستاباي",             group: "أرقام التواصل والدفع",     default: "01285558567",                                                                 dir: "ltr" as const },
   ].filter(f => !q || f.label.includes(q) || f.group.includes(q) || f.key.includes(q));
 
   const bannerMatches = !q || "شريط الإعلان".includes(q) || "promo_banner".includes(q) || "بانر".includes(q) || "شريط".includes(q);
