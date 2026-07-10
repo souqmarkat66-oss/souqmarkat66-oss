@@ -870,7 +870,7 @@ export default function MyDashboard() {
                 <TableCell className="text-right px-4 py-2 font-medium">{row.value}</TableCell>
                 <TableCell className="text-right px-4 py-2 font-medium hidden sm:table-cell">{row.price}</TableCell>
               </TableRow>
-            ))}
+            )}
           </TableBody>
         </Table>
       </CardContent>
