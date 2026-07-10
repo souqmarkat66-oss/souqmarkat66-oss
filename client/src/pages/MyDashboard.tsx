@@ -864,13 +864,21 @@ export default function MyDashboard() {
             </Card>
           </div>
         <TableBody>
-            {data.map((row) => (
-              <TableRow key={row.id}>
-                <TableCell className="text-right px-4 py-2 font-medium">{row.label}</TableCell>
-                <TableCell className="text-right px-4 py-2 font-medium">{row.value}</TableCell>
-                <TableCell className="text-right px-4 py-2 font-medium hidden sm:table-cell">{row.price}</TableCell>
-              </TableRow>
-            ))}
+           {data.map((row: any) => (
+  <TableRow key={row.id}>
+    <TableCell className="text-right px-4 py-2 font-medium">
+      {row.label}
+    </TableCell>
+
+    <TableCell className="text-right px-4 py-2 font-medium">
+      {row.value}
+    </TableCell>
+
+    <TableCell className="text-right px-4 py-2 font-medium hidden sm:table-cell">
+      {row.price}
+    </TableCell>
+  </TableRow>
+))}
           </TableBody>
         </Table>
       </CardContent>
