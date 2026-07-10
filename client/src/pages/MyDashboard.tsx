@@ -95,7 +95,6 @@ function SubscriptionCard() {
   if (!sub) return null;
   if (sub.isAdmin) return null;
 
-  // In trial
   if (sub.inTrial) {
     return (
       <Card className="border-blue-500/40 bg-blue-50/50 dark:bg-blue-950/20 rounded-2xl">
@@ -120,7 +119,6 @@ function SubscriptionCard() {
     );
   }
 
-  // Active subscription
   if (sub.hasActiveSub) {
     return (
       <Card className="border-green-500/40 bg-green-50/50 dark:bg-green-950/20 rounded-2xl">
@@ -154,7 +152,6 @@ function SubscriptionCard() {
     );
   }
 
-  // Expired
   const canAfford = sub.balance >= 250;
   return (
     <Card className="border-red-500/50 bg-red-50/50 dark:bg-red-950/20 rounded-2xl">
@@ -198,6 +195,38 @@ export default function MyDashboard() {
   const [editingAd, setEditingAd] = useState<any>(null);
   const [editForm, setEditForm] = useState({ title: "", description: "", priceEGP: "", whatsappNumber: "", status: "active" });
 
+  useWalletSocket(user?.id);
+
+  const { data: ads = [] } = useQuery<any[]>({
+    queryKey: ["/api/ads/mine"],
+    queryFn: () => fetch("/api/ads/mine", { credentials: "include" }).then(r => r.json()),
+    enabled: !!user,
+  });
+
+  const { data: campaigns = [] } = useQuery<any[]>({
+    queryKey: ["/api/campaigns"],
+    queryFn: () => fetch("/api/campaigns", { credentials: "include" }).then(r => r.json()),
+    enabled: !!user,
+  });
+
+  const { data: channels = [] } = useQuery<any[]>({
+    queryKey: ["/api/channels"],
+    queryFn: () => fetch("/api/channels", { credentials: "include" }).then(r => r.json()),
+    enabled: !!user,
+  });
+
+  const { data: analytics, isLoading: analyticsLoading } = useQuery<any>({
+    queryKey: ["/api/my/analytics"],
+    queryFn: () => fetch("/api/my/analytics", { credentials: "include" }).then(r => r.json()),
+    enabled: !!user,
+  });
+
+  const { data: pricing = {} } = useQuery<Record<string, string>>({
+    queryKey: ["/api/pricing"],
+    queryFn: () => fetch("/api/pricing").then(r => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const updateAdMutation = useMutation({
     mutationFn: (vars: { id: number; data: any }) =>
       apiRequest("PUT", `/api/ads/${vars.id}`, vars.data),
@@ -229,33 +258,6 @@ export default function MyDashboard() {
     });
   }
 
-  // ── تحديث المحفظة لحظياً عبر Socket.IO ──────────────────────
-  useWalletSocket(user?.id);
-
-  const { data: ads = [] } = useQuery<any[]>({
-    queryKey: ["/api/ads/mine"],
-    queryFn: () => fetch("/api/ads/mine", { credentials: "include" }).then(r => r.json()),
-    enabled: !!user,
-  });
-
-  const { data: campaigns = [] } = useQuery<any[]>({
-    queryKey: ["/api/campaigns"],
-    queryFn: () => fetch("/api/campaigns", { credentials: "include" }).then(r => r.json()),
-    enabled: !!user,
-  });
-
-  const { data: channels = [] } = useQuery<any[]>({
-    queryKey: ["/api/channels"],
-    queryFn: () => fetch("/api/channels", { credentials: "include" }).then(r => r.json()),
-    enabled: !!user,
-  });
-
-  const { data: analytics, isLoading: analyticsLoading } = useQuery<any>({
-    queryKey: ["/api/my/analytics"],
-    queryFn: () => fetch("/api/my/analytics", { credentials: "include" }).then(r => r.json()),
-    enabled: !!user,
-  });
-
   if (isLoading) return (
     <div className="flex items-center justify-center min-h-screen">
       <Loader2 className="w-10 h-10 animate-spin text-primary" />
@@ -277,12 +279,6 @@ export default function MyDashboard() {
   const adv = analytics?.advertiser;
   const pub = analytics?.publisher;
 
-  const { data: pricing = {} } = useQuery<Record<string, string>>({
-    queryKey: ["/api/pricing"],
-    queryFn: () => fetch("/api/pricing").then(r => r.json()),
-    staleTime: 5 * 60 * 1000,
-  });
-
   const TABS: { key: Tab; label: string; icon: any; color: string }[] = [
     { key: "overview",   label: "نظرة عامة",  icon: PieChart,      color: "text-primary"   },
     { key: "myads",      label: "إعلاناتي",   icon: Megaphone,     color: "text-violet-500" },
@@ -295,7 +291,6 @@ export default function MyDashboard() {
     <div className="min-h-screen bg-background" dir="rtl">
       <div className="container mx-auto px-4 py-6 max-w-5xl">
 
-        {/* Header */}
         <div className="flex items-center justify-between mb-5">
           <div>
             <h1 className="text-2xl font-extrabold flex items-center gap-2">
@@ -313,12 +308,10 @@ export default function MyDashboard() {
           </Link>
         </div>
 
-        {/* Subscription Status */}
         <div className="mb-4">
           <SubscriptionCard />
         </div>
 
-        {/* Tabs */}
         <div className="flex gap-1 mb-5 bg-muted/40 rounded-xl p-1 w-fit">
           {TABS.map(t => (
             <button
@@ -336,7 +329,6 @@ export default function MyDashboard() {
           ))}
         </div>
 
-        {/* ══ OVERVIEW TAB ══════════════════════════════════════ */}
         {tab === "overview" && (
           <div className="space-y-6">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -383,7 +375,6 @@ export default function MyDashboard() {
           </div>
         )}
 
-        {/* ══ MY ADS TAB ════════════════════════════════════════ */}
         {tab === "myads" && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -413,7 +404,6 @@ export default function MyDashboard() {
                   <Card key={ad.id} className="border border-border/60 hover:border-violet-300 transition-colors">
                     <CardContent className="p-4">
                       <div className="flex gap-3 items-start">
-                        {/* صورة الإعلان */}
                         {ad.mediaUrl && (
                           <img
                             src={ad.mediaUrl}
@@ -421,7 +411,6 @@ export default function MyDashboard() {
                             className="w-16 h-16 rounded-lg object-cover shrink-0 border border-border/40"
                           />
                         )}
-                        {/* تفاصيل */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-start justify-between gap-2 flex-wrap">
                             <div>
@@ -454,7 +443,6 @@ export default function MyDashboard() {
                               </Button>
                             </div>
                           </div>
-                          {/* إحصائيات */}
                           <div className="flex items-center gap-3 mt-2 flex-wrap">
                             {ad.priceEgp && (
                               <span className="text-xs font-bold text-green-600">
@@ -484,7 +472,6 @@ export default function MyDashboard() {
           </div>
         )}
 
-        {/* ══ ADVERTISER TAB ════════════════════════════════════ */}
         {tab === "advertiser" && (
           <div className="space-y-5">
             {analyticsLoading ? (
@@ -599,7 +586,6 @@ export default function MyDashboard() {
           </div>
         )}
 
-        {/* ══ PUBLISHER TAB ═════════════════════════════════════ */}
         {tab === "publisher" && (
           <div className="space-y-5">
             {analyticsLoading ? (
@@ -680,9 +666,9 @@ export default function MyDashboard() {
                   </h3>
                   {myChannels.map((ch: any) => {
                     const chAnalytics = pub?.channels?.find((c: any) => c.id === ch.id);
-                    const earn7d = parseFloat(chAnalytics?.earnings_7d || 0);
-                    const imp7d  = parseInt(chAnalytics?.imp_7d || 0);
-                    const ctr    = imp7d > 0 ? ((parseInt(chAnalytics?.clicks_7d || 0) / imp7d) * 100).toFixed(2) : "0";
+                    const earn7d = parseFloat(chAnalytics?.earnings7d || 0);
+                    const imp7d  = parseInt(chAnalytics?.imp7d || 0);
+                    const ctr    = imp7d > 0 ? ((parseInt(chAnalytics?.clicks7d || 0) / imp7d) * 100).toFixed(2) : "0";
                     return (
                       <Card key={ch.id} className="border-border/50 rounded-xl">
                         <CardContent className="p-3">
@@ -751,12 +737,10 @@ export default function MyDashboard() {
           </div>
         )}
 
-        {/* ══ PRICES TAB ════════════════════════════════════════ */}
         {tab === "prices" && (
           <div className="space-y-5" dir="rtl">
             <p className="text-sm text-muted-foreground">الأسعار أدناه تُحدَّث تلقائياً من لوحة التحكم.</p>
 
-            {/* الخدمات الإعلانية */}
             <Card className="rounded-2xl">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm flex items-center gap-2">
@@ -785,44 +769,9 @@ export default function MyDashboard() {
                       { label: "📣 حملة إعلانية (CPM)",   price: `${pricing.cpmRateEgp ?? '15'} ج.م/1000`, desc: "لكل 1000 مشاهدة" },
                       { label: "📣 حملة إعلانية (CPC)",   price: `${pricing.cpcRateEgp ?? '0.75'} ج.م`,     desc: "لكل نقرة" },
                     ].map((row, i) => (
-                      <tr key={i} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
+                      <tr key={i} className="border-b last:border-0 hover:bg-muted/20">
                         <td className="px-4 py-2.5 font-medium">{row.label}</td>
                         <td className="px-4 py-2.5 font-bold text-primary">{row.price}</td>
-                        <td className="px-4 py-2.5 text-muted-foreground text-xs hidden sm:table-cell">{row.desc}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </CardContent>
-            </Card>
-
-            {/* خدمات الذكاء الاصطناعي */}
-            <Card className="rounded-2xl">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <Star className="w-4 h-4 text-violet-500" /> خدمات الذكاء الاصطناعي
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-xs text-muted-foreground">
-                      <th className="text-right px-4 py-2 font-medium">الخدمة</th>
-                      <th className="text-right px-4 py-2 font-medium">السعر</th>
-                      <th className="text-right px-4 py-2 font-medium hidden sm:table-cell">الوصف</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      { label: "🖼️ توليد صورة",         price: `${pricing.aiPriceImage ?? '10'} ج.م`,         desc: "صورة إعلانية بالذكاء" },
-                      { label: "🎬 توليد فيديو",         price: `${pricing.aiPriceVideo ?? '25'} ج.م`,         desc: "مقطع فيديو قصير" },
-                      { label: "✨ تأثير متحرك",          price: `${pricing.aiPriceAnimation ?? '20'} ج.م`,     desc: "صورة بتأثير بصري" },
-                      { label: "✍️ كتابة محتوى",        price: `${pricing.aiPriceContent ?? '5'} ج.م`,          desc: "نص إعلاني احترافي" },
-                      { label: "🤖 كريدت ذكاء اصطناعي", price: `${pricing.aiPricePerCreditEgp ?? '5'} ج.م/كريدت`, desc: `${pricing.aiFreeCredits ?? '3'} كريدت مجاناً عند التسجيل` },
-                    ].map((row, i) => (
-                      <tr key={i} className="border-b last:border-0 hover:bg-muted/40 transition-colors">
-                        <td className="px-4 py-2.5 font-medium">{row.label}</td>
-                        <td className="px-4 py-2.5 font-bold text-violet-600">{row.price}</td>
                         <td className="px-4 py-2.5 text-muted-foreground text-xs hidden sm:table-cell">{row.desc}</td>
                       </tr>
                     ))}
@@ -863,148 +812,76 @@ export default function MyDashboard() {
               </CardContent>
             </Card>
           </div>
-        <TableBody>
-           {data.map((row: any) => 
-  <TableRow key={row.id}>
-    <TableCell className="text-right px-4 py-2 font-medium">
-      {row.label}
-    </TableCell>
+        )}
 
-    <TableCell className="text-right px-4 py-2 font-medium">
-      {row.value}
-    </TableCell>
-
-    <TableCell className="text-right px-4 py-2 font-medium hidden sm:table-cell">
-      {row.price}
-    </TableCell>
-  </TableRow>
-))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
-  </div>
+        {editingAd && (
+          <Dialog open={!!editingAd} onOpenChange={(open) => !open && setEditingAd(null)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Pencil className="w-4 h-4" /> تعديل الإعلان
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="edit-title">العنوان</Label>
+                  <Input
+                    id="edit-title"
+                    value={editForm.title}
+                    onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-desc">الوصف</Label>
+                  <Textarea
+                    id="edit-desc"
+                    value={editForm.description}
+                    onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-price">السعر (ج.م)</Label>
+                  <Input
+                    id="edit-price"
+                    type="number"
+                    value={editForm.priceEGP}
+                    onChange={(e) => setEditForm({ ...editForm, priceEGP: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-whatsapp">رقم الواتساب</Label>
+                  <Input
+                    id="edit-whatsapp"
+                    value={editForm.whatsappNumber}
+                    onChange={(e) => setEditForm({ ...editForm, whatsappNumber: e.target.value })}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setEditingAd(null)}>إلغاء</Button>
+                <Button
+                  onClick={() =>
+                    updateAdMutation.mutate({
+                      id: editingAd.id,
+                      data: {
+                        title: editForm.title,
+                        description: editForm.description,
+                        priceEgp: editForm.priceEGP,
+                        whatsappNumber: editForm.whatsappNumber,
+                        status: editForm.status,
+                      },
+                    })
+                  }
+                  disabled={updateAdMutation.isPending}
+                >
+                  {updateAdMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "حفظ"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
 
       </div>
     </div>
-
-    {/* ══ نافذة تعديل الإعلان ══════════════════════════════════ */}
-    <Dialog open={!!editingAd} onOpenChange={open => { if (!open) setEditingAd(null); }}>
-      <DialogContent className="max-w-lg" dir="rtl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Pencil className="w-4 h-4 text-violet-500" /> تعديل الإعلان
-          </DialogTitle>
-        </DialogHeader>
-
-        {editingAd && (
-          <div className="space-y-4 py-2">
-            {/* العنوان */}
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-title">عنوان الإعلان *</Label>
-              <Input
-                id="edit-title"
-                data-testid="input-edit-title"
-                value={editForm.title}
-                onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}
-                placeholder="عنوان الإعلان"
-              />
-            </div>
-
-            {/* الوصف */}
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-desc">وصف الإعلان *</Label>
-              <Textarea
-                id="edit-desc"
-                data-testid="input-edit-description"
-                value={editForm.description}
-                onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
-                placeholder="اكتب وصف الإعلان..."
-                rows={4}
-              />
-            </div>
-
-            {/* السعر ورقم الواتساب */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="edit-price">السعر (ج.م)</Label>
-                <Input
-                  id="edit-price"
-                  data-testid="input-edit-price"
-                  type="number"
-                  min="0"
-                  value={editForm.priceEGP}
-                  onChange={e => setEditForm(f => ({ ...f, priceEGP: e.target.value }))}
-                  placeholder="0"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="edit-whatsapp">رقم الواتساب</Label>
-                <Input
-                  id="edit-whatsapp"
-                  data-testid="input-edit-whatsapp"
-                  value={editForm.whatsappNumber}
-                  onChange={e => setEditForm(f => ({ ...f, whatsappNumber: e.target.value }))}
-                  placeholder="01xxxxxxxxx"
-                  dir="ltr"
-                />
-              </div>
-            </div>
-
-            {/* الحالة */}
-            <div className="space-y-1.5">
-              <Label>حالة الإعلان</Label>
-              <div className="flex gap-3">
-                {[
-                  { val: "active",   label: "✅ نشط",    cls: "border-green-400 bg-green-50 text-green-700" },
-                  { val: "inactive", label: "⏸ متوقف", cls: "border-gray-400 bg-gray-50 text-gray-600" },
-                ].map(opt => (
-                  <button
-                    key={opt.val}
-                    data-testid={`btn-status-${opt.val}`}
-                    onClick={() => setEditForm(f => ({ ...f, status: opt.val }))}
-                    className={`flex-1 py-2 rounded-lg border-2 text-sm font-medium transition-all ${
-                      editForm.status === opt.val ? opt.cls : "border-border text-muted-foreground hover:border-primary/40"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        
-
-        <DialogFooter className="gap-2 flex-row-reverse">
-          <Button
-            data-testid="btn-save-edit"
-            onClick={() => {
-              if (!editForm.title.trim() || !editForm.description.trim()) {
-                toast({ title: "⚠️ العنوان والوصف مطلوبان", variant: "destructive" });
-                return;
-              }
-              updateAdMutation.mutate({
-                id: editingAd.id,
-                data: {
-                  title: editForm.title.trim(),
-                  description: editForm.description.trim(),
-                  priceEGP: editForm.priceEGP ? parseFloat(editForm.priceEGP) : null,
-                  whatsappNumber: editForm.whatsappNumber.trim() || null,
-                  status: editForm.status,
-                },
-              });
-            }}
-            disabled={updateAdMutation.isPending}
-            className="bg-violet-600 hover:bg-violet-700 gap-2"
-          >
-            {updateAdMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Pencil className="w-4 h-4" />}
-            حفظ التعديلات
-          </Button>
-          <Button variant="outline" onClick={() => setEditingAd(null)} data-testid="btn-cancel-edit">
-            <X className="w-4 h-4 ml-1" /> إلغاء
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
-)}
+}
