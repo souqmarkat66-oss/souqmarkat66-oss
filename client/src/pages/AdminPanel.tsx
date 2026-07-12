@@ -15,6 +15,7 @@ import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 import AdminPinLock from "@/components/AdminPinLock";
 import AdminAiControl from "@/pages/AdminAiControl";
+import AiAgentPage from "@/pages/AiAgent";
 import TickerAdsAdminSection from "@/components/admin/TickerAdsAdminSection";
 import {
   LayoutDashboard, Users, Megaphone, Film, Tv, Radio, Flag, Banknote,
@@ -24,7 +25,7 @@ import {
   AlertTriangle, Activity, Menu, ChevronLeft, VideoOff, PieChart,
   Star, MessageSquare, Clock, BanIcon, UserCheck, FolderOpen, FileImage,
   FileVideo, File, Lock, Phone, Mail, Shield, RefreshCw, ToggleLeft, ToggleRight, Zap,
-  Sparkles, Image, Video, Wand2, FileText, Gift, Check, Globe, Plus, PlusCircle
+  Sparkles, Image, Video, Wand2, FileText, Gift, Check, Globe, Plus, PlusCircle, Bot
 } from "lucide-react";
 
 const ADMIN_ID = "54219806";
@@ -55,6 +56,7 @@ const NAV = [
   { key: "pricing",        label: "إدارة الأسعار",          icon: DollarSign,      color: "text-yellow-400" },
   { key: "aipricing",      label: "أسعار الذكاء الاصطناعي", icon: Sparkles,       color: "text-violet-400" },
   { key: "ai_control",     label: "تحكم الذكاء الاصطناعي", icon: Sparkles,        color: "text-violet-400" },
+  { key: "ai_agent",       label: "🤖 مساعد التطوير AI",    icon: Bot,             color: "text-violet-500" },
   { key: "coins",          label: "نظام العملات",          icon: Gift,            color: "text-yellow-400" },
   { key: "settings",       label: "إعدادات المنصة",       icon: Settings,        color: "text-gray-400" },
   { key: "activity",       label: "سجل النشاط",           icon: Activity,        color: "text-slate-400" },
@@ -94,6 +96,15 @@ function StatCard({ icon: Icon, label, value, color, sub }: any) {
         {sub && <div className="text-xs text-muted-foreground mt-1 opacity-70">{sub}</div>}
       </CardContent>
     </Card>
+  );
+}
+
+// ── AI Agent Embed (داخل لوحة الأدمن) ─────────────────────────
+function AiAgentEmbed() {
+  return (
+    <div className="-mx-4 -mt-2">
+      <AiAgentPage />
+    </div>
   );
 }
 
@@ -223,6 +234,7 @@ export default function AdminPanel() {
           {section === "pricing"    && <PricingSection />}
           {section === "aipricing"  && <AiPricingSection />}
           {section === "ai_control" && <AdminAiControl />}
+          {section === "ai_agent"   && <AiAgentEmbed />}
           {section === "coins"      && <CoinsSection logAction={logAction} />}
           {section === "settings"   && <SettingsSection logAction={logAction} />}
           {section === "activity"   && <ActivitySection />}
