@@ -340,7 +340,79 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socketToUser: Map<string, { userId: string; userName: string }>;
     autoAccept: boolean;
     raisedHands?: Map<string, { userId: string; userName: string; raisedAt: number }>;
+    battle?: {
+      active: boolean;
+      mode: "1v1" | "2v2";
+      startedAt: number;
+      endsAt: number;
+      scoreA: number;
+      scoreB: number;
+      multiplier: 1 | 2 | 3 | 5;
+      multiplierEndsAt: number | null;
+      roseCount: number;
+      nextRoseThreshold: number;
+      winner: "A" | "B" | "draw" | null;
+      timer?: ReturnType<typeof setTimeout>;
+    };
   }> = new Map();
+
+  // The client may request a gift, but the server is the source of truth.
+  // Multipliers are battle score effects only; they never change this value.
+  const GIFT_CATALOG: Record<string, { name: string; coins: number; emoji: string; glow: string; boost?: 5 }> = {
+    clap: { name: "تصفيق", coins: 5, emoji: "👏", glow: "#ffffff" },
+    rose: { name: "وردة", coins: 5, emoji: "🌹", glow: "#ff6b9d" },
+    heart: { name: "قلب", coins: 10, emoji: "❤️", glow: "#ef4444" },
+    kiss: { name: "قبلة", coins: 15, emoji: "💋", glow: "#ec4899" },
+    star: { name: "نجمة", coins: 20, emoji: "⭐", glow: "#facc15" },
+    icecream: { name: "آيس كريم", coins: 20, emoji: "🍦", glow: "#fbcfe8" },
+    fire: { name: "نار", coins: 30, emoji: "🔥", glow: "#f97316" },
+    bomb: { name: "قنبلة", coins: 40, emoji: "💣", glow: "#6b7280" },
+    crown: { name: "تاج", coins: 50, emoji: "👑", glow: "#eab308" },
+    money: { name: "كنز", coins: 60, emoji: "💰", glow: "#22c55e" },
+    rocket: { name: "صاروخ", coins: 75, emoji: "🚀", glow: "#3b82f6" },
+    diamond: { name: "ألماسة", coins: 100, emoji: "💎", glow: "#06b6d4" },
+    lion: { name: "أسد", coins: 150, emoji: "🦁", glow: "#d97706" },
+    car: { name: "سيارة", coins: 200, emoji: "🏎️", glow: "#dc2626" },
+    castle: { name: "قصر", coins: 300, emoji: "🏰", glow: "#8b5cf6" },
+    ufo: { name: "مركبة فضاء", coins: 500, emoji: "🛸", glow: "#10b981" },
+    glove: { name: "قفاز 5x", coins: 250, emoji: "🥊", glow: "#f43f5e", boost: 5 },
+  };
+
+  function publicBattleState(battle: NonNullable<ReturnType<typeof getOrCreateRoom>["battle"]>) {
+    const { timer: _timer, ...state } = battle;
+    return state;
+  }
+
+  async function saveBattleResult(streamId: string, battle: NonNullable<ReturnType<typeof getOrCreateRoom>["battle"]>) {
+    const numericStreamId = Number(streamId);
+    if (!Number.isInteger(numericStreamId) || numericStreamId <= 0) return;
+    await pool.query(
+      `INSERT INTO live_battles
+        (stream_id, mode, started_at, ended_at, score_a, score_b, winner)
+       VALUES ($1, $2, TO_TIMESTAMP($3 / 1000.0), NOW(), $4, $5, $6)`,
+      [
+        numericStreamId,
+        battle.mode,
+        battle.startedAt,
+        battle.scoreA,
+        battle.scoreB,
+        battle.winner,
+      ],
+    );
+  }
+
+  async function finishBattle(streamId: string, battle: NonNullable<ReturnType<typeof getOrCreateRoom>["battle"]>) {
+    if (!battle.active) return;
+    battle.active = false;
+    if (battle.timer) clearTimeout(battle.timer);
+    battle.winner = battle.scoreA === battle.scoreB ? "draw" : battle.scoreA > battle.scoreB ? "A" : "B";
+    try {
+      await saveBattleResult(streamId, battle);
+    } catch (error) {
+      console.error("PK battle result persistence error:", error);
+    }
+    io.to(`stream:${streamId}`).emit("battle-ended", publicBattleState(battle));
+  }
 
   // Arabic & English bad words basic filter
   const BAD_WORDS = ["كس","طيز","زب","شرموط","عاهرة","fuck","shit","bitch","ass","dick","pussy","bastard","motherfucker","asshole"];
@@ -359,7 +431,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         broadcasterId: null, cohostIds: [], cohostNames: new Map(), viewers: new Set(),
         peakViewers: 0, startedAt: Date.now(), totalLikes: 0, totalComments: 0,
         bannedSockets: new Set(), giftGoal: null, totalGiftCoins: 0,
-        socketToUser: new Map(), autoAccept: false,
+        socketToUser: new Map(), autoAccept: false, battle: undefined,
       });
     }
     return streamRooms.get(streamId)!;
@@ -392,6 +464,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Inform new viewer of current auto-accept state
       if (room.autoAccept) {
         socket.emit("auto-accept-changed", true);
+      }
+      if (room.battle?.active) {
+        socket.emit("battle-state", publicBattleState(room.battle));
       }
     });
 
@@ -445,7 +520,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socket.on("candidate", (id: string, message: any) => socket.to(id).emit("candidate", socket.id, message));
 
     // ── Co-host Signaling ──
-    socket.on("request-cohost", (data: { streamId: string; userId: string; userName: string }) => {
+    socket.on("request-cohost", (data: { streamId: string; userId: string; userName: string; withCamera?: boolean }) => {
       const room = streamRooms.get(data.streamId);
       if (!room?.broadcasterId) return;
       if (room.cohostIds.length >= 3) {
@@ -561,57 +636,150 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
 
     // ── TikTok-style Live Features ──────────────────────────────────
-    socket.on("send-gift", async (data: { streamId: string; giftType: string; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId: string; broadcasterUserId?: string }) => {
-      // Deduct coins from sender & credit broadcaster in DB
+    socket.on("send-gift", async (data: { streamId: string; giftType: string; giftEmoji?: string; giftName?: string; giftCoins?: number; userName: string; userId: string; broadcasterUserId?: string; battleTeam?: "A" | "B" }) => {
+      // Never trust price/name/emoji from the browser.
+      const gift = GIFT_CATALOG[data.giftType];
+      if (!gift || !data.userId || !data.streamId) return;
+      const originalGiftCoins = gift.coins;
+      let accepted = false;
+      let battleState: any = null;
       try {
-        if (data.userId && data.giftCoins > 0) {
-          // Deduct from sender
-          await pool.query(
-            `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
-             VALUES ($1, GREATEST(0, -$2::int), $2::int, 0)
-             ON CONFLICT (user_id) DO UPDATE
-             SET balance = GREATEST(0, coin_wallets.balance - $2::int),
-                 total_spent = coin_wallets.total_spent + $2::int,
-                 updated_at = NOW()`,
-            [data.userId, data.giftCoins]
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          const wallet = await client.query(
+            `SELECT balance FROM coin_wallets WHERE user_id = $1 FOR UPDATE`,
+            [data.userId]
           );
-          // Log sender transaction
-          await pool.query(
+          const balance = Number(wallet.rows[0]?.balance || 0);
+          if (balance < originalGiftCoins) {
+            await client.query("ROLLBACK");
+            socket.emit("gift-rejected", { reason: "insufficient_balance", balance, required: originalGiftCoins });
+            return;
+          }
+          await client.query(
+            `UPDATE coin_wallets
+             SET balance = balance - $2::int, total_spent = total_spent + $2::int, updated_at = NOW()
+             WHERE user_id = $1`,
+            [data.userId, originalGiftCoins]
+          );
+          await client.query(
             `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id, related_user_id)
              VALUES ($1, 'gift_sent', $2, $3, $4, $5)`,
-            [data.userId, -data.giftCoins, `هدية ${data.giftName} في البث`, data.streamId ? parseInt(data.streamId) : null, data.broadcasterUserId || null]
+            [data.userId, -originalGiftCoins, `هدية ${gift.name} في البث`, parseInt(data.streamId), data.broadcasterUserId || null]
           );
-          // Credit broadcaster (60% to broadcaster, platform keeps 40%)
+          // 60/40 is always calculated from the original gift value.
           if (data.broadcasterUserId) {
-            const broadcasterCoins = Math.floor(data.giftCoins * 0.6);
-            await pool.query(
+            const broadcasterCoins = Math.floor(originalGiftCoins * 0.6);
+            await client.query(
               `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
                VALUES ($1, $2::int, 0, $2::int)
                ON CONFLICT (user_id) DO UPDATE
                SET balance = coin_wallets.balance + $2::int,
                    total_earned = coin_wallets.total_earned + $2::int,
                    updated_at = NOW()`,
-              [data.broadcasterUserId, broadcasterCoins]
+               [data.broadcasterUserId, broadcasterCoins]
             );
             // Log broadcaster transaction
-            await pool.query(
+            await client.query(
               `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id, related_user_id)
                VALUES ($1, 'gift_received', $2, $3, $4, $5)`,
-              [data.broadcasterUserId, broadcasterCoins, `استلام هدية ${data.giftName} من ${data.userName}`, data.streamId ? parseInt(data.streamId) : null, data.userId]
+               [data.broadcasterUserId, broadcasterCoins, `استلام هدية ${gift.name} من ${data.userName}`, parseInt(data.streamId), data.userId]
             );
             // Also credit revenue_transactions in EGP (1 coin = 0.05 EGP)
-            const egpAmount = parseFloat((broadcasterCoins * 0.05).toFixed(2));
-            await pool.query(
+             const egpAmount = parseFloat((broadcasterCoins * 0.05).toFixed(2));
+            await client.query(
               `INSERT INTO revenue_transactions (user_id, type, amount_egp, description, channel_id)
                SELECT $1, 'earning', $2, $3, id FROM channels WHERE user_id = $1 LIMIT 1`,
-              [data.broadcasterUserId, egpAmount, `هدايا من بث مباشر - ${data.giftName}`]
+               [data.broadcasterUserId, egpAmount, `هدايا من بث مباشر - ${gift.name}`]
             );
           }
+          await client.query("COMMIT");
+          accepted = true;
+        } catch (transactionError) {
+          await client.query("ROLLBACK").catch(() => {});
+          throw transactionError;
+        } finally {
+          client.release();
         }
       } catch (err) {
         console.error("Gift coin transaction error:", err);
+        return;
       }
-      io.to(`stream:${data.streamId}`).emit("stream-gift", { id: Date.now() + Math.random(), ...data, timestamp: new Date().toISOString() });
+      if (!accepted) return;
+
+      const room = streamRooms.get(data.streamId);
+      if (room?.battle?.active) {
+        const battle = room.battle;
+        const now = Date.now();
+        if (now >= battle.endsAt) {
+          await finishBattle(data.streamId, battle);
+        } else if (data.battleTeam) {
+          if (gift.boost === 5) {
+            battle.multiplier = 5;
+            battle.multiplierEndsAt = now + 15_000;
+          } else {
+            const scoreMultiplier = battle.multiplierEndsAt && battle.multiplierEndsAt > now ? battle.multiplier : 1;
+            const scoreDelta = originalGiftCoins * scoreMultiplier;
+            if (data.battleTeam === "A") battle.scoreA += scoreDelta;
+            else battle.scoreB += scoreDelta;
+          }
+          if (data.giftType === "rose") {
+            battle.roseCount += 1;
+            if (battle.roseCount >= battle.nextRoseThreshold) {
+              const triple = battle.nextRoseThreshold === 10;
+              battle.multiplier = triple ? 3 : 2;
+              battle.multiplierEndsAt = now + (triple ? 25_000 : 15_000);
+              // 10 roses is the final automatic threshold for this round.
+              battle.nextRoseThreshold = triple ? Number.MAX_SAFE_INTEGER : 10;
+              io.to(`stream:${data.streamId}`).emit("battle-multiplier", {
+                multiplier: battle.multiplier,
+                durationSeconds: triple ? 25 : 15,
+                reason: triple ? "10 وردات" : "5 وردات",
+              });
+            }
+          }
+        }
+        battleState = publicBattleState(battle);
+        io.to(`stream:${data.streamId}`).emit("battle-state", battleState);
+      }
+      io.to(`stream:${data.streamId}`).emit("stream-gift", {
+        id: Date.now() + Math.random(),
+        ...data,
+        giftEmoji: gift.emoji,
+        giftName: gift.name,
+        giftCoins: originalGiftCoins,
+        glow: gift.glow,
+        originalGiftCoins,
+        battleState,
+        timestamp: new Date().toISOString(),
+      });
+    });
+
+    socket.on("battle-start", (data: { streamId: string; mode: "1v1" | "2v2" }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room || room.broadcasterId !== socket.id || !["1v1", "2v2"].includes(data.mode)) return;
+      if (room.battle?.timer) clearTimeout(room.battle.timer);
+      const startedAt = Date.now();
+      room.battle = {
+        active: true, mode: data.mode, startedAt, endsAt: startedAt + 300_000,
+        scoreA: 0, scoreB: 0, multiplier: 1, multiplierEndsAt: null,
+        roseCount: 0, nextRoseThreshold: 5, winner: null,
+      };
+      room.battle.timer = setTimeout(() => {
+        const battle = room.battle;
+        if (!battle?.active || battle.endsAt > Date.now()) return;
+        void finishBattle(data.streamId, battle);
+      }, 300_000);
+      const state = publicBattleState(room.battle);
+      io.to(`stream:${data.streamId}`).emit("battle-started", state);
+      io.to(`stream:${data.streamId}`).emit("battle-state", state);
+    });
+
+    socket.on("battle-end", (data: { streamId: string }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room || room.broadcasterId !== socket.id || !room.battle?.active) return;
+      void finishBattle(data.streamId, room.battle);
     });
 
     socket.on("pin-comment", (data: { streamId: string; message: string; userName: string }) => {
@@ -736,34 +904,78 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const { code } = req.body || {};
     if (!code) return res.status(400).json({ message: "الكود مطلوب" });
 
-    const r = await pool.query(`SELECT * FROM coin_recharge_codes WHERE code = $1`, [code.toUpperCase().trim()]);
-    if (r.rows.length === 0) return res.status(404).json({ message: "الكود غير صحيح" });
-    const row = r.rows[0];
-    if (row.used_by_user_id) return res.status(400).json({ message: "هذا الكود مستخدم بالفعل" });
-    if (row.expires_at && new Date(row.expires_at) < new Date()) return res.status(400).json({ message: "الكود منتهي الصلاحية" });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const r = await client.query(
+        `SELECT * FROM coin_recharge_codes WHERE code = $1 FOR UPDATE`,
+        [code.toUpperCase().trim()]
+      );
+      if (r.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "الكود غير صحيح" });
+      }
+      const row = r.rows[0];
+      if (row.used_by_user_id) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ message: "هذا الكود مستخدم بالفعل" });
+      }
+      if (row.expires_at && new Date(row.expires_at) < new Date()) {
+        // Keep the inventory replenished when an unused code expires.
+        const replacementCode = `SOUQ-${randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase()}-${randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase()}`;
+        // Consume the expired code in the same transaction so retrying it
+        // cannot mint unlimited replacement codes.
+        await client.query(
+          `UPDATE coin_recharge_codes SET used_by_user_id = $1, used_at = NOW() WHERE id = $2`,
+          [userId, row.id]
+        );
+        await client.query(
+          `INSERT INTO coin_recharge_codes (code, coins, price_egp, expires_at)
+           VALUES ($1, $2, $3, NOW() + INTERVAL '30 days')`,
+          [replacementCode, row.coins, row.price_egp]
+        );
+        await client.query("COMMIT");
+        return res.status(400).json({ message: "الكود منتهي الصلاحية", replacementCode });
+      }
 
-    // Mark as used
-    await pool.query(
-      `UPDATE coin_recharge_codes SET used_by_user_id = $1, used_at = NOW() WHERE id = $2`,
-      [userId, row.id]
-    );
-    // Add coins to wallet
-    await pool.query(
-      `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
-       VALUES ($1, $2::int, 0, $2::int)
-       ON CONFLICT (user_id) DO UPDATE
-       SET balance = coin_wallets.balance + $2::int,
-           total_earned = coin_wallets.total_earned + $2::int,
-           updated_at = NOW()`,
-      [userId, row.coins]
-    );
-    // Log transaction
-    await pool.query(
-      `INSERT INTO coin_transactions (user_id, type, coins, description, recharge_code_id)
-       VALUES ($1, 'recharge', $2, $3, $4)`,
-      [userId, row.coins, `شحن بكود - ${row.coins} عملة`, row.id]
-    );
-    res.json({ success: true, coins: row.coins, message: `تم إضافة ${row.coins} عملة لمحفظتك` });
+      const replacementCode = `SOUQ-${randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase()}-${randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase()}`;
+      await client.query(
+        `UPDATE coin_recharge_codes SET used_by_user_id = $1, used_at = NOW() WHERE id = $2`,
+        [userId, row.id]
+      );
+      await client.query(
+        `INSERT INTO coin_recharge_codes (code, coins, price_egp, expires_at)
+         VALUES ($1, $2, $3, NOW() + INTERVAL '30 days')`,
+        [replacementCode, row.coins, row.price_egp]
+      );
+      await client.query(
+        `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
+         VALUES ($1, $2::int, 0, $2::int)
+         ON CONFLICT (user_id) DO UPDATE
+         SET balance = coin_wallets.balance + $2::int,
+             total_earned = coin_wallets.total_earned + $2::int,
+             updated_at = NOW()`,
+        [userId, row.coins]
+      );
+      await client.query(
+        `INSERT INTO coin_transactions (user_id, type, coins, description, recharge_code_id)
+         VALUES ($1, 'recharge', $2, $3, $4)`,
+        [userId, row.coins, `شحن بكود - ${row.coins} عملة`, row.id]
+      );
+      await client.query("COMMIT");
+      return res.json({
+        success: true,
+        coins: row.coins,
+        replacementCode,
+        message: `تم إضافة ${row.coins} عملة لمحفظتك — تم إصدار كود جديد تلقائياً`,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("Recharge code redemption error:", error);
+      return res.status(500).json({ message: "تعذر تنفيذ الشحن، حاول مرة أخرى" });
+    } finally {
+      client.release();
+    }
   });
 
   // Submit coin purchase order (user pays via Vodafone Cash / InstaPay / Bank)
@@ -2238,7 +2450,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
     const enrichReels = async (rows: any[]) => {
       if (!rows.length) return rows;
       const getChannelId = (r: any) => r.channelId ?? r.channel_id ?? null;
-      const channelIds = [...new Set(rows.map(getChannelId).filter(Boolean))];
+      const channelIds = Array.from(new Set(rows.map(getChannelId).filter(Boolean)));
       let channelMap: Record<number, { name: string; avatarUrl: string | null }> = {};
       if (channelIds.length) {
         const chRows = await db.execute(sql`SELECT id, name, avatar_url FROM channels WHERE id = ANY(ARRAY[${sql.raw(channelIds.join(','))}])`);
@@ -5963,8 +6175,8 @@ ${reelTags}
       const { ratings } = await import("@shared/schema");
       const { desc, eq } = await import("drizzle-orm");
       let query = db.select().from(ratings).orderBy(desc(ratings.createdAt)).$dynamic();
-      if (type && type !== "all") {
-        query = query.where(eq(ratings.targetType, type as string));
+      if (type === "user" || type === "ad") {
+        query = query.where(eq(ratings.targetType, type));
       }
       const rows = await query.limit(500);
       res.json(rows);

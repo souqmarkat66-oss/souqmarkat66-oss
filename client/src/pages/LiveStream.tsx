@@ -81,9 +81,11 @@ export default function LiveStream() {
   const [battleMode,      setBattleMode]      = useState<"1v1"|"2v2">("1v1");
   const [battleScoreA,    setBattleScoreA]    = useState(0); // Team A = broadcaster side
   const [battleScoreB,    setBattleScoreB]    = useState(0); // Team B = guest side
-  const [battleSecs,      setBattleSecs]      = useState(120);
+  const [battleSecs,      setBattleSecs]      = useState(300);
   const [battleRunning,   setBattleRunning]   = useState(false);
   const [battleWinner,    setBattleWinner]    = useState<"A"|"B"|"draw"|null>(null);
+  const [battleMultiplier, setBattleMultiplier] = useState<1|2|3|5>(1);
+  const [battleMultiplierEndsAt, setBattleMultiplierEndsAt] = useState<number|null>(null);
   const [giftTeamChoice,  setGiftTeamChoice]  = useState<"A"|"B">("A"); // viewer's chosen side
   const [showBattleSetup, setShowBattleSetup] = useState(false);
   // Cross-stream battle challenge state
@@ -104,12 +106,39 @@ export default function LiveStream() {
   // Purchase flow states
   const [purchaseStep,    setPurchaseStep]    = useState<"packages"|"pay"|"done">("packages");
   const [selectedPkg,     setSelectedPkg]     = useState<any>(null);
-  const [payMethod,       setPayMethod]       = useState<"vodafone"|"instapay"|"bank">("vodafone");
+  const [payMethod,       setPayMethod]       = useState<"vodafone"|"vodafone2"|"instapay"|"bank">("vodafone");
   const [payRef,          setPayRef]          = useState("");
   const [payLoading,      setPayLoading]      = useState(false);
   interface FlyingGift { id: number; emoji: string; x: number; glow?: string; big?: boolean; }
   const [flyingGifts,     setFlyingGifts]     = useState<FlyingGift[]>([]);
   const [myCoins,         setMyCoins]         = useState(0); // loaded from DB
+  const giftAudioContextRef = useRef<AudioContext | null>(null);
+
+  const playGiftSound = useCallback((coins: number) => {
+    if (coins < 100 || typeof window === "undefined") return;
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = giftAudioContextRef.current || new AudioContextClass();
+      giftAudioContextRef.current = ctx;
+      if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+      const now = ctx.currentTime;
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscillator.type = coins >= 300 ? "sawtooth" : "triangle";
+      oscillator.frequency.setValueAtTime(coins >= 300 ? 220 : 330, now);
+      oscillator.frequency.exponentialRampToValueAtTime(coins >= 300 ? 660 : 520, now + 0.22);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start(now);
+      oscillator.stop(now + 0.45);
+    } catch {
+      // Browsers may reject audio until the user interacts with the page.
+    }
+  }, []);
 
   // ── Gift Combo (Double / Triple / Mega) state ──
   interface ComboDisplay { id: number; emoji: string; count: number; label: string; color: string; fading: boolean; }
@@ -336,6 +365,51 @@ export default function LiveStream() {
     socket.on("stream-like",   () => setLikesCount(p => p + 1));
     socket.on("chat-message",  (msg: ChatMsg) => setMessages(prev => [...prev.slice(-60), msg]));
     socket.on("connect",       () => socket.emit("join-stream", id));
+
+    type BattleState = {
+      active: boolean;
+      mode: "1v1" | "2v2";
+      startedAt: number;
+      endsAt: number;
+      scoreA: number;
+      scoreB: number;
+      multiplier: 1 | 2 | 3 | 5;
+      multiplierEndsAt: number | null;
+      winner: "A" | "B" | "draw" | null;
+    };
+    const applyBattleState = (state: BattleState) => {
+      setBattleMode(state.mode);
+      setBattleScoreA(state.scoreA);
+      setBattleScoreB(state.scoreB);
+      battleScoreARef.current = state.scoreA;
+      battleScoreBRef.current = state.scoreB;
+      setBattleMultiplier(state.multiplier);
+      setBattleMultiplierEndsAt(state.multiplierEndsAt);
+      setBattleWinner(state.winner);
+      setBattleActive(state.active || !!state.winner);
+      setBattleRunning(state.active);
+      setBattleSecs(Math.max(0, Math.ceil((state.endsAt - Date.now()) / 1000)));
+    };
+    socket.on("battle-state", applyBattleState);
+    socket.on("battle-started", applyBattleState);
+    socket.on("battle-ended", (state: BattleState) => {
+      applyBattleState({ ...state, active: false });
+      toast({
+        title: state.winner === "draw" ? "🤝 انتهت المعركة بالتعادل" : `🏆 الفريق ${state.winner === "A" ? "أ" : "ب"} فاز!`,
+        description: `النتيجة ${state.scoreA.toLocaleString()} مقابل ${state.scoreB.toLocaleString()}`,
+      });
+    });
+    socket.on("battle-multiplier", (data: { multiplier: 2 | 3 | 5; durationSeconds: number; reason: string }) => {
+      setBattleMultiplier(data.multiplier);
+      setBattleMultiplierEndsAt(Date.now() + data.durationSeconds * 1000);
+      toast({ title: `${data.multiplier}x! ⚡`, description: `مضاعف السكور — ${data.reason}` });
+    });
+    socket.on("gift-rejected", (data: { reason: string; balance: number; required: number }) => {
+      if (data.reason === "insufficient_balance") {
+        setMyCoins(data.balance);
+        toast({ title: "رصيدك غير كافٍ", description: `تحتاج ${data.required} عملة`, variant: "destructive" });
+      }
+    });
 
     if (isBroadcast) {
       socket.on("watcher", async (watcherId: string) => {
@@ -592,17 +666,11 @@ export default function LiveStream() {
       const big = data.giftCoins >= 100;
       setFlyingGifts(prev => [...prev, { id: flyId, emoji: data.giftEmoji, x, glow: data.glow, big }]);
       setTimeout(() => setFlyingGifts(prev => prev.filter(g => g.id !== flyId)), 3000);
+      playGiftSound(data.giftCoins);
       if (isBroadcast) {
         toast({ title: `🎁 هدية من ${data.userName}!`, description: `${data.giftEmoji} ${data.giftName} — ${data.giftCoins} عملة` });
       }
-      // Battle scoring — score-only, NOT added to balance
-      if (data.battleTeam === "A") {
-        battleScoreARef.current += data.giftCoins;
-        setBattleScoreA(battleScoreARef.current);
-      } else if (data.battleTeam === "B") {
-        battleScoreBRef.current += data.giftCoins;
-        setBattleScoreB(battleScoreBRef.current);
-      }
+      // Battle scores are server-authoritative and arrive via battle-state.
       // ── Combo Detection (Double / Triple / Mega) ──
       if (lastGiftTypeRef.current === data.giftEmoji) {
         comboCountRef.current += 1;
@@ -1037,7 +1105,7 @@ export default function LiveStream() {
         packageId: selectedPkg.id,
         coins: selectedPkg.coins + (selectedPkg.bonus_coins || 0),
         amountEGP: selectedPkg.price_egp,
-        paymentMethod: payMethod === "vodafone" ? "فودافون كاش" : payMethod === "instapay" ? "إنستاباي" : "تحويل بنكي",
+        paymentMethod: payMethod === "vodafone" || payMethod === "vodafone2" ? "فودافون كاش" : payMethod === "instapay" ? "إنستاباي" : "تحويل بنكي",
         paymentRef: payRef.trim(),
         userName,
       });
@@ -1058,31 +1126,27 @@ export default function LiveStream() {
     setBattleMode(mode);
     setBattleScoreA(0); setBattleScoreB(0);
     battleScoreARef.current = 0; battleScoreBRef.current = 0;
-    setBattleSecs(120); setBattleWinner(null);
-    setBattleActive(true); setBattleRunning(true);
+    setBattleSecs(300); setBattleWinner(null);
+    setBattleMultiplier(1); setBattleMultiplierEndsAt(null);
+    // The server turns the battle on and sends the authoritative start state.
+    setBattleActive(false); setBattleRunning(false);
     setShowBattleSetup(false);
     socketRef.current?.emit("battle-start", { streamId: id, mode });
-    toast({ title: "⚔️ المعركة بدأت!", description: `وضع ${mode === "1v1" ? "1 ضد 1" : "2 ضد 2"} — مدة 2 دقيقة` });
+    toast({ title: "⚔️ جاري بدء المعركة", description: `وضع ${mode === "1v1" ? "1 ضد 1" : "2 ضد 2"} — مدة 5 دقائق` });
   };
 
   const endBattle = () => {
     if (battleTimerRef.current) clearInterval(battleTimerRef.current);
     setBattleRunning(false);
-    const winner = battleScoreARef.current > battleScoreBRef.current ? "A"
-                 : battleScoreBRef.current > battleScoreARef.current ? "B" : "draw";
-    setBattleWinner(winner);
-    socketRef.current?.emit("battle-end", { streamId: id, winner, scoreA: battleScoreARef.current, scoreB: battleScoreBRef.current });
-    setTimeout(() => { setBattleActive(false); setBattleWinner(null); }, 5000);
+    // The server computes the winner from its final score.
+    socketRef.current?.emit("battle-end", { streamId: id });
   };
 
   // Battle countdown timer
   useEffect(() => {
     if (!battleRunning) return;
     battleTimerRef.current = setInterval(() => {
-      setBattleSecs(s => {
-        if (s <= 1) { endBattle(); return 0; }
-        return s - 1;
-      });
+      setBattleSecs(s => Math.max(0, s - 1));
     }, 1000);
     return () => { if (battleTimerRef.current) clearInterval(battleTimerRef.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1111,6 +1175,7 @@ export default function LiveStream() {
     { type: "car",     emoji: "🏎️", name: "سيارة",      coins: 200, glow: "#dc2626" },
     { type: "castle",  emoji: "🏰", name: "قصر",        coins: 300, glow: "#8b5cf6" },
     { type: "ufo",     emoji: "🛸", name: "مركبة فضاء", coins: 500, glow: "#10b981" },
+    { type: "glove",   emoji: "🥊", name: "قفاز 5x",    coins: 250, glow: "#f43f5e" },
   ];
 
   const sendGift = (gift: typeof GIFTS[0]) => {
@@ -1127,7 +1192,6 @@ export default function LiveStream() {
       battleTeam: battleActive ? giftTeamChoice : undefined,
       glow: gift.glow,
     });
-    setMyCoins(prev => prev - gift.coins);
     // Sync wallet from server after a short delay
     setTimeout(() => refetchWallet(), 1500);
   };
@@ -1849,7 +1913,9 @@ export default function LiveStream() {
             <div className="absolute top-0 inset-x-0 z-40 bg-black/80 backdrop-blur-md px-4 py-2">
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-1">
-                  <span className="text-white font-extrabold text-sm">الفريق أ 🔴</span>
+                  <span className="text-white font-extrabold text-sm">
+                    {battleMode === "1v1" ? "المذيع 🔴" : "الفريق أ 🔴"}
+                  </span>
                   <span className="text-yellow-400 font-bold text-sm">{battleScoreA} 🪙</span>
                 </div>
                 <div className="flex flex-col items-center">
@@ -1857,6 +1923,11 @@ export default function LiveStream() {
                     <Timer className="w-3 h-3" />
                     {fmtTimer(battleSecs)}
                   </div>
+                  {battleMultiplier > 1 && battleMultiplierEndsAt && battleMultiplierEndsAt > Date.now() && (
+                    <span className="battle-multiplier-badge text-[11px] font-black text-yellow-100">
+                      ⚡ {battleMultiplier}x سكور
+                    </span>
+                  )}
                   {battleWinner && (
                     <span className={`text-xs font-extrabold ${battleWinner === "draw" ? "text-yellow-400" : "text-green-400"}`}>
                       {battleWinner === "A" ? "🏆 الفريق أ فاز!" : battleWinner === "B" ? "🏆 الفريق ب فاز!" : "🤝 تعادل!"}
@@ -1865,7 +1936,9 @@ export default function LiveStream() {
                 </div>
                 <div className="flex items-center gap-1">
                   <span className="text-yellow-400 font-bold text-sm">{battleScoreB} 🪙</span>
-                  <span className="text-white font-extrabold text-sm">الفريق ب 🔵</span>
+                  <span className="text-white font-extrabold text-sm">
+                    {battleMode === "1v1" ? "الضيف 🔵" : "الفريق ب 🔵"}
+                  </span>
                 </div>
               </div>
               {/* Score progress bar */}

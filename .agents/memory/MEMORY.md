@@ -1,1 +1,2 @@
 - [Settings API camelCase keys](settings-api-camelcase.md) — deepToCamel middleware converts ALL /api/* JSON responses; use camelCase keys in frontend (contactWhatsapp not contact_whatsapp)
+- [Live battle accounting](live-battle-accounting.md) — multipliers affect PK score only; wallet debits, payouts, and recharge-code rotation stay server-atomic

@@ -153,6 +153,22 @@ export type LiveStream = typeof liveStreams.$inferSelect;
 export type InsertLiveStream = z.infer<typeof insertLiveStreamSchema>;
 
 // ============================================================
+// LIVE PK BATTLE RESULTS TABLE
+// ============================================================
+export const liveBattles = pgTable("live_battles", {
+  id: serial("id").primaryKey(),
+  streamId: integer("stream_id").references(() => liveStreams.id).notNull(),
+  mode: text("mode", { enum: ["1v1", "2v2"] }).notNull().default("1v1"),
+  startedAt: timestamp("started_at").notNull(),
+  endedAt: timestamp("ended_at").defaultNow().notNull(),
+  scoreA: integer("score_a").notNull().default(0),
+  scoreB: integer("score_b").notNull().default(0),
+  winner: text("winner", { enum: ["A", "B", "draw"] }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+export type LiveBattle = typeof liveBattles.$inferSelect;
+
+// ============================================================
 // CHAT MESSAGES TABLE
 // ============================================================
 export const chatMessages = pgTable("chat_messages", {

@@ -197,6 +197,17 @@ async function runMigrations() {
     await db.execute(sql`ALTER TABLE live_streams ADD COLUMN IF NOT EXISTS recording_url TEXT`);
     await db.execute(sql`ALTER TABLE live_streams ADD COLUMN IF NOT EXISTS stream_key TEXT UNIQUE`);
     await db.execute(sql`ALTER TABLE live_streams ADD COLUMN IF NOT EXISTS stream_mode TEXT DEFAULT 'webrtc'`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS live_battles (
+      id SERIAL PRIMARY KEY,
+      stream_id INTEGER NOT NULL REFERENCES live_streams(id) ON DELETE CASCADE,
+      mode TEXT NOT NULL DEFAULT '1v1',
+      started_at TIMESTAMP NOT NULL,
+      ended_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      score_a INTEGER NOT NULL DEFAULT 0,
+      score_b INTEGER NOT NULL DEFAULT 0,
+      winner TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthday DATE`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title VARCHAR(100)`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS company VARCHAR(100)`);
