@@ -12,6 +12,7 @@ import {
   Share2, Gift, Megaphone, Swords, Trophy, Timer,
   Layers, Tv2, Type, ChevronDown, ChevronUp, Palette,
   Armchair, User as UserIcon, Sparkles, Star, Package,
+  MessageCircle, Search,
 } from "lucide-react";
 import { SiWhatsapp, SiFacebook, SiX, SiTelegram, SiInstagram, SiTiktok, SiSnapchat } from "react-icons/si";
 import { Button } from "@/components/ui/button";
@@ -103,6 +104,13 @@ export default function LiveStream() {
   const [liveStreams,       setLiveStreams]    = useState<any[]>([]);
   const [challengeSentTo,   setChallengeSentTo]   = useState<string|null>(null); // streamId waiting for response
   const [incomingChallenge, setIncomingChallenge] = useState<{challengerStreamId:string; challengerSocketId:string; challengerName:string}|null>(null);
+  // ── دعوة تحدي لمستخدم محدد (بحث + بروفايل + دعوة) ──
+  const [userSearchQ,       setUserSearchQ]       = useState("");
+  const [userSearchResults, setUserSearchResults] = useState<any[]>([]);
+  const [userSearching,     setUserSearching]     = useState(false);
+  const [inviteStatus,      setInviteStatus]      = useState<Record<string, "sending"|"sent"|"offline"|"accepted"|"declined">>({});
+  const [incomingUserChallenge, setIncomingUserChallenge] = useState<{inviteId:string; streamId:string; challengerName:string}|null>(null);
+  const chatInputRef = useRef<HTMLInputElement|null>(null);
   const battleScoreARef   = useRef(0);
   const battleScoreBRef   = useRef(0);
   const battleTimerRef    = useRef<ReturnType<typeof setInterval>|null>(null);
@@ -985,6 +993,70 @@ export default function LiveStream() {
     socketRef.current?.emit("stream-like", id);
   };
 
+  /* ─── دعوات التحدي الشخصية (غرفة المستخدم + المستمعات) ─── */
+  useEffect(() => {
+    const s = socketRef.current;
+    if (!s || !user?.id) return;
+    const joinMyRoom = () => s.emit("join-user-room", String((user as any).id));
+    if (s.connected) joinMyRoom();
+    s.on("connect", joinMyRoom);
+
+    const onIncoming = (data: { inviteId: string; streamId: string; challengerName: string }) => {
+      // لو الدعوة لنفس البث اللي أنا مذيعه، تجاهل
+      if (isBroadcast && String(data.streamId) === String(id)) return;
+      setIncomingUserChallenge(data);
+    };
+    const onResult = (data: { accepted: boolean; responderName: string }) => {
+      if (data.accepted) toast({ title: `✅ ${data.responderName} قبل الدعوة!`, description: "سينضم إلى بثك الآن — اقبل طلب مشاركته" });
+      else toast({ title: `${data.responderName} رفض الدعوة`, variant: "destructive" });
+    };
+    const onStatus = (data: { targetUserId: string; status: string }) => {
+      if (data.status === "sent") setInviteStatus(p => ({ ...p, [data.targetUserId]: "sent" }));
+      else if (data.status === "offline") {
+        setInviteStatus(p => ({ ...p, [data.targetUserId]: "offline" }));
+        toast({ title: "المستخدم غير متصل الآن", description: "جرّب لاحقاً أو تحدَّ بثاً مباشراً آخر", variant: "destructive" });
+      } else {
+        setInviteStatus(p => { const n = { ...p }; delete n[data.targetUserId]; return n; });
+      }
+    };
+    s.on("challenge-user-incoming", onIncoming);
+    s.on("challenge-user-result", onResult);
+    s.on("challenge-user-status", onStatus);
+    return () => {
+      s.off("connect", joinMyRoom);
+      s.off("challenge-user-incoming", onIncoming);
+      s.off("challenge-user-result", onResult);
+      s.off("challenge-user-status", onStatus);
+    };
+  }, [user?.id, isBroadcast, id]);
+
+  /* ─── بحث المستخدمين لقائمة التحدي (debounced) ─── */
+  useEffect(() => {
+    if (!showBattleSetup) return;
+    const q = userSearchQ.trim();
+    if (q.length < 2) { setUserSearchResults([]); setUserSearching(false); return; }
+    setUserSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/users/search?q=${encodeURIComponent(q)}`, { credentials: "include" });
+        const rows = r.ok ? await r.json() : [];
+        setUserSearchResults((rows || []).filter((u: any) => String(u.id) !== String((user as any)?.id)));
+      } catch { setUserSearchResults([]); }
+      setUserSearching(false);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [userSearchQ, showBattleSetup]);
+
+  /* ─── انضمام تلقائي بعد قبول دعوة تحدي (من صفحة أخرى) ─── */
+  useEffect(() => {
+    if (isBroadcast || !user || !streaming) return;
+    if (sessionStorage.getItem("autoJoinBattle") === String(id)) {
+      sessionStorage.removeItem("autoJoinBattle");
+      toast({ title: "⚔️ وصلت لبث التحدي!", description: "اختر كاميرا أو مايك للانضمام" });
+      requestCoHost();
+    }
+  }, [isBroadcast, user, streaming, id]);
+
   /* ─── Co-host helpers ────────────────────────────────── */
   const requestCoHost = () => {
     if (!user) return;
@@ -1690,6 +1762,28 @@ export default function LiveStream() {
           ))}
         </div>
 
+        {/* ── هدايا وشحن (خارج المعركة) — صف سفلي مرتب ── */}
+        {!isBroadcast && streaming && !ended && user && !battleActive && (
+          <div className="absolute inset-x-0 z-30 flex items-center justify-center gap-2 px-3" style={{ bottom: "8px" }}>
+            <button
+              onClick={() => { setShowGiftPanel(p => !p); setShowShare(false); setShowRechargeModal(false); }}
+              className="h-10 px-5 rounded-full bg-gradient-to-r from-amber-500 to-yellow-500 flex items-center gap-1.5 text-white font-bold text-xs shadow-lg shadow-amber-900/40 active:scale-95 transition-transform"
+              data-testid="btn-gift-panel-bottom"
+            >
+              <Gift className="w-4 h-4" />
+              هدية
+              <span className="bg-black/30 rounded-full px-1.5 text-[10px]">{myCoins}</span>
+            </button>
+            <button
+              onClick={() => { setShowRechargeModal(true); setShowGiftPanel(false); setShowShare(false); }}
+              className="h-10 px-5 rounded-full bg-black/60 backdrop-blur border border-amber-400/40 flex items-center gap-1.5 text-amber-300 font-bold text-xs shadow-lg active:scale-95 transition-transform"
+              data-testid="btn-recharge-coins-bottom"
+            >
+              🪙 شحن
+            </button>
+          </div>
+        )}
+
         {/* VIEWER ACTIONS */}
         {!isBroadcast && streaming && !ended && (
           <div className="absolute end-3 z-10 flex flex-col items-center gap-4" style={{ bottom: "88px" }}>
@@ -1712,34 +1806,21 @@ export default function LiveStream() {
               </div>
             </button>
 
+            {/* COMMENT BUTTON — يوجّه لخانة التعليق */}
+            <button onClick={() => chatInputRef.current?.focus()} className="flex flex-col items-center gap-0.5" data-testid="btn-focus-comment">
+              <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-black/60 backdrop-blur">
+                <MessageCircle className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-white text-[10px] font-bold drop-shadow">تعليق</span>
+            </button>
+
             {/* SHARE BUTTON */}
             <button onClick={() => { setShowShare(true); setShowGiftPanel(false); }} className="flex flex-col items-center gap-0.5" data-testid="btn-share-stream">
-              <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-blue-600/80 backdrop-blur">
+              <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-black/60 backdrop-blur">
                 <Share2 className="w-6 h-6 text-white" />
               </div>
               <span className="text-white text-[10px] font-bold drop-shadow">مشاركة</span>
             </button>
-
-            {/* GIFT BUTTON */}
-            {user && (
-              <button onClick={() => { setShowGiftPanel(p => !p); setShowShare(false); setShowRechargeModal(false); }} className="flex flex-col items-center gap-0.5" data-testid="btn-gift-panel">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-yellow-500/80 backdrop-blur relative">
-                  <Gift className="w-6 h-6 text-white" />
-                  <span className="absolute -top-1 -end-1 bg-black/70 text-white text-[9px] font-bold rounded-full px-1">{myCoins}</span>
-                </div>
-                <span className="text-white text-[10px] font-bold drop-shadow">هدية</span>
-              </button>
-            )}
-
-            {/* COIN RECHARGE BUTTON */}
-            {user && (
-              <button onClick={() => { setShowRechargeModal(true); setShowGiftPanel(false); setShowShare(false); }} className="flex flex-col items-center gap-0.5" data-testid="btn-recharge-coins">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg bg-amber-600/80 backdrop-blur">
-                  <span className="text-xl">🪙</span>
-                </div>
-                <span className="text-white text-[10px] font-bold drop-shadow">شحن</span>
-              </button>
-            )}
 
             {/* RAISE HAND BUTTON */}
             {user && coHostStatus === "idle" && !handRaised && !handInvited && (
@@ -2020,6 +2101,28 @@ export default function LiveStream() {
                 })()}
               </div>
             </div>
+
+            {/* ── هدايا وشحن — تحت الجولة مباشرة ── */}
+            {!isBroadcast && user && (
+              <div className="absolute inset-x-0 z-40 flex items-center justify-center gap-2" style={{ top: "76px" }}>
+                <button
+                  onClick={() => { setShowGiftPanel(p => !p); setShowShare(false); setShowRechargeModal(false); }}
+                  className="h-9 px-4 rounded-full bg-gradient-to-r from-amber-500 to-yellow-500 flex items-center gap-1.5 text-white font-bold text-xs shadow-lg shadow-amber-900/40 active:scale-95 transition-transform"
+                  data-testid="btn-gift-panel"
+                >
+                  <Gift className="w-4 h-4" />
+                  هدية
+                  <span className="bg-black/30 rounded-full px-1.5 text-[10px]">{myCoins}</span>
+                </button>
+                <button
+                  onClick={() => { setShowRechargeModal(true); setShowGiftPanel(false); setShowShare(false); }}
+                  className="h-9 px-4 rounded-full bg-black/60 backdrop-blur border border-amber-400/40 flex items-center gap-1.5 text-amber-300 font-bold text-xs shadow-lg active:scale-95 transition-transform"
+                  data-testid="btn-recharge-coins"
+                >
+                  🪙 شحن
+                </button>
+              </div>
+            )}
 
             {/* Winner announcement */}
             {battleWinner && (
@@ -2464,19 +2567,6 @@ export default function LiveStream() {
             >
               <Tv2 className="w-5 h-5 text-white" />
             </button>
-            {/* Battle button — always visible, disabled hint if no guests */}
-            <button
-              onClick={() => setShowBattleSetup(true)}
-              data-testid="btn-start-battle"
-              className={`h-12 px-3 rounded-full flex items-center gap-1.5 text-white font-bold text-xs shadow-xl border transition-all ${
-                activeCoHosts.length > 0
-                  ? "bg-gradient-to-r from-orange-500 to-pink-600 border-orange-400/30"
-                  : "bg-black/60 border-white/20 opacity-70"
-              }`}
-            >
-              <Swords className="w-4 h-4" />
-              تحدي
-            </button>
             <button
               onClick={endStream}
               data-testid="btn-end-stream"
@@ -2506,36 +2596,22 @@ export default function LiveStream() {
               <UserIcon className="w-3.5 h-3.5" />
               فردي
             </button>
+            {/* ── زرار التحدي الذكي الوحيد — يفتح قائمة التحدي الكاملة ── */}
             <button
               onClick={() => {
+                if (battleRunning) { toast({ title: "المعركة شغالة بالفعل ⚔️", description: "أنهِها أولاً من زرار الإنهاء" }); return; }
                 setSalonMode(false);
-                if (activeCoHosts.length > 0) startBattle("1v1");
-                else setShowBattleSetup(true);
+                setShowBattleSetup(true);
               }}
-              className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 ${
-                battleActive && battleMode === "1v1"
+              className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 ${
+                battleActive
                   ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white shadow-lg shadow-orange-900/40"
                   : "bg-black/60 backdrop-blur border-white/15 text-white/70"
               }`}
-              data-testid="btn-mode-1v1"
+              data-testid="btn-start-battle"
             >
               <Swords className="w-3.5 h-3.5" />
-              تحدي 1v1
-            </button>
-            <button
-              onClick={() => {
-                if (activeCoHosts.length >= 2) { setSalonMode(false); startBattle("2v2"); }
-                else toast({ title: "تحتاج ضيفين على الأقل لتحدي 2v2", description: "اقبل طلبات المشاركة أولاً", variant: "destructive" });
-              }}
-              className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 ${
-                battleActive && battleMode === "2v2"
-                  ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white shadow-lg shadow-orange-900/40"
-                  : "bg-black/60 backdrop-blur border-white/15 text-white/70"
-              }`}
-              data-testid="btn-mode-2v2"
-            >
-              <Swords className="w-3.5 h-3.5" />
-              تحدي 2v2
+              تحدي ⚔️
             </button>
             <button
               onClick={() => {
@@ -3359,23 +3435,89 @@ export default function LiveStream() {
               </button>
             </div>
 
-            {/* ── تحدي بث مباشر آخر (لو مفيش ضيوف) ── */}
-            {activeCoHosts.length === 0 && (
-              <button
-                onClick={async () => {
-                  setShowBattleSetup(false);
-                  const r = await fetch("/api/streams", { credentials: "include" });
-                  const all = await r.json();
-                  setLiveStreams((all || []).filter((s: any) => s.status === "live" && String(s.id) !== String(id)));
-                  setShowChallengeList(true);
-                }}
-                className="w-full mb-4 py-4 rounded-2xl bg-gradient-to-r from-orange-500 to-pink-600 text-white font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform"
-                data-testid="btn-challenge-live"
-              >
-                <Swords className="w-5 h-5" />
-                تحدي بث مباشر آخر ⚔️
-              </button>
-            )}
+            {/* ── ابحث عن شخص وادعُه للتحدي ── */}
+            <div className="mb-4">
+              <div className="relative mb-2">
+                <Search className="absolute top-1/2 -translate-y-1/2 end-3 w-4 h-4 text-white/40 pointer-events-none" />
+                <input
+                  value={userSearchQ}
+                  onChange={e => setUserSearchQ(e.target.value)}
+                  placeholder="ابحث عن شخص لتتحداه..."
+                  className="w-full bg-white/10 border border-white/15 rounded-full h-10 text-sm text-white placeholder:text-white/40 ps-4 pe-9 outline-none focus:border-orange-400/60"
+                  data-testid="input-challenge-user-search"
+                />
+              </div>
+              {userSearching && (
+                <div className="flex items-center justify-center py-3">
+                  <Loader2 className="w-4 h-4 text-orange-400 animate-spin" />
+                </div>
+              )}
+              {!userSearching && userSearchQ.trim().length >= 2 && userSearchResults.length === 0 && (
+                <p className="text-center text-white/40 text-xs py-2">لا توجد نتائج</p>
+              )}
+              {userSearchResults.length > 0 && (
+                <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                  {userSearchResults.map((u: any) => {
+                    const name = `${u.firstName || ""} ${u.lastName || ""}`.trim() || "مستخدم";
+                    const st = inviteStatus[String(u.id)];
+                    return (
+                      <div key={u.id} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl p-2" data-testid={`row-challenge-user-${u.id}`}>
+                        <div className="w-9 h-9 rounded-full bg-zinc-700 overflow-hidden flex items-center justify-center flex-shrink-0">
+                          {u.profileImageUrl
+                            ? <img src={u.profileImageUrl} className="w-full h-full object-cover" alt={name} />
+                            : <UserIcon className="w-4 h-4 text-white/50" />}
+                        </div>
+                        <p className="flex-1 text-white text-sm font-bold truncate text-right">{name}</p>
+                        <button
+                          onClick={() => window.open(`/profile/${u.id}`, "_blank")}
+                          className="px-2.5 py-1.5 rounded-full bg-white/10 text-white/70 text-[11px] font-bold active:scale-95"
+                          data-testid={`btn-view-profile-${u.id}`}
+                        >
+                          بروفايل
+                        </button>
+                        <button
+                          disabled={st === "sent" || st === "sending"}
+                          onClick={() => {
+                            setInviteStatus(p => ({ ...p, [String(u.id)]: "sending" }));
+                            socketRef.current?.emit("challenge-user-invite", {
+                              targetUserId: String(u.id),
+                              streamId: String(id),
+                              challengerName: user?.firstName || "مذيع",
+                            });
+                          }}
+                          className={`px-3 py-1.5 rounded-full text-[11px] font-bold active:scale-95 transition-all ${
+                            st === "sent"
+                              ? "bg-green-500/20 text-green-300"
+                              : st === "offline"
+                              ? "bg-zinc-600/40 text-white/40"
+                              : "bg-gradient-to-r from-orange-500 to-pink-600 text-white"
+                          } disabled:opacity-70`}
+                          data-testid={`btn-invite-user-${u.id}`}
+                        >
+                          {st === "sent" ? "أُرسلت ✓" : st === "sending" ? "..." : st === "offline" ? "غير متصل" : "دعوة ⚔️"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ── تحدي بث مباشر آخر ── */}
+            <button
+              onClick={async () => {
+                setShowBattleSetup(false);
+                const r = await fetch("/api/streams", { credentials: "include" });
+                const all = await r.json();
+                setLiveStreams((all || []).filter((s: any) => s.status === "live" && String(s.id) !== String(id)));
+                setShowChallengeList(true);
+              }}
+              className="w-full mb-4 py-3.5 rounded-2xl bg-gradient-to-r from-orange-500 to-pink-600 text-white font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform"
+              data-testid="btn-challenge-live"
+            >
+              <Swords className="w-5 h-5" />
+              تحدي بث مباشر آخر ⚔️
+            </button>
 
             <div className="grid grid-cols-2 gap-3 mb-4">
               <button
@@ -3529,11 +3671,65 @@ export default function LiveStream() {
         </div>
       )}
 
+      {/* ── دعوة تحدي شخصية واردة (لأي مستخدم) ── */}
+      {incomingUserChallenge && user && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" dir="rtl">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative w-full max-w-xs bg-zinc-900 rounded-3xl p-6 text-center shadow-2xl border border-orange-500/30">
+            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-orange-500 to-pink-600 flex items-center justify-center mx-auto mb-4 shadow-xl shadow-orange-500/30">
+              <Swords className="w-8 h-8 text-white" />
+            </div>
+            <h3 className="text-white font-extrabold text-lg mb-1">دعوة تحدي! ⚔️</h3>
+            <p className="text-white/70 text-sm mb-1">
+              <span className="text-orange-400 font-bold">{incomingUserChallenge.challengerName}</span>
+            </p>
+            <p className="text-white/50 text-xs mb-6">يدعوك لتحدي مباشر في بثه — تقبل؟</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  const ch = incomingUserChallenge;
+                  socketRef.current?.emit("challenge-user-response", {
+                    accepted: true,
+                    inviteId: ch.inviteId,
+                  });
+                  setIncomingUserChallenge(null);
+                  if (String(ch.streamId) !== String(id)) {
+                    sessionStorage.setItem("autoJoinBattle", String(ch.streamId));
+                    setLocation(`/streams/${ch.streamId}`);
+                  } else {
+                    requestCoHost();
+                  }
+                  toast({ title: "✅ قبلت الدعوة!", description: "جاري الانضمام للتحدي..." });
+                }}
+                className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-orange-500 to-pink-600 text-white font-bold active:scale-95 transition-transform"
+                data-testid="btn-accept-user-challenge"
+              >
+                قبول ⚔️
+              </button>
+              <button
+                onClick={() => {
+                  socketRef.current?.emit("challenge-user-response", {
+                    accepted: false,
+                    inviteId: incomingUserChallenge.inviteId,
+                  });
+                  setIncomingUserChallenge(null);
+                }}
+                className="flex-1 py-3 rounded-2xl bg-white/10 text-white/60 font-bold active:scale-95 transition-transform"
+                data-testid="btn-reject-user-challenge"
+              >
+                رفض
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CHAT INPUT BAR */}
       <div className="flex-shrink-0 bg-zinc-900/95 border-t border-white/10 pb-safe">
         {user ? (
           <div className="flex items-center gap-2 px-3 py-2">
             <Input
+              ref={chatInputRef}
               value={chatInput}
               onChange={e => setChatInput(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}

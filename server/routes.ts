@@ -334,6 +334,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
+  // دعوات التحدي الشخصية المعلّقة — inviteId → بيانات الدعوة (تنتهي بعد 90 ثانية)
+  const pendingUserChallenges = new Map<string, { challengerSocketId: string; streamId: string; targetUserId: string; expiresAt: number }>();
+
   const streamRooms: Map<string, {
     broadcasterId: string | null;
     cohostIds: string[];
@@ -960,6 +963,58 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         challengerStreamId: data.challengerStreamId,
         challengerSocketId: socket.id,
         challengerName: data.challengerName,
+      });
+    });
+
+    /* ── دعوة تحدي لمستخدم محدد (من قائمة البحث) ──
+     * المذيع يبعت دعوة لمستخدم بالـ userId؛ توصل لغرفته الخاصة user:{id}
+     * (المستخدم لازم يكون متصل بالسوكت ومنضم لغرفته) */
+    socket.on("challenge-user-invite", (data: { targetUserId: string; streamId: string; challengerName: string }) => {
+      const authUid = (socket.data as any).authUserId;
+      if (!authUid) return socket.emit("challenge-user-status", { targetUserId: data?.targetUserId, status: "not_authenticated" });
+      if (!data?.targetUserId || data.targetUserId === authUid) {
+        return socket.emit("challenge-user-status", { targetUserId: data?.targetUserId, status: "invalid_target" });
+      }
+      const room = streamRooms.get(String(data.streamId));
+      if (!room || room.broadcasterId !== socket.id) {
+        return socket.emit("challenge-user-status", { targetUserId: data.targetUserId, status: "not_broadcaster" });
+      }
+      const targetRoom = io.sockets.adapter.rooms.get(`user:${data.targetUserId}`);
+      if (!targetRoom || targetRoom.size === 0) {
+        return socket.emit("challenge-user-status", { targetUserId: data.targetUserId, status: "offline" });
+      }
+      const inviteId = randomUUID();
+      pendingUserChallenges.set(inviteId, {
+        challengerSocketId: socket.id,
+        streamId: String(data.streamId),
+        targetUserId: String(data.targetUserId),
+        expiresAt: Date.now() + 90_000,
+      });
+      setTimeout(() => pendingUserChallenges.delete(inviteId), 95_000);
+      io.to(`user:${data.targetUserId}`).emit("challenge-user-incoming", {
+        inviteId,
+        streamId: String(data.streamId),
+        challengerName: String(data.challengerName || "مذيع").slice(0, 50),
+      });
+      socket.emit("challenge-user-status", { targetUserId: data.targetUserId, status: "sent" });
+    });
+
+    socket.on("challenge-user-response", async (data: { inviteId: string; accepted: boolean }) => {
+      const authUid = (socket.data as any).authUserId;
+      if (!authUid || !data?.inviteId) return;
+      const invite = pendingUserChallenges.get(data.inviteId);
+      // الرد صالح فقط من المستخدم المدعو نفسه وقبل انتهاء الصلاحية — استهلاك ذرّي
+      if (!invite || invite.expiresAt < Date.now() || invite.targetUserId !== authUid) return;
+      pendingUserChallenges.delete(data.inviteId);
+      let responderName = "مستخدم";
+      try {
+        const rows = await db.execute(sql`SELECT first_name, last_name FROM users WHERE id = ${authUid} LIMIT 1`);
+        const u: any = rows.rows?.[0];
+        if (u) responderName = `${u.first_name || ""} ${u.last_name || ""}`.trim() || "مستخدم";
+      } catch {}
+      io.to(invite.challengerSocketId).emit("challenge-user-result", {
+        accepted: !!data.accepted,
+        responderName,
       });
     });
 
@@ -5196,6 +5251,23 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       }
       res.json({ ok: true });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ── بحث المستخدمين (لدعوات التحدي في البث) ──
+  app.get("/api/users/search", isAuthenticated, async (req: any, res) => {
+    const q = String(req.query.q || "").trim();
+    if (q.length < 2) return res.json([]);
+    try {
+      const rows = await db.execute(sql`
+        SELECT id, first_name, last_name, profile_image_url
+        FROM users
+        WHERE first_name ILIKE ${'%' + q + '%'} OR last_name ILIKE ${'%' + q + '%'} OR (first_name || ' ' || last_name) ILIKE ${'%' + q + '%'}
+        ORDER BY first_name ASC
+        LIMIT 10`);
+      res.json(rows.rows);
+    } catch (e) {
+      res.status(500).json({ message: "search_failed" });
+    }
   });
 
   app.get("/api/profile/:userId", async (req, res) => {
