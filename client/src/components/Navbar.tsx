@@ -19,7 +19,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-const ADMIN_USER_ID = "54219806";
+const ADMIN_USER_ID = "54165148";
 
 const navLinks = (user: any) => [
   { href: "/ads", label: "الإعلانات", icon: LayoutGrid },
@@ -34,7 +34,7 @@ const navLinks = (user: any) => [
     { href: "/campaigns", label: "الحملات", icon: BarChart2 },
     { href: "/revenue", label: "الإيرادات", icon: DollarSign },
     { href: "/payments", label: "المدفوعات", icon: Receipt },
-    ...(user.id === ADMIN_USER_ID ? [{ href: "/admin", label: "الإدارة", icon: ShieldCheck }] : []),
+    ...(user.isAdmin === true ? [{ href: "/admin", label: "الإدارة", icon: ShieldCheck }] : []),
   ] : []),
 ];
 
@@ -260,7 +260,7 @@ export function Navbar() {
           <LiveClock />
 
           {/* Admin Quick Broadcast */}
-          {user && (user.isAdmin === true || user.id === ADMIN_USER_ID) && <QuickBroadcastButton />}
+          {user && user.isAdmin === true && <QuickBroadcastButton />}
 
           {/* Live Stream */}
           {user && feat("feature_livestream") && (

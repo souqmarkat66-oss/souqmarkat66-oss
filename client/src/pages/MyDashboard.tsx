@@ -25,7 +25,7 @@ import {
   Tooltip, ResponsiveContainer, Legend
 } from "recharts";
 
-const ADMIN_ID = "54219806";
+const ADMIN_ID = "54165148";
 
 function pct(curr: number, prev: number) {
   if (prev === 0) return curr > 0 ? 100 : 0;

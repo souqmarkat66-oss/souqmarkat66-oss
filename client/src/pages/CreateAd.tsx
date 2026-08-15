@@ -204,8 +204,7 @@ export default function CreateAd() {
   const aiEnabled = platformSettings?.["feature_ai"] !== "0";
 
   const { user } = useAuth();
-  const ADMIN_ID = "54219806";
-  const isAdmin = (user as any)?.id === ADMIN_ID || (user as any)?.email === "souqmarkat66@gmail.com";
+  const isAdmin = (user as any)?.isAdmin === true;
 
   const { data: pricingData } = useQuery<Record<string, string>>({
     queryKey: ["/api/pricing"],

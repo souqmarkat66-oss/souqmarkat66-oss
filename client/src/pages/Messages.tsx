@@ -14,7 +14,7 @@ import { format, isToday, isYesterday } from "date-fns";
 import { ar } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 
-const ADMIN_ID = "54219806";
+const ADMIN_ID = "54165148";
 
 function VoicePlayer({ url }: { url: string }) {
   const audioRef = useRef<HTMLAudioElement>(null);

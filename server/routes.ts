@@ -37,11 +37,9 @@ function deepToCamel(obj: any): any {
   return obj;
 }
 
-// Admin user IDs (super-admins, hardcoded — cannot be removed via UI)
-const ADMIN_USER_ID  = "54219806";
-const ADMIN_EMAIL    = "souqmarkat66@gmail.com";
-const ADMIN_USER_ID2 = "54165148";
-const ADMIN_EMAIL2   = "ahmedmohmed@example.com";
+// Admin user (single super-admin, hardcoded — cannot be removed via UI)
+const ADMIN_USER_ID  = "54165148";
+const ADMIN_EMAIL    = "ahmedesmat.5151@gmail.com";
 
 // Extra admins added via the admin panel (persisted in platform_settings.extra_admin_ids)
 const _extraAdminIds = new Set<string>();
@@ -72,14 +70,12 @@ async function saveExtraAdminIds() {
 function isSuperAdmin(req: any): boolean {
   const sub   = req.user?.claims?.sub;
   const email = req.user?.claims?.email?.toLowerCase();
-  return sub === ADMIN_USER_ID  || email === ADMIN_EMAIL.toLowerCase()
-      || sub === ADMIN_USER_ID2 || email === ADMIN_EMAIL2.toLowerCase();
+  return sub === ADMIN_USER_ID || email === ADMIN_EMAIL.toLowerCase();
 }
 
 function isAdminUser(req: any): boolean {
-  if (isSuperAdmin(req)) return true;
-  const sub = req.user?.claims?.sub;
-  return !!sub && _extraAdminIds.has(String(sub));
+  // Single-admin policy: extra_admin_ids is intentionally ignored.
+  return isSuperAdmin(req);
 }
 
 async function requireAdmin(req: any, res: any, next: any) {
@@ -523,7 +519,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socket.on("request-cohost", (data: { streamId: string; userId: string; userName: string; withCamera?: boolean }) => {
       const room = streamRooms.get(data.streamId);
       if (!room?.broadcasterId) return;
-      if (room.cohostIds.length >= 3) {
+      if (room.cohostIds.length >= 7) { // 8-seat salon: broadcaster + 7 guests
         socket.emit("cohost-rejected", { reason: "max_cohosts" });
         return;
       }
@@ -553,6 +549,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socket.on("accept-cohost", (data: { streamId: string; guestSocketId: string; guestName?: string }) => {
       const room = streamRooms.get(data.streamId);
       if (room && !room.cohostIds.includes(data.guestSocketId)) {
+        if (room.cohostIds.length >= 7) { // 8-seat salon cap
+          io.to(data.guestSocketId).emit("cohost-rejected", { reason: "max_cohosts" });
+          return;
+        }
         room.cohostIds.push(data.guestSocketId);
         if (data.guestName) room.cohostNames.set(data.guestSocketId, data.guestName);
       }
@@ -568,6 +568,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const name = typeof data === "object" ? data.name : undefined;
       const room = streamRooms.get(streamId);
       if (room && !room.cohostIds.includes(socket.id)) {
+        if (room.cohostIds.length >= 7) { // 8-seat salon cap
+          socket.emit("cohost-rejected", { reason: "max_cohosts" });
+          return;
+        }
         room.cohostIds.push(socket.id);
         if (name) room.cohostNames.set(socket.id, name);
       }
@@ -1271,11 +1275,10 @@ Sitemap: ${BASE}/sitemap-pages.xml
   // ================================================================
   // PLATFORM SETTINGS (Admin only)
   // ================================================================
-  app.get("/api/settings", async (req, res) => {
+app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     const settings = await storage.getAllSettings();
     res.json(settings);
-  });
-
+});
   // ── Admin PIN ────────────────────────────────────────────────────
   app.post("/api/admin/publish", isAuthenticated, requireAdmin, async (_req: any, res) => {
     const now = new Date().toISOString();
@@ -1683,7 +1686,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
     try {
       const { insertAdSchema } = await import("@shared/schema");
       const userId = req.user.claims.sub;
-      const isAdmin = userId === process.env.ADMIN_USER_ID;
+      const isAdmin = isAdminUser(req);
 
       // ── Listing fee: charge wallet for non-admin users ─────────────────
       const listingDurationDays = parseInt(req.body.listingDurationDays) || 7;
@@ -1877,7 +1880,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // GET /api/boost/orders — admin: list all boost orders
   app.get("/api/boost/orders", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
+    if (!isAdminUser(req)) return res.status(403).json({ message: "أدمن فقط" });
     try {
       const rows = await db.execute(sql`
         SELECT bo.*, u.first_name, u.last_name, a.title AS ad_title
@@ -1892,7 +1895,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // PATCH /api/boost/orders/:id — admin: confirm or reject
   app.patch("/api/boost/orders/:id", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
+    if (!isAdminUser(req)) return res.status(403).json({ message: "أدمن فقط" });
     const { status } = req.body; // 'confirmed' | 'rejected'
     try {
       const orderRow = await db.execute(sql`SELECT * FROM boost_orders WHERE id = ${req.params.id} LIMIT 1`);
@@ -2140,7 +2143,17 @@ Sitemap: ${BASE}/sitemap-pages.xml
   app.get("/api/streams", async (req, res) => {
     const status = req.query.status as string || 'live';
     const streams = await storage.getLiveStreams(status);
-    res.json(streams);
+    // Enrich with live room state so the lobby can classify solo / salon / PK
+    const enriched = streams.map((s: any) => {
+      const room = streamRooms.get(String(s.id));
+      return {
+        ...s,
+        coHostCount: room ? room.cohostIds.length : 0,
+        battleActive: !!(room as any)?.battle?.active,
+        battleMode: (room as any)?.battle?.mode ?? null,
+      };
+    });
+    res.json(enriched);
   });
 
   app.get("/api/streams/:id", async (req, res) => {
@@ -4710,7 +4723,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // POST /api/messages/:id/confirm-payment — admin confirms payment screenshot → activate service
   app.post("/api/messages/:id/confirm-payment", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
+    if (!isAdminUser(req)) return res.status(403).json({ message: "أدمن فقط" });
     try {
       const msgRow = await db.execute(sql`SELECT * FROM direct_messages WHERE id = ${req.params.id} LIMIT 1`);
       const msg = msgRow.rows[0] as any;
@@ -4820,7 +4833,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // GET /api/admin/payment-receipts — all payment proof screenshots with sender info
   app.get("/api/admin/payment-receipts", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
+    if (!isAdminUser(req)) return res.status(403).json({ message: "أدمن فقط" });
     try {
       const [dmRows, pnRows] = await Promise.all([
         db.execute(sql`
@@ -4950,7 +4963,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // GET /api/admin/ai-pricing — get AI pricing settings
   app.get("/api/admin/ai-pricing", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
+    if (!isAdminUser(req)) return res.status(403).json({ message: "forbidden" });
     try {
       const keys = ['ai_price_image','ai_price_video','ai_price_animation','ai_price_content','ai_price_post','ai_free_credits','ai_price_per_credit_egp','ai_referral_bonus_egp'];
       const rows = await db.execute(sql`SELECT key, value FROM platform_settings WHERE key IN (${sql.join(keys.map(k => sql`${k}`), sql`, `)})`);
@@ -4962,7 +4975,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // POST /api/admin/ai-pricing — update AI pricing settings
   app.post("/api/admin/ai-pricing", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
+    if (!isAdminUser(req)) return res.status(403).json({ message: "forbidden" });
     try {
       const { settings } = req.body;
       for (const [key, value] of Object.entries(settings)) {
@@ -5007,7 +5020,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
   });
 
   app.get("/api/admin/pricing", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
+    if (!isAdminUser(req)) return res.status(403).json({ message: "forbidden" });
     try {
       const keys = [
         'cpm_rate_egp','cpc_rate_egp','publisher_share_pct','campaign_min_budget_egp',
@@ -5028,7 +5041,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // POST /api/admin/pricing — update platform pricing settings
   app.post("/api/admin/pricing", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== process.env.ADMIN_USER_ID) return res.status(403).json({ message: "forbidden" });
+    if (!isAdminUser(req)) return res.status(403).json({ message: "forbidden" });
     try {
       const { settings } = req.body;
       const allowed = [
@@ -5418,7 +5431,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // GET /api/renewal/orders — admin: list all pending renewal orders
   app.get("/api/renewal/orders", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
+    if (!isAdminUser(req)) return res.status(403).json({ message: "أدمن فقط" });
     try {
       const rows = await db.execute(sql`
         SELECT ro.*, u.first_name, u.last_name, u.phone, a.title as ad_title
@@ -5433,7 +5446,7 @@ Sitemap: ${BASE}/sitemap-pages.xml
 
   // PATCH /api/renewal/orders/:id — admin: confirm or reject renewal
   app.patch("/api/renewal/orders/:id", isAuthenticated, async (req: any, res) => {
-    if (req.user.claims.sub !== ADMIN_USER_ID) return res.status(403).json({ message: "أدمن فقط" });
+    if (!isAdminUser(req)) return res.status(403).json({ message: "أدمن فقط" });
     const { status } = req.body;
     try {
       const orderRow = await db.execute(sql`SELECT * FROM renewal_orders WHERE id = ${req.params.id} LIMIT 1`);
@@ -6207,21 +6220,15 @@ ${reelTags}
         extraUsers = rows.rows as any[];
       }
       const hardcoded = [
-        { id: ADMIN_USER_ID,  email: ADMIN_EMAIL,  superAdmin: true },
-        { id: ADMIN_USER_ID2, email: ADMIN_EMAIL2, superAdmin: true },
+        { id: ADMIN_USER_ID, email: ADMIN_EMAIL, superAdmin: true },
       ];
       res.json({ hardcoded, extra: extraUsers });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  app.post("/api/admin/admins/add", isAuthenticated, requireAdmin, async (req: any, res) => {
-    if (!isSuperAdmin(req)) return res.status(403).json({ message: "superadmin only" });
-    const { userId } = req.body;
-    if (!userId) return res.status(400).json({ message: "userId مطلوب" });
-    if (!_extraAdminLoaded) await loadExtraAdminIds();
-    _extraAdminIds.add(String(userId));
-    await saveExtraAdminIds();
-    res.json({ success: true, adminCount: _extraAdminIds.size });
+  app.post("/api/admin/admins/add", isAuthenticated, requireAdmin, async (_req: any, res) => {
+    // Single-admin policy: adding admins is disabled.
+    res.status(403).json({ message: "إضافة أدمنات معطّلة — النظام يعمل بأدمن واحد فقط" });
   });
 
   app.post("/api/admin/admins/remove", isAuthenticated, requireAdmin, async (req: any, res) => {
@@ -6251,7 +6258,7 @@ ${reelTags}
   // Helper: check if a userId is admin (super-admins + extra admins from settings)
   function isAdminUserId(userId: string): boolean {
     if (!userId) return false;
-    return userId === ADMIN_USER_ID || userId === ADMIN_USER_ID2 || _extraAdminIds.has(String(userId));
+    return userId === ADMIN_USER_ID;
   }
 
   // Helper: stop billing for a ticker ad

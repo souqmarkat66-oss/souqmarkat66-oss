@@ -69,7 +69,7 @@ const STATUS_MAP: Record<string, { label: string; icon: any; color: string }> = 
 export default function Consultations() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const isAdmin = (user as any)?.email === "souqmarkat66@gmail.com";
+  const isAdmin = (user as any)?.isAdmin === true;
 
   const [showNew, setShowNew] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);

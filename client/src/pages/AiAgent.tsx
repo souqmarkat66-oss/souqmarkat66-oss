@@ -182,7 +182,7 @@ export default function AiAgent() {
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   if (isLoading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
-  if (!user || (user.id !== ADMIN_ID && (user as any).email !== "souqmarkat66@gmail.com")) {
+  if (!user || (user as any).isAdmin !== true) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
         <ShieldAlert className="w-12 h-12 text-red-500" />

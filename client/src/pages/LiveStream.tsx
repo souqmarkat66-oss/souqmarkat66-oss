@@ -11,6 +11,7 @@ import {
   Loader2, X, CheckCircle, XCircle,
   Share2, Gift, Megaphone, Swords, Trophy, Timer,
   Layers, Tv2, Type, ChevronDown, ChevronUp, Palette,
+  Armchair, User as UserIcon, Sparkles, Star, Package,
 } from "lucide-react";
 import { SiWhatsapp, SiFacebook, SiX, SiTelegram, SiInstagram, SiTiktok, SiSnapchat } from "react-icons/si";
 import { Button } from "@/components/ui/button";
@@ -88,6 +89,12 @@ export default function LiveStream() {
   const [battleMultiplierEndsAt, setBattleMultiplierEndsAt] = useState<number|null>(null);
   const [giftTeamChoice,  setGiftTeamChoice]  = useState<"A"|"B">("A"); // viewer's chosen side
   const [showBattleSetup, setShowBattleSetup] = useState(false);
+  // ── Salon 8-seat mode (عرض شبكة الكراسي) ──
+  const [salonMode,       setSalonMode]       = useState(false);
+  // ── Gift panel UI state (tabs / target / combo) ──
+  const [giftTab,         setGiftTab]         = useState<"popular"|"interactive"|"special"|"vip"|"inventory">("popular");
+  const [selectedGiftType, setSelectedGiftType] = useState<string>("rose");
+  const [comboMult,       setComboMult]       = useState<1|2|3>(1);
   // Cross-stream battle challenge state
   const [showChallengeList, setShowChallengeList] = useState(false);
   const [liveStreams,       setLiveStreams]    = useState<any[]>([]);
@@ -1156,27 +1163,30 @@ export default function LiveStream() {
 
   /* ─── Gift helpers ────────────────────────────────────── */
   const GIFTS = [
-    // ── رخيصة ──
-    { type: "clap",    emoji: "👏", name: "تصفيق",     coins: 5,   glow: "#ffffff" },
-    { type: "rose",    emoji: "🌹", name: "وردة",       coins: 5,   glow: "#ff6b9d" },
-    { type: "heart",   emoji: "❤️", name: "قلب",        coins: 10,  glow: "#ef4444" },
-    { type: "kiss",    emoji: "💋", name: "قبلة",       coins: 15,  glow: "#ec4899" },
-    { type: "star",    emoji: "⭐", name: "نجمة",       coins: 20,  glow: "#facc15" },
-    { type: "icecream",emoji: "🍦", name: "آيس كريم",   coins: 20,  glow: "#fbcfe8" },
-    // ── متوسطة ──
-    { type: "fire",    emoji: "🔥", name: "نار",        coins: 30,  glow: "#f97316" },
-    { type: "bomb",    emoji: "💣", name: "قنبلة",      coins: 40,  glow: "#6b7280" },
-    { type: "crown",   emoji: "👑", name: "تاج",        coins: 50,  glow: "#eab308" },
-    { type: "money",   emoji: "💰", name: "كنز",        coins: 60,  glow: "#22c55e" },
-    { type: "rocket",  emoji: "🚀", name: "صاروخ",      coins: 75,  glow: "#3b82f6" },
-    // ── غالية ──
-    { type: "diamond", emoji: "💎", name: "ألماسة",     coins: 100, glow: "#06b6d4" },
-    { type: "lion",    emoji: "🦁", name: "أسد",        coins: 150, glow: "#d97706" },
-    { type: "car",     emoji: "🏎️", name: "سيارة",      coins: 200, glow: "#dc2626" },
-    { type: "castle",  emoji: "🏰", name: "قصر",        coins: 300, glow: "#8b5cf6" },
-    { type: "ufo",     emoji: "🛸", name: "مركبة فضاء", coins: 500, glow: "#10b981" },
-    { type: "glove",   emoji: "🥊", name: "قفاز 5x",    coins: 250, glow: "#f43f5e" },
+    // ── شائعة ──
+    { type: "clap",    emoji: "👏", name: "تصفيق",     coins: 5,   glow: "#ffffff", cat: "popular" },
+    { type: "rose",    emoji: "🌹", name: "وردة",       coins: 5,   glow: "#ff6b9d", cat: "popular" },
+    { type: "heart",   emoji: "❤️", name: "قلب",        coins: 10,  glow: "#ef4444", cat: "popular" },
+    { type: "kiss",    emoji: "💋", name: "قبلة",       coins: 15,  glow: "#ec4899", cat: "popular" },
+    { type: "star",    emoji: "⭐", name: "نجمة",       coins: 20,  glow: "#facc15", cat: "popular" },
+    { type: "icecream",emoji: "🍦", name: "آيس كريم",   coins: 20,  glow: "#fbcfe8", cat: "popular" },
+    // ── تفاعلية ──
+    { type: "fire",    emoji: "🔥", name: "نار",        coins: 30,  glow: "#f97316", cat: "interactive" },
+    { type: "bomb",    emoji: "💣", name: "قنبلة",      coins: 40,  glow: "#6b7280", cat: "interactive" },
+    { type: "rocket",  emoji: "🚀", name: "صاروخ",      coins: 75,  glow: "#3b82f6", cat: "interactive" },
+    { type: "glove",   emoji: "🥊", name: "قفاز 5x",    coins: 250, glow: "#f43f5e", cat: "interactive" },
+    // ── خاصة ──
+    { type: "crown",   emoji: "👑", name: "تاج",        coins: 50,  glow: "#eab308", cat: "special" },
+    { type: "money",   emoji: "💰", name: "كنز",        coins: 60,  glow: "#22c55e", cat: "special" },
+    { type: "diamond", emoji: "💎", name: "ألماسة",     coins: 100, glow: "#06b6d4", cat: "special" },
+    { type: "lion",    emoji: "🦁", name: "أسد",        coins: 150, glow: "#d97706", cat: "special" },
+    // ── VIP ──
+    { type: "car",     emoji: "🏎️", name: "سيارة",      coins: 200, glow: "#dc2626", cat: "vip" },
+    { type: "castle",  emoji: "🏰", name: "قصر",        coins: 300, glow: "#8b5cf6", cat: "vip" },
+    { type: "ufo",     emoji: "🛸", name: "مركبة فضاء", coins: 500, glow: "#10b981", cat: "vip" },
   ];
+  const selectedGift = GIFTS.find(g => g.type === selectedGiftType) || GIFTS[1];
+  const giftTabGifts = GIFTS.filter(g => g.cat === giftTab);
 
   const sendGift = (gift: typeof GIFTS[0]) => {
     if (!user) return;
@@ -1194,6 +1204,18 @@ export default function LiveStream() {
     });
     // Sync wallet from server after a short delay
     setTimeout(() => refetchWallet(), 1500);
+  };
+
+  /* إرسال كومبو — تكرار الإرسال حسب المضاعف المختار (x1/x2/x3) */
+  const sendGiftCombo = (gift: typeof GIFTS[0], times: number) => {
+    if (!user) return;
+    if (myCoins < gift.coins * times) {
+      toast({ title: "رصيدك غير كافٍ للكومبو", description: `تحتاج ${gift.coins * times} عملة — رصيدك ${myCoins}`, variant: "destructive" });
+      return;
+    }
+    for (let i = 0; i < times; i++) {
+      setTimeout(() => sendGift(gift), i * 280);
+    }
   };
 
   /* ─── Share helpers ───────────────────────────────────── */
@@ -1909,52 +1931,71 @@ export default function LiveStream() {
         {/* ══════════ BATTLE MODE — split-screen layout ══════════ */}
         {battleActive && activeCoHosts.length > 0 && (
           <>
-            {/* Score bar */}
-            <div className="absolute top-0 inset-x-0 z-40 bg-black/80 backdrop-blur-md px-4 py-2">
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-1">
-                  <span className="text-white font-extrabold text-sm">
-                    {battleMode === "1v1" ? "المذيع 🔴" : "الفريق أ 🔴"}
+            {/* Score bar — سكور منفصل للطرفين + مؤقت + شريط تفوق */}
+            <div className="absolute top-0 inset-x-0 z-40 bg-black/80 backdrop-blur-md px-3 pt-2 pb-2.5">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                {/* Team A */}
+                <div className="flex flex-col items-start">
+                  <span className="text-white font-extrabold text-xs flex items-center gap-1">
+                    <Swords className="w-3 h-3 text-red-400" />
+                    {battleMode === "1v1" ? "المذيع" : "الفريق أ"}
                   </span>
-                  <span className="text-yellow-400 font-bold text-sm">{battleScoreA} 🪙</span>
+                  <span className="text-lg font-black leading-none mt-0.5 text-transparent bg-clip-text bg-gradient-to-l from-orange-400 to-red-400" data-testid="text-battle-score-a">
+                    {battleScoreA.toLocaleString()}
+                  </span>
                 </div>
+                {/* Center: timer + multiplier */}
                 <div className="flex flex-col items-center">
-                  <div className="flex items-center gap-1 text-white/80 text-xs font-bold">
+                  <div className={`flex items-center gap-1 text-xs font-black rounded-full px-3 py-1 border ${battleSecs <= 30 && battleRunning ? "text-red-300 border-red-500/60 bg-red-500/15 animate-pulse" : "text-white border-white/20 bg-white/5"}`} data-testid="text-battle-timer">
                     <Timer className="w-3 h-3" />
                     {fmtTimer(battleSecs)}
                   </div>
                   {battleMultiplier > 1 && battleMultiplierEndsAt && battleMultiplierEndsAt > Date.now() && (
-                    <span className="battle-multiplier-badge text-[11px] font-black text-yellow-100">
-                      ⚡ {battleMultiplier}x سكور
-                    </span>
-                  )}
-                  {battleWinner && (
-                    <span className={`text-xs font-extrabold ${battleWinner === "draw" ? "text-yellow-400" : "text-green-400"}`}>
-                      {battleWinner === "A" ? "🏆 الفريق أ فاز!" : battleWinner === "B" ? "🏆 الفريق ب فاز!" : "🤝 تعادل!"}
+                    <span className="battle-multiplier-badge text-[10px] font-black text-yellow-100 mt-0.5">
+                      {battleMultiplier}x سكور
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-yellow-400 font-bold text-sm">{battleScoreB} 🪙</span>
-                  <span className="text-white font-extrabold text-sm">
-                    {battleMode === "1v1" ? "الضيف 🔵" : "الفريق ب 🔵"}
+                {/* Team B */}
+                <div className="flex flex-col items-end">
+                  <span className="text-white font-extrabold text-xs flex items-center gap-1">
+                    {battleMode === "1v1" ? "الضيف" : "الفريق ب"}
+                    <Swords className="w-3 h-3 text-blue-400" />
+                  </span>
+                  <span className="text-lg font-black leading-none mt-0.5 text-transparent bg-clip-text bg-gradient-to-l from-blue-400 to-violet-400" data-testid="text-battle-score-b">
+                    {battleScoreB.toLocaleString()}
                   </span>
                 </div>
               </div>
-              {/* Score progress bar */}
-              <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden flex">
+              {/* Domination bar */}
+              <div className="w-full h-2.5 rounded-full bg-white/10 overflow-hidden flex" dir="rtl">
                 {(() => {
                   const total = battleScoreA + battleScoreB || 1;
-                  const pctA = Math.round((battleScoreA / total) * 100);
+                  const pctA = Math.max(6, Math.min(94, Math.round((battleScoreA / total) * 100)));
                   return (
                     <>
-                      <div className="h-full bg-red-500 transition-all duration-500" style={{ width: `${pctA}%` }} />
-                      <div className="h-full bg-blue-500 transition-all duration-500 flex-1" />
+                      <div className="h-full pk-shimmer transition-all duration-500" style={{ width: `${pctA}%`, background: "linear-gradient(270deg,#f97316,#ef4444)" }} />
+                      <div className="h-full flex-1 transition-all duration-500" style={{ background: "linear-gradient(90deg,#3b82f6,#8b5cf6)" }} />
                     </>
                   );
                 })()}
               </div>
             </div>
+
+            {/* Winner announcement */}
+            {battleWinner && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
+                <div className="winner-pop flex flex-col items-center gap-2 bg-black/80 backdrop-blur-lg border border-yellow-500/40 rounded-3xl px-8 py-6 shadow-2xl" data-testid="overlay-battle-winner">
+                  <Trophy className={`w-12 h-12 ${battleWinner === "draw" ? "text-yellow-400" : battleWinner === "A" ? "text-orange-400" : "text-blue-400"}`} />
+                  <p className="text-white font-black text-xl">
+                    {battleWinner === "draw" ? "تعادل!" : battleWinner === "A" ? (battleMode === "1v1" ? "المذيع فاز!" : "الفريق أ فاز!") : (battleMode === "1v1" ? "الضيف فاز!" : "الفريق ب فاز!")}
+                  </p>
+                  <p className="text-yellow-300 font-bold text-sm" dir="ltr">
+                    {battleScoreA.toLocaleString()} — {battleScoreB.toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Battle split-screen — Team A (broadcaster) left | Team B (guests) right */}
             <div className="absolute inset-0 flex z-5 mt-12">
@@ -2021,7 +2062,7 @@ export default function LiveStream() {
         )}
 
         {/* ══════════ NORMAL MODE — horizontal co-host row ══════════ */}
-        {isBroadcast && activeCoHosts.length > 0 && !battleActive && (
+        {isBroadcast && activeCoHosts.length > 0 && !battleActive && !salonMode && (
           <>
             {/* When a co-host is swapped to full-screen */}
             {swappedCohostId && (
@@ -2404,6 +2445,150 @@ export default function LiveStream() {
             </button>
           </div>
         )}
+
+        {/* ══ BROADCASTER MODE BAR — فردي / تحدي 1v1 / تحدي 2v2 / صالون 8 ══ */}
+        {isBroadcast && streaming && broadcastMode === "webrtc" && (
+          <div className="absolute inset-x-0 z-30 flex items-center justify-center gap-1.5 px-3" style={{ bottom: "8px" }} dir="rtl">
+            <button
+              onClick={() => {
+                setSalonMode(false);
+                if (battleRunning) endBattle();
+              }}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 ${
+                !battleActive && !salonMode
+                  ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white shadow-lg shadow-orange-900/40"
+                  : "bg-black/60 backdrop-blur border-white/15 text-white/70"
+              }`}
+              data-testid="btn-mode-solo"
+            >
+              <UserIcon className="w-3.5 h-3.5" />
+              فردي
+            </button>
+            <button
+              onClick={() => {
+                setSalonMode(false);
+                if (activeCoHosts.length > 0) startBattle("1v1");
+                else setShowBattleSetup(true);
+              }}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 ${
+                battleActive && battleMode === "1v1"
+                  ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white shadow-lg shadow-orange-900/40"
+                  : "bg-black/60 backdrop-blur border-white/15 text-white/70"
+              }`}
+              data-testid="btn-mode-1v1"
+            >
+              <Swords className="w-3.5 h-3.5" />
+              تحدي 1v1
+            </button>
+            <button
+              onClick={() => {
+                if (activeCoHosts.length >= 2) { setSalonMode(false); startBattle("2v2"); }
+                else toast({ title: "تحتاج ضيفين على الأقل لتحدي 2v2", description: "اقبل طلبات المشاركة أولاً", variant: "destructive" });
+              }}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 ${
+                battleActive && battleMode === "2v2"
+                  ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white shadow-lg shadow-orange-900/40"
+                  : "bg-black/60 backdrop-blur border-white/15 text-white/70"
+              }`}
+              data-testid="btn-mode-2v2"
+            >
+              <Swords className="w-3.5 h-3.5" />
+              تحدي 2v2
+            </button>
+            <button
+              onClick={() => {
+                if (battleRunning) { toast({ title: "أنهِ المعركة أولاً", variant: "destructive" }); return; }
+                setSalonMode(s => !s);
+                if (!salonMode && !autoAccept) toggleAutoAccept();
+              }}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 ${
+                salonMode && !battleActive
+                  ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white shadow-lg shadow-orange-900/40"
+                  : "bg-black/60 backdrop-blur border-white/15 text-white/70"
+              }`}
+              data-testid="btn-mode-salon"
+            >
+              <Armchair className="w-3.5 h-3.5" />
+              صالون 8
+            </button>
+          </div>
+        )}
+
+        {/* ══ SALON 8-SEAT GRID (broadcaster) ══ */}
+        {isBroadcast && salonMode && !battleActive && streaming && (
+          <div className="absolute inset-0 z-20 bg-zinc-950/97 pt-16 pb-12 px-2" data-testid="salon-grid" dir="rtl">
+            <div className="grid grid-cols-2 grid-rows-4 gap-1.5 h-full">
+              {Array.from({ length: 8 }).map((_, i) => {
+                if (i === 0) {
+                  return (
+                    <div key="self" className="relative rounded-2xl overflow-hidden border-2 border-orange-500/60 shadow-lg shadow-orange-900/30">
+                      <video
+                        autoPlay playsInline muted
+                        ref={el => { if (el && localStream.current && !el.srcObject) { el.srcObject = localStream.current; el.play().catch(() => {}); } }}
+                        className="w-full h-full object-cover"
+                        style={{ transform: camFacing === "user" ? "scaleX(-1)" : "none" }}
+                      />
+                      <div className="absolute bottom-1 inset-x-0 flex justify-center">
+                        <span className="text-[9px] text-white bg-gradient-to-l from-red-600 to-orange-500 rounded-full px-2 py-0.5 font-bold">المذيع</span>
+                      </div>
+                    </div>
+                  );
+                }
+                const ch = activeCoHosts[i - 1];
+                if (ch) {
+                  return (
+                    <div key={ch.socketId} className="relative rounded-2xl overflow-hidden border border-white/15 bg-zinc-900">
+                      <audio autoPlay ref={el => { if (el) { const ms = coHostStreams.current.get(ch.socketId); if (ms && !ch.hasCamera && !el.srcObject) { el.srcObject = ms; el.play().catch(() => {}); } } }} style={{ display: "none" }} />
+                      {ch.hasCamera !== false ? (
+                        <video
+                          autoPlay playsInline
+                          ref={el => { if (el) { coHostVideoRefs.current.set(ch.socketId, el); const ms = coHostStreams.current.get(ch.socketId); if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(() => {}); } } }}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center gap-1.5">
+                          <div className="w-10 h-10 rounded-full bg-orange-500/15 flex items-center justify-center">
+                            <Mic className="w-4 h-4 text-orange-300" />
+                          </div>
+                          <span className="text-[9px] text-orange-300 font-bold">صوت فقط</span>
+                        </div>
+                      )}
+                      <div className="absolute bottom-1 inset-x-0 flex justify-center pointer-events-none">
+                        <span className="text-[9px] text-white bg-black/60 rounded-full px-2 py-0.5 font-bold truncate max-w-[90%]">{ch.name}</span>
+                      </div>
+                      <button
+                        onClick={() => endCoHostFromBroadcaster(ch.socketId)}
+                        className="absolute top-1 end-1 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center shadow"
+                        data-testid={`btn-salon-remove-${i}`}
+                      ><X className="w-2.5 h-2.5 text-white" /></button>
+                      <button
+                        onClick={() => toggleMuteCohost(ch.socketId)}
+                        className={`absolute top-1 start-1 w-5 h-5 rounded-full flex items-center justify-center shadow ${mutedCohosts.has(ch.socketId) ? "bg-red-500" : "bg-black/60"}`}
+                        data-testid={`btn-salon-mute-${i}`}
+                      >
+                        {mutedCohosts.has(ch.socketId) ? <MicOff className="w-2.5 h-2.5 text-white" /> : <Mic className="w-2.5 h-2.5 text-white" />}
+                      </button>
+                    </div>
+                  );
+                }
+                return (
+                  <button
+                    key={`empty-${i}`}
+                    onClick={() => {
+                      setShowShare(true);
+                      toast({ title: "مقعد فارغ", description: "شارك رابط البث — كل من يطلب المشاركة سينضم للمقعد" });
+                    }}
+                    className="seat-empty relative rounded-2xl border-2 border-dashed border-orange-500/25 bg-black/40 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform"
+                    data-testid={`btn-salon-seat-${i}`}
+                  >
+                    <Armchair className="w-6 h-6 text-orange-400/50" />
+                    <span className="text-[9px] text-white/40 font-bold">مقعد {i + 1} — فارغ</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ══ VIRTUAL BACKGROUND PANEL ══ */}
@@ -2659,29 +2844,49 @@ export default function LiveStream() {
                   </div>
                 </div>
 
-                {/* Packages grid */}
-                <p className="text-white/50 text-xs font-bold mb-2">أو اشتري باقة بالدفع المباشر</p>
-                <div className="grid grid-cols-2 gap-2 mb-4">
-                  {(coinPackages || [
-                    { id:1, name:"باقة صغيرة",  coins:100,  price_egp:10,  bonus_coins:0   },
-                    { id:2, name:"باقة متوسطة", coins:250,  price_egp:22,  bonus_coins:20  },
-                    { id:3, name:"باقة كبيرة",  coins:500,  price_egp:40,  bonus_coins:75  },
-                    { id:4, name:"باقة مميزة",  coins:1000, price_egp:70,  bonus_coins:200 },
-                    { id:5, name:"باقة الكنز",  coins:3000, price_egp:180, bonus_coins:800 },
-                  ]).map((pkg: any) => (
+                {/* Packages grid — باقات الشحن الفوري */}
+                <p className="text-white/50 text-xs font-bold mb-2">اختر باقة الشحن المناسبة للشحن المباشر والفوري بحسابك:</p>
+                <div className="grid grid-cols-3 gap-2 mb-4">
+                  {(coinPackages && coinPackages.length > 0 ? coinPackages : [
+                    { id:1, name:"باقة البداية",     coins:100,   price_egp:10,   bonus_coins:0,    bonus_label:"+0% بونص" },
+                    { id:2, name:"باقة إضافية",      coins:500,   price_egp:50,   bonus_coins:25,   bonus_label:"+5% إضافي" },
+                    { id:3, name:"باقة VIP",         coins:1200,  price_egp:100,  bonus_coins:240,  bonus_label:"+20% بونص VIP" },
+                    { id:4, name:"باقة VIP بلس",     coins:3000,  price_egp:250,  bonus_coins:750,  bonus_label:"+25% بونص VIP" },
+                    { id:5, name:"باقة الداعم الذهبي", coins:6500, price_egp:500,  bonus_coins:1950, bonus_label:"+30% باقة الداعم الذهبي" },
+                    { id:6, name:"باقة الحوت",       coins:15000, price_egp:1000, bonus_coins:7500, bonus_label:"+50% باقة الحوت" },
+                  ]).map((pkg: any, idx: number) => (
                     <button key={pkg.id}
-                      className="bg-gradient-to-b from-yellow-500/20 to-yellow-600/10 border border-yellow-500/30 rounded-2xl p-3 text-right hover:from-yellow-500/30 active:scale-95 transition-all"
+                      className={`relative rounded-2xl p-2.5 text-center border transition-all active:scale-95 ${
+                        idx === 1
+                          ? "bg-gradient-to-b from-orange-500/25 to-red-600/10 border-orange-400/60 shadow-lg shadow-orange-900/30"
+                          : "bg-gradient-to-b from-yellow-500/15 to-yellow-600/5 border-yellow-500/25 hover:border-yellow-400/50"
+                      }`}
                       data-testid={`btn-buy-package-${pkg.id}`}
                       onClick={() => { setSelectedPkg(pkg); setPurchaseStep("pay"); setPayRef(""); }}
                     >
-                      <div className="text-2xl mb-0.5">🪙</div>
-                      <p className="text-yellow-400 font-bold text-sm">{(pkg.coins + (pkg.bonus_coins || 0)).toLocaleString()} عملة</p>
-                      {pkg.bonus_coins > 0 && <p className="text-green-400 text-[10px]">+{pkg.bonus_coins} مجاناً</p>}
-                      <p className="text-white font-bold text-base mt-1">{pkg.price_egp} ج.م</p>
+                      {idx === 1 && (
+                        <span className="absolute -top-2 right-1/2 translate-x-1/2 bg-gradient-to-l from-red-600 to-orange-500 text-white text-[8px] font-black px-2 py-0.5 rounded-full whitespace-nowrap">الأكثر شيوعاً</span>
+                      )}
+                      <p className="text-yellow-400 font-black text-base leading-none">{pkg.coins.toLocaleString()}</p>
+                      <p className="text-green-400 text-[9px] font-bold mt-1 leading-tight">{pkg.bonus_label || (pkg.bonus_coins > 0 ? `+${pkg.bonus_coins} بونص` : "بدون بونص")}</p>
+                      <p className="text-white font-bold text-xs mt-1.5">{pkg.price_egp} ج.م</p>
+                      <span className="mt-1.5 inline-block w-full py-1 rounded-full bg-gradient-to-l from-red-600 to-orange-500 text-white text-[9px] font-black">
+                        اشحن الآن +
+                      </span>
                     </button>
                   ))}
                 </div>
-                <p className="text-white/20 text-[10px] text-center">المدفوع لا يُسترد • للمساعدة تواصل معنا</p>
+                <button
+                  onClick={() => { setSelectedPkg({ id: 0, name: "شحن مخصص", coins: 0, price_egp: 0, bonus_coins: 0 }); setPurchaseStep("pay"); setPayRef(""); }}
+                  className="w-full mb-3 py-2.5 rounded-2xl bg-teal-500/15 border border-teal-500/40 text-teal-300 text-xs font-bold active:scale-[0.98] transition-transform"
+                  data-testid="btn-transfer-details"
+                >
+                  تريد الدفع عبر اتصالات كاش أو فودافون كاش أو انستاباي؟ — تفاصيل التحويل
+                </button>
+                <p className="text-white/25 text-[10px] text-center flex items-center justify-center gap-1">
+                  <CheckCircle className="w-3 h-3 text-green-500" />
+                  شحن محلي وآمن وموثّق 100% عبر بوابات سوق ماركات الرسمية
+                </p>
               </>
             )}
 
@@ -2701,22 +2906,21 @@ export default function LiveStream() {
                 </div>
 
                 {/* Payment method selector */}
-                <p className="text-white/60 text-xs font-bold mb-2">اختر طريقة الدفع</p>
+                <p className="text-white/60 text-xs font-bold mb-2">اختر محفظتك المفضلة وانسخ الرقم للتحويل، أو استخدم تطبيق سوق ماركات:</p>
                 <div className="grid grid-cols-2 gap-2 mb-4">
                   {[
-                    { key: "vodafone",  label: "فودافون كاش",   sub: "01126665741",  emoji: "📱", color: "border-red-500/50 bg-red-500/10" },
-                    { key: "vodafone2", label: "فودافون كاش",   sub: "01098553911",  emoji: "📱", color: "border-red-400/50 bg-red-400/10" },
-                    { key: "instapay",  label: "إنستاباي",       sub: "01285558567",  emoji: "💳", color: "border-blue-500/50 bg-blue-500/10" },
-                    { key: "bank",      label: "تحويل بنكي",     sub: "البنك الأهلي", emoji: "🏦", color: "border-green-500/50 bg-green-500/10" },
+                    { key: "bank",      label: "تطبيق سوق ماركات", sub: "Souq Markets App", Icon: Radio,   color: "border-orange-500/60 bg-orange-500/10" },
+                    { key: "vodafone",  label: "اتصالات كاش",       sub: "01126665741",      Icon: Copy,    color: "border-green-500/60 bg-green-500/10" },
+                    { key: "vodafone2", label: "فودافون كاش",       sub: "01098553911",      Icon: Copy,    color: "border-red-500/60 bg-red-500/10" },
+                    { key: "instapay",  label: "انستا باي",         sub: "01285558567",      Icon: Copy,    color: "border-violet-500/60 bg-violet-500/10" },
                   ].map(m => (
                     <button key={m.key}
                       onClick={() => setPayMethod(m.key as any)}
-                      className={`rounded-2xl p-2.5 border-2 transition-all text-center ${payMethod === m.key ? m.color + " border-opacity-100" : "border-white/10 bg-white/5"}`}
+                      className={`rounded-2xl p-2.5 border-2 transition-all text-center active:scale-95 ${payMethod === m.key ? m.color : "border-white/10 bg-white/5"}`}
                       data-testid={`btn-paymethod-${m.key}`}
                     >
-                      <div className="text-xl mb-0.5">{m.emoji}</div>
                       <p className="text-white text-[11px] font-bold">{m.label}</p>
-                      <p className="text-white/50 text-[10px]" dir="ltr">{m.sub}</p>
+                      <p className="text-white/50 text-[10px] mt-0.5" dir="ltr">{m.sub}</p>
                     </button>
                   ))}
                 </div>
@@ -2725,31 +2929,55 @@ export default function LiveStream() {
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-4 mb-4">
                   {payMethod === "vodafone" && (
                     <>
-                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ لفودافون كاش:</p>
-                      <p className="text-white font-bold text-2xl tracking-widest" dir="ltr">01126665741</p>
-                      <p className="text-white/40 text-xs mt-1">سوق ماركات للإعلانات</p>
+                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ لمحفظة اتصالات كاش الرسمية:</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-white font-bold text-2xl tracking-widest" dir="ltr">01126665741</p>
+                        <button onClick={() => { navigator.clipboard.writeText("01126665741"); toast({ title: "تم نسخ الرقم" }); }} className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center" data-testid="btn-copy-etisalat">
+                          <Copy className="w-3.5 h-3.5 text-white" />
+                        </button>
+                      </div>
+                      <p className="text-white/40 text-xs mt-1">محفظة اتصالات كاش الرسمية — سوق ماركات للإعلانات</p>
                     </>
                   )}
                   {payMethod === "vodafone2" && (
                     <>
-                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ لفودافون كاش:</p>
-                      <p className="text-white font-bold text-2xl tracking-widest" dir="ltr">01098553911</p>
-                      <p className="text-white/40 text-xs mt-1">سوق ماركات للإعلانات</p>
+                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ لمحفظة فودافون كاش المعتمدة:</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-white font-bold text-2xl tracking-widest" dir="ltr">01098553911</p>
+                        <button onClick={() => { navigator.clipboard.writeText("01098553911"); toast({ title: "تم نسخ الرقم" }); }} className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center" data-testid="btn-copy-vodafone">
+                          <Copy className="w-3.5 h-3.5 text-white" />
+                        </button>
+                      </div>
+                      <p className="text-white/40 text-xs mt-1">محفظة فودافون كاش المعتمدة — سوق ماركات للإعلانات</p>
                     </>
                   )}
                   {payMethod === "instapay" && (
                     <>
-                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ عبر إنستاباي لـ:</p>
-                      <p className="text-white font-bold text-2xl tracking-widest" dir="ltr">01285558567</p>
+                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ عبر انستا باي (التحويل البنكي الفوري IPN):</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-white font-bold text-2xl tracking-widest" dir="ltr">01285558567</p>
+                        <button onClick={() => { navigator.clipboard.writeText("01285558567"); toast({ title: "تم نسخ الرقم" }); }} className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center" data-testid="btn-copy-instapay">
+                          <Copy className="w-3.5 h-3.5 text-white" />
+                        </button>
+                      </div>
                       <p className="text-white/40 text-xs mt-1">سوق ماركات للإعلانات</p>
                     </>
                   )}
                   {payMethod === "bank" && (
                     <>
-                      <p className="text-white/60 text-xs mb-1">حوّل المبلغ لحساب البنك التالي:</p>
-                      <p className="text-white font-bold text-sm">البنك الأهلي المصري</p>
-                      <p className="text-white text-sm" dir="ltr">1234567890123456</p>
-                      <p className="text-white/40 text-xs mt-1">باسم: سوق ماركات للإعلانات</p>
+                      <p className="text-white font-bold text-sm mb-1">تطبيق سوق ماركات — Souq Markets App</p>
+                      <p className="text-white/50 text-xs mb-2">ادفع مباشرة عبر تطبيق سوق ماركات مع دعم كامل للشراء والرعايات والشحن والتحويلات</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          { label: "Google Play — متجر بلاي" },
+                          { label: "App Store — أبل ستور" },
+                          { label: "Huawei AppGallery — متجر هواوي" },
+                        ].map(s => (
+                          <span key={s.label} className="text-white/70 text-[10px] font-bold bg-black/50 border border-white/15 rounded-full px-2.5 py-1">
+                            {s.label}
+                          </span>
+                        ))}
+                      </div>
                     </>
                   )}
                   <div className="mt-3 pt-3 border-t border-white/10">
@@ -2852,98 +3080,188 @@ export default function LiveStream() {
         </div>
       )}
 
-      {/* GIFT PANEL */}
+      {/* GIFT PANEL — تبويبات + مستهدف + كومبو */}
       {showGiftPanel && !isBroadcast && (
         <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => { setShowGiftPanel(false); if(rapidFireTimer.current){clearInterval(rapidFireTimer.current);rapidFireTimer.current=null;} }}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-          <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-safe" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <h3 className="text-white font-bold text-lg">أرسل هدية 🎁</h3>
-                <div className="flex items-center gap-2">
-                  <p className="text-white/50 text-xs">رصيدك: <span className="text-yellow-400 font-bold">{myCoins} عملة</span></p>
-                  <span className="text-[10px] bg-orange-500/20 text-orange-300 rounded-full px-2 py-0.5 border border-orange-500/30">
-                    📌 اضغط باستمرار للتكبيث السريع!
-                  </span>
-                </div>
-              </div>
-              <button onClick={() => setShowGiftPanel(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+          <div className="relative w-full max-w-lg bg-zinc-950 border-t border-orange-500/20 rounded-t-3xl p-4 pb-safe max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()} dir="rtl">
+
+            {/* Header: balance + recharge */}
+            <div className="flex items-center justify-between mb-3">
+              <button onClick={() => setShowGiftPanel(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center" data-testid="btn-close-gift-panel">
                 <X className="w-4 h-4 text-white" />
               </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setShowGiftPanel(false); setShowRechargeModal(true); }}
+                  className="souq-glow-btn text-white text-[11px] font-bold px-3 py-1.5 rounded-full active:scale-95 transition-transform"
+                  data-testid="btn-gift-recharge"
+                >
+                  شحن +
+                </button>
+                <div className="flex items-center gap-1.5 bg-black/60 border border-yellow-500/30 rounded-full px-3 py-1.5">
+                  <span className="text-white/50 text-[10px]">رصيد العملات</span>
+                  <span className="text-yellow-400 font-black text-sm" data-testid="text-gift-balance">{myCoins.toLocaleString()}</span>
+                </div>
+              </div>
             </div>
-            {/* Battle team selector (shown during battle) */}
-            {battleActive && (
-              <div className="flex gap-2 mb-3">
-                <button onClick={() => setGiftTeamChoice("A")} className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${giftTeamChoice === "A" ? "bg-red-500 text-white" : "bg-white/10 text-white/60"}`} data-testid="btn-gift-team-a">🔴 هدية للفريق أ</button>
-                <button onClick={() => setGiftTeamChoice("B")} className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${giftTeamChoice === "B" ? "bg-blue-500 text-white" : "bg-white/10 text-white/60"}`} data-testid="btn-gift-team-b">🔵 هدية للفريق ب</button>
+
+            {/* Tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto mb-3 pb-0.5" style={{ scrollbarWidth: "none" }}>
+              {([
+                { key: "popular",     label: "شائعة",    Icon: Star },
+                { key: "interactive", label: "تفاعلية",  Icon: Sparkles },
+                { key: "special",     label: "خاصة",     Icon: Gift },
+                { key: "vip",         label: "VIP",      Icon: Trophy },
+                { key: "inventory",   label: "الحقيبة",  Icon: Package },
+              ] as const).map(t => (
+                <button
+                  key={t.key}
+                  onClick={() => setGiftTab(t.key)}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap flex-shrink-0 border transition-all ${
+                    giftTab === t.key
+                      ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white"
+                      : "bg-white/5 border-white/10 text-white/60"
+                  }`}
+                  data-testid={`tab-gift-${t.key}`}
+                >
+                  <t.Icon className="w-3 h-3" />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Target selector — الهدية موجهة إلى */}
+            <p className="text-white/40 text-[10px] font-bold mb-1.5">الهدية موجهة إلى:</p>
+            <div className="flex items-center gap-1.5 overflow-x-auto mb-3" style={{ scrollbarWidth: "none" }}>
+              {battleActive ? (
+                <>
+                  <button
+                    onClick={() => setGiftTeamChoice("A")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold flex-shrink-0 border transition-all ${giftTeamChoice === "A" ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white" : "bg-white/5 border-white/10 text-white/60"}`}
+                    data-testid="btn-gift-team-a"
+                  >
+                    <Swords className="w-3 h-3" />
+                    {battleMode === "1v1" ? "المذيع (فريق أ)" : "الفريق أ"}
+                  </button>
+                  <button
+                    onClick={() => setGiftTeamChoice("B")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold flex-shrink-0 border transition-all ${giftTeamChoice === "B" ? "bg-gradient-to-l from-blue-600 to-violet-500 border-blue-400/50 text-white" : "bg-white/5 border-white/10 text-white/60"}`}
+                    data-testid="btn-gift-team-b"
+                  >
+                    <Swords className="w-3 h-3" />
+                    {battleMode === "1v1" ? "الضيف (فريق ب)" : "الفريق ب"}
+                  </button>
+                </>
+              ) : (
+                <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold flex-shrink-0 bg-gradient-to-l from-red-600 to-orange-500 text-white border border-orange-400/50" data-testid="chip-gift-target-host">
+                  <UserIcon className="w-3 h-3" />
+                  {stream?.channelName || "المذيع"}
+                </span>
+              )}
+            </div>
+
+            {/* Gifts grid */}
+            {giftTab === "inventory" ? (
+              <div className="py-10 flex flex-col items-center gap-3 text-center">
+                <div className="w-14 h-14 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+                  <Package className="w-6 h-6 text-white/30" />
+                </div>
+                <p className="text-white/50 text-sm font-bold">حقيبتك فارغة</p>
+                <p className="text-white/25 text-[11px] max-w-[220px]">الهدايا المكتسبة من الفعاليات والمكافآت ستظهر هنا</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {giftTabGifts.map(gift => {
+                  const selected = selectedGiftType === gift.type;
+                  const affordable = myCoins >= gift.coins;
+                  return (
+                    <button
+                      key={gift.type}
+                      onClick={() => setSelectedGiftType(gift.type)}
+                      className={`relative flex flex-col items-center gap-1 active:scale-95 transition-all rounded-2xl p-3 border ${
+                        selected
+                          ? "bg-gradient-to-b from-orange-500/25 to-red-600/10 border-orange-400/70 shadow-lg shadow-orange-900/30"
+                          : affordable
+                            ? "bg-white/5 border-white/10"
+                            : "bg-white/5 border-white/10 opacity-45"
+                      }`}
+                      data-testid={`btn-gift-${gift.type}`}
+                    >
+                      {selected && (
+                        <span className="absolute top-1 end-1 w-4 h-4 rounded-full bg-orange-500 flex items-center justify-center">
+                          <Check className="w-2.5 h-2.5 text-white" />
+                        </span>
+                      )}
+                      <span className="text-3xl" style={{ filter: `drop-shadow(0 0 8px ${gift.glow})` }}>{gift.emoji}</span>
+                      <span className="text-white text-[10px] font-bold">{gift.name}</span>
+                      <span className="text-yellow-400 text-[10px] font-black">{gift.coins}</span>
+                    </button>
+                  );
+                })}
               </div>
             )}
 
-            {/* ── Cheap gifts ── */}
-            <p className="text-white/40 text-[10px] font-bold mb-1.5 mt-1">هدايا اعتيادية</p>
-            <div className="grid grid-cols-4 gap-2 mb-3">
-              {GIFTS.filter(g => g.coins <= 30).map(gift => (
+            {giftTab !== "inventory" && (
+              <>
+                {/* Combo selector */}
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-white/40 text-[10px] font-bold">COMBO:</span>
+                  <div className="flex items-center gap-1.5">
+                    {([1, 2, 3] as const).map(m => (
+                      <button
+                        key={m}
+                        onClick={() => setComboMult(m)}
+                        className={`px-3.5 py-1 rounded-full text-xs font-black border transition-all ${
+                          comboMult === m
+                            ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white"
+                            : "bg-white/5 border-white/10 text-white/50"
+                        }`}
+                        data-testid={`btn-combo-x${m}`}
+                      >
+                        x{m}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Price + score summary */}
+                <div className="rounded-2xl bg-black/50 border border-white/10 px-3.5 py-2.5 mb-3 flex flex-col gap-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-white/50 text-[11px]">سعر الهدية ({selectedGift.name} x{comboMult}):</span>
+                    <span className="text-yellow-400 font-black text-sm" data-testid="text-gift-price">{(selectedGift.coins * comboMult).toLocaleString()} عملة</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-white/50 text-[11px]">نقاط السكور:</span>
+                    <span className="text-orange-400 font-black text-sm" data-testid="text-gift-score">
+                      +{(selectedGift.coins * comboMult * (battleActive ? battleMultiplier : 1)).toLocaleString()}
+                      {battleActive && battleMultiplier > 1 ? ` (${battleMultiplier}x)` : ""}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Send button — ضغطة واحدة ترسل الكومبو، الضغط المستمر = تكبيث */}
                 <button
-                  key={gift.type}
                   onPointerDown={() => {
-                    sendGift(gift);
+                    sendGiftCombo(selectedGift, comboMult);
                     rapidFireCount.current = 1;
                     rapidFireTimer.current = setInterval(() => {
                       rapidFireCount.current += 1;
-                      sendGift(gift);
-                    }, 350);
+                      sendGift(selectedGift);
+                    }, 380);
                   }}
                   onPointerUp={() => { if(rapidFireTimer.current){clearInterval(rapidFireTimer.current);rapidFireTimer.current=null;} }}
                   onPointerLeave={() => { if(rapidFireTimer.current){clearInterval(rapidFireTimer.current);rapidFireTimer.current=null;} }}
-                  className={`flex flex-col items-center gap-1 active:scale-95 transition-all rounded-2xl p-2.5 border ${myCoins >= gift.coins ? "bg-white/10 border-white/10" : "bg-red-500/5 border-red-500/20 opacity-40"}`}
-                  data-testid={`btn-gift-${gift.type}`}
-                  style={{ boxShadow: myCoins >= gift.coins ? `0 0 0 0 ${gift.glow}` : "none" }}
+                  disabled={myCoins < selectedGift.coins * comboMult}
+                  className="w-full py-3.5 rounded-2xl souq-glow-btn text-white font-black text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:animate-none"
+                  data-testid="btn-send-gift"
                 >
-                  <span className="text-2xl" style={{ filter: `drop-shadow(0 0 4px ${gift.glow})` }}>{gift.emoji}</span>
-                  <span className="text-white text-[10px] font-bold">{gift.name}</span>
-                  <span className="text-yellow-400 text-[9px]">{gift.coins}🪙</span>
+                  <Send className="w-4 h-4" />
+                  إرسال الهدية ({(selectedGift.coins * comboMult).toLocaleString()} عملة {battleActive ? (giftTeamChoice === "A" ? "— فريق أ" : "— فريق ب") : "— للمذيع"})
                 </button>
-              ))}
-            </div>
-
-            {/* ── Medium gifts ── */}
-            <p className="text-white/40 text-[10px] font-bold mb-1.5">هدايا مميزة ⭐</p>
-            <div className="grid grid-cols-4 gap-2 mb-3">
-              {GIFTS.filter(g => g.coins > 30 && g.coins <= 100).map(gift => (
-                <button
-                  key={gift.type}
-                  onPointerDown={() => {
-                    sendGift(gift);
-                    rapidFireTimer.current = setInterval(() => sendGift(gift), 600);
-                  }}
-                  onPointerUp={() => { if(rapidFireTimer.current){clearInterval(rapidFireTimer.current);rapidFireTimer.current=null;} }}
-                  onPointerLeave={() => { if(rapidFireTimer.current){clearInterval(rapidFireTimer.current);rapidFireTimer.current=null;} }}
-                  className={`flex flex-col items-center gap-1 active:scale-95 transition-all rounded-2xl p-2.5 border ${myCoins >= gift.coins ? "bg-gradient-to-b from-white/15 to-white/5 border-white/20" : "bg-red-500/5 border-red-500/20 opacity-40"}`}
-                  data-testid={`btn-gift-${gift.type}`}
-                >
-                  <span className="text-2xl" style={{ filter: `drop-shadow(0 0 6px ${gift.glow})` }}>{gift.emoji}</span>
-                  <span className="text-white text-[10px] font-bold">{gift.name}</span>
-                  <span className="text-yellow-400 text-[9px]">{gift.coins}🪙</span>
-                </button>
-              ))}
-            </div>
-
-            {/* ── Premium gifts ── */}
-            <p className="text-white/40 text-[10px] font-bold mb-1.5">هدايا فاخرة 💎</p>
-            <div className="grid grid-cols-4 gap-2">
-              {GIFTS.filter(g => g.coins > 100).map(gift => (
-                <button
-                  key={gift.type}
-                  onClick={() => sendGift(gift)}
-                  className={`flex flex-col items-center gap-1 active:scale-95 transition-all rounded-2xl p-2.5 border-2 ${myCoins >= gift.coins ? "bg-gradient-to-b from-yellow-500/20 to-yellow-600/5 border-yellow-500/30" : "bg-red-500/5 border-red-500/20 opacity-40"}`}
-                  data-testid={`btn-gift-${gift.type}`}
-                >
-                  <span className="text-2xl" style={{ filter: `drop-shadow(0 0 8px ${gift.glow}) drop-shadow(0 0 16px ${gift.glow})` }}>{gift.emoji}</span>
-                  <span className="text-white text-[10px] font-bold">{gift.name}</span>
-                  <span className="text-yellow-400 font-extrabold text-[9px]">{gift.coins}🪙</span>
-                </button>
-              ))}
-            </div>
+                <p className="text-white/25 text-[10px] text-center mt-2">اضغط باستمرار على زر الإرسال للتكبيث السريع</p>
+              </>
+            )}
           </div>
         </div>
       )}
