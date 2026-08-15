@@ -723,8 +723,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         recipientUserId = target.userId;
       }
       if (recipientUserId === authUid) {
-        // Gifting yourself would mint 60% back — disallow credit.
-        recipientUserId = undefined;
+        // ممنوع إهداء النفس تماماً — reject before any wallet debit.
+        socket.emit("gift-rejected", { reason: "self_gift" });
+        return;
       }
       data.broadcasterUserId = recipientUserId;
       try {
@@ -817,8 +818,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           await finishBattle(data.streamId, battle);
         } else if (effectiveTeam) {
           if (gift.boost === 5) {
+            // القفاز: 5x لمدة 30 ثانية — متاح في أي وقت من الجولة.
             battle.multiplier = 5;
-            battle.multiplierEndsAt = now + 15_000;
+            battle.multiplierEndsAt = now + 30_000;
           } else {
             const scoreMultiplier = battle.multiplierEndsAt && battle.multiplierEndsAt > now ? battle.multiplier : 1;
             const scoreDelta = originalGiftCoins * scoreMultiplier;
@@ -827,7 +829,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           }
           if (data.giftType === "rose") {
             battle.roseCount += 1;
-            if (battle.roseCount >= battle.nextRoseThreshold) {
+            // الدبل/التريبل: لا يتفعلان إلا بعد أول دقيقة من الجولة (بهدية وردة).
+            const afterFirstMinute = now - battle.startedAt >= 60_000;
+            if (afterFirstMinute && battle.roseCount >= battle.nextRoseThreshold) {
               const triple = battle.nextRoseThreshold === 10;
               battle.multiplier = triple ? 3 : 2;
               battle.multiplierEndsAt = now + (triple ? 25_000 : 15_000);

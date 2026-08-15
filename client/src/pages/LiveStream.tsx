@@ -430,6 +430,8 @@ export default function LiveStream() {
       } else if (data.reason === "not_in_battle") {
         setGiftTargetSocketId(null);
         toast({ title: "هذا الشخص ليس في المعركة", description: "لم يُخصم أي رصيد — اختر أحد المتبارين", variant: "destructive" });
+      } else if (data.reason === "self_gift") {
+        toast({ title: "لا يمكنك إهداء نفسك", description: "لم يُخصم أي رصيد", variant: "destructive" });
       } else if (data.reason === "not_authenticated") {
         toast({ title: "سجّل الدخول أولاً", description: "يجب تسجيل الدخول لإرسال الهدايا", variant: "destructive" });
       } else {
