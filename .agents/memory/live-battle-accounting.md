@@ -14,3 +14,4 @@ Recharge-code redemption must lock the code row, credit the wallet, record the t
 **Why:** Retrying a used or expired code must not mint repeated replacement codes or duplicate coins.
 
 **How to apply:** Preserve row locking and transaction boundaries whenever the recharge-code flow changes.
+**Socket identity:** Socket.IO shares the express-session cookie (`io.engine.use(getSession())`); `send-gift` debits `socket.data.authUserId` and credits the DB stream owner — never trust userId/broadcasterUserId from event payloads, and self-gifting mints no 60% credit.

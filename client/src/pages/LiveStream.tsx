@@ -411,11 +411,16 @@ export default function LiveStream() {
       setBattleMultiplierEndsAt(Date.now() + data.durationSeconds * 1000);
       toast({ title: `${data.multiplier}x! ⚡`, description: `مضاعف السكور — ${data.reason}` });
     });
-    socket.on("gift-rejected", (data: { reason: string; balance: number; required: number }) => {
+    socket.on("gift-rejected", (data: { reason: string; balance?: number; required?: number }) => {
       if (data.reason === "insufficient_balance") {
-        setMyCoins(data.balance);
+        if (typeof data.balance === "number") setMyCoins(data.balance);
         toast({ title: "رصيدك غير كافٍ", description: `تحتاج ${data.required} عملة`, variant: "destructive" });
+      } else {
+        toast({ title: "تعذّر إرسال الهدية", description: "حدث خطأ — لم يُخصم أي رصيد، حاول مجدداً", variant: "destructive" });
       }
+    });
+    socket.on("gift-accepted", (data: { balance: number }) => {
+      if (typeof data.balance === "number") setMyCoins(data.balance);
     });
 
     if (isBroadcast) {
@@ -1485,7 +1490,7 @@ export default function LiveStream() {
           playsInline
           muted={isBroadcast}
           data-testid="video-stream"
-          className="absolute inset-0 w-full h-full object-cover"
+          className={`absolute inset-0 w-full h-full object-cover ${isBroadcast && (salonMode || (battleActive && activeCoHosts.length > 0) || (!!swappedCohostId && activeCoHosts.length > 0)) ? "opacity-0 pointer-events-none" : ""}`}
           style={{ backgroundColor: "#000", transform: (isBroadcast && camFacing === "user") ? "scaleX(-1)" : "none" }}
         />
 
@@ -2188,7 +2193,7 @@ export default function LiveStream() {
         {flyingGifts.map(g => (
           <div
             key={g.id}
-            className="absolute bottom-40 z-30 pointer-events-none flex flex-col items-center"
+            className="absolute bottom-40 z-[60] pointer-events-none flex flex-col items-center"
             style={{ left: `${g.x}%`, animation: "giftFly 3s ease-out forwards" }}
           >
             {g.glow && g.big && (
@@ -2969,13 +2974,15 @@ export default function LiveStream() {
                       <p className="text-white/50 text-xs mb-2">ادفع مباشرة عبر تطبيق سوق ماركات مع دعم كامل للشراء والرعايات والشحن والتحويلات</p>
                       <div className="flex flex-wrap gap-1.5">
                         {[
-                          { label: "Google Play — متجر بلاي" },
-                          { label: "App Store — أبل ستور" },
-                          { label: "Huawei AppGallery — متجر هواوي" },
+                          { label: "Google Play — متجر بلاي", href: "https://play.google.com/store/apps/details?id=com.apmo.souqmarket" },
+                          { label: "App Store — أبل ستور", href: "https://apps.apple.com/eg/app/as-souqmarket/id6740153334" },
+                          { label: "Huawei AppGallery — متجر هواوي", href: "https://app.as-souqmarkat.com/?from-splash=false" },
                         ].map(s => (
-                          <span key={s.label} className="text-white/70 text-[10px] font-bold bg-black/50 border border-white/15 rounded-full px-2.5 py-1">
-                            {s.label}
-                          </span>
+                          <a key={s.label} href={s.href} target="_blank" rel="noopener noreferrer"
+                            className="text-white text-[10px] font-bold bg-orange-500/20 border border-orange-500/40 rounded-full px-2.5 py-1 hover:bg-orange-500/40 transition-colors"
+                            data-testid={`link-souq-app-${s.label.split(" ")[0]}`}>
+                            {s.label} ↗
+                          </a>
                         ))}
                       </div>
                     </>

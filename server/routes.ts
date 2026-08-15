@@ -5,7 +5,7 @@ import { walletEmitter } from "./wallet-events";
 import { Server as SocketServer } from "socket.io";
 import { storage } from "./storage";
 import { z } from "zod";
-import { setupAuth } from "./replit_integrations/auth";
+import { setupAuth, getSession } from "./replit_integrations/auth";
 import { isAuthenticated, registerCustomAuthRoutes } from "./customAuth";
 import { registerImageRoutes, openai } from "./replit_integrations/image";
 import { registerAiAgentRoutes } from "./ai-agent-routes";
@@ -311,6 +311,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     cors: { origin: "*", methods: ["GET", "POST"] },
   });
 
+  // ── Socket.IO authentication: derive identity from the same express-session
+  //    cookie the HTTP routes use. Never trust user IDs sent in event payloads.
+  io.engine.use(getSession() as any);
+  io.use((socket, next) => {
+    const sess: any = (socket.request as any).session;
+    const uid =
+      sess?.customUser?.id ??
+      sess?.passport?.user?.claims?.sub ??
+      null;
+    (socket.data as any).authUserId = uid != null ? String(uid) : null;
+    next();
+  });
+
   // ── ربط المحفظة بالـ Socket.IO — تحديث لحظي عند أي خصم ────────
   walletEmitter.on("wallet:update", (payload) => {
     io.to(`user:${payload.userId}`).emit("wallet:update", {
@@ -436,7 +449,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   io.on("connection", (socket) => {
     // ── المستخدم ينضم لغرفته الخاصة عشان يستقبل تحديثات المحفظة ──
     socket.on("join-user-room", (userId: string) => {
-      if (userId && typeof userId === "string") {
+      // Only the authenticated owner may subscribe to their wallet updates.
+      const authUid = (socket.data as any).authUserId;
+      if (userId && typeof userId === "string" && authUid && userId === authUid) {
         socket.join(`user:${userId}`);
       }
     });
@@ -643,10 +658,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socket.on("send-gift", async (data: { streamId: string; giftType: string; giftEmoji?: string; giftName?: string; giftCoins?: number; userName: string; userId: string; broadcasterUserId?: string; battleTeam?: "A" | "B" }) => {
       // Never trust price/name/emoji from the browser.
       const gift = GIFT_CATALOG[data.giftType];
-      if (!gift || !data.userId || !data.streamId) return;
+      if (!gift || !data.streamId) return;
       const originalGiftCoins = gift.coins;
       let accepted = false;
       let battleState: any = null;
+      let newSenderBalance = 0;
+      // Identity comes from the authenticated session, never from the payload.
+      const authUid = (socket.data as any).authUserId;
+      if (!authUid) {
+        socket.emit("gift-rejected", { reason: "not_authenticated" });
+        return;
+      }
+      data.userId = authUid;
+      // Recipient is the stream owner as recorded in the DB, never client-supplied.
+      try {
+        const streamRow = await storage.getLiveStream(parseInt(data.streamId));
+        data.broadcasterUserId = streamRow?.userId ? String(streamRow.userId) : undefined;
+      } catch {
+        data.broadcasterUserId = undefined;
+      }
+      if (data.broadcasterUserId === authUid) {
+        // Broadcaster gifting themselves would mint 60% back — disallow credit.
+        data.broadcasterUserId = undefined;
+      }
       try {
         const client = await pool.connect();
         try {
@@ -661,12 +695,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             socket.emit("gift-rejected", { reason: "insufficient_balance", balance, required: originalGiftCoins });
             return;
           }
-          await client.query(
+          const debitRes = await client.query(
             `UPDATE coin_wallets
              SET balance = balance - $2::int, total_spent = total_spent + $2::int, updated_at = NOW()
-             WHERE user_id = $1`,
+             WHERE user_id = $1
+             RETURNING balance`,
             [data.userId, originalGiftCoins]
           );
+          newSenderBalance = Number(debitRes.rows[0]?.balance ?? 0);
           await client.query(
             `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id, related_user_id)
              VALUES ($1, 'gift_sent', $2, $3, $4, $5)`,
@@ -708,9 +744,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
       } catch (err) {
         console.error("Gift coin transaction error:", err);
+        socket.emit("gift-rejected", { reason: "server_error" });
         return;
       }
       if (!accepted) return;
+      // Push the sender's new balance immediately (no client-side polling race).
+      socket.emit("gift-accepted", { balance: newSenderBalance, giftType: data.giftType });
 
       const room = streamRooms.get(data.streamId);
       if (room?.battle?.active) {
