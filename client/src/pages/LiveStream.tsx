@@ -88,6 +88,9 @@ export default function LiveStream() {
   const [battleMultiplier, setBattleMultiplier] = useState<1|2|3|5>(1);
   const [battleMultiplierEndsAt, setBattleMultiplierEndsAt] = useState<number|null>(null);
   const [giftTeamChoice,  setGiftTeamChoice]  = useState<"A"|"B">("A"); // viewer's chosen side
+  const [giftTargetSocketId, setGiftTargetSocketId] = useState<string|null>(null); // null = المذيع
+  // قائمة المشاركين في المعركة كما أعلنها الخادم — يراها الجميع (مذيع ومشاهدين)
+  const [battleTeams, setBattleTeams] = useState<{A:{socketId:string;name:string}[];B:{socketId:string;name:string}[]}|null>(null);
   const [showBattleSetup, setShowBattleSetup] = useState(false);
   // ── Salon 8-seat mode (عرض شبكة الكراسي) ──
   const [salonMode,       setSalonMode]       = useState(false);
@@ -383,8 +386,10 @@ export default function LiveStream() {
       multiplier: 1 | 2 | 3 | 5;
       multiplierEndsAt: number | null;
       winner: "A" | "B" | "draw" | null;
+      teams?: { A: { socketId: string; name: string }[]; B: { socketId: string; name: string }[] };
     };
     const applyBattleState = (state: BattleState) => {
+      if (state.teams) setBattleTeams(state.teams);
       setBattleMode(state.mode);
       setBattleScoreA(state.scoreA);
       setBattleScoreB(state.scoreB);
@@ -406,6 +411,10 @@ export default function LiveStream() {
         description: `النتيجة ${state.scoreA.toLocaleString()} مقابل ${state.scoreB.toLocaleString()}`,
       });
     });
+    socket.on("battle-rejected", (data: { reason: string }) => {
+      setBattleActive(false); setBattleRunning(false);
+      toast({ title: "تعذّر بدء المعركة", description: data.reason === "invalid_teams" ? "تشكيلة الفرق غير مكتملة — تأكد أن الضيوف مسجّلون دخولهم ومقبولون" : "حاول مجدداً", variant: "destructive" });
+    });
     socket.on("battle-multiplier", (data: { multiplier: 2 | 3 | 5; durationSeconds: number; reason: string }) => {
       setBattleMultiplier(data.multiplier);
       setBattleMultiplierEndsAt(Date.now() + data.durationSeconds * 1000);
@@ -415,6 +424,14 @@ export default function LiveStream() {
       if (data.reason === "insufficient_balance") {
         if (typeof data.balance === "number") setMyCoins(data.balance);
         toast({ title: "رصيدك غير كافٍ", description: `تحتاج ${data.required} عملة`, variant: "destructive" });
+      } else if (data.reason === "target_left") {
+        setGiftTargetSocketId(null);
+        toast({ title: "المستلم غادر البث", description: "لم يُخصم أي رصيد — اختر مستلماً آخر", variant: "destructive" });
+      } else if (data.reason === "not_in_battle") {
+        setGiftTargetSocketId(null);
+        toast({ title: "هذا الشخص ليس في المعركة", description: "لم يُخصم أي رصيد — اختر أحد المتبارين", variant: "destructive" });
+      } else if (data.reason === "not_authenticated") {
+        toast({ title: "سجّل الدخول أولاً", description: "يجب تسجيل الدخول لإرسال الهدايا", variant: "destructive" });
       } else {
         toast({ title: "تعذّر إرسال الهدية", description: "حدث خطأ — لم يُخصم أي رصيد، حاول مجدداً", variant: "destructive" });
       }
@@ -1143,7 +1160,15 @@ export default function LiveStream() {
     // The server turns the battle on and sends the authoritative start state.
     setBattleActive(false); setBattleRunning(false);
     setShowBattleSetup(false);
-    socketRef.current?.emit("battle-start", { streamId: id, mode });
+    // إرسال تشكيلة الفرق للخادم: أ = المذيع (+ الضيف الثاني في 2v2)، ب = الضيف الأول (+ الثالث)
+    socketRef.current?.emit("battle-start", {
+      streamId: id, mode,
+      teamA: mode === "2v2" && activeCoHosts[1] ? [activeCoHosts[1].socketId] : [],
+      teamB: [
+        ...(activeCoHosts[0] ? [activeCoHosts[0].socketId] : []),
+        ...(mode === "2v2" && activeCoHosts[2] ? [activeCoHosts[2].socketId] : []),
+      ],
+    });
     toast({ title: "⚔️ جاري بدء المعركة", description: `وضع ${mode === "1v1" ? "1 ضد 1" : "2 ضد 2"} — مدة 5 دقائق` });
   };
 
@@ -1200,10 +1225,17 @@ export default function LiveStream() {
       return;
     }
     const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مستخدم";
+    // A stale target (co-host left) falls back to the broadcaster.
+    // Viewers know participants from the server battle roster, not activeCoHosts.
+    const knownTarget =
+      activeCoHosts.some(c => c.socketId === giftTargetSocketId) ||
+      !!(battleTeams && [...battleTeams.A, ...battleTeams.B].some(m => m.socketId === giftTargetSocketId));
+    const validTargetSocketId = giftTargetSocketId && knownTarget ? giftTargetSocketId : undefined;
     socketRef.current?.emit("send-gift", {
       streamId: id, giftType: gift.type, giftEmoji: gift.emoji,
       giftName: gift.name, giftCoins: gift.coins, userName, userId: (user as any).id,
       broadcasterUserId: stream?.userId,
+      recipientSocketId: validTargetSocketId,
       battleTeam: battleActive ? giftTeamChoice : undefined,
       glow: gift.glow,
     });
@@ -1934,7 +1966,7 @@ export default function LiveStream() {
         )}
 
         {/* ══════════ BATTLE MODE — split-screen layout ══════════ */}
-        {battleActive && activeCoHosts.length > 0 && (
+        {battleActive && (isBroadcast ? activeCoHosts.length > 0 : true) && (
           <>
             {/* Score bar — سكور منفصل للطرفين + مؤقت + شريط تفوق */}
             <div className="absolute top-0 inset-x-0 z-40 bg-black/80 backdrop-blur-md px-3 pt-2 pb-2.5">
@@ -2002,7 +2034,9 @@ export default function LiveStream() {
               </div>
             )}
 
-            {/* Battle split-screen — Team A (broadcaster) left | Team B (guests) right */}
+            {/* Battle split-screen — Team A (broadcaster) left | Team B (guests) right.
+                يُعرض على جهاز المذيع فقط؛ المشاهد يرى بث المذيع الرئيسي مع شريط السكور والمؤقت */}
+            {isBroadcast && activeCoHosts.length > 0 && (
             <div className="absolute inset-0 flex z-5 mt-12">
               {/* Team A — broadcaster */}
               <div className="w-1/2 h-full relative border-r border-white/30">
@@ -2052,6 +2086,7 @@ export default function LiveStream() {
                 )}
               </div>
             </div>
+            )}
 
             {/* Battle end button (broadcaster) */}
             {isBroadcast && (
@@ -3142,24 +3177,58 @@ export default function LiveStream() {
             <p className="text-white/40 text-[10px] font-bold mb-1.5">الهدية موجهة إلى:</p>
             <div className="flex items-center gap-1.5 overflow-x-auto mb-3" style={{ scrollbarWidth: "none" }}>
               {battleActive ? (
-                <>
+                /* أثناء المعركة: اختر الشخص نفسه — السكور يتجمع للفريق، لكن الفلوس تروح للشخص المختار فقط.
+                   القائمة من تشكيلة الخادم (يراها الجميع)، مع بديل محلي لو لم تصل بعد */
+                (battleTeams
+                  ? [
+                      ...battleTeams.A.map((m, i) => ({ sid: (i === 0 ? null : m.socketId) as string | null, name: i === 0 ? (stream?.channelName || m.name) : m.name, team: "A" as const })),
+                      ...battleTeams.B.map(m => ({ sid: m.socketId as string | null, name: m.name, team: "B" as const })),
+                    ]
+                  : [
+                      { sid: null as string | null, name: `${stream?.channelName || "المذيع"}`, team: "A" as const },
+                      ...(battleMode === "2v2" && activeCoHosts[1] ? [{ sid: activeCoHosts[1].socketId as string | null, name: activeCoHosts[1].name, team: "A" as const }] : []),
+                      ...(activeCoHosts[0] ? [{ sid: activeCoHosts[0].socketId as string | null, name: activeCoHosts[0].name, team: "B" as const }] : []),
+                      ...(battleMode === "2v2" && activeCoHosts[2] ? [{ sid: activeCoHosts[2].socketId as string | null, name: activeCoHosts[2].name, team: "B" as const }] : []),
+                    ]
+                ).map(t => {
+                  const selected = giftTargetSocketId === t.sid && giftTeamChoice === t.team;
+                  return (
+                    <button
+                      key={t.sid ?? "host"}
+                      onClick={() => { setGiftTargetSocketId(t.sid); setGiftTeamChoice(t.team); }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold flex-shrink-0 border transition-all ${
+                        selected
+                          ? t.team === "A"
+                            ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white"
+                            : "bg-gradient-to-l from-blue-600 to-violet-500 border-blue-400/50 text-white"
+                          : "bg-white/5 border-white/10 text-white/60"
+                      }`}
+                      data-testid={`btn-gift-target-${t.sid ?? "host"}`}
+                    >
+                      <Swords className="w-3 h-3" />
+                      {t.name} ({t.team === "A" ? "فريق أ" : "فريق ب"})
+                    </button>
+                  );
+                })
+              ) : activeCoHosts.length > 0 ? (
+                /* صالون / ضيوف: اختر المستلم — كل شخص يستلم 60% مما يُهدى له شخصياً */
+                ([{ sid: null as string | null, name: stream?.channelName || "المذيع" },
+                  ...activeCoHosts.map(c => ({ sid: c.socketId as string | null, name: c.name }))
+                ]).map(t => (
                   <button
-                    onClick={() => setGiftTeamChoice("A")}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold flex-shrink-0 border transition-all ${giftTeamChoice === "A" ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white" : "bg-white/5 border-white/10 text-white/60"}`}
-                    data-testid="btn-gift-team-a"
+                    key={t.sid ?? "host"}
+                    onClick={() => setGiftTargetSocketId(t.sid)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold flex-shrink-0 border transition-all ${
+                      giftTargetSocketId === t.sid
+                        ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white"
+                        : "bg-white/5 border-white/10 text-white/60"
+                    }`}
+                    data-testid={`btn-gift-target-${t.sid ?? "host"}`}
                   >
-                    <Swords className="w-3 h-3" />
-                    {battleMode === "1v1" ? "المذيع (فريق أ)" : "الفريق أ"}
+                    <UserIcon className="w-3 h-3" />
+                    {t.name}
                   </button>
-                  <button
-                    onClick={() => setGiftTeamChoice("B")}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold flex-shrink-0 border transition-all ${giftTeamChoice === "B" ? "bg-gradient-to-l from-blue-600 to-violet-500 border-blue-400/50 text-white" : "bg-white/5 border-white/10 text-white/60"}`}
-                    data-testid="btn-gift-team-b"
-                  >
-                    <Swords className="w-3 h-3" />
-                    {battleMode === "1v1" ? "الضيف (فريق ب)" : "الفريق ب"}
-                  </button>
-                </>
+                ))
               ) : (
                 <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold flex-shrink-0 bg-gradient-to-l from-red-600 to-orange-500 text-white border border-orange-400/50" data-testid="chip-gift-target-host">
                   <UserIcon className="w-3 h-3" />

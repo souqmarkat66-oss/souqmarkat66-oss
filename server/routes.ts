@@ -361,6 +361,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       roseCount: number;
       nextRoseThreshold: number;
       winner: "A" | "B" | "draw" | null;
+      teams?: {
+        A: { socketId: string; userId?: string; name: string }[];
+        B: { socketId: string; userId?: string; name: string }[];
+      };
       timer?: ReturnType<typeof setTimeout>;
     };
   }> = new Map();
@@ -510,7 +514,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
 
     // ── WebRTC Signaling (main broadcaster → viewers) ──
-    socket.on("broadcaster", (streamId: string) => {
+    socket.on("broadcaster", async (streamId: string) => {
+      // Only the authenticated DB owner of the stream may claim the broadcaster
+      // slot — otherwise any socket could hijack the room (battle start/end, etc).
+      const authUid = (socket.data as any).authUserId;
+      if (!authUid) return;
+      try {
+        const streamRow = await storage.getLiveStream(parseInt(streamId));
+        if (!streamRow || String(streamRow.userId) !== authUid) return;
+      } catch {
+        return;
+      }
       socket.join(`stream:${streamId}`);
       const room = getOrCreateRoom(streamId);
       room.broadcasterId = socket.id;
@@ -543,6 +557,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (!room.cohostIds.includes(socket.id)) {
           room.cohostIds.push(socket.id);
           if (data.userName) room.cohostNames.set(socket.id, data.userName);
+          const uid = (socket.data as any).authUserId;
+          if (uid) room.socketToUser.set(socket.id, { userId: uid, userName: data.userName || "ضيف" });
         }
         socket.emit("cohost-accepted", { broadcasterId: room.broadcasterId });
         // Also notify broadcaster that someone joined automatically
@@ -563,13 +579,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     socket.on("accept-cohost", (data: { streamId: string; guestSocketId: string; guestName?: string }) => {
       const room = streamRooms.get(data.streamId);
-      if (room && !room.cohostIds.includes(data.guestSocketId)) {
+      // Only the broadcaster may admit guests.
+      if (!room || room.broadcasterId !== socket.id) return;
+      if (!room.cohostIds.includes(data.guestSocketId)) {
         if (room.cohostIds.length >= 7) { // 8-seat salon cap
           io.to(data.guestSocketId).emit("cohost-rejected", { reason: "max_cohosts" });
           return;
         }
         room.cohostIds.push(data.guestSocketId);
         if (data.guestName) room.cohostNames.set(data.guestSocketId, data.guestName);
+        const guestSock = io.sockets.sockets.get(data.guestSocketId);
+        const guestUid = guestSock ? (guestSock.data as any).authUserId : null;
+        if (guestUid) room.socketToUser.set(data.guestSocketId, { userId: guestUid, userName: data.guestName || "ضيف" });
       }
       io.to(data.guestSocketId).emit("cohost-accepted", { broadcasterId: socket.id });
     });
@@ -582,14 +603,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const streamId = typeof data === "string" ? data : data.streamId;
       const name = typeof data === "object" ? data.name : undefined;
       const room = streamRooms.get(streamId);
-      if (room && !room.cohostIds.includes(socket.id)) {
-        if (room.cohostIds.length >= 7) { // 8-seat salon cap
-          socket.emit("cohost-rejected", { reason: "max_cohosts" });
-          return;
-        }
-        room.cohostIds.push(socket.id);
-        if (name) room.cohostNames.set(socket.id, name);
-      }
+      // Announce only — admission happens exclusively via request/accept paths.
+      // A socket that was never admitted cannot self-add as a co-host.
+      if (!room || !room.cohostIds.includes(socket.id)) return;
+      if (name) room.cohostNames.set(socket.id, name);
+      const uid = (socket.data as any).authUserId;
+      if (uid) room.socketToUser.set(socket.id, { userId: uid, userName: name || "ضيف" });
       // Notify all viewers that a new co-host is live
       socket.to(`stream:${streamId}`).emit("cohost-active", socket.id, name || "ضيف");
     });
@@ -608,6 +627,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (room) {
         room.cohostIds = room.cohostIds.filter(id => id !== socket.id);
         room.cohostNames.delete(socket.id);
+        room.socketToUser.delete(socket.id);
       }
       io.to(`stream:${streamId}`).emit("cohost-left", socket.id);
     });
@@ -655,7 +675,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
 
     // ── TikTok-style Live Features ──────────────────────────────────
-    socket.on("send-gift", async (data: { streamId: string; giftType: string; giftEmoji?: string; giftName?: string; giftCoins?: number; userName: string; userId: string; broadcasterUserId?: string; battleTeam?: "A" | "B" }) => {
+    socket.on("send-gift", async (data: { streamId: string; giftType: string; giftEmoji?: string; giftName?: string; giftCoins?: number; userName: string; userId: string; broadcasterUserId?: string; battleTeam?: "A" | "B"; recipientSocketId?: string }) => {
       // Never trust price/name/emoji from the browser.
       const gift = GIFT_CATALOG[data.giftType];
       if (!gift || !data.streamId) return;
@@ -670,17 +690,43 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return;
       }
       data.userId = authUid;
-      // Recipient is the stream owner as recorded in the DB, never client-supplied.
+      // Recipient resolution — per-person accounting:
+      // default = stream owner from the DB; a targeted co-host is honored only
+      // if that socket is a server-admitted co-host of this room with a
+      // verified session identity. Client user IDs are never trusted.
+      let recipientUserId: string | undefined;
       try {
         const streamRow = await storage.getLiveStream(parseInt(data.streamId));
-        data.broadcasterUserId = streamRow?.userId ? String(streamRow.userId) : undefined;
+        recipientUserId = streamRow?.userId ? String(streamRow.userId) : undefined;
       } catch {
-        data.broadcasterUserId = undefined;
+        recipientUserId = undefined;
       }
-      if (data.broadcasterUserId === authUid) {
-        // Broadcaster gifting themselves would mint 60% back — disallow credit.
-        data.broadcasterUserId = undefined;
+      const roomForTarget = streamRooms.get(data.streamId);
+      if (data.recipientSocketId && data.recipientSocketId !== roomForTarget?.broadcasterId) {
+        // An explicitly-targeted recipient must be a current, admitted co-host
+        // with a verified identity — otherwise REJECT instead of silently
+        // crediting the broadcaster with someone else's gift.
+        const isCurrentCohost = roomForTarget?.cohostIds.includes(data.recipientSocketId) ?? false;
+        const target = isCurrentCohost ? roomForTarget!.socketToUser.get(data.recipientSocketId) : undefined;
+        if (!target?.userId) {
+          socket.emit("gift-rejected", { reason: "target_left" });
+          return;
+        }
+        // During a battle, the recipient must belong to the roster snapshot.
+        const activeTeams = roomForTarget?.battle?.active ? roomForTarget.battle.teams : undefined;
+        if (activeTeams &&
+            !activeTeams.A.some(m => m.socketId === data.recipientSocketId) &&
+            !activeTeams.B.some(m => m.socketId === data.recipientSocketId)) {
+          socket.emit("gift-rejected", { reason: "not_in_battle" });
+          return;
+        }
+        recipientUserId = target.userId;
       }
+      if (recipientUserId === authUid) {
+        // Gifting yourself would mint 60% back — disallow credit.
+        recipientUserId = undefined;
+      }
+      data.broadcasterUserId = recipientUserId;
       try {
         const client = await pool.connect();
         try {
@@ -755,16 +801,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (room?.battle?.active) {
         const battle = room.battle;
         const now = Date.now();
+        // The team is derived server-side from the validated recipient —
+        // the client's battleTeam claim is only a fallback for old rosters.
+        let effectiveTeam: "A" | "B" | undefined;
+        if (battle.teams) {
+          const targetSid = data.recipientSocketId && room.cohostIds.includes(data.recipientSocketId)
+            ? data.recipientSocketId
+            : room.broadcasterId;
+          if (battle.teams.A.some(m => m.socketId === targetSid)) effectiveTeam = "A";
+          else if (battle.teams.B.some(m => m.socketId === targetSid)) effectiveTeam = "B";
+        } else {
+          effectiveTeam = data.battleTeam;
+        }
         if (now >= battle.endsAt) {
           await finishBattle(data.streamId, battle);
-        } else if (data.battleTeam) {
+        } else if (effectiveTeam) {
           if (gift.boost === 5) {
             battle.multiplier = 5;
             battle.multiplierEndsAt = now + 15_000;
           } else {
             const scoreMultiplier = battle.multiplierEndsAt && battle.multiplierEndsAt > now ? battle.multiplier : 1;
             const scoreDelta = originalGiftCoins * scoreMultiplier;
-            if (data.battleTeam === "A") battle.scoreA += scoreDelta;
+            if (effectiveTeam === "A") battle.scoreA += scoreDelta;
             else battle.scoreB += scoreDelta;
           }
           if (data.giftType === "rose") {
@@ -799,15 +857,49 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
     });
 
-    socket.on("battle-start", (data: { streamId: string; mode: "1v1" | "2v2" }) => {
+    socket.on("battle-start", (data: { streamId: string; mode: "1v1" | "2v2"; teamA?: string[]; teamB?: string[] }) => {
       const room = streamRooms.get(data.streamId);
       if (!room || room.broadcasterId !== socket.id || !["1v1", "2v2"].includes(data.mode)) return;
       if (room.battle?.timer) clearTimeout(room.battle.timer);
       const startedAt = Date.now();
+      // Team roster snapshot: broadcaster is always on team A; extra members
+      // are honored only if they are server-admitted co-hosts of this room.
+      const rosterEntry = (sid: string) => ({
+        socketId: sid,
+        userId: room.socketToUser.get(sid)?.userId,
+        name: room.cohostNames.get(sid) || room.socketToUser.get(sid)?.userName || "ضيف",
+      });
+      const broadcasterUid = (socket.data as any).authUserId;
+      // Strict composition: distinct, admitted co-hosts with verified identity.
+      // 1v1 = broadcaster vs 1 co-host; 2v2 = broadcaster + 1 vs exactly 2.
+      const extrasA = Array.from(new Set(data.teamA || []));
+      const extrasB = Array.from(new Set(data.teamB || []));
+      const wantA = data.mode === "2v2" ? 1 : 0;
+      const wantB = data.mode === "2v2" ? 2 : 1;
+      const allExtras = [...extrasA, ...extrasB];
+      const valid =
+        extrasA.length === wantA &&
+        extrasB.length === wantB &&
+        new Set(allExtras).size === allExtras.length &&
+        allExtras.every(sid =>
+          sid !== socket.id &&
+          room.cohostIds.includes(sid) &&
+          !!room.socketToUser.get(sid)?.userId,
+        );
+      if (!valid) {
+        socket.emit("battle-rejected", { reason: "invalid_teams" });
+        return;
+      }
+      const teamA = [
+        { socketId: socket.id, userId: broadcasterUid || undefined, name: "المذيع" },
+        ...extrasA.map(rosterEntry),
+      ];
+      const teamB = extrasB.map(rosterEntry);
       room.battle = {
         active: true, mode: data.mode, startedAt, endsAt: startedAt + 300_000,
         scoreA: 0, scoreB: 0, multiplier: 1, multiplierEndsAt: null,
         roseCount: 0, nextRoseThreshold: 5, winner: null,
+        teams: { A: teamA, B: teamB },
       };
       room.battle.timer = setTimeout(() => {
         const battle = room.battle;
@@ -885,6 +977,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (room.cohostIds.includes(socket.id)) {
           room.cohostIds = room.cohostIds.filter(id => id !== socket.id);
           room.cohostNames.delete(socket.id);
+          room.socketToUser.delete(socket.id);
           io.to(`stream:${streamId}`).emit("cohost-left", socket.id);
         }
         room.viewers.delete(socket.id);
