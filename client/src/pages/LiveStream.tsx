@@ -448,6 +448,7 @@ export default function LiveStream() {
     });
     socket.on("gift-accepted", (data: { balance: number }) => {
       if (typeof data.balance === "number") setMyCoins(data.balance);
+      refetchWallet();
     });
 
     if (isBroadcast) {
@@ -1596,7 +1597,7 @@ export default function LiveStream() {
           playsInline
           muted={isBroadcast}
           data-testid="video-stream"
-          className={`absolute inset-0 w-full h-full object-cover ${isBroadcast && (salonMode || (battleActive && activeCoHosts.length > 0) || (!!swappedCohostId && activeCoHosts.length > 0)) ? "opacity-0 pointer-events-none" : ""}`}
+          className={`absolute inset-0 w-full h-full object-cover ${(isBroadcast && (salonMode || (battleActive && activeCoHosts.length > 0) || (!!swappedCohostId && activeCoHosts.length > 0))) || (!isBroadcast && battleActive && coHostStatus === "accepted") ? "opacity-0 pointer-events-none" : ""}`}
           style={{ backgroundColor: "#000", transform: (isBroadcast && camFacing === "user") ? "scaleX(-1)" : "none" }}
         />
 
@@ -1763,7 +1764,7 @@ export default function LiveStream() {
         </div>
 
         {/* ── هدايا وشحن (خارج المعركة) — صف سفلي مرتب ── */}
-        {!isBroadcast && streaming && !ended && user && !battleActive && (
+        {!isBroadcast && (streaming || stream?.status === "live") && !ended && user && !battleActive && (
           <div className="absolute inset-x-0 z-30 flex items-center justify-center gap-2 px-3" style={{ bottom: "8px" }}>
             <button
               onClick={() => { setShowGiftPanel(p => !p); setShowShare(false); setShowRechargeModal(false); }}
@@ -2189,6 +2190,53 @@ export default function LiveStream() {
                     )}
                   </>
                 )}
+              </div>
+            </div>
+            )}
+
+            {/* Battle split-screen — جهاز الضيف المتحدي: المذيع (أ) شمال | كاميرته هو (ب) يمين */}
+            {!isBroadcast && coHostStatus === "accepted" && (
+            <div className="absolute inset-0 flex z-5 mt-12">
+              {/* Team A — broadcaster feed */}
+              <div className="w-1/2 h-full relative border-r border-white/30">
+                <video
+                  autoPlay playsInline muted
+                  ref={el => {
+                    if (!el) return;
+                    const mainEl = (hlsVideoRef.current || videoRef.current) as any;
+                    let src = (videoRef.current?.srcObject || hlsVideoRef.current?.srcObject) as MediaStream | null;
+                    // بث RTMP/HLS: مفيش srcObject — ناخد نسخة من الفيديو الشغال نفسه
+                    if (!src && mainEl && typeof mainEl.captureStream === "function") {
+                      try { src = mainEl.captureStream(); } catch { src = null; }
+                    }
+                    if (src && el.srcObject !== src) { el.srcObject = src; el.play().catch(() => {}); }
+                  }}
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute bottom-2 inset-x-0 flex justify-center">
+                  <span className="text-[10px] text-white bg-red-600 rounded-full px-2 py-0.5 font-bold">🔴 الفريق أ</span>
+                </div>
+              </div>
+              {/* Team B — my own camera */}
+              <div className="w-1/2 h-full relative">
+                {guestHasCamera ? (
+                  <video
+                    autoPlay playsInline muted
+                    ref={el => {
+                      const ms = coHostStream.current;
+                      if (el && ms && el.srcObject !== ms) { el.srcObject = ms; el.play().catch(() => {}); }
+                    }}
+                    className="w-full h-full object-cover"
+                    style={{ transform: "scaleX(-1)" }}
+                  />
+                ) : (
+                  <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
+                    <Mic className="w-10 h-10 text-blue-300" />
+                  </div>
+                )}
+                <div className="absolute bottom-2 inset-x-0 flex justify-center">
+                  <span className="text-[10px] text-white bg-blue-600 rounded-full px-2 py-0.5 font-bold">🔵 الفريق ب (أنت)</span>
+                </div>
               </div>
             </div>
             )}

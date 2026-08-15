@@ -336,6 +336,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // دعوات التحدي الشخصية المعلّقة — inviteId → بيانات الدعوة (تنتهي بعد 90 ثانية)
   const pendingUserChallenges = new Map<string, { challengerSocketId: string; streamId: string; targetUserId: string; expiresAt: number }>();
+  /* بعد قبول دعوة التحدي: أول ما المدعو ينضم كضيف للغرفة دي، المعركة تبدأ تلقائياً 1v1 */
+  const pendingAutoBattles = new Map<string, { targetUserId: string; expiresAt: number }>();
 
   const streamRooms: Map<string, {
     broadcasterId: string | null;
@@ -428,6 +430,62 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       console.error("PK battle result persistence error:", error);
     }
     io.to(`stream:${streamId}`).emit("battle-ended", publicBattleState(battle));
+  }
+
+  /* بدء معركة لغرفة معينة — يُستخدم من handler اليدوي ومن البدء التلقائي بعد قبول دعوة تحدي */
+  function startRoomBattle(streamId: string, mode: "1v1" | "2v2", extrasA: string[], extrasB: string[]): boolean {
+    const room = streamRooms.get(streamId);
+    if (!room?.broadcasterId) return false;
+    const broadcasterSocket = io.sockets.sockets.get(room.broadcasterId);
+    if (!broadcasterSocket) return false;
+    if (room.battle?.timer) clearTimeout(room.battle.timer);
+    const startedAt = Date.now();
+    const rosterEntry = (sid: string) => ({
+      socketId: sid,
+      userId: room.socketToUser.get(sid)?.userId,
+      name: room.cohostNames.get(sid) || room.socketToUser.get(sid)?.userName || "ضيف",
+    });
+    const broadcasterUid = (broadcasterSocket.data as any).authUserId;
+    // Strict composition: distinct, admitted co-hosts with verified identity.
+    // 1v1 = broadcaster vs 1 co-host; 2v2 = broadcaster + 1 vs exactly 2.
+    const uniqA = Array.from(new Set(extrasA));
+    const uniqB = Array.from(new Set(extrasB));
+    const wantA = mode === "2v2" ? 1 : 0;
+    const wantB = mode === "2v2" ? 2 : 1;
+    const allExtras = [...uniqA, ...uniqB];
+    const valid =
+      uniqA.length === wantA &&
+      uniqB.length === wantB &&
+      new Set(allExtras).size === allExtras.length &&
+      allExtras.every(sid =>
+        sid !== room.broadcasterId &&
+        room.cohostIds.includes(sid) &&
+        !!room.socketToUser.get(sid)?.userId,
+      );
+    if (!valid) {
+      broadcasterSocket.emit("battle-rejected", { reason: "invalid_teams" });
+      return false;
+    }
+    const teamA = [
+      { socketId: room.broadcasterId, userId: broadcasterUid || undefined, name: "المذيع" },
+      ...uniqA.map(rosterEntry),
+    ];
+    const teamB = uniqB.map(rosterEntry);
+    room.battle = {
+      active: true, mode, startedAt, endsAt: startedAt + 300_000,
+      scoreA: 0, scoreB: 0, multiplier: 1, multiplierEndsAt: null,
+      roseCount: 0, nextRoseThreshold: 5, winner: null,
+      teams: { A: teamA, B: teamB },
+    };
+    room.battle.timer = setTimeout(() => {
+      const battle = room.battle;
+      if (!battle?.active || battle.endsAt > Date.now()) return;
+      void finishBattle(streamId, battle);
+    }, 300_000);
+    const state = publicBattleState(room.battle);
+    io.to(`stream:${streamId}`).emit("battle-started", state);
+    io.to(`stream:${streamId}`).emit("battle-state", state);
+    return true;
   }
 
   // Arabic & English bad words basic filter
@@ -614,6 +672,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (uid) room.socketToUser.set(socket.id, { userId: uid, userName: name || "ضيف" });
       // Notify all viewers that a new co-host is live
       socket.to(`stream:${streamId}`).emit("cohost-active", socket.id, name || "ضيف");
+      // ── بدء تلقائي للمعركة بعد قبول دعوة التحدي ──
+      const pendingBattle = pendingAutoBattles.get(streamId);
+      if (pendingBattle && uid && pendingBattle.targetUserId === uid && pendingBattle.expiresAt > Date.now() && !room.battle?.active) {
+        pendingAutoBattles.delete(streamId);
+        // مهلة قصيرة عشان اتصال الفيديو (WebRTC) يكتمل قبل بدء الجولة
+        setTimeout(() => {
+          const r = streamRooms.get(streamId);
+          if (!r || r.battle?.active || !r.cohostIds.includes(socket.id)) return;
+          startRoomBattle(streamId, "1v1", [], [socket.id]);
+        }, 2500);
+      }
     });
 
     socket.on("cohost-watcher", (data: { cohostId: string }) => {
@@ -867,55 +936,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socket.on("battle-start", (data: { streamId: string; mode: "1v1" | "2v2"; teamA?: string[]; teamB?: string[] }) => {
       const room = streamRooms.get(data.streamId);
       if (!room || room.broadcasterId !== socket.id || !["1v1", "2v2"].includes(data.mode)) return;
-      if (room.battle?.timer) clearTimeout(room.battle.timer);
-      const startedAt = Date.now();
-      // Team roster snapshot: broadcaster is always on team A; extra members
-      // are honored only if they are server-admitted co-hosts of this room.
-      const rosterEntry = (sid: string) => ({
-        socketId: sid,
-        userId: room.socketToUser.get(sid)?.userId,
-        name: room.cohostNames.get(sid) || room.socketToUser.get(sid)?.userName || "ضيف",
-      });
-      const broadcasterUid = (socket.data as any).authUserId;
-      // Strict composition: distinct, admitted co-hosts with verified identity.
-      // 1v1 = broadcaster vs 1 co-host; 2v2 = broadcaster + 1 vs exactly 2.
-      const extrasA = Array.from(new Set(data.teamA || []));
-      const extrasB = Array.from(new Set(data.teamB || []));
-      const wantA = data.mode === "2v2" ? 1 : 0;
-      const wantB = data.mode === "2v2" ? 2 : 1;
-      const allExtras = [...extrasA, ...extrasB];
-      const valid =
-        extrasA.length === wantA &&
-        extrasB.length === wantB &&
-        new Set(allExtras).size === allExtras.length &&
-        allExtras.every(sid =>
-          sid !== socket.id &&
-          room.cohostIds.includes(sid) &&
-          !!room.socketToUser.get(sid)?.userId,
-        );
-      if (!valid) {
-        socket.emit("battle-rejected", { reason: "invalid_teams" });
-        return;
-      }
-      const teamA = [
-        { socketId: socket.id, userId: broadcasterUid || undefined, name: "المذيع" },
-        ...extrasA.map(rosterEntry),
-      ];
-      const teamB = extrasB.map(rosterEntry);
-      room.battle = {
-        active: true, mode: data.mode, startedAt, endsAt: startedAt + 300_000,
-        scoreA: 0, scoreB: 0, multiplier: 1, multiplierEndsAt: null,
-        roseCount: 0, nextRoseThreshold: 5, winner: null,
-        teams: { A: teamA, B: teamB },
-      };
-      room.battle.timer = setTimeout(() => {
-        const battle = room.battle;
-        if (!battle?.active || battle.endsAt > Date.now()) return;
-        void finishBattle(data.streamId, battle);
-      }, 300_000);
-      const state = publicBattleState(room.battle);
-      io.to(`stream:${data.streamId}`).emit("battle-started", state);
-      io.to(`stream:${data.streamId}`).emit("battle-state", state);
+      startRoomBattle(data.streamId, data.mode, data.teamA || [], data.teamB || []);
     });
 
     socket.on("battle-end", (data: { streamId: string }) => {
@@ -1006,6 +1027,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // الرد صالح فقط من المستخدم المدعو نفسه وقبل انتهاء الصلاحية — استهلاك ذرّي
       if (!invite || invite.expiresAt < Date.now() || invite.targetUserId !== authUid) return;
       pendingUserChallenges.delete(data.inviteId);
+      if (data.accepted) {
+        // عند انضمام المدعو كضيف للغرفة دي خلال 3 دقايق، المعركة تبدأ تلقائياً
+        pendingAutoBattles.set(invite.streamId, { targetUserId: authUid, expiresAt: Date.now() + 180_000 });
+        setTimeout(() => {
+          const p = pendingAutoBattles.get(invite.streamId);
+          if (p && p.expiresAt <= Date.now()) pendingAutoBattles.delete(invite.streamId);
+        }, 185_000);
+      }
       let responderName = "مستخدم";
       try {
         const rows = await db.execute(sql`SELECT first_name, last_name FROM users WHERE id = ${authUid} LIMIT 1`);
