@@ -47,12 +47,22 @@ declare module "http" {
   }
 }
 
-app.use(
-  express.json({
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
-  }),
+// الحد الافتراضي للطلبات العادية، وحد أكبر فقط لمسارات إيجنت التطوير (مرفقات/صوت base64 — أدمن فقط)
+const defaultJsonParser = express.json({
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf;
+  },
+});
+const largeJsonParser = express.json({
+  limit: "25mb",
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf;
+  },
+});
+app.use((req, res, next) =>
+  req.path.startsWith("/api/admin/ai-agent")
+    ? largeJsonParser(req, res, next)
+    : defaultJsonParser(req, res, next),
 );
 
 app.use(express.urlencoded({ extended: false }));

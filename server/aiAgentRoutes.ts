@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { openai } from "./replit_integrations/image";
+import { speechToText, ensureCompatibleFormat } from "./replit_integrations/audio";
 import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
@@ -47,6 +48,75 @@ function isAllowedCmd(cmd: string): boolean {
   );
 }
 
+/* ── ملخص شجرة المشروع (سياق عميق) — يُبنى ويُخزّن مؤقتاً 60 ثانية ── */
+let treeSummaryCache: { text: string; at: number } | null = null;
+function buildTreeSummary(): string {
+  if (treeSummaryCache && Date.now() - treeSummaryCache.at < 60_000) return treeSummaryCache.text;
+  const IGNORE = new Set([
+    "node_modules", ".git", "dist", ".local", "backups",
+    "uploads", "__pycache__", ".cache", "coverage", "attached_assets", ".agents",
+  ]);
+  const lines: string[] = [];
+  function walk(dir: string, depth: number, prefix: string) {
+    if (depth > 3 || lines.length > 350) return;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (IGNORE.has(e.name) || e.name.startsWith(".")) continue;
+      if (lines.length > 350) return;
+      const rel = prefix ? `${prefix}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        lines.push(`${rel}/`);
+        walk(path.join(dir, e.name), depth + 1, rel);
+      } else {
+        lines.push(rel);
+      }
+    }
+  }
+  walk(PROJECT_ROOT, 0, "");
+  const text = lines.join("\n");
+  treeSummaryCache = { text, at: Date.now() };
+  return text;
+}
+
+/* ── استدعاء Gemini (تعدد موديلات + بحث جوجل + فيديو/صور) ── */
+type Attachment = { mimeType: string; data: string; name?: string };
+async function callGemini(
+  systemContent: string,
+  messages: { role: string; content: string }[],
+  attachments: Attachment[],
+  webSearch: boolean,
+): Promise<string> {
+  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!key) throw new Error("no_gemini_key");
+  const contents = messages.map(m => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: String(m.content) }] as any[],
+  }));
+  if (attachments.length && contents.length) {
+    const last = contents[contents.length - 1];
+    for (const a of attachments.slice(0, 4)) {
+      if (a?.data && a?.mimeType) {
+        last.parts.push({ inline_data: { mime_type: a.mimeType, data: a.data } });
+      }
+    }
+  }
+  const body: any = {
+    system_instruction: { parts: [{ text: systemContent }] },
+    contents,
+    generationConfig: { temperature: 0.3, maxOutputTokens: 8000 },
+  };
+  if (webSearch) body.tools = [{ google_search: {} }];
+  const r = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
+  if (!r.ok) throw new Error(`Gemini ${r.status}: ${(await r.text()).slice(0, 300)}`);
+  const j: any = await r.json();
+  const parts = j.candidates?.[0]?.content?.parts || [];
+  return parts.map((p: any) => p.text || "").filter(Boolean).join("\n");
+}
+
 const AI_AGENT_SYSTEM_PROMPT = `أنت مساعد تطوير برمجي متخصص في مشروع "شبكة سوق للإعلانات" (Souq Ads Network).
 المشروع: منصة إعلانية ثنائية اللغة (عربي/إنجليزي) مع بث مباشر وشبكة إعلانات بنمط Meta/AdSense.
 التقنيات: React 18 + TypeScript (Frontend) ، Node.js + Express + TypeScript (Backend) ، PostgreSQL + Drizzle ORM ، Tailwind CSS + shadcn/ui.
@@ -78,7 +148,9 @@ const AI_AGENT_SYSTEM_PROMPT = `أنت مساعد تطوير برمجي متخص
   "type": "message",
   "content": "ردك هنا"
 }
-قاعدة صارمة: أرجع JSON صحيح فقط، بدون backticks أو أي نص خارج الـ JSON.`;
+قاعدة صارمة: أرجع JSON صحيح فقط، بدون backticks أو أي نص خارج الـ JSON.
+لو المستخدم أرفق صور أو فيديو: حلّلها بدقة (واجهات، تصميمات، أخطاء) واستخدمها في ردك.
+لو تفعّل البحث على الويب: استخدم نتائج البحث الفعلية لأحدث الحلول والتوثيق، واذكر المصادر باختصار داخل ردك.`;
 
 export function registerAiAgentRoutes(
   app: Express,
@@ -96,7 +168,7 @@ export function registerAiAgentRoutes(
           "node_modules", ".git", "dist", ".local", "backups",
           "uploads", "__pycache__", ".cache", "coverage",
         ]);
-        function buildTree(dirPath: string, depth = 0): any[] {
+        const buildTree = (dirPath: string, depth = 0): any[] => {
           if (depth > 5) return [];
           let entries: fs.Dirent[];
           try {
@@ -126,7 +198,7 @@ export function registerAiAgentRoutes(
               try { size = fs.statSync(fullPath).size; } catch {}
               return { name: e.name, path: relativePath, type: "file", size };
             });
-        }
+        };
         res.json({ tree: buildTree(PROJECT_ROOT) });
       } catch (e: any) {
         res.status(500).json({ message: e.message });
@@ -145,7 +217,7 @@ export function registerAiAgentRoutes(
         if (!filePath)
           return res.status(400).json({ message: "path required" });
         const fullPath = path.resolve(PROJECT_ROOT, filePath);
-        if (!fullPath.startsWith(PROJECT_ROOT))
+        if (fullPath !== PROJECT_ROOT && !fullPath.startsWith(PROJECT_ROOT + path.sep))
           return res.status(403).json({ message: "Access denied" });
         if (!fs.existsSync(fullPath))
           return res.status(404).json({ message: "File not found" });
@@ -160,24 +232,24 @@ export function registerAiAgentRoutes(
     }
   );
 
-  // ── POST /api/admin/ai-agent/write-file ────────────────────────
+  // ملاحظة: تم إزالة /write-file المباشر — الكتابة تتم فقط عبر /execute بعد موافقة صريحة من الأدمن.
+
+  // ── POST /api/admin/ai-agent/transcribe — تحويل صوت لنص ────────
   app.post(
-    "/api/admin/ai-agent/write-file",
+    "/api/admin/ai-agent/transcribe",
     isAuthenticated,
     requireAdmin,
     async (req, res) => {
       try {
-        const { filePath, content } = req.body;
-        if (!filePath || content === undefined)
-          return res.status(400).json({ message: "filePath and content required" });
-        const fullPath = path.resolve(PROJECT_ROOT, filePath);
-        if (!fullPath.startsWith(PROJECT_ROOT))
-          return res.status(403).json({ message: "Access denied" });
-        const dir = path.dirname(fullPath);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        const existed = fs.existsSync(fullPath);
-        fs.writeFileSync(fullPath, content, "utf-8");
-        res.json({ success: true, action: existed ? "modified" : "created", filePath });
+        const { audio } = req.body;
+        if (!audio || typeof audio !== "string")
+          return res.status(400).json({ message: "audio (base64) required" });
+        const buf = Buffer.from(audio, "base64");
+        if (buf.length > 15 * 1024 * 1024)
+          return res.status(413).json({ message: "الملف الصوتي كبير جداً (الحد 15MB)" });
+        const { buffer, format } = await ensureCompatibleFormat(buf);
+        const text = await speechToText(buffer, format);
+        res.json({ text });
       } catch (e: any) {
         res.status(500).json({ message: e.message });
       }
@@ -191,25 +263,68 @@ export function registerAiAgentRoutes(
     requireAdmin,
     async (req, res) => {
       try {
-        const { messages, fileContext } = req.body;
+        const { messages, fileContext, model, webSearch, attachments } = req.body as {
+          messages: any[]; fileContext?: string; model?: string; webSearch?: boolean; attachments?: Attachment[];
+        };
         if (!messages || !Array.isArray(messages))
           return res.status(400).json({ message: "messages array required" });
-        const systemContent = fileContext
-          ? `${AI_AGENT_SYSTEM_PROMPT}\n\nسياق الملفات المرفقة:\n${fileContext}`
-          : AI_AGENT_SYSTEM_PROMPT;
-        const completion = await openai.chat.completions.create({
-          model: "gpt-4o",
-          messages: [
+
+        const atts: Attachment[] = Array.isArray(attachments)
+          ? attachments.filter(a => a?.data && a?.mimeType).slice(0, 4)
+          : [];
+        const totalAttBytes = atts.reduce((s, a) => s + a.data.length, 0);
+        if (totalAttBytes > 20 * 1024 * 1024)
+          return res.status(413).json({ message: "حجم المرفقات كبير جداً (الحد 20MB)" });
+
+        // سياق عميق: شجرة المشروع + الملفات المرفقة
+        let systemContent = `${AI_AGENT_SYSTEM_PROMPT}\n\nشجرة ملفات المشروع الحالية:\n${buildTreeSummary()}`;
+        if (fileContext) systemContent += `\n\nسياق الملفات المرفقة:\n${fileContext}`;
+
+        const cleanMessages = messages.map((m: any) => ({
+          role: (m.role === "assistant" ? "assistant" : "user") as "user" | "assistant",
+          content: String(m.content),
+        }));
+
+        const hasVideo = atts.some(a => a.mimeType.startsWith("video/"));
+        const geminiAvailable = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+        // البحث على الويب والفيديو يتطلبان Gemini؛ وإلا الموديل المختار
+        const useGemini = (model === "gemini" || !!webSearch || hasVideo) && geminiAvailable;
+        if ((webSearch || hasVideo) && !geminiAvailable && model !== "openai") {
+          return res.status(503).json({ message: "البحث على الويب وتحليل الفيديو يتطلبان مفتاح Gemini/Google — غير متوفر حالياً" });
+        }
+
+        let raw = "";
+        let modelUsed = "";
+        if (useGemini) {
+          raw = await callGemini(systemContent, cleanMessages, atts, !!webSearch);
+          modelUsed = webSearch ? "gemini-2.0-flash + Google Search" : "gemini-2.0-flash";
+        } else {
+          // OpenAI: الصور تُرفق كـ data URLs في آخر رسالة مستخدم
+          const oaMessages: any[] = [
             { role: "system", content: systemContent },
-            ...messages.map((m: any) => ({
-              role: m.role as "user" | "assistant",
-              content: String(m.content),
-            })),
-          ],
-          temperature: 0.3,
-          max_tokens: 4000,
-        });
-        const raw = completion.choices[0]?.message?.content || "{}";
+            ...cleanMessages.map(m => ({ role: m.role, content: m.content })),
+          ];
+          const images = atts.filter(a => a.mimeType.startsWith("image/"));
+          if (images.length) {
+            const lastIdx = oaMessages.length - 1;
+            oaMessages[lastIdx] = {
+              role: "user",
+              content: [
+                { type: "text", text: String(oaMessages[lastIdx].content) },
+                ...images.map(a => ({ type: "image_url", image_url: { url: `data:${a.mimeType};base64,${a.data}` } })),
+              ],
+            };
+          }
+          const completion = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: oaMessages,
+            temperature: 0.3,
+            max_tokens: 4000,
+          });
+          raw = completion.choices[0]?.message?.content || "{}";
+          modelUsed = "gpt-4o";
+        }
+
         let parsed: any;
         try {
           const cleaned = raw
@@ -221,7 +336,7 @@ export function registerAiAgentRoutes(
         } catch {
           parsed = { type: "message", content: raw };
         }
-        res.json({ response: parsed });
+        res.json({ response: parsed, modelUsed });
       } catch (e: any) {
         res.status(500).json({ message: e.message });
       }
@@ -338,7 +453,7 @@ export function registerAiAgentRoutes(
           }
 
           const fullPath = path.resolve(PROJECT_ROOT, filePath);
-          if (!fullPath.startsWith(PROJECT_ROOT)) {
+          if (fullPath === PROJECT_ROOT || !fullPath.startsWith(PROJECT_ROOT + path.sep)) {
             results.push({ filePath, action, success: false, error: "Access denied — path outside project" });
             continue;
           }

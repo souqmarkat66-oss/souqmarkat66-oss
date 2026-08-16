@@ -11,8 +11,9 @@ import {
   Bot, Send, Loader2, FolderOpen, FileText, ChevronRight,
   ChevronDown, Terminal, ShieldAlert, CheckCircle2, XCircle,
   Database, RefreshCw, Trash2, Eye, Code2, Zap, AlertTriangle,
-  Archive, Play, X
+  Archive, Play, X, Globe, Mic, ImagePlus, Volume2, Square, Film
 } from "lucide-react";
+import { useTTS } from "@/hooks/use-tts";
 
 const ADMIN_ID = "54219806";
 
@@ -21,7 +22,8 @@ interface FileNode {
   size?: number; children?: FileNode[];
 }
 
-interface ChatMsg { role: "user" | "assistant"; content: string; parsed?: any; }
+interface ChatMsg { role: "user" | "assistant"; content: string; parsed?: any; modelUsed?: string; attachmentNames?: string[]; }
+interface Attachment { name: string; mimeType: string; data: string; }
 
 function FileTree({ nodes, onSelect, selected }: {
   nodes: FileNode[]; onSelect: (p: string) => void; selected: string;
@@ -178,6 +180,17 @@ export default function AiAgent() {
   const [cmdOutput, setCmdOutput] = useState("");
   const [tab, setTab] = useState<"chat" | "files" | "terminal">("chat");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // ── إمكانيات جديدة: تعدد موديلات، بحث ويب، مرفقات، صوت ──
+  const [aiModel, setAiModel] = useState<"openai" | "gemini">("openai");
+  const [webSearch, setWebSearch] = useState(false);
+  const [voiceReply, setVoiceReply] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordChunksRef = useRef<Blob[]>([]);
+  const tts = useTTS();
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
@@ -205,17 +218,31 @@ export default function AiAgent() {
   });
 
   const chatMutation = useMutation({
-    mutationFn: (vars: { messages: ChatMsg[]; fileContext?: string }) =>
-      apiRequest("POST", "/api/admin/ai-agent/chat", vars),
+    mutationFn: async (vars: { messages: { role: string; content: string }[]; fileContext?: string; model: string; webSearch: boolean; attachments: Attachment[] }) => {
+      const r = await fetch("/api/admin/ai-agent/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(vars),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.message || "فشل الطلب");
+      return d;
+    },
     onSuccess: (data: any) => {
       const resp = data?.response || data;
-      setMessages(prev => [...prev, { role: "assistant", content: resp?.content || JSON.stringify(resp), parsed: resp }]);
+      const text = resp?.content || (resp?.type === "plan" ? resp?.analysis : "") || JSON.stringify(resp);
+      setMessages(prev => [...prev, { role: "assistant", content: text, parsed: resp, modelUsed: data?.modelUsed }]);
+      // رد صوتي بالعربي لو مفعّل (للردود النصية فقط)
+      if (voiceReply && resp?.type !== "plan" && typeof resp?.content === "string" && resp.content.trim()) {
+        tts.generate(resp.content.slice(0, 900), "nova", true).catch(() => {});
+      }
     },
-    onError: () => toast({ title: "❌ خطأ في الـ AI", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "❌ خطأ في الـ AI", description: e?.message, variant: "destructive" }),
   });
 
   const executeMutation = useMutation({
-    mutationFn: (plan: any) => apiRequest("POST", "/api/admin/ai-agent/execute", { plan }),
+    mutationFn: (plan: any) => apiRequest("POST", "/api/admin/ai-agent/execute", { plan }).then((r: any) => (typeof r?.json === "function" ? r.json() : r)),
     onSuccess: (data: any) => {
       const ok = data?.results?.filter((r: any) => r.success).length || 0;
       const fail = data?.results?.filter((r: any) => !r.success).length || 0;
@@ -226,33 +253,116 @@ export default function AiAgent() {
   });
 
   const backupMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/admin/ai-agent/backup", {}),
+    mutationFn: () => apiRequest("POST", "/api/admin/ai-agent/backup", {}).then((r: any) => (typeof r?.json === "function" ? r.json() : r)),
     onSuccess: (data: any) => toast({ title: `💾 Backup: ${data?.backupName}` }),
     onError: () => toast({ title: "❌ فشل الـ Backup", variant: "destructive" }),
   });
 
   const cmdMutation = useMutation({
-    mutationFn: (command: string) => apiRequest("POST", "/api/admin/ai-agent/command", { command }),
+    mutationFn: (command: string) => apiRequest("POST", "/api/admin/ai-agent/command", { command }).then((r: any) => (typeof r?.json === "function" ? r.json() : r)),
     onSuccess: (data: any) => setCmdOutput((data?.stdout || "") + (data?.stderr ? `\nSTDERR: ${data.stderr}` : "")),
     onError: (e: any) => setCmdOutput(`Error: ${e?.message || "فشل"}`),
   });
 
-  function sendMessage() {
-    const text = input.trim();
-    if (!text) return;
-    const newMsg: ChatMsg = { role: "user", content: text };
+  function sendMessage(overrideText?: string) {
+    const text = (overrideText ?? input).trim();
+    if (!text && attachments.length === 0) return;
+    const newMsg: ChatMsg = {
+      role: "user",
+      content: text || "(مرفقات بدون نص)",
+      attachmentNames: attachments.map(a => a.name),
+    };
     const updatedMsgs = [...messages, newMsg];
     setMessages(updatedMsgs);
     setInput("");
     const fileContext = selectedFile && fileContent
-      ? `الملف: ${selectedFile}\n\`\`\`\n${fileContent.slice(0, 3000)}\n\`\`\``
+      ? `الملف: ${selectedFile}\n\`\`\`\n${fileContent.slice(0, 12000)}\n\`\`\``
       : undefined;
-    chatMutation.mutate({ messages: updatedMsgs.map(m => ({ role: m.role, content: m.content })), fileContext });
+    const atts = attachments;
+    setAttachments([]);
+    chatMutation.mutate({
+      messages: updatedMsgs.map(m => ({ role: m.role, content: m.content })),
+      fileContext,
+      model: aiModel,
+      webSearch,
+      attachments: atts,
+    });
   }
 
   function handleFileSelect(p: string) {
     setSelectedFile(p);
     loadFileMutation.mutate(p);
+  }
+
+  /* ── مرفقات صور/فيديو ── */
+  async function onPickAttachments(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    // نتتبع العدد والحجم محلياً داخل الحلقة لأن قيمة الـ state لا تتحدث فورياً
+    let count = attachments.length;
+    let totalEncoded = attachments.reduce((s, a) => s + a.data.length, 0);
+    for (const f of files) {
+      if (count >= 4) { toast({ title: "الحد 4 مرفقات", variant: "destructive" }); break; }
+      if (f.size > 10 * 1024 * 1024) { toast({ title: `${f.name} أكبر من 10MB`, variant: "destructive" }); continue; }
+      const data = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(",")[1] || "");
+        r.onerror = reject;
+        r.readAsDataURL(f);
+      }).catch(() => "");
+      if (!data) continue;
+      if (totalEncoded + data.length > 18 * 1024 * 1024) {
+        toast({ title: "إجمالي المرفقات تجاوز الحد (~18MB)", description: f.name, variant: "destructive" });
+        break;
+      }
+      count += 1;
+      totalEncoded += data.length;
+      setAttachments(prev => [...prev, { name: f.name, mimeType: f.type || "application/octet-stream", data }]);
+    }
+  }
+
+  /* ── تسجيل صوتي → نص → إرسال ── */
+  async function toggleRecording() {
+    if (recording) {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+    const ms = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
+    if (!ms) { toast({ title: "تعذّر فتح الميكروفون", variant: "destructive" }); return; }
+    recordChunksRef.current = [];
+    const mr = new MediaRecorder(ms);
+    mediaRecorderRef.current = mr;
+    mr.ondataavailable = ev => { if (ev.data.size) recordChunksRef.current.push(ev.data); };
+    mr.onstop = async () => {
+      setRecording(false);
+      ms.getTracks().forEach(t => t.stop());
+      const blob = new Blob(recordChunksRef.current, { type: mr.mimeType || "audio/webm" });
+      if (blob.size < 1000) return;
+      setTranscribing(true);
+      try {
+        const b64 = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result).split(",")[1] || "");
+          r.onerror = reject;
+          r.readAsDataURL(blob);
+        });
+        const res = await fetch("/api/admin/ai-agent/transcribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ audio: b64 }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d?.message || "فشل التحويل");
+        if (d.text?.trim()) sendMessage(d.text.trim());
+        else toast({ title: "لم يتم التقاط كلام واضح", variant: "destructive" });
+      } catch (e: any) {
+        toast({ title: "❌ فشل تحويل الصوت", description: e?.message, variant: "destructive" });
+      }
+      setTranscribing(false);
+    };
+    mr.start();
+    setRecording(true);
   }
 
   return (
@@ -395,6 +505,9 @@ export default function AiAgent() {
                       ) : (
                         <div className="bg-muted/60 border border-border/40 rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed">
                           {m.parsed?.content || m.content}
+                          {m.modelUsed && (
+                            <div className="text-[9px] text-muted-foreground/70 mt-1.5" dir="ltr">{m.modelUsed}</div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -420,6 +533,63 @@ export default function AiAgent() {
               </CardContent>
 
               <div className="border-t border-border/40 p-3">
+                {/* ── شريط الإمكانيات: موديل + بحث ويب + رد صوتي + مرفقات + مايك ── */}
+                <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+                  <div className="flex rounded-lg border border-border/60 overflow-hidden">
+                    {([["openai", "GPT-4o"], ["gemini", "Gemini"]] as const).map(([k, label]) => (
+                      <button
+                        key={k}
+                        onClick={() => setAiModel(k)}
+                        className={`px-2.5 py-1 text-[10px] font-bold transition-colors ${aiModel === k ? "bg-violet-600 text-white" : "text-muted-foreground hover:bg-muted"}`}
+                        data-testid={`btn-model-${k}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setWebSearch(w => !w)}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${webSearch ? "bg-blue-600 text-white border-blue-600" : "text-muted-foreground border-border/60 hover:bg-muted"}`}
+                    data-testid="btn-toggle-websearch"
+                  >
+                    <Globe className="w-3 h-3" /> بحث ويب
+                  </button>
+                  <button
+                    onClick={() => setVoiceReply(v => !v)}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${voiceReply ? "bg-green-600 text-white border-green-600" : "text-muted-foreground border-border/60 hover:bg-muted"}`}
+                    data-testid="btn-toggle-voicereply"
+                  >
+                    <Volume2 className="w-3 h-3" /> رد صوتي
+                  </button>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border border-border/60 text-muted-foreground hover:bg-muted transition-colors"
+                    data-testid="btn-attach"
+                  >
+                    <ImagePlus className="w-3 h-3" /> صورة/فيديو
+                  </button>
+                  <input ref={fileInputRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={onPickAttachments} />
+                  <button
+                    onClick={toggleRecording}
+                    disabled={transcribing}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${recording ? "bg-red-600 text-white border-red-600 animate-pulse" : "text-muted-foreground border-border/60 hover:bg-muted"}`}
+                    data-testid="btn-voice-record"
+                  >
+                    {transcribing ? <Loader2 className="w-3 h-3 animate-spin" /> : recording ? <Square className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
+                    {recording ? "إيقاف وإرسال" : transcribing ? "جاري التحويل..." : "رسالة صوتية"}
+                  </button>
+                </div>
+                {attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {attachments.map((a, i) => (
+                      <span key={i} className="flex items-center gap-1 bg-muted/60 border border-border/40 rounded-full px-2 py-0.5 text-[10px]">
+                        {a.mimeType.startsWith("video/") ? <Film className="w-2.5 h-2.5" /> : <ImagePlus className="w-2.5 h-2.5" />}
+                        <span className="max-w-[100px] truncate">{a.name}</span>
+                        <button onClick={() => setAttachments(prev => prev.filter((_, j) => j !== i))}><X className="w-2.5 h-2.5" /></button>
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <Textarea
                     value={input}
@@ -432,8 +602,8 @@ export default function AiAgent() {
                     disabled={chatMutation.isPending}
                   />
                   <Button
-                    onClick={sendMessage}
-                    disabled={!input.trim() || chatMutation.isPending}
+                    onClick={() => sendMessage()}
+                    disabled={(!input.trim() && attachments.length === 0) || chatMutation.isPending}
                     className="shrink-0 self-end gap-1"
                     data-testid="btn-send-chat"
                   >

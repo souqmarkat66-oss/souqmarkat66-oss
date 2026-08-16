@@ -8,7 +8,7 @@ import { z } from "zod";
 import { setupAuth, getSession } from "./replit_integrations/auth";
 import { isAuthenticated, registerCustomAuthRoutes } from "./customAuth";
 import { registerImageRoutes, openai } from "./replit_integrations/image";
-import { registerAiAgentRoutes } from "./ai-agent-routes";
+import { registerAiAgentRoutes } from "./aiAgentRoutes";
 import { textToSpeech } from "./replit_integrations/audio";
 import { spawn } from "child_process";
 import { writeFile, unlink, readFile, mkdir } from "fs/promises";
@@ -4352,6 +4352,18 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
 - الحملات الإعلانية والاستهداف
 - الدفع بالجنيه المصري (فودافون كاش / اتصالات / InstaPay)
 - استخدام الذكاء الاصطناعي في كتابة الإعلانات
+- تحديات البث المباشر (PK Battles) والهدايا وشحن الرصيد
+
+━━━━━━━━━━━━━━━━━━━━━━━━━
+تحديات البث المباشر والهدايا (ميزة جديدة):
+━━━━━━━━━━━━━━━━━━━━━━━━━
+- التحدي: منافسة داخل البث المباشر 1 ضد 1 أو 2 ضد 2، الشاشة بتتقسم نصين وكل فريق بيجمع نقاط من هدايا الجمهور.
+- إزاي يبدأ: صاحب البث بيضغط زر "تحدي" ⚔️، يدوّر على مستخدم ويبعتله دعوة، وأول ما يقبل وينضم التحدي بيبدأ تلقائياً.
+- الجولات: كل جولة 5 دقايق بعداد تنازلي، وفي الآخر بيظهر الفريق الفايز.
+- المضاعفات: فيه لحظات x2 و x3 بتضاعف النقاط بس — قيمة الهدية الفعلية ونصيب صاحب البث مبيتغيروش.
+- الهدايا: بتتبعت من أيقونة الهدية 🎁 داخل البث، سعرها بالكوينز وبتتخصم من المحفظة فوراً، وصاحب البث بياخد 60% من قيمتها الأصلية.
+- الشحن: زر "شحن" داخل البث أو من المحفظة — فودافون كاش / اتصالات كاش / InstaPay / أكواد شحن جاهزة بتتفعّل فوراً.
+- الصالون: البث الجماعي بيدعم لحد 8 مقاعد للضيوف بالصوت أو الكاميرا.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 روابط التحميل الرسمية:
@@ -4409,7 +4421,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
 
       let reply = "";
 
-      const geminiKey = process.env.GEMINI_API_KEY;
+      const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
       if (geminiKey) {
         try {
           const genAI = new GoogleGenerativeAI(geminiKey);
