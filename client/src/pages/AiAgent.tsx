@@ -583,7 +583,7 @@ export default function AiAgent() {
                     <option value="auto">🧠 توجيه ذكي (تلقائي)</option>
                     {(providersData?.providers || []).map(p => (
                       <option key={p.provider} value={p.provider} disabled={!p.available}>
-                        {p.provider === "openai" ? "GPT-4o" : p.provider === "gemini" ? "Gemini" : "DeepSeek"}
+                        {p.provider === "openai" ? "GPT-4o" : p.provider === "gemini" ? "Gemini" : p.provider === "anthropic" ? "Claude" : "DeepSeek"}
                         {!p.available ? " (يحتاج مفتاح)" : ""}
                       </option>
                     ))}
@@ -632,7 +632,7 @@ export default function AiAgent() {
                     <p className="text-xs font-bold flex items-center gap-1.5"><Zap className="w-3.5 h-3.5 text-violet-500" /> مفاتيح API المخصصة</p>
                     {(providersData?.providers || []).map(p => (
                       <div key={p.provider} className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[11px] font-bold w-16">{p.provider === "openai" ? "OpenAI" : p.provider === "gemini" ? "Gemini" : "DeepSeek"}</span>
+                        <span className="text-[11px] font-bold w-16">{p.provider === "openai" ? "OpenAI" : p.provider === "gemini" ? "Gemini" : p.provider === "anthropic" ? "Claude" : "DeepSeek"}</span>
                         {p.hasCustomKey ? (
                           <>
                             <code className="text-[10px] bg-background border border-border/40 rounded px-2 py-0.5" dir="ltr">{p.maskedKey}</code>
@@ -686,6 +686,7 @@ export default function AiAgent() {
                               <option value="openai">GPT-4o</option>
                               <option value="gemini">Gemini</option>
                               <option value="deepseek">DeepSeek</option>
+                              <option value="anthropic">Claude</option>
                             </select>
                           </label>
                         ))}

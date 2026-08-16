@@ -129,8 +129,61 @@ async function callGemini(
 /* أحدث موديلات Gemini بالترتيب — عند توقف موديل بيتم التحويل للتالي بدون تدخل */
 const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
 
+/* ── استدعاء Anthropic Claude ── */
+const ANTHROPIC_MODELS = ["claude-sonnet-4-5", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"];
+async function callAnthropic(
+  systemContent: string,
+  messages: { role: string; content: string }[],
+  attachments: Attachment[],
+  apiKey: string,
+): Promise<string> {
+  const anthropicMessages: any[] = messages.map(m => ({
+    role: m.role === "assistant" ? "assistant" : "user",
+    content: m.content,
+  }));
+  // إضافة الصور إلى آخر رسالة مستخدم (Claude يدعم vision)
+  const images = attachments.filter(a => a.mimeType.startsWith("image/"));
+  if (images.length) {
+    const lastIdx = anthropicMessages.length - 1;
+    if (lastIdx >= 0 && anthropicMessages[lastIdx].role === "user") {
+      anthropicMessages[lastIdx].content = [
+        { type: "text", text: String(anthropicMessages[lastIdx].content) },
+        ...images.map(a => ({
+          type: "image",
+          source: { type: "base64", media_type: a.mimeType as any, data: a.data },
+        })),
+      ];
+    }
+  }
+  let lastErr = "";
+  for (const model of ANTHROPIC_MODELS) {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        system: systemContent,
+        messages: anthropicMessages,
+        max_tokens: 8000,
+        temperature: 0.3,
+      }),
+    });
+    if (r.ok) {
+      const j: any = await r.json();
+      return (j.content || []).map((b: any) => b.text || "").filter(Boolean).join("\n");
+    }
+    lastErr = `Anthropic ${model} ${r.status}: ${(await r.text()).slice(0, 300)}`;
+    if (r.status !== 404) throw new Error(lastErr);
+  }
+  throw new Error(lastErr || "Anthropic: no model available");
+}
+
 /* ── إدارة مزوّدي الموديلات الديناميكية ── */
-const AI_PROVIDERS = ["openai", "gemini", "deepseek"] as const;
+const AI_PROVIDERS = ["openai", "gemini", "deepseek", "anthropic"] as const;
 type AiProvider = (typeof AI_PROVIDERS)[number];
 const PROVIDER_KEY_SETTING = (p: string) => `ai_agent_key_${p}`;
 const ROUTING_SETTING = "ai_agent_routing";
@@ -178,7 +231,7 @@ async function providerAvailable(p: AiProvider): Promise<boolean> {
   if (await getCustomKey(p)) return true;
   if (p === "openai") return true; // متوفر دائماً عبر تكامل Replit
   if (p === "gemini") return !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
-  return false; // deepseek يحتاج مفتاح مخصص
+  return false; // deepseek و anthropic يحتاجان مفتاح مخصص
 }
 
 async function getRouting(): Promise<Record<string, AiProvider>> {
@@ -494,7 +547,8 @@ export function registerAiAgentRoutes(
             return res.status(503).json({ message: "البحث على الويب وتحليل الفيديو يتطلبان مفتاح Gemini/Google — أضفه من إعدادات الموديلات" });
           target = "gemini";
         } else if (hasImages && target === "deepseek") {
-          target = (await providerAvailable("gemini")) ? "gemini" : "openai";
+          // DeepSeek لا يدعم الصور → Gemini أو OpenAI أو Anthropic
+          target = (await providerAvailable("gemini")) ? "gemini" : (await providerAvailable("anthropic")) ? "anthropic" : "openai";
         }
         // fallback لو المزوّد المختار غير متاح
         if (!(await providerAvailable(target))) {
@@ -514,6 +568,11 @@ export function registerAiAgentRoutes(
           if (!dsKey) return res.status(503).json({ message: "DeepSeek يحتاج مفتاح API — أضفه من إعدادات الموديلات" });
           raw = await callDeepSeek(systemContent, cleanMessages, dsKey);
           modelUsed = "deepseek-chat";
+        } else if (target === "anthropic") {
+          const anthKey = await getCustomKey("anthropic");
+          if (!anthKey) return res.status(503).json({ message: "Claude يحتاج مفتاح API — أضفه من إعدادات الموديلات" });
+          raw = await callAnthropic(systemContent, cleanMessages, atts, anthKey);
+          modelUsed = "claude-sonnet-4-5";
         } else {
           // OpenAI: الصور تُرفق كـ data URLs في آخر رسالة مستخدم
           const oaMessages: any[] = [
