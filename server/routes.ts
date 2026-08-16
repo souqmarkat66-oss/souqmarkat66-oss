@@ -366,6 +366,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       roseCount: number;
       nextRoseThreshold: number;
       winner: "A" | "B" | "draw" | null;
+      /* عدادات فردية مستقلة — مفتاحها socketId لكل مشارك؛ نقاط الفريق = مجموعها فقط */
+      playerScores: Record<string, number>;
       teams?: {
         A: { socketId: string; userId?: string; name: string }[];
         B: { socketId: string; userId?: string; name: string }[];
@@ -404,10 +406,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   async function saveBattleResult(streamId: string, battle: NonNullable<ReturnType<typeof getOrCreateRoom>["battle"]>) {
     const numericStreamId = Number(streamId);
     if (!Number.isInteger(numericStreamId) || numericStreamId <= 0) return;
+    // مساهمة كل مشارك بالاسم — تُحفظ للترتيب والتحليل لاحقاً
+    const participants = battle.teams
+      ? (["A", "B"] as const).flatMap(team =>
+          battle.teams![team].map(m => ({
+            team,
+            userId: m.userId || null,
+            name: m.name,
+            score: battle.playerScores[m.socketId] || 0,
+          })),
+        )
+      : [];
     await pool.query(
       `INSERT INTO live_battles
-        (stream_id, mode, started_at, ended_at, score_a, score_b, winner)
-       VALUES ($1, $2, TO_TIMESTAMP($3 / 1000.0), NOW(), $4, $5, $6)`,
+        (stream_id, mode, started_at, ended_at, score_a, score_b, winner, player_scores)
+       VALUES ($1, $2, TO_TIMESTAMP($3 / 1000.0), NOW(), $4, $5, $6, $7)`,
       [
         numericStreamId,
         battle.mode,
@@ -415,6 +428,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         battle.scoreA,
         battle.scoreB,
         battle.winner,
+        JSON.stringify(participants),
       ],
     );
   }
@@ -471,10 +485,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       ...uniqA.map(rosterEntry),
     ];
     const teamB = uniqB.map(rosterEntry);
+    const playerScores: Record<string, number> = {};
+    for (const m of [...teamA, ...teamB]) playerScores[m.socketId] = 0;
     room.battle = {
       active: true, mode, startedAt, endsAt: startedAt + 300_000,
       scoreA: 0, scoreB: 0, multiplier: 1, multiplierEndsAt: null,
       roseCount: 0, nextRoseThreshold: 5, winner: null,
+      playerScores,
       teams: { A: teamA, B: teamB },
     };
     room.battle.timer = setTimeout(() => {
@@ -877,12 +894,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // The team is derived server-side from the validated recipient —
         // the client's battleTeam claim is only a fallback for old rosters.
         let effectiveTeam: "A" | "B" | undefined;
+        let effectiveTargetSid: string | null = null;
         if (battle.teams) {
           const targetSid = data.recipientSocketId && room.cohostIds.includes(data.recipientSocketId)
             ? data.recipientSocketId
             : room.broadcasterId;
-          if (battle.teams.A.some(m => m.socketId === targetSid)) effectiveTeam = "A";
-          else if (battle.teams.B.some(m => m.socketId === targetSid)) effectiveTeam = "B";
+          if (battle.teams.A.some(m => m.socketId === targetSid)) { effectiveTeam = "A"; effectiveTargetSid = targetSid; }
+          else if (battle.teams.B.some(m => m.socketId === targetSid)) { effectiveTeam = "B"; effectiveTargetSid = targetSid; }
         } else {
           effectiveTeam = data.battleTeam;
         }
@@ -896,6 +914,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           } else {
             const scoreMultiplier = battle.multiplierEndsAt && battle.multiplierEndsAt > now ? battle.multiplier : 1;
             const scoreDelta = originalGiftCoins * scoreMultiplier;
+            // العداد الفردي أولاً: كل خانة (Slot) لها رقمها المستقل، ونقاط الفريق مجرد مجموع
+            if (effectiveTargetSid) {
+              battle.playerScores[effectiveTargetSid] = (battle.playerScores[effectiveTargetSid] || 0) + scoreDelta;
+            }
             if (effectiveTeam === "A") battle.scoreA += scoreDelta;
             else battle.scoreB += scoreDelta;
           }

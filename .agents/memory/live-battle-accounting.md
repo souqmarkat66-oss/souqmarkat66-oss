@@ -15,3 +15,5 @@ Recharge-code redemption must lock the code row, credit the wallet, record the t
 
 **How to apply:** Preserve row locking and transaction boundaries whenever the recharge-code flow changes.
 **Socket identity:** Socket.IO shares the express-session cookie (`io.engine.use(getSession())`); `send-gift` debits `socket.data.authUserId` and credits the DB stream owner — never trust userId/broadcasterUserId from event payloads, and self-gifting mints no 60% credit.
+
+Per-slot scoring: battle state keeps `playerScores` keyed by socketId (team score = sum only); gift handler increments the validated recipient slot; `live_battles.player_scores` jsonb stores [{team,userId,name,score}] on finish (idempotent ALTER in runMigrations, server/index.ts). Client renders an independent gem badge per slot from the broadcast playerScores map; guest identity resolved from the roster across both teams (never assume team B).

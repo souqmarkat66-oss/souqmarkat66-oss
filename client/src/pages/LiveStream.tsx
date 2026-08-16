@@ -92,6 +92,8 @@ export default function LiveStream() {
   const [giftTargetSocketId, setGiftTargetSocketId] = useState<string|null>(null); // null = المذيع
   // قائمة المشاركين في المعركة كما أعلنها الخادم — يراها الجميع (مذيع ومشاهدين)
   const [battleTeams, setBattleTeams] = useState<{A:{socketId:string;name:string}[];B:{socketId:string;name:string}[]}|null>(null);
+  // عدادات فردية مستقلة لكل خانة (Slot) — المفتاح socketId؛ لا تتأثر خانة بأخرى
+  const [battlePlayerScores, setBattlePlayerScores] = useState<Record<string, number>>({});
   const [showBattleSetup, setShowBattleSetup] = useState(false);
   // ── Salon 8-seat mode (عرض شبكة الكراسي) ──
   const [salonMode,       setSalonMode]       = useState(false);
@@ -394,10 +396,12 @@ export default function LiveStream() {
       multiplier: 1 | 2 | 3 | 5;
       multiplierEndsAt: number | null;
       winner: "A" | "B" | "draw" | null;
+      playerScores?: Record<string, number>;
       teams?: { A: { socketId: string; name: string }[]; B: { socketId: string; name: string }[] };
     };
     const applyBattleState = (state: BattleState) => {
       if (state.teams) setBattleTeams(state.teams);
+      setBattlePlayerScores(state.playerScores || {});
       setBattleMode(state.mode);
       setBattleScoreA(state.scoreA);
       setBattleScoreB(state.scoreB);
@@ -2152,13 +2156,20 @@ export default function LiveStream() {
                   className="w-full h-full object-cover"
                   style={{ transform: camFacing === "user" ? "scaleX(-1)" : "none" }}
                 />
+                {/* شارة مستقلة: اسم صاحب الخانة + عداده الخاص فقط */}
+                <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-black/60 backdrop-blur rounded-full px-2 py-0.5" data-testid="badge-slot-a0">
+                  <span className="text-[10px] font-black text-cyan-300">💎 {((battleTeams?.A?.[0] && battlePlayerScores[battleTeams.A[0].socketId]) || 0).toLocaleString()}</span>
+                </div>
                 <div className="absolute bottom-2 inset-x-0 flex justify-center">
-                  <span className="text-[10px] text-white bg-red-600 rounded-full px-2 py-0.5 font-bold">🔴 الفريق أ</span>
+                  <span className="text-[10px] text-white bg-red-600 rounded-full px-2 py-0.5 font-bold">🔴 {battleTeams?.A?.[0]?.name || "الفريق أ"}</span>
                 </div>
                 {battleMode === "2v2" && activeCoHosts[1] && (
                   <div className="absolute bottom-16 inset-x-0 flex justify-center">
-                    <div className="w-20 h-28 rounded-xl overflow-hidden border border-red-400">
+                    <div className="w-20 h-28 rounded-xl overflow-hidden border border-red-400 relative">
                       <video autoPlay playsInline ref={el => { if (el) { coHostVideoRefs.current.set(activeCoHosts[1].socketId, el); const ms = coHostStreams.current.get(activeCoHosts[1].socketId); if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); } }}} className="w-full h-full object-cover" />
+                      <div className="absolute top-0.5 right-0.5 bg-black/60 rounded-full px-1 py-px" data-testid="badge-slot-a1">
+                        <span className="text-[8px] font-black text-cyan-300">💎 {(battlePlayerScores[activeCoHosts[1].socketId] || 0).toLocaleString()}</span>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -2178,13 +2189,19 @@ export default function LiveStream() {
                         <Mic className="w-10 h-10 text-blue-300" />
                       </div>
                     )}
+                    <div className="absolute top-2 left-2 z-10 flex items-center gap-1 bg-black/60 backdrop-blur rounded-full px-2 py-0.5" data-testid="badge-slot-b0">
+                      <span className="text-[10px] font-black text-cyan-300">💎 {(battlePlayerScores[activeCoHosts[0].socketId] || 0).toLocaleString()}</span>
+                    </div>
                     <div className="absolute bottom-2 inset-x-0 flex justify-center">
-                      <span className="text-[10px] text-white bg-blue-600 rounded-full px-2 py-0.5 font-bold">🔵 الفريق ب</span>
+                      <span className="text-[10px] text-white bg-blue-600 rounded-full px-2 py-0.5 font-bold">🔵 {battleTeams?.B?.find(m => m.socketId === activeCoHosts[0].socketId)?.name || "الفريق ب"}</span>
                     </div>
                     {battleMode === "2v2" && activeCoHosts[2] && (
                       <div className="absolute bottom-16 inset-x-0 flex justify-center">
-                        <div className="w-20 h-28 rounded-xl overflow-hidden border border-blue-400">
+                        <div className="w-20 h-28 rounded-xl overflow-hidden border border-blue-400 relative">
                           <video autoPlay playsInline ref={el => { if (el) { coHostVideoRefs.current.set(activeCoHosts[2].socketId, el); const ms = coHostStreams.current.get(activeCoHosts[2].socketId); if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); } }}} className="w-full h-full object-cover" />
+                          <div className="absolute top-0.5 left-0.5 bg-black/60 rounded-full px-1 py-px" data-testid="badge-slot-b1">
+                            <span className="text-[8px] font-black text-cyan-300">💎 {(battlePlayerScores[activeCoHosts[2].socketId] || 0).toLocaleString()}</span>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -2213,8 +2230,11 @@ export default function LiveStream() {
                   }}
                   className="w-full h-full object-cover"
                 />
+                <div className="absolute top-2 right-2 z-10 bg-black/60 backdrop-blur rounded-full px-2 py-0.5" data-testid="badge-guest-slot-a">
+                  <span className="text-[10px] font-black text-cyan-300">💎 {((battleTeams?.A?.[0] && battlePlayerScores[battleTeams.A[0].socketId]) || 0).toLocaleString()}</span>
+                </div>
                 <div className="absolute bottom-2 inset-x-0 flex justify-center">
-                  <span className="text-[10px] text-white bg-red-600 rounded-full px-2 py-0.5 font-bold">🔴 الفريق أ</span>
+                  <span className="text-[10px] text-white bg-red-600 rounded-full px-2 py-0.5 font-bold">🔴 {battleTeams?.A?.[0]?.name || "الفريق أ"}</span>
                 </div>
               </div>
               {/* Team B — my own camera */}
@@ -2234,9 +2254,24 @@ export default function LiveStream() {
                     <Mic className="w-10 h-10 text-blue-300" />
                   </div>
                 )}
-                <div className="absolute bottom-2 inset-x-0 flex justify-center">
-                  <span className="text-[10px] text-white bg-blue-600 rounded-full px-2 py-0.5 font-bold">🔵 الفريق ب (أنت)</span>
-                </div>
+                {(() => {
+                  // هوية الضيف من القائمة الرسمية (قد يكون في الفريق أ في الرباعي) — بدون افتراض الفريق ب
+                  const myId = socketRef.current?.id;
+                  const inA = battleTeams?.A?.find(m => m.socketId === myId);
+                  const inB = battleTeams?.B?.find(m => m.socketId === myId);
+                  const me = inA || inB;
+                  const myTeamLabel = inA ? "🔴 الفريق أ (أنت)" : "🔵 الفريق ب (أنت)";
+                  return (
+                    <>
+                      <div className="absolute top-2 left-2 z-10 bg-black/60 backdrop-blur rounded-full px-2 py-0.5" data-testid="badge-guest-slot-b">
+                        <span className="text-[10px] font-black text-cyan-300">💎 {(me ? battlePlayerScores[me.socketId] || 0 : 0).toLocaleString()}</span>
+                      </div>
+                      <div className="absolute bottom-2 inset-x-0 flex justify-center">
+                        <span className={`text-[10px] text-white rounded-full px-2 py-0.5 font-bold ${inA ? "bg-red-600" : "bg-blue-600"}`}>{myTeamLabel}</span>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
             )}

@@ -270,6 +270,8 @@ async function runMigrations() {
             AND a2.target_interests <> ''
         )
     `);
+    // عمود مساهمات المشاركين الفردية في نتائج التحديات (idempotent)
+    await db.execute(sql`ALTER TABLE live_battles ADD COLUMN IF NOT EXISTS player_scores JSONB`);
     // Backfill users.governorate from their most recent ad's target_region
     await db.execute(sql`
       UPDATE users u

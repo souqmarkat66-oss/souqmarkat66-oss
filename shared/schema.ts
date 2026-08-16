@@ -164,6 +164,8 @@ export const liveBattles = pgTable("live_battles", {
   scoreA: integer("score_a").notNull().default(0),
   scoreB: integer("score_b").notNull().default(0),
   winner: text("winner", { enum: ["A", "B", "draw"] }).notNull(),
+  // مساهمة كل مشارك: [{ team, userId, name, score }]
+  playerScores: jsonb("player_scores"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 export type LiveBattle = typeof liveBattles.$inferSelect;
