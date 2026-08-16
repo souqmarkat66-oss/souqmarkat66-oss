@@ -187,7 +187,13 @@ const AI_PROVIDERS = ["openai", "gemini", "deepseek", "anthropic"] as const;
 type AiProvider = (typeof AI_PROVIDERS)[number];
 const PROVIDER_KEY_SETTING = (p: string) => `ai_agent_key_${p}`;
 const ROUTING_SETTING = "ai_agent_routing";
-const DEFAULT_ROUTING: Record<string, AiProvider> = { ui: "gemini", code: "deepseek", general: "openai" };
+const DEFAULT_ROUTING: Record<string, AiProvider> = { ui: "gemini", code: "anthropic", general: "openai" };
+// سلاسل fallback حسب نوع الطلب — لو الموديل الأول غير متاح نجرب التالي
+const INTENT_FALLBACK_CHAINS: Record<string, AiProvider[]> = {
+  code:    ["anthropic", "deepseek", "openai"],
+  ui:      ["gemini", "openai"],
+  general: ["openai", "gemini"],
+};
 
 function maskKey(k: string): string {
   if (k.length <= 8) return "****";
@@ -554,7 +560,13 @@ export function registerAiAgentRoutes(
         if (!(await providerAvailable(target))) {
           if (model === target)
             return res.status(503).json({ message: `مزوّد ${target} غير متاح — أضف مفتاح API من إعدادات الموديلات` });
-          target = (await providerAvailable("openai")) ? "openai" : "gemini";
+          // استخدام سلسلة fallback حسب نوع الطلب (intent-aware)
+          const fallbackChain = INTENT_FALLBACK_CHAINS[intent] || ["openai", "gemini"];
+          let resolved: AiProvider | null = null;
+          for (const p of fallbackChain) {
+            if (await providerAvailable(p)) { resolved = p; break; }
+          }
+          target = resolved || "openai";
         }
 
         let raw = "";
