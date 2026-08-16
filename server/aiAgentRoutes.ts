@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { openai } from "./replit_integrations/image";
+import { storage } from "./storage";
 import { speechToText, ensureCompatibleFormat } from "./replit_integrations/audio";
 import fs from "fs";
 import path from "path";
@@ -86,8 +87,9 @@ async function callGemini(
   messages: { role: string; content: string }[],
   attachments: Attachment[],
   webSearch: boolean,
+  apiKey?: string,
 ): Promise<string> {
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  const key = apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   if (!key) throw new Error("no_gemini_key");
   const contents = messages.map(m => ({
     role: m.role === "assistant" ? "model" : "user",
@@ -117,7 +119,100 @@ async function callGemini(
   return parts.map((p: any) => p.text || "").filter(Boolean).join("\n");
 }
 
-const AI_AGENT_SYSTEM_PROMPT = `أنت مساعد تطوير برمجي متخصص في مشروع "شبكة سوق للإعلانات" (Souq Ads Network).
+/* ── إدارة مزوّدي الموديلات الديناميكية ── */
+const AI_PROVIDERS = ["openai", "gemini", "deepseek"] as const;
+type AiProvider = (typeof AI_PROVIDERS)[number];
+const PROVIDER_KEY_SETTING = (p: string) => `ai_agent_key_${p}`;
+const ROUTING_SETTING = "ai_agent_routing";
+const DEFAULT_ROUTING: Record<string, AiProvider> = { ui: "gemini", code: "deepseek", general: "openai" };
+
+function maskKey(k: string): string {
+  if (k.length <= 8) return "****";
+  return `${k.slice(0, 4)}...${k.slice(-4)}`;
+}
+
+/* تشفير مفاتيح API قبل تخزينها (AES-256-GCM بمفتاح مشتق من SESSION_SECRET) */
+import crypto from "crypto";
+function encKey(): Buffer {
+  const secret = process.env.SESSION_SECRET || "";
+  if (!secret) throw new Error("SESSION_SECRET غير متوفر لتشفير المفاتيح");
+  return crypto.createHash("sha256").update(`ai-agent-keys:${secret}`).digest();
+}
+function encryptSecret(plain: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", encKey(), iv);
+  const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+  return `enc:v1:${iv.toString("base64")}:${cipher.getAuthTag().toString("base64")}:${enc.toString("base64")}`;
+}
+function decryptSecret(stored: string): string | null {
+  if (!stored) return null;
+  if (!stored.startsWith("enc:v1:")) return stored; // توافق خلفي مع قيم قديمة غير مشفرة
+  try {
+    const [, , ivB64, tagB64, dataB64] = stored.split(":");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", encKey(), Buffer.from(ivB64, "base64"));
+    decipher.setAuthTag(Buffer.from(tagB64, "base64"));
+    return Buffer.concat([decipher.update(Buffer.from(dataB64, "base64")), decipher.final()]).toString("utf8");
+  } catch {
+    return null; // مفتاح تالف أو SESSION_SECRET اتغير
+  }
+}
+
+async function getCustomKey(p: AiProvider): Promise<string | null> {
+  try {
+    const raw = await storage.getSetting(PROVIDER_KEY_SETTING(p));
+    return raw ? decryptSecret(raw) : null;
+  } catch { return null; }
+}
+
+async function providerAvailable(p: AiProvider): Promise<boolean> {
+  if (await getCustomKey(p)) return true;
+  if (p === "openai") return true; // متوفر دائماً عبر تكامل Replit
+  if (p === "gemini") return !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+  return false; // deepseek يحتاج مفتاح مخصص
+}
+
+async function getRouting(): Promise<Record<string, AiProvider>> {
+  try {
+    const raw = await storage.getSetting(ROUTING_SETTING);
+    if (raw) return { ...DEFAULT_ROUTING, ...JSON.parse(raw) };
+  } catch {}
+  return { ...DEFAULT_ROUTING };
+}
+
+/* تصنيف نية الطلب: واجهات / كود ومنطق / عام */
+function classifyIntent(text: string): "ui" | "code" | "general" {
+  const t = text.toLowerCase();
+  const uiWords = ["تصميم", "واجهة", "واجهات", "صفحة", "شكل", "ألوان", "الوان", "زر", "أزرار", "ستايل", "خط", "أيقونة", "css", "ui", "ux", "design", "layout", "tailwind", "responsive", "أنيميشن", "animation", "شاشة"];
+  const codeWords = ["كود", "دالة", "باج", "خطأ", "أخطاء", "سكريبت", "منطق", "قاعدة بيانات", "استعلام", "api", "function", "bug", "error", "fix", "logic", "database", "sql", "endpoint", "socket", "refactor", "أداء", "performance", "اختبار", "test"];
+  const uiScore = uiWords.filter(w => t.includes(w)).length;
+  const codeScore = codeWords.filter(w => t.includes(w)).length;
+  if (uiScore > codeScore && uiScore > 0) return "ui";
+  if (codeScore > 0) return "code";
+  return "general";
+}
+
+/* استدعاء DeepSeek (واجهة متوافقة مع OpenAI) */
+async function callDeepSeek(
+  systemContent: string,
+  messages: { role: string; content: string }[],
+  apiKey: string,
+): Promise<string> {
+  const r = await fetch("https://api.deepseek.com/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: "deepseek-chat",
+      messages: [{ role: "system", content: systemContent }, ...messages],
+      temperature: 0.3,
+      max_tokens: 4000,
+    }),
+  });
+  if (!r.ok) throw new Error(`DeepSeek ${r.status}: ${(await r.text()).slice(0, 300)}`);
+  const j: any = await r.json();
+  return j.choices?.[0]?.message?.content || "";
+}
+
+const AI_AGENT_SYSTEM_PROMPT = `أنت كبير مهندسي البرمجيات (Senior Lead Software Engineer) والعقل التقني المدبر لمشروع "شبكة سوق للإعلانات" (Souq Ads Network / سوق ماركات).
 المشروع: منصة إعلانية ثنائية اللغة (عربي/إنجليزي) مع بث مباشر وشبكة إعلانات بنمط Meta/AdSense.
 التقنيات: React 18 + TypeScript (Frontend) ، Node.js + Express + TypeScript (Backend) ، PostgreSQL + Drizzle ORM ، Tailwind CSS + shadcn/ui.
 المسار الجذري: ${PROJECT_ROOT}
@@ -150,7 +245,13 @@ const AI_AGENT_SYSTEM_PROMPT = `أنت مساعد تطوير برمجي متخص
 }
 قاعدة صارمة: أرجع JSON صحيح فقط، بدون backticks أو أي نص خارج الـ JSON.
 لو المستخدم أرفق صور أو فيديو: حلّلها بدقة (واجهات، تصميمات، أخطاء) واستخدمها في ردك.
-لو تفعّل البحث على الويب: استخدم نتائج البحث الفعلية لأحدث الحلول والتوثيق، واذكر المصادر باختصار داخل ردك.`;
+لو تفعّل البحث على الويب: استخدم نتائج البحث الفعلية لأحدث الحلول والتوثيق، واذكر المصادر باختصار داخل ردك.
+
+معاييرك الهندسية الإلزامية (World-class Standards):
+1. عقلية مهندس النظام: قبل أي تعديل حلّل الترابط الكامل بين Frontend وBackend وقاعدة البيانات والـ API — لا تقترح تغييراً في جزء يكسر جزءاً آخر، واذكر التأثيرات المتبادلة في "analysis" و"risks".
+2. الاستقرار أولاً: لا تقترح كوداً إلا وهو مكتمل وجاهز للتشغيل (Build-Ready) — بدون TODO ناقصة أو دوال وهمية. راجع الكود ذهنياً قبل إرجاعه (Self-Verification).
+3. هوية بصرية أصلية: ممنوع القوالب الجاهزة الجنيرك. عند استلام مرجع بصري (صورة/فيديو) حلّله بدقة Pixel-perfect: الألوان، المسافات، الخطوط، الحركة — ونفّذه مطابقاً مع دمج منطق المشروع، بهوية "سوق ماركات" الفخمة.
+4. التزم بأنماط المشروع القائمة: Tailwind + shadcn/ui، دعم RTL والعربية، والبنية الحالية للملفات.`;
 
 export function registerAiAgentRoutes(
   app: Express,
@@ -234,6 +335,80 @@ export function registerAiAgentRoutes(
 
   // ملاحظة: تم إزالة /write-file المباشر — الكتابة تتم فقط عبر /execute بعد موافقة صريحة من الأدمن.
 
+  // ── إدارة مزوّدي الموديلات (مفاتيح API مخصصة + توجيه ذكي) ─────
+  app.get(
+    "/api/admin/ai-agent/providers",
+    isAuthenticated,
+    requireAdmin,
+    async (_req, res) => {
+      try {
+        const providers = await Promise.all(
+          AI_PROVIDERS.map(async p => {
+            const custom = await getCustomKey(p);
+            return {
+              provider: p,
+              hasEnvKey:
+                p === "openai" ? true :
+                p === "gemini" ? !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) :
+                false,
+              hasCustomKey: !!custom,
+              maskedKey: custom ? maskKey(custom) : null,
+              available: await providerAvailable(p),
+            };
+          }),
+        );
+        res.json({ providers, routing: await getRouting() });
+      } catch (e: any) {
+        res.status(500).json({ message: e.message });
+      }
+    }
+  );
+
+  app.post(
+    "/api/admin/ai-agent/providers",
+    isAuthenticated,
+    requireAdmin,
+    async (req, res) => {
+      try {
+        const { provider, apiKey, routing } = req.body || {};
+        if (routing && typeof routing === "object") {
+          const clean: Record<string, string> = {};
+          for (const k of ["ui", "code", "general"]) {
+            if (routing[k] && AI_PROVIDERS.includes(routing[k])) clean[k] = routing[k];
+          }
+          await storage.setSetting(ROUTING_SETTING, JSON.stringify({ ...(await getRouting()), ...clean }));
+        }
+        if (provider) {
+          if (!AI_PROVIDERS.includes(provider))
+            return res.status(400).json({ message: "مزوّد غير معروف" });
+          if (typeof apiKey !== "string" || apiKey.trim().length < 10)
+            return res.status(400).json({ message: "مفتاح API غير صالح" });
+          await storage.setSetting(PROVIDER_KEY_SETTING(provider), encryptSecret(apiKey.trim()));
+        }
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(500).json({ message: e.message });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/admin/ai-agent/providers/:provider",
+    isAuthenticated,
+    requireAdmin,
+    async (req, res) => {
+      try {
+        const p = req.params.provider as AiProvider;
+        if (!AI_PROVIDERS.includes(p))
+          return res.status(400).json({ message: "مزوّد غير معروف" });
+        await storage.setSetting(PROVIDER_KEY_SETTING(p), "");
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(500).json({ message: e.message });
+      }
+    }
+  );
+
   // ── POST /api/admin/ai-agent/transcribe — تحويل صوت لنص ────────
   app.post(
     "/api/admin/ai-agent/transcribe",
@@ -286,18 +461,43 @@ export function registerAiAgentRoutes(
         }));
 
         const hasVideo = atts.some(a => a.mimeType.startsWith("video/"));
-        const geminiAvailable = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
-        // البحث على الويب والفيديو يتطلبان Gemini؛ وإلا الموديل المختار
-        const useGemini = (model === "gemini" || !!webSearch || hasVideo) && geminiAvailable;
-        if ((webSearch || hasVideo) && !geminiAvailable && model !== "openai") {
-          return res.status(503).json({ message: "البحث على الويب وتحليل الفيديو يتطلبان مفتاح Gemini/Google — غير متوفر حالياً" });
+        const hasImages = atts.some(a => a.mimeType.startsWith("image/"));
+
+        // ── التوجيه الذكي: auto يختار الأنسب حسب نوع الطلب ──
+        const routing = await getRouting();
+        const lastUserText = [...cleanMessages].reverse().find(m => m.role === "user")?.content || "";
+        const intent = classifyIntent(lastUserText);
+        let target: AiProvider = (AI_PROVIDERS as readonly string[]).includes(model || "")
+          ? (model as AiProvider)
+          : routing[intent] || "openai";
+        let routedBy = (AI_PROVIDERS as readonly string[]).includes(model || "") ? "يدوي" : `تلقائي (${intent === "ui" ? "واجهات" : intent === "code" ? "كود" : "عام"})`;
+
+        // قيود القدرات: البحث والفيديو → Gemini فقط؛ DeepSeek لا يدعم الصور
+        if (webSearch || hasVideo) {
+          if (!(await providerAvailable("gemini")))
+            return res.status(503).json({ message: "البحث على الويب وتحليل الفيديو يتطلبان مفتاح Gemini/Google — أضفه من إعدادات الموديلات" });
+          target = "gemini";
+        } else if (hasImages && target === "deepseek") {
+          target = (await providerAvailable("gemini")) ? "gemini" : "openai";
+        }
+        // fallback لو المزوّد المختار غير متاح
+        if (!(await providerAvailable(target))) {
+          if (model === target)
+            return res.status(503).json({ message: `مزوّد ${target} غير متاح — أضف مفتاح API من إعدادات الموديلات` });
+          target = (await providerAvailable("openai")) ? "openai" : "gemini";
         }
 
         let raw = "";
         let modelUsed = "";
-        if (useGemini) {
-          raw = await callGemini(systemContent, cleanMessages, atts, !!webSearch);
+        if (target === "gemini") {
+          const customGemini = await getCustomKey("gemini");
+          raw = await callGemini(systemContent, cleanMessages, atts, !!webSearch, customGemini || undefined);
           modelUsed = webSearch ? "gemini-2.0-flash + Google Search" : "gemini-2.0-flash";
+        } else if (target === "deepseek") {
+          const dsKey = await getCustomKey("deepseek");
+          if (!dsKey) return res.status(503).json({ message: "DeepSeek يحتاج مفتاح API — أضفه من إعدادات الموديلات" });
+          raw = await callDeepSeek(systemContent, cleanMessages, dsKey);
+          modelUsed = "deepseek-chat";
         } else {
           // OpenAI: الصور تُرفق كـ data URLs في آخر رسالة مستخدم
           const oaMessages: any[] = [
@@ -315,15 +515,29 @@ export function registerAiAgentRoutes(
               ],
             };
           }
-          const completion = await openai.chat.completions.create({
-            model: "gpt-4o",
-            messages: oaMessages,
-            temperature: 0.3,
-            max_tokens: 4000,
-          });
-          raw = completion.choices[0]?.message?.content || "{}";
-          modelUsed = "gpt-4o";
+          const customOa = await getCustomKey("openai");
+          if (customOa) {
+            const r = await fetch("https://api.openai.com/v1/chat/completions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${customOa}` },
+              body: JSON.stringify({ model: "gpt-4o", messages: oaMessages, temperature: 0.3, max_tokens: 4000 }),
+            });
+            if (!r.ok) throw new Error(`OpenAI ${r.status}: ${(await r.text()).slice(0, 300)}`);
+            const j: any = await r.json();
+            raw = j.choices?.[0]?.message?.content || "{}";
+            modelUsed = "gpt-4o (مفتاح مخصص)";
+          } else {
+            const completion = await openai.chat.completions.create({
+              model: "gpt-4o",
+              messages: oaMessages,
+              temperature: 0.3,
+              max_tokens: 4000,
+            });
+            raw = completion.choices[0]?.message?.content || "{}";
+            modelUsed = "gpt-4o";
+          }
         }
+        modelUsed += ` — ${routedBy}`;
 
         let parsed: any;
         try {

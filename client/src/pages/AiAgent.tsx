@@ -181,7 +181,10 @@ export default function AiAgent() {
   const [tab, setTab] = useState<"chat" | "files" | "terminal">("chat");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // ── إمكانيات جديدة: تعدد موديلات، بحث ويب، مرفقات، صوت ──
-  const [aiModel, setAiModel] = useState<"openai" | "gemini">("openai");
+  const [aiModel, setAiModel] = useState<"auto" | "openai" | "gemini" | "deepseek">("auto");
+  const [showProviderSettings, setShowProviderSettings] = useState(false);
+  const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
+  const [routingDraft, setRoutingDraft] = useState<Record<string, string> | null>(null);
   const [webSearch, setWebSearch] = useState(false);
   const [voiceReply, setVoiceReply] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -208,6 +211,42 @@ export default function AiAgent() {
     queryKey: ["/api/admin/ai-agent/files"],
     queryFn: () => fetch("/api/admin/ai-agent/files", { credentials: "include" }).then(r => r.json()),
     staleTime: 30000,
+  });
+
+  // ── مزوّدو الموديلات + التوجيه الذكي ──
+  const { data: providersData, refetch: refetchProviders } = useQuery<{
+    providers: { provider: string; hasEnvKey: boolean; hasCustomKey: boolean; maskedKey: string | null; available: boolean }[];
+    routing: Record<string, string>;
+  }>({
+    queryKey: ["/api/admin/ai-agent/providers"],
+    queryFn: () => fetch("/api/admin/ai-agent/providers", { credentials: "include" }).then(r => r.json()),
+    staleTime: 30000,
+  });
+
+  const saveProviderMutation = useMutation({
+    mutationFn: async (body: { provider?: string; apiKey?: string; routing?: Record<string, string> }) => {
+      const r = await fetch("/api/admin/ai-agent/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.message || "فشل الحفظ");
+      return d;
+    },
+    onSuccess: () => { toast({ title: "✅ تم الحفظ" }); refetchProviders(); },
+    onError: (e: any) => toast({ title: "❌ فشل الحفظ", description: e?.message, variant: "destructive" }),
+  });
+
+  const deleteProviderKeyMutation = useMutation({
+    mutationFn: async (provider: string) => {
+      const r = await fetch(`/api/admin/ai-agent/providers/${provider}`, { method: "DELETE", credentials: "include" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.message || "فشل الحذف");
+      return d;
+    },
+    onSuccess: () => { toast({ title: "🗑️ تم حذف المفتاح" }); refetchProviders(); },
   });
 
   const loadFileMutation = useMutation({
@@ -535,18 +574,27 @@ export default function AiAgent() {
               <div className="border-t border-border/40 p-3">
                 {/* ── شريط الإمكانيات: موديل + بحث ويب + رد صوتي + مرفقات + مايك ── */}
                 <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-                  <div className="flex rounded-lg border border-border/60 overflow-hidden">
-                    {([["openai", "GPT-4o"], ["gemini", "Gemini"]] as const).map(([k, label]) => (
-                      <button
-                        key={k}
-                        onClick={() => setAiModel(k)}
-                        className={`px-2.5 py-1 text-[10px] font-bold transition-colors ${aiModel === k ? "bg-violet-600 text-white" : "text-muted-foreground hover:bg-muted"}`}
-                        data-testid={`btn-model-${k}`}
-                      >
-                        {label}
-                      </button>
+                  <select
+                    value={aiModel}
+                    onChange={e => setAiModel(e.target.value as any)}
+                    className="px-2 py-1 rounded-lg border border-border/60 bg-background text-[10px] font-bold outline-none"
+                    data-testid="select-model"
+                  >
+                    <option value="auto">🧠 توجيه ذكي (تلقائي)</option>
+                    {(providersData?.providers || []).map(p => (
+                      <option key={p.provider} value={p.provider} disabled={!p.available}>
+                        {p.provider === "openai" ? "GPT-4o" : p.provider === "gemini" ? "Gemini" : "DeepSeek"}
+                        {!p.available ? " (يحتاج مفتاح)" : ""}
+                      </option>
                     ))}
-                  </div>
+                  </select>
+                  <button
+                    onClick={() => setShowProviderSettings(s => !s)}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${showProviderSettings ? "bg-violet-600 text-white border-violet-600" : "text-muted-foreground border-border/60 hover:bg-muted"}`}
+                    data-testid="btn-provider-settings"
+                  >
+                    <Zap className="w-3 h-3" /> إعدادات الموديلات
+                  </button>
                   <button
                     onClick={() => setWebSearch(w => !w)}
                     className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${webSearch ? "bg-blue-600 text-white border-blue-600" : "text-muted-foreground border-border/60 hover:bg-muted"}`}
@@ -579,6 +627,73 @@ export default function AiAgent() {
                     {recording ? "إيقاف وإرسال" : transcribing ? "جاري التحويل..." : "رسالة صوتية"}
                   </button>
                 </div>
+                {showProviderSettings && (
+                  <div className="border border-border/60 rounded-xl p-3 mb-2 space-y-3 bg-muted/20" data-testid="panel-provider-settings">
+                    <p className="text-xs font-bold flex items-center gap-1.5"><Zap className="w-3.5 h-3.5 text-violet-500" /> مفاتيح API المخصصة</p>
+                    {(providersData?.providers || []).map(p => (
+                      <div key={p.provider} className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] font-bold w-16">{p.provider === "openai" ? "OpenAI" : p.provider === "gemini" ? "Gemini" : "DeepSeek"}</span>
+                        {p.hasCustomKey ? (
+                          <>
+                            <code className="text-[10px] bg-background border border-border/40 rounded px-2 py-0.5" dir="ltr">{p.maskedKey}</code>
+                            <button
+                              onClick={() => deleteProviderKeyMutation.mutate(p.provider)}
+                              className="text-[10px] text-red-500 hover:underline"
+                              data-testid={`btn-delete-key-${p.provider}`}
+                            >حذف</button>
+                          </>
+                        ) : (
+                          <>
+                            <input
+                              type="password"
+                              value={keyInputs[p.provider] || ""}
+                              onChange={e => setKeyInputs(k => ({ ...k, [p.provider]: e.target.value }))}
+                              placeholder={p.hasEnvKey ? "مفتاح مخصص (اختياري — يوجد مفتاح افتراضي)" : "أدخل مفتاح API"}
+                              className="flex-1 min-w-[140px] text-[10px] border border-border/60 rounded-lg px-2 py-1 bg-background outline-none"
+                              dir="ltr"
+                              data-testid={`input-key-${p.provider}`}
+                            />
+                            <Button
+                              size="sm" variant="outline" className="h-6 text-[10px] px-2"
+                              disabled={!(keyInputs[p.provider] || "").trim() || saveProviderMutation.isPending}
+                              onClick={() => {
+                                saveProviderMutation.mutate({ provider: p.provider, apiKey: keyInputs[p.provider].trim() });
+                                setKeyInputs(k => ({ ...k, [p.provider]: "" }));
+                              }}
+                              data-testid={`btn-save-key-${p.provider}`}
+                            >حفظ</Button>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                    <div className="border-t border-border/40 pt-2">
+                      <p className="text-xs font-bold mb-1.5">🧠 التوجيه الذكي — الأقوى في كل مجال:</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {([["ui", "تصميم الواجهات"], ["code", "الكود والمنطق"], ["general", "أسئلة عامة"]] as const).map(([k, label]) => (
+                          <label key={k} className="text-[10px] flex flex-col gap-0.5">
+                            <span className="text-muted-foreground">{label}</span>
+                            <select
+                              value={(routingDraft || providersData?.routing || {})[k] || "openai"}
+                              onChange={e => {
+                                // نرسل كائن التوجيه كاملاً كل مرة لتفادي تضارب التحديثات المتزامنة
+                                const full = { ...(routingDraft || providersData?.routing || {}), [k]: e.target.value };
+                                setRoutingDraft(full);
+                                saveProviderMutation.mutate({ routing: full });
+                              }}
+                              className="border border-border/60 rounded-lg px-2 py-1 bg-background outline-none text-[10px]"
+                              data-testid={`select-routing-${k}`}
+                            >
+                              <option value="openai">GPT-4o</option>
+                              <option value="gemini">Gemini</option>
+                              <option value="deepseek">DeepSeek</option>
+                            </select>
+                          </label>
+                        ))}
+                      </div>
+                      <p className="text-[9px] text-muted-foreground mt-1.5">مع وضع "توجيه ذكي" النظام يحلل طلبك ويختار الموديل الأنسب تلقائياً. البحث والفيديو يستخدمان Gemini دائماً.</p>
+                    </div>
+                  </div>
+                )}
                 {attachments.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mb-2">
                     {attachments.map((a, i) => (
