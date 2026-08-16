@@ -109,15 +109,25 @@ async function callGemini(
     generationConfig: { temperature: 0.3, maxOutputTokens: 8000 },
   };
   if (webSearch) body.tools = [{ google_search: {} }];
-  const r = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
-  );
-  if (!r.ok) throw new Error(`Gemini ${r.status}: ${(await r.text()).slice(0, 300)}`);
-  const j: any = await r.json();
-  const parts = j.candidates?.[0]?.content?.parts || [];
-  return parts.map((p: any) => p.text || "").filter(Boolean).join("\n");
+  // قائمة موديلات مرتبة من الأحدث للأقدم — لو موديل اتوقف (404) بنجرب اللي بعده تلقائياً
+  let lastErr = "";
+  for (const model of GEMINI_MODELS) {
+    const r = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    );
+    if (r.ok) {
+      const j: any = await r.json();
+      const parts = j.candidates?.[0]?.content?.parts || [];
+      return parts.map((p: any) => p.text || "").filter(Boolean).join("\n");
+    }
+    lastErr = `Gemini ${model} ${r.status}: ${(await r.text()).slice(0, 300)}`;
+    if (r.status !== 404) throw new Error(lastErr); // 404 فقط = الموديل اتشال، غيره خطأ حقيقي
+  }
+  throw new Error(lastErr || "Gemini: no model available");
 }
+/* أحدث موديلات Gemini بالترتيب — عند توقف موديل بيتم التحويل للتالي بدون تدخل */
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
 
 /* ── إدارة مزوّدي الموديلات الديناميكية ── */
 const AI_PROVIDERS = ["openai", "gemini", "deepseek"] as const;
@@ -213,6 +223,12 @@ async function callDeepSeek(
 }
 
 const AI_AGENT_SYSTEM_PROMPT = `أنت كبير مهندسي البرمجيات (Senior Lead Software Engineer) والعقل التقني المدبر لمشروع "شبكة سوق للإعلانات" (Souq Ads Network / سوق ماركات).
+
+هويتك وأسلوبك:
+- أنت لست مساعد ذكاء اصطناعي تقليدي — أنت شريك تقني حقيقي يعمل مع المالك يداً بيد، كأنكما جالسان في مكتب واحد.
+- تتحدث معه بالعربية (وتفهم العامية المصرية بدقة تامة)، بأسلوب مهندس محترف: تحليل عميق، تفكير بشري حقيقي، ونقاش هندسي مدروس — ليس مجرد أكواد جاهزة.
+- تفهم السياق الكامل للمشروع وتاريخه قبل أي رد. عند الغموض: اسأل وناقش قبل أن تفترض.
+- عند وجود مشكلة: حلّل السبب الجذري (Root Cause) واشرحه بوضوح، ثم اقترح الحل الأمثل مع البدائل ومقارنة سريعة بينها عند اللزوم.
 المشروع: منصة إعلانية ثنائية اللغة (عربي/إنجليزي) مع بث مباشر وشبكة إعلانات بنمط Meta/AdSense.
 التقنيات: React 18 + TypeScript (Frontend) ، Node.js + Express + TypeScript (Backend) ، PostgreSQL + Drizzle ORM ، Tailwind CSS + shadcn/ui.
 المسار الجذري: ${PROJECT_ROOT}
@@ -492,7 +508,7 @@ export function registerAiAgentRoutes(
         if (target === "gemini") {
           const customGemini = await getCustomKey("gemini");
           raw = await callGemini(systemContent, cleanMessages, atts, !!webSearch, customGemini || undefined);
-          modelUsed = webSearch ? "gemini-2.0-flash + Google Search" : "gemini-2.0-flash";
+          modelUsed = webSearch ? "Gemini + بحث Google" : "Gemini";
         } else if (target === "deepseek") {
           const dsKey = await getCustomKey("deepseek");
           if (!dsKey) return res.status(503).json({ message: "DeepSeek يحتاج مفتاح API — أضفه من إعدادات الموديلات" });

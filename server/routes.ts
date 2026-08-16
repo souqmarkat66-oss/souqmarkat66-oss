@@ -4426,7 +4426,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         try {
           const genAI = new GoogleGenerativeAI(geminiKey);
           const model = genAI.getGenerativeModel({
-            model: "gemini-2.0-flash",
+            model: "gemini-2.5-flash",
             systemInstruction: SYSTEM_PROMPT,
           });
           const geminiHistory = history.slice(-8).map((h: any) => ({
