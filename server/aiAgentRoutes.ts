@@ -547,26 +547,35 @@ export function registerAiAgentRoutes(
           : routing[intent] || "openai";
         let routedBy = (AI_PROVIDERS as readonly string[]).includes(model || "") ? "يدوي" : `تلقائي (${intent === "ui" ? "واجهات" : intent === "code" ? "كود" : "عام"})`;
 
-        // قيود القدرات: البحث والفيديو → Gemini فقط؛ DeepSeek لا يدعم الصور
-        if (webSearch || hasVideo) {
-          if (!(await providerAvailable("gemini")))
-            return res.status(503).json({ message: "البحث على الويب وتحليل الفيديو يتطلبان مفتاح Gemini/Google — أضفه من إعدادات الموديلات" });
-          target = "gemini";
-        } else if (hasImages && target === "deepseek") {
-          // DeepSeek لا يدعم الصور → Gemini أو OpenAI أو Anthropic
-          target = (await providerAvailable("gemini")) ? "gemini" : (await providerAvailable("anthropic")) ? "anthropic" : "openai";
-        }
-        // fallback لو المزوّد المختار غير متاح
-        if (!(await providerAvailable(target))) {
-          if (model === target)
+        const isManual = (AI_PROVIDERS as readonly string[]).includes(model || "");
+
+        if (isManual) {
+          // ── اختيار يدوي = سيادة كاملة: نستخدم الموديل المختار حصرياً، بدون أي تحويل تلقائي ──
+          if (webSearch && target !== "gemini")
+            return res.status(400).json({ message: `البحث على الويب متاح فقط مع Gemini — عطّل البحث أو اختر Gemini يدوياً. لن يتم التبديل تلقائياً احتراماً لاختيارك (${target}).` });
+          if (hasVideo && target !== "gemini")
+            return res.status(400).json({ message: `تحليل الفيديو متاح فقط مع Gemini — احذف الفيديو أو اختر Gemini يدوياً. الموديل المختار (${target}) لا يدعم الفيديو.` });
+          if (hasImages && target === "deepseek")
+            return res.status(400).json({ message: "DeepSeek لا يدعم تحليل الصور — احذف الصور أو اختر موديلاً آخر يدوياً." });
+          if (!(await providerAvailable(target)))
             return res.status(503).json({ message: `مزوّد ${target} غير متاح — أضف مفتاح API من إعدادات الموديلات` });
-          // استخدام سلسلة fallback حسب نوع الطلب (intent-aware)
-          const fallbackChain = INTENT_FALLBACK_CHAINS[intent] || ["openai", "gemini"];
-          let resolved: AiProvider | null = null;
-          for (const p of fallbackChain) {
-            if (await providerAvailable(p)) { resolved = p; break; }
+        } else {
+          // ── وضع تلقائي فقط: قيود القدرات والتبديل مسموحان ──
+          if (webSearch || hasVideo) {
+            if (!(await providerAvailable("gemini")))
+              return res.status(503).json({ message: "البحث على الويب وتحليل الفيديو يتطلبان مفتاح Gemini/Google — أضفه من إعدادات الموديلات" });
+            target = "gemini";
+          } else if (hasImages && target === "deepseek") {
+            target = (await providerAvailable("openai")) ? "openai" : (await providerAvailable("anthropic")) ? "anthropic" : "gemini";
           }
-          target = resolved || "openai";
+          if (!(await providerAvailable(target))) {
+            const fallbackChain = INTENT_FALLBACK_CHAINS[intent] || ["openai", "gemini"];
+            let resolved: AiProvider | null = null;
+            for (const p of fallbackChain) {
+              if (await providerAvailable(p)) { resolved = p; break; }
+            }
+            target = resolved || "openai";
+          }
         }
 
         let raw = "";
