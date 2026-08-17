@@ -73,6 +73,23 @@ export default function Profile() {
     }
   }, [profile?.user, isOwn]);
 
+  // ── نظام المتابعة ──
+  const { data: followInfo } = useQuery<any>({
+    queryKey: ["/api/users", targetUserId, "follow-info"],
+    queryFn: () => fetch(`/api/users/${targetUserId}/follow-info`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!targetUserId && !!user,
+  });
+
+  const followMutation = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/users/${targetUserId}/follow`),
+    onSuccess: async (r: any) => {
+      const data = typeof r?.json === "function" ? await r.json() : r;
+      toast({ title: data?.following ? "✅ تمت المتابعة" : "تم إلغاء المتابعة" });
+      qc.invalidateQueries({ queryKey: ["/api/users", targetUserId, "follow-info"] });
+    },
+    onError: (e: any) => toast({ title: "تعذّرت العملية", description: e?.message, variant: "destructive" }),
+  });
+
   const { data: referralData } = useQuery<any>({
     queryKey: ["/api/auth/me/referral"],
     queryFn: () => fetch("/api/auth/me/referral", { credentials: "include" }).then(r => r.json()),
@@ -254,6 +271,38 @@ export default function Profile() {
                   <Edit2 className="w-3.5 h-3.5" />
                 </button>
               )}
+              {!isOwn && user && (
+                <Button
+                  size="sm"
+                  variant={followInfo?.following ? "outline" : "default"}
+                  disabled={followMutation.isPending}
+                  onClick={() => followMutation.mutate()}
+                  className="rounded-full h-8 px-4 font-bold"
+                  data-testid="btn-follow-user"
+                >
+                  {followInfo?.following ? "✓ أتابعه" : followInfo?.followsMe ? "+ رد المتابعة" : "+ متابعة"}
+                </Button>
+              )}
+              {!isOwn && followInfo?.followsMe && (
+                <Badge variant="secondary" className="text-[10px]">{followInfo?.following ? "🤝 صديق" : "يتابعك"}</Badge>
+              )}
+            </div>
+            {/* عدادات المتابعة */}
+            <div className="flex items-center gap-4 justify-center sm:justify-start mb-1 text-xs text-muted-foreground">
+              <button
+                onClick={() => isOwn && setLocation("/follows?tab=followers")}
+                className={isOwn ? "hover:text-primary" : "cursor-default"}
+                data-testid="text-followers-count"
+              >
+                <b className="text-foreground">{followInfo?.followersCount ?? 0}</b> متابِع
+              </button>
+              <button
+                onClick={() => isOwn && setLocation("/follows?tab=following")}
+                className={isOwn ? "hover:text-primary" : "cursor-default"}
+                data-testid="text-following-count"
+              >
+                <b className="text-foreground">{followInfo?.followingCount ?? 0}</b> يتابع
+              </button>
             </div>
             {profileUser.bio ? (
               <p className="text-sm text-muted-foreground mb-2 max-w-sm">{profileUser.bio}</p>

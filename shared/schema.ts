@@ -233,6 +233,18 @@ export const follows = pgTable("follows", {
 export type Follow = typeof follows.$inferSelect;
 
 // ============================================================
+// USER FOLLOWS TABLE (متابعة مستخدم لمستخدم — نظام الأصدقاء)
+// ============================================================
+export const userFollows = pgTable("user_follows", {
+  id: serial("id").primaryKey(),
+  followerId: varchar("follower_id").references(() => users.id).notNull(),
+  followingId: varchar("following_id").references(() => users.id).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type UserFollow = typeof userFollows.$inferSelect;
+
+// ============================================================
 // AD CAMPAIGNS TABLE (Meta/AdSense-like)
 // ============================================================
 export const adCampaigns = pgTable("ad_campaigns", {

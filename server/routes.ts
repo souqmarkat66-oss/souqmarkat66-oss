@@ -529,6 +529,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   }
 
   io.on("connection", (socket) => {
+    // ── انضمام تلقائي لغرفة المستخدم (حالة الاتصال + دعوات التحدي + المحفظة) ──
+    {
+      const authUid = (socket.data as any).authUserId;
+      if (authUid) socket.join(`user:${authUid}`);
+    }
+
     // ── المستخدم ينضم لغرفته الخاصة عشان يستقبل تحديثات المحفظة ──
     socket.on("join-user-room", (userId: string) => {
       // Only the authenticated owner may subscribe to their wallet updates.
@@ -5331,6 +5337,93 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     } catch (e) {
       res.status(500).json({ message: "search_failed" });
     }
+  });
+
+  // ── نظام المتابعات والأصدقاء (Follow & Friends) ──
+  // متابعة / إلغاء متابعة مستخدم (toggle)
+  app.post("/api/users/:id/follow", isAuthenticated, async (req: any, res) => {
+    const me = req.user.claims.sub;
+    const target = String(req.params.id);
+    if (target === me) return res.status(400).json({ message: "لا يمكنك متابعة نفسك" });
+    try {
+      const exists = await db.execute(sql`SELECT 1 FROM users WHERE id = ${target}`);
+      if (!exists.rows[0]) return res.status(404).json({ message: "المستخدم غير موجود" });
+      // Toggle ذري: حذف إن وُجد وإلا إدراج — ثم إرجاع الحالة الفعلية المخزنة
+      await db.execute(sql`
+        WITH del AS (
+          DELETE FROM user_follows WHERE follower_id = ${me} AND following_id = ${target} RETURNING 1
+        )
+        INSERT INTO user_follows (follower_id, following_id)
+        SELECT ${me}, ${target} WHERE NOT EXISTS (SELECT 1 FROM del)
+        ON CONFLICT (follower_id, following_id) DO NOTHING
+      `);
+      const state = await db.execute(sql`SELECT 1 FROM user_follows WHERE follower_id = ${me} AND following_id = ${target}`);
+      res.json({ following: state.rows.length > 0 });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // حالة المتابعة + العدادات لبروفايل مستخدم
+  app.get("/api/users/:id/follow-info", isAuthenticated, async (req: any, res) => {
+    const me = req.user.claims.sub;
+    const target = String(req.params.id);
+    try {
+      const [iFollow, followsMe, counts] = await Promise.all([
+        db.execute(sql`SELECT 1 FROM user_follows WHERE follower_id = ${me} AND following_id = ${target}`),
+        db.execute(sql`SELECT 1 FROM user_follows WHERE follower_id = ${target} AND following_id = ${me}`),
+        db.execute(sql`
+          SELECT
+            (SELECT COUNT(*) FROM user_follows WHERE following_id = ${target}) AS followers_count,
+            (SELECT COUNT(*) FROM user_follows WHERE follower_id = ${target}) AS following_count
+        `),
+      ]);
+      res.json({
+        following: iFollow.rows.length > 0,
+        followsMe: followsMe.rows.length > 0,
+        followersCount: Number((counts.rows[0] as any)?.followers_count || 0),
+        followingCount: Number((counts.rows[0] as any)?.following_count || 0),
+      });
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // قوائم: أتابعهم / يتابعوني / الأصدقاء (متبادل) — مع حالة اللايف
+  app.get("/api/social/follows", isAuthenticated, async (req: any, res) => {
+    const me = req.user.claims.sub;
+    const type = String(req.query.type || "following");
+    try {
+      let rows;
+      if (type === "followers") {
+        rows = await db.execute(sql`
+          SELECT u.id, u.first_name, u.last_name, u.profile_image_url,
+                 EXISTS(SELECT 1 FROM user_follows f2 WHERE f2.follower_id = ${me} AND f2.following_id = u.id) AS mutual
+          FROM user_follows f JOIN users u ON u.id = f.follower_id
+          WHERE f.following_id = ${me}
+          ORDER BY f.created_at DESC LIMIT 200`);
+      } else if (type === "friends") {
+        rows = await db.execute(sql`
+          SELECT u.id, u.first_name, u.last_name, u.profile_image_url, TRUE AS mutual
+          FROM user_follows f JOIN users u ON u.id = f.following_id
+          WHERE f.follower_id = ${me}
+            AND EXISTS(SELECT 1 FROM user_follows f2 WHERE f2.follower_id = u.id AND f2.following_id = ${me})
+          ORDER BY f.created_at DESC LIMIT 200`);
+      } else {
+        rows = await db.execute(sql`
+          SELECT u.id, u.first_name, u.last_name, u.profile_image_url,
+                 EXISTS(SELECT 1 FROM user_follows f2 WHERE f2.follower_id = u.id AND f2.following_id = ${me}) AS mutual
+          FROM user_follows f JOIN users u ON u.id = f.following_id
+          WHERE f.follower_id = ${me}
+          ORDER BY f.created_at DESC LIMIT 200`);
+      }
+      // حالة اللايف والاتصال الفوري
+      const liveStreams = await storage.getLiveStreams("live");
+      const liveByUser = new Map<string, number>();
+      for (const s of liveStreams as any[]) liveByUser.set(String(s.userId), s.id);
+      const enriched = (rows.rows as any[]).map((u) => ({
+        ...u,
+        liveStreamId: liveByUser.get(String(u.id)) ?? null,
+        online: io.sockets.adapter.rooms.has(`user:${u.id}`),
+      }));
+      res.json(enriched);
+    } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
   app.get("/api/profile/:userId", async (req, res) => {

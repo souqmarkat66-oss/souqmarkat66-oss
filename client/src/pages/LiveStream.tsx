@@ -108,6 +108,22 @@ export default function LiveStream() {
   const [incomingChallenge, setIncomingChallenge] = useState<{challengerStreamId:string; challengerSocketId:string; challengerName:string}|null>(null);
   // ── دعوة تحدي لمستخدم محدد (بحث + بروفايل + دعوة) ──
   const [userSearchQ,       setUserSearchQ]       = useState("");
+  const [battleFriends,     setBattleFriends]     = useState<any[]>([]);
+  const [battleFriendsLoading, setBattleFriendsLoading] = useState(false);
+  const [followedInSearch,  setFollowedInSearch]  = useState<Record<string, boolean>>({});
+  const [battleInviteTab,   setBattleInviteTab]   = useState<"friends" | "search">("friends");
+
+  // تحميل قائمة الأصدقاء تلقائياً عند فتح نافذة إعداد المعركة
+  useEffect(() => {
+    if (!showBattleSetup) return;
+    setBattleInviteTab("friends");
+    setBattleFriendsLoading(true);
+    fetch("/api/social/follows?type=friends", { credentials: "include" })
+      .then(r => r.json())
+      .then(d => setBattleFriends(Array.isArray(d) ? d : []))
+      .catch(() => setBattleFriends([]))
+      .finally(() => setBattleFriendsLoading(false));
+  }, [showBattleSetup]);
   const [userSearchResults, setUserSearchResults] = useState<any[]>([]);
   const [userSearching,     setUserSearching]     = useState(false);
   const [inviteStatus,      setInviteStatus]      = useState<Record<string, "sending"|"sent"|"offline"|"accepted"|"declined">>({});
@@ -3518,8 +3534,85 @@ export default function LiveStream() {
               </button>
             </div>
 
+            {/* ── تبويبات الدعوة: الأصدقاء / البحث ── */}
+            <div className="flex gap-2 mb-3">
+              <button
+                onClick={async () => {
+                  setBattleInviteTab("friends");
+                  setBattleFriendsLoading(true);
+                  try {
+                    const r = await fetch("/api/social/follows?type=friends", { credentials: "include" });
+                    setBattleFriends(await r.json());
+                  } catch { setBattleFriends([]); }
+                  setBattleFriendsLoading(false);
+                }}
+                className={`flex-1 py-2 rounded-full text-xs font-bold border transition-all ${battleInviteTab === "friends" ? "bg-orange-500/20 border-orange-400/50 text-orange-300" : "bg-white/5 border-white/10 text-white/50"}`}
+                data-testid="tab-battle-friends"
+              >
+                🤝 الأصدقاء
+              </button>
+              <button
+                onClick={() => setBattleInviteTab("search")}
+                className={`flex-1 py-2 rounded-full text-xs font-bold border transition-all ${battleInviteTab === "search" ? "bg-orange-500/20 border-orange-400/50 text-orange-300" : "bg-white/5 border-white/10 text-white/50"}`}
+                data-testid="tab-battle-search"
+              >
+                🔍 بحث بالاسم
+              </button>
+            </div>
+
+            {/* ── قائمة الأصدقاء (متابعة متبادلة) ── */}
+            {battleInviteTab === "friends" && (
+              <div className="mb-4">
+                {battleFriendsLoading ? (
+                  <div className="flex items-center justify-center py-4"><Loader2 className="w-4 h-4 text-orange-400 animate-spin" /></div>
+                ) : battleFriends.length === 0 ? (
+                  <p className="text-center text-white/40 text-xs py-3">لا يوجد أصدقاء بعد — الصديق هو متابعة متبادلة. تابِع أصدقاءك من بروفايلاتهم أولاً</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                    {battleFriends.map((u: any) => {
+                      const name = `${u.firstName ?? u.first_name ?? ""} ${u.lastName ?? u.last_name ?? ""}`.trim() || "مستخدم";
+                      const img = u.profileImageUrl ?? u.profile_image_url;
+                      const st = inviteStatus[String(u.id)];
+                      return (
+                        <div key={u.id} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl p-2" data-testid={`row-battle-friend-${u.id}`}>
+                          <div className="relative w-9 h-9 rounded-full bg-zinc-700 overflow-hidden flex items-center justify-center flex-shrink-0">
+                            {img ? <img src={img} className="w-full h-full object-cover" alt={name} /> : <UserIcon className="w-4 h-4 text-white/50" />}
+                          </div>
+                          <div className="flex-1 min-w-0 text-right">
+                            <p className="text-white text-sm font-bold truncate">{name}</p>
+                            {u.liveStreamId ? <span className="text-[10px] text-red-400 font-bold">🔴 لايف الآن</span>
+                              : u.online ? <span className="text-[10px] text-green-400">● متصل</span>
+                              : <span className="text-[10px] text-white/30">غير متصل</span>}
+                          </div>
+                          <button
+                            disabled={st === "sent" || st === "sending"}
+                            onClick={() => {
+                              setInviteStatus(p => ({ ...p, [String(u.id)]: "sending" }));
+                              socketRef.current?.emit("challenge-user-invite", {
+                                targetUserId: String(u.id),
+                                streamId: String(id),
+                                challengerName: user?.firstName || "مذيع",
+                              });
+                            }}
+                            className={`px-3 py-1.5 rounded-full text-[11px] font-bold active:scale-95 transition-all ${
+                              st === "sent" ? "bg-green-500/20 text-green-300"
+                              : st === "offline" ? "bg-zinc-600/40 text-white/40"
+                              : "bg-gradient-to-r from-orange-500 to-pink-600 text-white"
+                            } disabled:opacity-70`}
+                            data-testid={`btn-invite-friend-${u.id}`}
+                          >
+                            {st === "sent" ? "أُرسلت ✓" : st === "sending" ? "..." : st === "offline" ? "غير متصل" : "دعوة ⚔️"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ── ابحث عن شخص وادعُه للتحدي ── */}
-            <div className="mb-4">
+            <div className={`mb-4 ${battleInviteTab !== "search" ? "hidden" : ""}`}>
               <div className="relative mb-2">
                 <Search className="absolute top-1/2 -translate-y-1/2 end-3 w-4 h-4 text-white/40 pointer-events-none" />
                 <input
@@ -3557,6 +3650,23 @@ export default function LiveStream() {
                           data-testid={`btn-view-profile-${u.id}`}
                         >
                           بروفايل
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const r = await fetch(`/api/users/${u.id}/follow`, { method: "POST", credentials: "include" });
+                              const d = await r.json();
+                              if (!r.ok) throw new Error(d?.message);
+                              setFollowedInSearch(p => ({ ...p, [String(u.id)]: !!d.following }));
+                              toast({ title: d.following ? "✅ تمت المتابعة" : "تم إلغاء المتابعة" });
+                            } catch (e: any) {
+                              toast({ title: "تعذّرت المتابعة", description: e?.message, variant: "destructive" });
+                            }
+                          }}
+                          className={`px-2.5 py-1.5 rounded-full text-[11px] font-bold active:scale-95 ${followedInSearch[String(u.id)] ? "bg-green-500/20 text-green-300" : "bg-white/10 text-white/70"}`}
+                          data-testid={`btn-follow-search-${u.id}`}
+                        >
+                          {followedInSearch[String(u.id)] ? "أتابعه ✓" : "+ متابعة"}
                         </button>
                         <button
                           disabled={st === "sent" || st === "sending"}

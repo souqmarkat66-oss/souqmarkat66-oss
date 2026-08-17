@@ -270,6 +270,18 @@ async function runMigrations() {
             AND a2.target_interests <> ''
         )
     `);
+    // جدول متابعة المستخدمين (نظام الأصدقاء) — idempotent
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS user_follows (
+        id SERIAL PRIMARY KEY,
+        follower_id VARCHAR NOT NULL REFERENCES users(id),
+        following_id VARCHAR NOT NULL REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        CONSTRAINT user_follows_unique UNIQUE (follower_id, following_id),
+        CONSTRAINT user_follows_no_self CHECK (follower_id <> following_id)
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_user_follows_following ON user_follows(following_id)`);
     // عمود مساهمات المشاركين الفردية في نتائج التحديات (idempotent)
     await db.execute(sql`ALTER TABLE live_battles ADD COLUMN IF NOT EXISTS player_scores JSONB`);
     // Backfill users.governorate from their most recent ad's target_region

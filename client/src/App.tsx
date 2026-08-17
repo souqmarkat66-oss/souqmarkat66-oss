@@ -30,6 +30,7 @@ const EmbedGuide = lazy(() => import("@/pages/EmbedGuide"));
 const MediaLibrary = lazy(() => import("@/pages/MediaLibrary"));
 const Messages = lazy(() => import("@/pages/Messages"));
 const Profile = lazy(() => import("@/pages/Profile"));
+const Follows = lazy(() => import("@/pages/Follows"));
 const MyDashboard = lazy(() => import("@/pages/MyDashboard"));
 const Social = lazy(() => import("@/pages/Social"));
 const Help = lazy(() => import("@/pages/Help"));
@@ -125,6 +126,9 @@ function Router() {
               <Route path="/embed-guide" component={EmbedGuide} />
               <Route path="/messages">
                 <ProtectedRoute component={Messages} />
+              </Route>
+              <Route path="/follows">
+                <ProtectedRoute component={Follows} />
               </Route>
               <Route path="/profile/:userId" component={Profile} />
               <Route path="/profile">

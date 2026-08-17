@@ -2,3 +2,4 @@
 - [Live battle accounting](live-battle-accounting.md) — multipliers affect PK score only; wallet debits, payouts, and recharge-code rotation stay server-atomic
 - [Admin dev-agent architecture](dev-agent-upgrade.md) — live module aiAgentRoutes.ts, approval-only writes via /execute, multi-model+search+voice, 25mb parser scoped to its paths
 - [PK battle flow](pk-battle-flow.md) — invite accept auto-starts 1v1 via shared validated helper; guest split screen needs captureStream for HLS; gift button can't rely on WebRTC streaming flag alone
+- [Follow & Friends system](pk-battle-flow.md) — user_follows table (mutual = friend); presence via global user:<id> room join on socket auth; battle friend-invite reuses challenge-user-invite flow
