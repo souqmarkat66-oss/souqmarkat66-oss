@@ -277,7 +277,15 @@ export default function AiAgent() {
         tts.generate(resp.content.slice(0, 900), "nova", true).catch(() => {});
       }
     },
-    onError: (e: any) => toast({ title: "❌ خطأ في الـ AI", description: e?.message, variant: "destructive" }),
+    onError: (e: any) => {
+      const msg = e?.message || "حدث خطأ غير متوقع";
+      // إضافة رسالة الخطأ كفقاعة محادثة دائمة حتى لا تضيع مع انتهاء الـ toast
+      setMessages(prev => [
+        ...prev,
+        { role: "assistant", content: `⚠️ ${msg}`, parsed: { type: "error" } },
+      ]);
+      toast({ title: "❌ خطأ في الـ AI", description: msg, variant: "destructive" });
+    },
   });
 
   const executeMutation = useMutation({
@@ -541,6 +549,10 @@ export default function AiAgent() {
                           onApprove={(p) => executeMutation.mutate(p)}
                           isApproving={executeMutation.isPending}
                         />
+                      ) : m.parsed?.type === "error" ? (
+                        <div className="bg-red-50 border border-red-200 rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed text-red-700">
+                          {m.content}
+                        </div>
                       ) : (
                         <div className="bg-muted/60 border border-border/40 rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed">
                           {m.parsed?.content || m.content}

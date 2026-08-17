@@ -131,6 +131,22 @@ const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-lat
 
 /* ── استدعاء Anthropic Claude ── */
 const ANTHROPIC_MODELS = ["claude-sonnet-4-5", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"];
+
+/** تحويل خطأ Anthropic HTTP إلى رسالة عربية واضحة */
+async function parseAnthropicError(status: number, body: string): Promise<string> {
+  let apiMsg = "";
+  try { apiMsg = (JSON.parse(body) as any)?.error?.message || ""; } catch {}
+  if (status === 401)
+    return `مفتاح Claude غير صالح أو منتهي الصلاحية — تحقق من المفتاح في إعدادات الموديلات${apiMsg ? ` (${apiMsg.slice(0, 120)})` : ""}`;
+  if (status === 403)
+    return `مفتاح Claude لا يملك صلاحية استخدام هذا الموديل${apiMsg ? ` — ${apiMsg.slice(0, 120)}` : ""}`;
+  if (status === 429)
+    return `تجاوزت حد الطلبات على Claude — انتظر قليلاً ثم حاول مجدداً${apiMsg ? ` (${apiMsg.slice(0, 120)})` : ""}`;
+  if (status >= 500)
+    return `خطأ في خوادم Anthropic (${status}) — حاول مجدداً بعد لحظات${apiMsg ? ` (${apiMsg.slice(0, 120)})` : ""}`;
+  return `Claude رفض الطلب (${status})${apiMsg ? `: ${apiMsg.slice(0, 200)}` : `: ${body.slice(0, 200)}`}`;
+}
+
 async function callAnthropic(
   systemContent: string,
   messages: { role: string; content: string }[],
@@ -176,10 +192,16 @@ async function callAnthropic(
       const j: any = await r.json();
       return (j.content || []).map((b: any) => b.text || "").filter(Boolean).join("\n");
     }
-    lastErr = `Anthropic ${model} ${r.status}: ${(await r.text()).slice(0, 300)}`;
-    if (r.status !== 404) throw new Error(lastErr);
+    const body = await r.text();
+    if (r.status === 404) {
+      // موديل غير متاح → جرب التالي
+      lastErr = `Anthropic ${model} غير متاح (404)`;
+      continue;
+    }
+    // أي خطأ آخر: حوّله لرسالة واضحة وارمِه فوراً
+    throw new Error(await parseAnthropicError(r.status, body));
   }
-  throw new Error(lastErr || "Anthropic: no model available");
+  throw new Error(lastErr || "Claude: لا يوجد موديل متاح حالياً");
 }
 
 /* ── إدارة مزوّدي الموديلات الديناميكية ── */
