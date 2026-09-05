@@ -21,8 +21,10 @@ function config() {
       || !ALLOWED_BASE_URLS.has(parsed.origin)) {
     throw new Error("AFS payment configuration is invalid");
   }
-  const entityId = process.env.AFS_ENTITY_ID;
-  const accessToken = process.env.AFS_ACCESS_TOKEN;
+  const entityId = process.env.AFS_ENTITY_ID?.trim();
+  // Accept either the raw token or the exact "Bearer <token>" value commonly
+  // copied from AFS examples, while always sending one Authorization prefix.
+  const accessToken = process.env.AFS_ACCESS_TOKEN?.trim().replace(/^Bearer\s+/i, "");
   if (!entityId || !accessToken) throw new Error("AFS payment service is not configured");
   return { baseUrl: parsed.origin, entityId, accessToken };
 }
