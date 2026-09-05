@@ -23,6 +23,8 @@ const Campaigns = lazy(() => import("@/pages/Campaigns"));
 const AdminPanel = lazy(() => import("@/pages/AdminPanel"));
 const Revenue = lazy(() => import("@/pages/Revenue"));
 const Payments = lazy(() => import("@/pages/Payments"));
+const AfsCheckout = lazy(() => import("@/pages/AfsCheckout"));
+const AfsPaymentResult = lazy(() => import("@/pages/AfsPaymentResult"));
 const Reels = lazy(() => import("@/pages/Reels"));
 const Login = lazy(() => import("@/pages/Login"));
 const MyContent = lazy(() => import("@/pages/MyContent"));
@@ -114,6 +116,12 @@ function Router() {
               </Route>
               <Route path="/payments">
                 <ProtectedRoute component={Payments} />
+              </Route>
+              <Route path="/payments/afs/result">
+                <ProtectedRoute component={AfsPaymentResult} />
+              </Route>
+              <Route path="/payments/afs/:orderId">
+                <ProtectedRoute component={AfsCheckout} />
               </Route>
               <Route path="/admin">
                 <ProtectedRoute component={AdminPanel} />

@@ -19,7 +19,9 @@ import path from "path";
 import fs from "fs";
 import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
+import { getAfsEntityId, getAfsPaymentStatus, getAfsWidget, prepareAfsCheckout } from "./afsPayments";
 import express from "express";
+import type { PoolClient } from "pg";
 import * as webpushModule from "web-push";
 const webpush: typeof webpushModule = (webpushModule as any).default || webpushModule;
 
@@ -352,6 +354,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     giftGoal: number | null;
     totalGiftCoins: number;
     socketToUser: Map<string, { userId: string; userName: string }>;
+    pendingCohostRequests: Map<string, { userId: string; userName: string; withCamera: boolean }>;
     autoAccept: boolean;
     raisedHands?: Map<string, { userId: string; userName: string; raisedAt: number }>;
     battle?: {
@@ -522,7 +525,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         broadcasterId: null, cohostIds: [], cohostNames: new Map(), viewers: new Set(),
         peakViewers: 0, startedAt: Date.now(), totalLikes: 0, totalComments: 0,
         bannedSockets: new Set(), giftGoal: null, totalGiftCoins: 0,
-        socketToUser: new Map(), autoAccept: false, battle: undefined,
+        socketToUser: new Map(), pendingCohostRequests: new Map(), autoAccept: false, battle: undefined,
       });
     }
     return streamRooms.get(streamId)!;
@@ -632,6 +635,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socket.on("request-cohost", (data: { streamId: string; userId: string; userName: string; withCamera?: boolean }) => {
       const room = streamRooms.get(data.streamId);
       if (!room?.broadcasterId) return;
+      const authUid = (socket.data as any).authUserId;
+      // Only an authenticated viewer who is actually inside this room may request a seat.
+      if (!authUid || !room.viewers.has(socket.id) || room.broadcasterId === socket.id) return;
       if (room.cohostIds.length >= 7) { // 8-seat salon: broadcaster + 7 guests
         socket.emit("cohost-rejected", { reason: "max_cohosts" });
         return;
@@ -641,14 +647,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (!room.cohostIds.includes(socket.id)) {
           room.cohostIds.push(socket.id);
           if (data.userName) room.cohostNames.set(socket.id, data.userName);
-          const uid = (socket.data as any).authUserId;
-          if (uid) room.socketToUser.set(socket.id, { userId: uid, userName: data.userName || "ضيف" });
+          room.socketToUser.set(socket.id, { userId: authUid, userName: data.userName || "ضيف" });
         }
         socket.emit("cohost-accepted", { broadcasterId: room.broadcasterId });
         // Also notify broadcaster that someone joined automatically
         socket.to(room.broadcasterId).emit("cohost-auto-joined", { socketId: socket.id, userName: data.userName, withCamera: data.withCamera });
       } else {
-        socket.to(room.broadcasterId).emit("cohost-request", { socketId: socket.id, userId: data.userId, userName: data.userName, withCamera: data.withCamera });
+        room.pendingCohostRequests.set(socket.id, {
+          userId: authUid,
+          userName: data.userName || "ضيف",
+          withCamera: data.withCamera !== false,
+        });
+        socket.to(room.broadcasterId).emit("cohost-request", { socketId: socket.id, userId: authUid, userName: data.userName, withCamera: data.withCamera });
       }
     });
 
@@ -661,25 +671,71 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       io.to(`stream:${data.streamId}`).emit("auto-accept-changed", data.enabled);
     });
 
+    // The host may browse authenticated people already watching this stream,
+    // but never receives anonymous sockets or people already on a salon seat.
+    socket.on("list-stream-viewers", async (data: { streamId: string }, ack?: (viewers: { socketId: string; userId: string; name: string; profileImageUrl: string | null }[]) => void) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room || room.broadcasterId !== socket.id) return ack?.([]);
+      const byUser = new Map<string, string>();
+      for (const socketId of Array.from(room.viewers)) {
+        if (socketId === socket.id || room.cohostIds.includes(socketId)) continue;
+        const viewer = io.sockets.sockets.get(socketId);
+        const userId = viewer?.data.authUserId ? String(viewer.data.authUserId) : null;
+        if (userId && !byUser.has(userId)) byUser.set(userId, socketId);
+      }
+      if (!byUser.size) return ack?.([]);
+      try {
+        const result = await pool.query(
+          `SELECT id, first_name, last_name, profile_image_url FROM users WHERE id::text = ANY($1::text[])`,
+          [Array.from(byUser.keys())],
+        );
+        const viewers = result.rows.map(row => {
+          const userId = String(row.id);
+          const name = `${row.first_name || ""} ${row.last_name || ""}`.trim() || "مستخدم";
+          return { socketId: byUser.get(userId)!, userId, name, profileImageUrl: row.profile_image_url || null };
+        }).filter(viewer => !!viewer.socketId);
+        ack?.(viewers);
+      } catch {
+        ack?.([]);
+      }
+    });
+
+    // Invitation is deliberately not admission: the viewer still chooses their
+    // media and submits the regular request for the host to approve manually.
+    socket.on("invite-viewer-to-cohost", (data: { streamId: string; guestSocketId: string }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room || room.broadcasterId !== socket.id) return;
+      const target = io.sockets.sockets.get(data.guestSocketId);
+      if (!target || !room.viewers.has(data.guestSocketId) || room.cohostIds.includes(data.guestSocketId)) return;
+      if (!(target.data as any).authUserId) return;
+      target.emit("viewer-cohost-invite", { broadcasterId: socket.id });
+    });
+
     socket.on("accept-cohost", (data: { streamId: string; guestSocketId: string; guestName?: string }) => {
       const room = streamRooms.get(data.streamId);
       // Only the broadcaster may admit guests.
       if (!room || room.broadcasterId !== socket.id) return;
+      const guestSock = io.sockets.sockets.get(data.guestSocketId);
+      const pending = room.pendingCohostRequests.get(data.guestSocketId);
+      const guestUid = guestSock ? (guestSock.data as any).authUserId : null;
+      if (!guestSock || !guestUid || !room.viewers.has(data.guestSocketId) || !pending) return;
       if (!room.cohostIds.includes(data.guestSocketId)) {
         if (room.cohostIds.length >= 7) { // 8-seat salon cap
           io.to(data.guestSocketId).emit("cohost-rejected", { reason: "max_cohosts" });
           return;
         }
         room.cohostIds.push(data.guestSocketId);
-        if (data.guestName) room.cohostNames.set(data.guestSocketId, data.guestName);
-        const guestSock = io.sockets.sockets.get(data.guestSocketId);
-        const guestUid = guestSock ? (guestSock.data as any).authUserId : null;
-        if (guestUid) room.socketToUser.set(data.guestSocketId, { userId: guestUid, userName: data.guestName || "ضيف" });
+        room.cohostNames.set(data.guestSocketId, pending.userName);
+        room.socketToUser.set(data.guestSocketId, { userId: guestUid, userName: pending.userName });
       }
+      room.pendingCohostRequests.delete(data.guestSocketId);
       io.to(data.guestSocketId).emit("cohost-accepted", { broadcasterId: socket.id });
     });
 
-    socket.on("reject-cohost", (data: { guestSocketId: string }) => {
+    socket.on("reject-cohost", (data: { streamId: string; guestSocketId: string }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room || room.broadcasterId !== socket.id || !room.pendingCohostRequests.has(data.guestSocketId)) return;
+      room.pendingCohostRequests.delete(data.guestSocketId);
       io.to(data.guestSocketId).emit("cohost-rejected");
     });
 
@@ -712,10 +768,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       socket.to(data.cohostId).emit("cohost-watcher", socket.id);
     });
 
-    // Co-host WebRTC signaling (separate from main broadcaster signaling)
-    socket.on("cohost-offer", (targetId: string, message: any) => socket.to(targetId).emit("cohost-offer", socket.id, message));
-    socket.on("cohost-answer", (targetId: string, message: any) => socket.to(targetId).emit("cohost-answer", socket.id, message));
-    socket.on("cohost-candidate", (targetId: string, message: any) => socket.to(targetId).emit("cohost-candidate", socket.id, message));
+    // Co-host WebRTC signaling is restricted to the current broadcaster and an
+    // admitted authenticated guest. Never relay arbitrary socket-to-socket media.
+    const validCohostPair = (senderId: string, targetId: string, direction: "guest-to-host" | "host-to-guest" | "either") => {
+      const sender = io.sockets.sockets.get(senderId);
+      const target = io.sockets.sockets.get(targetId);
+      if (!(sender?.data as any)?.authUserId || !(target?.data as any)?.authUserId) return false;
+      for (const room of Array.from(streamRooms.values())) {
+        const guestToHost = room.broadcasterId === targetId && room.cohostIds.includes(senderId);
+        const hostToGuest = room.broadcasterId === senderId && room.cohostIds.includes(targetId);
+        if ((direction === "guest-to-host" && guestToHost)
+          || (direction === "host-to-guest" && hostToGuest)
+          || (direction === "either" && (guestToHost || hostToGuest))) return true;
+      }
+      return false;
+    };
+    socket.on("cohost-offer", (targetId: string, message: any) => {
+      if (validCohostPair(socket.id, targetId, "guest-to-host")) socket.to(targetId).emit("cohost-offer", socket.id, message);
+    });
+    socket.on("cohost-answer", (targetId: string, message: any) => {
+      if (validCohostPair(socket.id, targetId, "host-to-guest")) socket.to(targetId).emit("cohost-answer", socket.id, message);
+    });
+    socket.on("cohost-candidate", (targetId: string, message: any) => {
+      if (validCohostPair(socket.id, targetId, "either")) socket.to(targetId).emit("cohost-candidate", socket.id, message);
+    });
 
     socket.on("cohost-leave", (streamId: string) => {
       const room = streamRooms.get(streamId);
@@ -723,14 +799,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         room.cohostIds = room.cohostIds.filter(id => id !== socket.id);
         room.cohostNames.delete(socket.id);
         room.socketToUser.delete(socket.id);
+        room.pendingCohostRequests.delete(socket.id);
       }
       io.to(`stream:${streamId}`).emit("cohost-left", socket.id);
+    });
+
+    // Only the stream owner can remove an admitted guest.  Keep roster state
+    // authoritative so a kicked socket cannot still be selected for a battle.
+    socket.on("kick-cohost", (data: { streamId: string; guestSocketId: string }) => {
+      const room = streamRooms.get(data.streamId);
+      if (!room || room.broadcasterId !== socket.id || !room.cohostIds.includes(data.guestSocketId)) return;
+      room.cohostIds = room.cohostIds.filter(id => id !== data.guestSocketId);
+      room.cohostNames.delete(data.guestSocketId);
+      room.socketToUser.delete(data.guestSocketId);
+      room.pendingCohostRequests.delete(data.guestSocketId);
+      room.raisedHands?.delete(data.guestSocketId);
+      io.to(data.guestSocketId).emit("cohost-removed");
+      io.to(`stream:${data.streamId}`).emit("cohost-left", data.guestSocketId);
     });
 
     // Broadcaster force-mutes/unmutes a specific guest
     socket.on("force-mute-cohost", (data: { streamId: string; guestSocketId: string; muted: boolean }) => {
       const room = streamRooms.get(data.streamId);
-      if (!room || room.broadcasterId !== socket.id) return;
+      const target = io.sockets.sockets.get(data.guestSocketId);
+      if (!room || room.broadcasterId !== socket.id || !room.cohostIds.includes(data.guestSocketId)) return;
+      if (!target || !(target.data as any).authUserId) return;
       io.to(data.guestSocketId).emit("force-muted", data.muted);
     });
 
@@ -1096,6 +1189,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           room.socketToUser.delete(socket.id);
           io.to(`stream:${streamId}`).emit("cohost-left", socket.id);
         }
+        room.pendingCohostRequests.delete(socket.id);
         room.viewers.delete(socket.id);
       });
     });
@@ -1156,8 +1250,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const { code } = req.body || {};
     if (!code) return res.status(400).json({ message: "الكود مطلوب" });
 
-    const client = await pool.connect();
+    let client: PoolClient | null = null;
     try {
+      client = await pool.connect();
       await client.query("BEGIN");
       const r = await client.query(
         `SELECT * FROM coin_recharge_codes WHERE code = $1 FOR UPDATE`,
@@ -1222,11 +1317,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         message: `تم إضافة ${row.coins} عملة لمحفظتك — تم إصدار كود جديد تلقائياً`,
       });
     } catch (error) {
-      await client.query("ROLLBACK").catch(() => {});
+      if (client) await client.query("ROLLBACK").catch(() => {});
       console.error("Recharge code redemption error:", error);
       return res.status(500).json({ message: "تعذر تنفيذ الشحن، حاول مرة أخرى" });
     } finally {
-      client.release();
+      client?.release();
     }
   });
 
@@ -3556,6 +3651,311 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     }
     const mine = await storage.getPaymentRequests(req.user.claims.sub);
     res.json(mine);
+  });
+
+  // A user-facing activity feed. Keep the underlying ledgers independent: each
+  // row is emitted once, with an id that remains stable across sources.
+  app.get("/api/payments/unified", isAuthenticated, async (req: any, res) => {
+    // Admin keeps the old all-users visibility; regular users only see their own activity.
+    const userId = isAdminUser(req) ? null : req.user.claims.sub;
+    const requestedKind = typeof req.query.kind === "string" ? req.query.kind : undefined;
+    const allowedKinds = new Set([
+      "deposit", "withdrawal", "coin_purchase", "coin_recharge",
+      "gift_sent", "gift_received", "revenue", "spending", "adjustment",
+    ]);
+    if (requestedKind && !allowedKinds.has(requestedKind)) {
+      return res.status(400).json({ message: "نوع النشاط غير صالح" });
+    }
+    const limit = Math.min(Math.max(Number.parseInt(req.query.limit as string, 10) || 50, 1), 100);
+
+    try {
+      const result = await pool.query(
+        `SELECT * FROM (
+          SELECT
+            'payment_request:' || id::text AS id,
+            'payment_request'::text AS source, id::text AS source_id, user_id,
+            CASE WHEN type = 'withdrawal' THEN 'withdrawal' ELSE 'deposit' END AS kind,
+            'EGP'::text AS asset, ABS(amount_egp)::numeric AS amount,
+            CASE WHEN type = 'withdrawal' THEN -ABS(amount_egp)::numeric ELSE ABS(amount_egp)::numeric END AS signed_amount,
+            amount_egp::numeric AS money_amount, status, method,
+            COALESCE(service_type, CASE WHEN type = 'withdrawal' THEN 'طلب سحب أرباح' ELSE 'طلب إيداع' END) AS description,
+            order_number AS reference, NULL::varchar AS related_user_id, NULL::integer AS related_stream_id,
+            screenshot_url, created_at
+          FROM payment_requests WHERE ($1::varchar IS NULL OR user_id = $1)
+
+          UNION ALL
+          SELECT
+            'coin_purchase_order:' || id::text, 'coin_purchase_order'::text, id::text, user_id,
+            'coin_purchase'::text, 'COIN'::text, ABS(coins)::numeric, ABS(coins)::numeric,
+            amount_egp::numeric, status, payment_method,
+            'طلب شراء عملات'::text, COALESCE(payment_ref, id::text), NULL::varchar, NULL::integer,
+            screenshot_url, created_at
+          FROM coin_purchase_orders WHERE ($1::varchar IS NULL OR user_id = $1)
+
+          UNION ALL
+          SELECT
+            'coin_transaction:' || id::text, 'coin_transaction'::text, id::text, user_id,
+            CASE type
+              WHEN 'recharge' THEN 'coin_recharge'
+              WHEN 'purchase' THEN 'coin_recharge'
+              WHEN 'gift_sent' THEN 'gift_sent'
+              WHEN 'gift_received' THEN 'gift_received'
+              ELSE 'adjustment'
+            END,
+            'COIN'::text, ABS(coins)::numeric,
+            CASE WHEN type = 'gift_sent' THEN -ABS(coins)::numeric ELSE ABS(coins)::numeric END,
+            NULL::numeric, 'completed'::text, NULL::text, description, recharge_code_id::text,
+            related_user_id, related_stream_id, NULL::text, created_at
+          FROM coin_transactions
+          WHERE ($1::varchar IS NULL OR user_id = $1)
+            AND type <> 'purchase'
+            AND NOT EXISTS (
+              SELECT 1 FROM afs_payment_orders apo
+              WHERE apo.status = 'paid' AND apo.coin_transaction_id = coin_transactions.id
+            )
+
+          UNION ALL
+          SELECT
+            'revenue_transaction:' || id::text, 'revenue_transaction'::text, id::text, user_id,
+            CASE type
+              WHEN 'earning' THEN 'revenue'
+              WHEN 'withdrawal' THEN 'withdrawal'
+              WHEN 'wallet_recharge' THEN 'deposit'
+              WHEN 'spending' THEN 'spending'
+              WHEN 'ai_charge' THEN 'spending'
+              ELSE 'adjustment'
+            END,
+            'EGP'::text, ABS(amount_egp)::numeric,
+            CASE WHEN type IN ('withdrawal', 'spending', 'ai_charge') THEN -ABS(amount_egp)::numeric ELSE ABS(amount_egp)::numeric END,
+            amount_egp::numeric, 'completed'::text, NULL::text, description,
+            COALESCE(campaign_id::text, channel_id::text), NULL::varchar, NULL::integer,
+            NULL::text, created_at
+          FROM revenue_transactions
+          WHERE ($1::varchar IS NULL OR user_id = $1)
+            AND NOT EXISTS (
+              SELECT 1 FROM afs_payment_orders apo
+              WHERE apo.status = 'paid' AND apo.revenue_transaction_id = revenue_transactions.id
+            )
+
+          UNION ALL
+          SELECT
+            'afs_card:' || id::text, 'afs_card'::text, id::text, user_id,
+            CASE WHEN purpose = 'coin_purchase' THEN 'coin_purchase' ELSE 'deposit' END,
+            CASE WHEN purpose = 'coin_purchase' THEN 'COIN' ELSE 'EGP' END,
+            CASE WHEN purpose = 'coin_purchase' THEN COALESCE(coins, 0)::numeric ELSE ABS(amount_egp)::numeric END,
+            CASE WHEN status = 'paid' THEN
+              CASE WHEN purpose = 'coin_purchase' THEN COALESCE(coins, 0)::numeric ELSE ABS(amount_egp)::numeric END
+              ELSE 0::numeric END,
+            amount_egp::numeric, status, 'afs_card'::text,
+            CASE WHEN purpose = 'coin_purchase' THEN 'شراء عملات بالبطاقة' ELSE 'شحن المحفظة بالبطاقة' END,
+            checkout_id, NULL::varchar, NULL::integer, NULL::text, created_at
+          FROM afs_payment_orders WHERE ($1::varchar IS NULL OR user_id = $1)
+        ) activity
+        WHERE ($2::text IS NULL OR kind = $2)
+        ORDER BY created_at DESC NULLS LAST
+        LIMIT $3`,
+        [userId, requestedKind || null, limit],
+      );
+      res.json(result.rows);
+    } catch (err) {
+      console.error("[payments/unified] failed:", err instanceof Error ? err.message : "unknown database error");
+      res.status(500).json({ message: "تعذر تحميل سجل النشاط حالياً" });
+    }
+  });
+
+  // ================================================================
+  // AFS / COPYandPAY CARD PAYMENTS
+  // ================================================================
+  const afsSafeOrder = (order: any, includeWidget = false) => ({
+    id: order.id,
+    purpose: order.purpose,
+    packageId: order.package_id,
+    amountEGP: Number(order.amount_egp),
+    coins: order.coins,
+    checkoutId: order.checkout_id,
+    integrity: includeWidget ? order.integrity : undefined,
+    status: order.status,
+    paymentBrand: order.payment_brand,
+    last4: order.last4,
+    createdAt: order.created_at,
+    paidAt: order.paid_at,
+  });
+
+  const normalizeAfsAmount = (value: unknown) => {
+    const parsed = Number(value);
+    const minorUnits = Math.round(parsed * 100);
+    if (!Number.isFinite(parsed) || !Number.isSafeInteger(minorUnits) || minorUnits <= 0) return null;
+    return minorUnits / 100;
+  };
+
+  app.post("/api/payments/afs/checkout", isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const { purpose } = req.body || {};
+    let amount: number;
+    let packageId: number | null = null;
+    let coins: number | null = null;
+    try {
+      if (purpose === "coin_purchase") {
+        packageId = Number(req.body?.packageId);
+        if (!Number.isSafeInteger(packageId) || packageId < 1) {
+          return res.status(400).json({ message: "اختر باقة عملات صالحة" });
+        }
+        const packageResult = await pool.query(
+          `SELECT id, coins, bonus_coins, price_egp FROM coin_packages WHERE id = $1 AND is_active = true`,
+          [packageId],
+        );
+        if (!packageResult.rows[0]) return res.status(404).json({ message: "الباقة غير متاحة حالياً" });
+        const pkg = packageResult.rows[0];
+        const packageAmount = normalizeAfsAmount(pkg.price_egp);
+        if (packageAmount === null) {
+          return res.status(503).json({ message: "سعر الباقة غير صالح، تواصل مع الإدارة" });
+        }
+        amount = packageAmount;
+        coins = Number(pkg.coins) + Number(pkg.bonus_coins || 0);
+      } else if (purpose === "wallet_top_up") {
+        const requestedAmount = normalizeAfsAmount(req.body?.amount);
+        if (requestedAmount === null || requestedAmount < 10 || requestedAmount > 1_000_000) {
+          return res.status(400).json({ message: "مبلغ الشحن يجب أن يكون بين 10 و1,000,000 جنيه" });
+        }
+        amount = requestedAmount;
+      } else {
+        return res.status(400).json({ message: "نوع عملية الدفع غير صالح" });
+      }
+
+      const checkout = await prepareAfsCheckout(amount);
+      const inserted = await pool.query(
+        `INSERT INTO afs_payment_orders
+          (user_id, purpose, package_id, amount_egp, coins, checkout_id, integrity)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [userId, purpose, packageId, amount, coins, checkout.checkoutId, checkout.integrity],
+      );
+      res.status(201).json({
+        ...afsSafeOrder(inserted.rows[0], true),
+        widgetUrl: checkout.widgetUrl,
+        isTestMode: checkout.isTestMode,
+      });
+    } catch {
+      res.status(503).json({ message: "تعذر بدء الدفع بالبطاقة، حاول مرة أخرى" });
+    }
+  });
+
+  app.get("/api/payments/afs/:id", isAuthenticated, async (req: any, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ message: "رقم العملية غير صالح" });
+    try {
+      const found = await pool.query(`SELECT * FROM afs_payment_orders WHERE id = $1`, [id]);
+      const order = found.rows[0];
+      if (!order || (order.user_id !== req.user.claims.sub && !isAdminUser(req))) {
+        return res.status(404).json({ message: "عملية الدفع غير موجودة" });
+      }
+      // Widget values are only supplied to the owner, never to an inspecting admin.
+      const own = order.user_id === req.user.claims.sub;
+      res.json({ ...afsSafeOrder(order, own), ...(own ? getAfsWidget(order.checkout_id) : {}) });
+    } catch (err) {
+      console.error("[payments/afs] order lookup failed:", err instanceof Error ? err.message : "unknown error");
+      res.status(503).json({ message: "تعذر تحميل عملية الدفع حالياً" });
+    }
+  });
+
+  app.post("/api/payments/afs/:id/verify", isAuthenticated, async (req: any, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ message: "رقم العملية غير صالح" });
+    let initial: any;
+    try {
+      const lookup = await pool.query(`SELECT * FROM afs_payment_orders WHERE id = $1`, [id]);
+      initial = lookup.rows[0];
+    } catch (err) {
+      console.error("[payments/afs] verify lookup failed:", err instanceof Error ? err.message : "unknown database error");
+      return res.status(503).json({ message: "تعذر التحقق من عملية الدفع حالياً" });
+    }
+    // Verifying is intentionally owner-only: admin inspection cannot cause credit.
+    if (!initial || initial.user_id !== req.user.claims.sub) return res.status(404).json({ message: "عملية الدفع غير موجودة" });
+    if (initial.status === "paid") return res.json({ status: "paid", message: "تم تأكيد الدفع وإضافة الرصيد." });
+
+    let provider: Record<string, any>;
+    try {
+      provider = await getAfsPaymentStatus(initial.checkout_id);
+    } catch {
+      return res.status(503).json({ status: "pending", message: "تعذر التحقق الآن، حاول مرة أخرى." });
+    }
+    const code = typeof provider.result?.code === "string" ? provider.result.code : "";
+    const providerAmount = Number(provider.amount);
+    const entity = provider.authentication?.entityId ?? provider.entityId;
+    let outcome: "paid" | "pending" | "failed" =
+      /^(000\.000\.|000\.100\.1|000\.[36])/.test(code) ? "paid" :
+      (/^(000\.200|000\.400|800\.400|100\.400\.500)/.test(code) ? "pending" : "failed");
+    try {
+      const providerMinorUnits = Math.round(providerAmount * 100);
+      const orderMinorUnits = Math.round(Number(initial.amount_egp) * 100);
+      if (provider.currency !== "EGP" || provider.paymentType !== "DB"
+          || !Number.isSafeInteger(providerMinorUnits) || providerMinorUnits !== orderMinorUnits
+          || typeof entity !== "string" || !entity || entity !== getAfsEntityId()) outcome = "failed";
+    } catch { outcome = "failed"; }
+
+    const brand = typeof provider.paymentBrand === "string" ? provider.paymentBrand.slice(0, 40) : null;
+    const last4Candidate = provider.card?.last4Digits || provider.card?.last4 || provider.last4;
+    const last4 = typeof last4Candidate === "string" && /^\d{4}$/.test(last4Candidate) ? last4Candidate : null;
+    const paymentId = typeof provider.id === "string" ? provider.id.slice(0, 160) : null;
+    const description = typeof provider.result?.description === "string" ? provider.result.description.slice(0, 500) : null;
+    let client: PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      await client.query("BEGIN");
+      const locked = await client.query(`SELECT * FROM afs_payment_orders WHERE id = $1 FOR UPDATE`, [id]);
+      const order = locked.rows[0];
+      if (order.status === "paid") {
+        await client.query("COMMIT");
+        return res.json({ status: "paid", message: "تم تأكيد الدفع وإضافة الرصيد." });
+      }
+      if (outcome === "paid") {
+        let coinTransactionId: number | null = null, revenueTransactionId: number | null = null;
+        if (order.purpose === "coin_purchase") {
+          await client.query(
+            `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
+             VALUES ($1, $2, 0, $2)
+             ON CONFLICT (user_id) DO UPDATE SET balance = coin_wallets.balance + EXCLUDED.balance,
+               total_earned = coin_wallets.total_earned + EXCLUDED.total_earned, updated_at = NOW()`,
+            [order.user_id, order.coins],
+          );
+          const ledger = await client.query(
+            `INSERT INTO coin_transactions (user_id, type, coins, description)
+             VALUES ($1, 'purchase', $2, 'شراء عملات ببطاقة') RETURNING id`,
+            [order.user_id, order.coins],
+          );
+          coinTransactionId = ledger.rows[0].id;
+        } else {
+          const ledger = await client.query(
+            `INSERT INTO revenue_transactions (user_id, type, amount_egp, description)
+             VALUES ($1, 'wallet_recharge', $2, 'شحن المحفظة ببطاقة') RETURNING id`,
+            [order.user_id, order.amount_egp],
+          );
+          revenueTransactionId = ledger.rows[0].id;
+        }
+        await client.query(
+          `UPDATE afs_payment_orders SET status='paid', payment_id=$2, result_code=$3, result_description=$4,
+           payment_brand=$5, last4=$6, coin_transaction_id=$7, revenue_transaction_id=$8, paid_at=NOW() WHERE id=$1`,
+          [id, paymentId, code || null, description, brand, last4, coinTransactionId, revenueTransactionId],
+        );
+      } else {
+        await client.query(
+          `UPDATE afs_payment_orders SET status=$2, payment_id=$3, result_code=$4, result_description=$5,
+           payment_brand=$6, last4=$7 WHERE id=$1`,
+          [id, outcome, paymentId, code || null, description, brand, last4],
+        );
+      }
+      await client.query("COMMIT");
+      res.json({
+        status: outcome,
+        message: outcome === "paid" ? "تم تأكيد الدفع وإضافة الرصيد." :
+          outcome === "pending" ? "الدفع ما زال قيد المعالجة، أعد المحاولة بعد قليل." : "لم يتم تأكيد عملية الدفع.",
+      });
+    } catch (err) {
+      if (client) await client.query("ROLLBACK").catch(() => undefined);
+      console.error("[payments/afs] verify persistence failed:", err instanceof Error ? err.message : "unknown database error");
+      res.status(500).json({ message: "تعذر حفظ نتيجة الدفع، حاول مرة أخرى." });
+    } finally {
+      client?.release();
+    }
   });
 
   app.post("/api/payments", isAuthenticated, async (req: any, res) => {

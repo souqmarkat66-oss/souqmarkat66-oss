@@ -284,6 +284,48 @@ async function runMigrations() {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_user_follows_following ON user_follows(following_id)`);
     // عمود مساهمات المشاركين الفردية في نتائج التحديات (idempotent)
     await db.execute(sql`ALTER TABLE live_battles ADD COLUMN IF NOT EXISTS player_scores JSONB`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS afs_payment_orders (
+      id SERIAL PRIMARY KEY,
+      user_id VARCHAR NOT NULL REFERENCES users(id),
+      purpose TEXT NOT NULL CHECK (purpose IN ('wallet_top_up', 'coin_purchase')),
+      package_id INTEGER,
+      amount_egp NUMERIC(12,2) NOT NULL,
+      coins INTEGER,
+      checkout_id TEXT NOT NULL UNIQUE,
+      payment_id TEXT UNIQUE,
+      integrity TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'failed')),
+      result_code TEXT,
+      result_description TEXT,
+      payment_brand TEXT,
+      last4 TEXT,
+      coin_transaction_id INTEGER,
+      revenue_transaction_id INTEGER,
+      created_at TIMESTAMP DEFAULT NOW(),
+      paid_at TIMESTAMP
+    )`);
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'afs_payment_orders'
+            AND column_name = 'amount_egp'
+            AND (
+              data_type <> 'numeric'
+              OR numeric_precision <> 12
+              OR numeric_scale <> 2
+            )
+        ) THEN
+          ALTER TABLE afs_payment_orders
+          ALTER COLUMN amount_egp TYPE NUMERIC(12,2)
+          USING ROUND(amount_egp::numeric, 2);
+        END IF;
+      END
+      $$
+    `);
     // Backfill users.governorate from their most recent ad's target_region
     await db.execute(sql`
       UPDATE users u

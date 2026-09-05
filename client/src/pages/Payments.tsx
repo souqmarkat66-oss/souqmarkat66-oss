@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon, Tag, CheckSquare, Square, Calculator, Download, Apple } from "lucide-react";
+import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon, Tag, CheckSquare, Square, Calculator, Download, Apple, Coins, ArrowDownLeft, ArrowUpRight, CircleDollarSign } from "lucide-react";
 import { SiGoogleplay, SiHuawei } from "react-icons/si";
+import { useLocation } from "wouter";
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {
   ad_boost:        "⚡ تعزيز إعلان",
@@ -50,12 +51,36 @@ const METHOD_LABELS: Record<string, { label: string; emoji: string; color: strin
   etisalat:  { label: "اتصالات e& كاش", emoji: "📲", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
   instapay:  { label: "InstaPay",        emoji: "💳", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
   souq:      { label: "سوق ماركات",      emoji: "🛒", color: "bg-primary/10 text-primary" },
+  visa_bank: { label: "بطاقة بنكية",     emoji: "💳", color: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" },
+  afs_card:  { label: "بطاقة AFS",       emoji: "💳", color: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" },
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  payment_request: "طلب دفع",
+  coin_purchase_order: "طلب عملات",
+  coin_transaction: "محفظة العملات",
+  revenue_transaction: "محفظة الأرباح",
+  afs_card: "دفع AFS",
 };
 
 const STATUS_MAP: Record<string, { label: string; icon: any; color: string }> = {
   pending:  { label: "قيد المراجعة", icon: Clock,          color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" },
   approved: { label: "مقبول",         icon: CheckCircle2,   color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" },
   rejected: { label: "مرفوض",         icon: XCircle,        color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
+  paid:     { label: "مدفوع",         icon: CheckCircle2,   color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" },
+  failed:   { label: "غير مكتمل",     icon: XCircle,        color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
+};
+
+const ACTIVITY_KINDS: Record<string, { label: string; icon: any; color: string }> = {
+  deposit:       { label: "إيداع", icon: ArrowDownLeft, color: "text-blue-600 bg-blue-500/10" },
+  withdrawal:    { label: "سحب", icon: ArrowUpRight, color: "text-orange-600 bg-orange-500/10" },
+  coin_purchase: { label: "شراء عملات", icon: Coins, color: "text-amber-600 bg-amber-500/10" },
+  coin_recharge: { label: "شحن عملات", icon: Coins, color: "text-amber-600 bg-amber-500/10" },
+  gift_sent:     { label: "هدية مرسلة", icon: ArrowUpRight, color: "text-rose-600 bg-rose-500/10" },
+  gift_received: { label: "هدية مستلمة", icon: ArrowDownLeft, color: "text-green-600 bg-green-500/10" },
+  revenue:       { label: "أرباح", icon: CircleDollarSign, color: "text-green-600 bg-green-500/10" },
+  spending:      { label: "إنفاق", icon: ArrowUpRight, color: "text-rose-600 bg-rose-500/10" },
+  adjustment:    { label: "تسوية", icon: Receipt, color: "text-muted-foreground bg-muted" },
 };
 
 const PAYMENT_METHODS = [
@@ -68,6 +93,7 @@ const PAYMENT_METHODS = [
 export default function Payments() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({ type: "top_up", method: "vodafone", phoneNumber: "", adId: "" });
@@ -79,8 +105,18 @@ export default function Payments() {
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const { data: payments = [], isLoading } = useQuery<any[]>({
-    queryKey: ["/api/payments"],
+  const [activityKind, setActivityKind] = useState("all");
+  const { data: activity = [], isLoading, isError, error } = useQuery<any[]>({
+    queryKey: ["/api/payments/unified", activityKind],
+    queryFn: async () => {
+      const suffix = activityKind === "all" ? "" : `?kind=${encodeURIComponent(activityKind)}`;
+      const res = await fetch(`/api/payments/unified${suffix}`, { credentials: "include" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || "تعذر تحميل سجل النشاط");
+      }
+      return res.json();
+    },
   });
 
   const { data: ads = [] } = useQuery<any[]>({
@@ -90,6 +126,28 @@ export default function Payments() {
 
   const { data: pricing = {} } = useQuery<Record<string, string>>({
     queryKey: ["/api/pricing"],
+  });
+  const { data: coinPackages = [] } = useQuery<any[]>({
+    queryKey: ["/api/coins/packages"],
+    queryFn: () => fetch("/api/coins/packages", { credentials: "include" }).then(r => r.json()),
+  });
+  const [afsPurpose, setAfsPurpose] = useState<"wallet_top_up" | "coin_purchase">("wallet_top_up");
+  const [afsAmount, setAfsAmount] = useState("");
+  const [afsPackageId, setAfsPackageId] = useState("");
+  const afsCheckout = useMutation({
+    mutationFn: async () => {
+      const payload = afsPurpose === "wallet_top_up"
+        ? { purpose: afsPurpose, amount: Number(afsAmount) }
+        : { purpose: afsPurpose, packageId: Number(afsPackageId) };
+      const response = await fetch("/api/payments/afs/checkout", {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message || "تعذر بدء الدفع بالبطاقة");
+      return body;
+    },
+    onSuccess: (order) => setLocation(`/payments/afs/${order.id}`),
+    onError: (err: Error) => toast({ title: "تعذر بدء الدفع", description: err.message, variant: "destructive" }),
   });
 
   const serviceList = buildServiceTypes(pricing)[formData.type === "top_up" ? "top_up" : "withdrawal"];
@@ -155,6 +213,7 @@ export default function Payments() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/payments/unified"] });
       toast({ title: "✅ تم إرسال طلب الدفع", description: "سيتم مراجعته فوراً وتفعيل الخدمة عند القبول" });
       setShowForm(false);
       setFormData({ type: "top_up", method: "vodafone", phoneNumber: "", adId: "" });
@@ -237,11 +296,12 @@ export default function Payments() {
     if (fileRef.current) fileRef.current.value = "";
   };
 
-  const filtered = payments.filter(p =>
+  const filtered = activity.filter(p =>
     !search ||
-    p.orderNumber?.toLowerCase().includes(search.toLowerCase()) ||
-    String(p.adId || "").includes(search) ||
-    String(p.id).includes(search)
+    p.reference?.toLowerCase().includes(search.toLowerCase()) ||
+    p.description?.toLowerCase().includes(search.toLowerCase()) ||
+    p.kind?.toLowerCase().includes(search.toLowerCase()) ||
+    String(p.sourceId || p.id).includes(search)
   );
 
   const selectedMethod = PAYMENT_METHODS.find(m => m.value === formData.method);
@@ -260,8 +320,8 @@ export default function Payments() {
             <Receipt className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-xl font-extrabold">جدول المدفوعات</h1>
-            <p className="text-xs text-muted-foreground">تتبّع طلبات الدفع والتحميل</p>
+            <h1 className="text-xl font-extrabold">سجل المدفوعات والنشاط</h1>
+            <p className="text-xs text-muted-foreground">كل حركات الدفع والعملات والأرباح في مكان واحد</p>
           </div>
         </div>
         <Button size="sm" onClick={() => setShowForm(true)} data-testid="btn-new-payment" className="gap-2">
@@ -270,12 +330,32 @@ export default function Payments() {
         </Button>
       </div>
 
-      {/* Stats Row */}
+       {/* Unified activity summary */}
+      <section className="mb-5 rounded-2xl border-2 border-primary/30 bg-primary/5 p-4 sm:p-5">
+        <div className="flex items-center gap-2 mb-3"><CreditCard className="w-5 h-5 text-primary" /><h2 className="font-extrabold">ادفع بالبطاقة مباشرة عبر AFS</h2></div>
+        <p className="text-xs text-muted-foreground mb-3">لن نطلب بيانات بطاقتك هنا؛ ستدخلها فقط في صفحة الدفع الآمنة.</p>
+        <div className="flex gap-2 mb-3">
+          <Button size="sm" variant={afsPurpose === "wallet_top_up" ? "default" : "outline"} onClick={() => setAfsPurpose("wallet_top_up")}>شحن المحفظة</Button>
+          <Button size="sm" variant={afsPurpose === "coin_purchase" ? "default" : "outline"} onClick={() => setAfsPurpose("coin_purchase")}>شراء عملات</Button>
+        </div>
+        {afsPurpose === "wallet_top_up" ? (
+          <Input type="number" min="10" max="1000000" value={afsAmount} onChange={e => setAfsAmount(e.target.value)} placeholder="المبلغ بالجنيه (10 – 1,000,000)" />
+        ) : (
+          <Select value={afsPackageId} onValueChange={setAfsPackageId}>
+            <SelectTrigger><SelectValue placeholder="اختر باقة العملات" /></SelectTrigger>
+            <SelectContent>{coinPackages.map((p: any) => <SelectItem key={p.id} value={String(p.id)}>{p.name} — {p.coins + (p.bonusCoins || p.bonus_coins || 0)} عملة / {p.priceEGP || p.price_egp} ج.م</SelectItem>)}</SelectContent>
+          </Select>
+        )}
+        <Button className="w-full mt-3" disabled={afsCheckout.isPending || (afsPurpose === "wallet_top_up" ? Number(afsAmount) < 10 : !afsPackageId)} onClick={() => afsCheckout.mutate()}>
+          {afsCheckout.isPending ? "جارٍ التحويل..." : "المتابعة للدفع بالبطاقة"}
+        </Button>
+      </section>
+
       <div className="grid grid-cols-3 gap-3 mb-5">
         {[
-          { label: "إجمالي الطلبات", value: payments.length, color: "text-foreground" },
-          { label: "مقبولة", value: payments.filter(p => p.status === "approved").length, color: "text-green-600" },
-          { label: "قيد المراجعة", value: payments.filter(p => p.status === "pending").length, color: "text-yellow-600" },
+           { label: "كل الحركات", value: activity.length, color: "text-foreground" },
+           { label: "وارد", value: activity.filter(p => Number(p.signedAmount) > 0).length, color: "text-green-600" },
+           { label: "قيد المراجعة", value: activity.filter(p => p.status === "pending").length, color: "text-yellow-600" },
         ].map(stat => (
           <div key={stat.label} className="border rounded-xl p-3 text-center bg-muted/20">
             <div className={`text-2xl font-extrabold ${stat.color}`}>{stat.value}</div>
@@ -284,11 +364,18 @@ export default function Payments() {
         ))}
       </div>
 
+       <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
+         <Button variant={activityKind === "all" ? "default" : "outline"} size="sm" onClick={() => setActivityKind("all")} className="shrink-0">الكل</Button>
+         {Object.entries(ACTIVITY_KINDS).map(([value, item]) => (
+           <Button key={value} variant={activityKind === value ? "default" : "outline"} size="sm" onClick={() => setActivityKind(value)} className="shrink-0 text-xs">{item.label}</Button>
+         ))}
+       </div>
+
       {/* Search */}
       <div className="relative mb-4">
         <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         <Input
-          placeholder="ابحث برقم الطلب أو رقم الإعلان..."
+           placeholder="ابحث بالمرجع أو الوصف..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="pr-9 text-sm"
@@ -302,12 +389,12 @@ export default function Payments() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
-                <th className="text-right px-4 py-3 font-bold">رقم الطلب</th>
-                <th className="text-right px-4 py-3 font-bold">رقم الإعلان</th>
+                <th className="text-right px-4 py-3 font-bold">المرجع</th>
+                <th className="text-right px-4 py-3 font-bold">المصدر</th>
                 <th className="text-right px-4 py-3 font-bold">النوع</th>
-                <th className="text-right px-4 py-3 font-bold">الخدمة</th>
-                <th className="text-right px-4 py-3 font-bold">المبلغ (ج.م)</th>
-                <th className="text-right px-4 py-3 font-bold">طريقة الدفع</th>
+                <th className="text-right px-4 py-3 font-bold">التفاصيل</th>
+                <th className="text-right px-4 py-3 font-bold">المبلغ</th>
+                <th className="text-right px-4 py-3 font-bold">الطريقة</th>
                 <th className="text-right px-4 py-3 font-bold">الحالة</th>
                 <th className="text-right px-4 py-3 font-bold">الإيصال</th>
                 <th className="text-right px-4 py-3 font-bold">التاريخ</th>
@@ -324,53 +411,50 @@ export default function Payments() {
                     ))}
                   </tr>
                 ))
+              ) : isError ? (
+                <tr>
+                  <td colSpan={9} className="text-center py-12 text-destructive">
+                    {(error as Error)?.message || "تعذر تحميل سجل النشاط"}
+                  </td>
+                </tr>
               ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="text-center py-12 text-muted-foreground">
                     <Receipt className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                    <p className="text-sm">لا توجد طلبات دفع بعد</p>
-                    <p className="text-xs mt-1">اضغط "طلب دفع جديد" للبدء</p>
+                    <p className="text-sm">لا توجد حركات مطابقة بعد</p>
+                    <p className="text-xs mt-1">ستظهر المدفوعات والعملات والأرباح هنا</p>
                   </td>
                 </tr>
               ) : filtered.map((p: any) => {
-                const method = METHOD_LABELS[p.method] || { label: p.method, emoji: "💰", color: "" };
-                const status = STATUS_MAP[p.status] || STATUS_MAP.pending;
+                const method = METHOD_LABELS[p.method] || { label: p.method || "—", emoji: "💰", color: "" };
+                const status = STATUS_MAP[p.status] || STATUS_MAP.approved;
                 const StatusIcon = status.icon;
-                const svcLabels = p.serviceType
-                  ? p.serviceType.split(",").map((s: string) => SERVICE_TYPE_LABELS[s.trim()] || s.trim()).join(" + ")
-                  : null;
+                const kind = ACTIVITY_KINDS[p.kind] || ACTIVITY_KINDS.adjustment;
+                const KindIcon = kind.icon;
+                const signedAmount = Number(p.signedAmount ?? 0);
                 return (
                   <tr key={p.id} className="border-b hover:bg-muted/10 transition-colors" data-testid={`row-payment-${p.id}`}>
                     <td className="px-4 py-3">
                       <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded font-bold">
-                        {p.orderNumber || `ORD-${String(p.id).padStart(6,"0")}`}
+                        {p.reference || `${p.source}:${p.sourceId}`}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {p.adId ? (
-                        <span className="font-mono text-xs bg-primary/10 text-primary px-2 py-0.5 rounded font-bold">
-                          #{p.adId}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
-                      )}
+                      <span className="text-xs text-muted-foreground">{SOURCE_LABELS[p.source] || p.source || "—"}</span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-xs font-bold">
-                        {p.type === "withdrawal" ? "🏧 سحب" : "💰 إيداع"}
+                      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-bold ${kind.color}`}>
+                        <KindIcon className="w-3 h-3" />{kind.label}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {svcLabels ? (
-                        <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold whitespace-nowrap">
-                          {svcLabels}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
-                      )}
+                      <span className="text-xs">{p.description || "—"}</span>
                     </td>
-                    <td className="px-4 py-3 font-bold text-green-600">
-                      {p.amountEGP?.toLocaleString()} ج.م
+                    <td className={`px-4 py-3 font-bold whitespace-nowrap ${signedAmount >= 0 ? "text-green-600" : "text-rose-600"}`}>
+                      {signedAmount >= 0 ? "+" : "−"}{Math.abs(signedAmount).toLocaleString("ar-EG")} {p.asset === "COIN" ? "🪙" : "ج.م"}
+                      {p.asset === "COIN" && p.moneyAmount != null && (
+                        <span className="block text-[10px] font-normal text-muted-foreground">{Number(p.moneyAmount).toLocaleString("ar-EG")} ج.م</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-bold ${method.color}`}>

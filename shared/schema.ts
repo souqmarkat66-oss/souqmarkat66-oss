@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, varchar, real, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, varchar, real, numeric, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -294,6 +294,30 @@ export const revenueTransactions = pgTable("revenue_transactions", {
 }));
 
 export type RevenueTransaction = typeof revenueTransactions.$inferSelect;
+
+// COPYandPAY card orders are the payment authority. The optional ledger ids
+// allow the activity feed to show the card order once rather than its credit.
+export const afsPaymentOrders = pgTable("afs_payment_orders", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  purpose: text("purpose", { enum: ["wallet_top_up", "coin_purchase"] }).notNull(),
+  packageId: integer("package_id"),
+  amountEGP: numeric("amount_egp", { precision: 12, scale: 2 }).notNull(),
+  coins: integer("coins"),
+  checkoutId: text("checkout_id").notNull().unique(),
+  paymentId: text("payment_id").unique(),
+  integrity: text("integrity"),
+  status: text("status", { enum: ["pending", "paid", "failed"] }).notNull().default("pending"),
+  resultCode: text("result_code"),
+  resultDescription: text("result_description"),
+  paymentBrand: text("payment_brand"),
+  last4: text("last4"),
+  coinTransactionId: integer("coin_transaction_id"),
+  revenueTransactionId: integer("revenue_transaction_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+  paidAt: timestamp("paid_at"),
+});
+export type AfsPaymentOrder = typeof afsPaymentOrders.$inferSelect;
 
 // ============================================================
 // REPORTS TABLE

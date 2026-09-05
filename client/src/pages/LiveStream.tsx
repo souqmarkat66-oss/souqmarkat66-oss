@@ -62,6 +62,10 @@ export default function LiveStream() {
   type CoHostStatus = "idle"|"choosing"|"requesting"|"accepted"|"rejected";
   const [coHostStatus,      setCoHostStatus]      = useState<CoHostStatus>("idle");
   const [coHostRequests,    setCoHostRequests]     = useState<{socketId:string; userName:string; withCamera?:boolean}[]>([]);
+  const [showCohostRequests, setShowCohostRequests] = useState(false);
+  const [showViewerPicker, setShowViewerPicker] = useState(false);
+  const [streamViewers, setStreamViewers] = useState<{socketId: string; userId: string; name: string; profileImageUrl: string | null}[]>([]);
+  const [viewersLoading, setViewersLoading] = useState(false);
   const [activeCoHosts,     setActiveCoHosts]      = useState<{socketId:string; name:string; hasCamera?:boolean}[]>([]);
   const [autoAccept,        setAutoAccept]         = useState(false);
   const [mutedCohosts,      setMutedCohosts]       = useState<Set<string>>(new Set());
@@ -78,7 +82,7 @@ export default function LiveStream() {
   const [selfCamSwapped,  setSelfCamSwapped]  = useState(false);       // viewer: own cam is full-screen
 
   // ── Battle (معركة) state ──────────────────────────────────
-  const MAX_COHOSTS = 8;
+  const MAX_COHOSTS = 7; // eight salon seats include the broadcaster
   const [battleActive,    setBattleActive]    = useState(false);
   const [battleMode,      setBattleMode]      = useState<"1v1"|"2v2">("1v1");
   const [battleScoreA,    setBattleScoreA]    = useState(0); // Team A = broadcaster side
@@ -214,6 +218,7 @@ export default function LiveStream() {
   const [tickerText,      setTickerText]      = useState("");
   const [showTicker,      setShowTicker]      = useState(false);
   const [showPresenterPanel, setShowPresenterPanel] = useState(false);
+  const [showHostMenu, setShowHostMenu] = useState(false);
 
   /* ── refs ── */
   const videoRef         = useRef<HTMLVideoElement>(null);
@@ -225,6 +230,9 @@ export default function LiveStream() {
   const coHostStreams     = useRef<Map<string, MediaStream>>(new Map()); // guest→stream received by broadcaster
   const coHostVideoRefs  = useRef<Map<string, HTMLVideoElement>>(new Map());
   const coHostNamesMap   = useRef<Map<string, string>>(new Map()); // for broadcaster to remember names
+  // ICE may arrive before its offer/answer. Keep it keyed by socket so feeds
+  // cannot be crossed when several salon guests negotiate simultaneously.
+  const coHostCandidateQueues = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   // Guest/viewer-side single co-host connection
   const coHostStream     = useRef<MediaStream | null>(null); // my own camera as guest
   const coHostPeer       = useRef<RTCPeerConnection | null>(null);
@@ -247,6 +255,38 @@ export default function LiveStream() {
   const spamMapRef       = useRef<Map<string, { count: number; emoji: string; glow: string; timerId: ReturnType<typeof setTimeout> }>>(new Map());
   // Noise suppression toggle for guest
   const [noiseSuppress,  setNoiseSuppress]  = useState(true);
+
+  const bindCohostVideo = useCallback((socketId: string, el: HTMLVideoElement | null) => {
+    if (!el) return;
+    coHostVideoRefs.current.set(socketId, el);
+    const stream = coHostStreams.current.get(socketId);
+    if (stream && el.srcObject !== stream) {
+      el.srcObject = stream;
+      el.play().catch(() => {});
+    }
+  }, []);
+
+  const closeHostOverlays = useCallback(() => {
+    setShowHostMenu(false);
+    setShowBgPanel(false);
+    setShowPresenterPanel(false);
+    setShowShare(false);
+    setShowBattleSetup(false);
+    setShowChallengeList(false);
+    setShowHandsList(false);
+    setShowCohostRequests(false);
+    setShowViewerPicker(false);
+  }, []);
+
+  const openViewerPicker = useCallback(() => {
+    closeHostOverlays();
+    setShowViewerPicker(true);
+    setViewersLoading(true);
+    socketRef.current?.emit("list-stream-viewers", { streamId: id }, (viewers: {socketId: string; userId: string; name: string; profileImageUrl: string | null}[]) => {
+      setStreamViewers(Array.isArray(viewers) ? viewers : []);
+      setViewersLoading(false);
+    });
+  }, [closeHostOverlays, id]);
 
   /* ── stream data ── */
   const { data: stream } = useQuery<any>({
@@ -500,6 +540,8 @@ export default function LiveStream() {
       socket.on("hand-raised", (data: { socketId: string; userName: string; userId: string }) => {
         setRaisedHands(prev => [...prev.filter(h => h.socketId !== data.socketId), data]);
         toast({ title: "✋ رفع إيده", description: `${data.userName} يريد التحدث` });
+        setShowCohostRequests(false);
+        setShowViewerPicker(false);
         setShowHandsList(true);
       });
 
@@ -511,6 +553,9 @@ export default function LiveStream() {
       socket.on("cohost-request", (data: { socketId: string; userName: string; withCamera?: boolean }) => {
         coHostNamesMap.current.set(data.socketId, data.userName);
         setCoHostRequests(prev => [...prev.filter(r => r.socketId !== data.socketId), data]);
+        setShowHandsList(false);
+        setShowViewerPicker(false);
+        setShowCohostRequests(true);
         const mode = data.withCamera === false ? "🎙️ صوت فقط" : "📷 صوت وصورة";
         toast({ title: "طلب مشاركة", description: `${data.userName} يريد الانضمام (${mode})` });
       });
@@ -535,24 +580,36 @@ export default function LiveStream() {
           if (!e.streams[0]) return;
           coHostStreams.current.set(fromId, e.streams[0]);
           const videoEl = coHostVideoRefs.current.get(fromId);
-          if (videoEl) { videoEl.srcObject = e.streams[0]; videoEl.play().catch(() => {}); }
+          if (videoEl && videoEl.srcObject !== e.streams[0]) { videoEl.srcObject = e.streams[0]; videoEl.play().catch(() => {}); }
         };
         if (localStream.current) {
           localStream.current.getTracks().forEach(t => pc.addTrack(t, localStream.current!));
         }
         await pc.setRemoteDescription(offer).catch(() => {});
+        const queued = coHostCandidateQueues.current.get(fromId) || [];
+        coHostCandidateQueues.current.delete(fromId);
+        await Promise.all(queued.map(candidate => pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {})));
         const answer = await pc.createAnswer().catch(() => null);
         if (!answer) return;
         await pc.setLocalDescription(answer).catch(() => {});
         socket.emit("cohost-answer", fromId, pc.localDescription);
 
         const name = coHostNamesMap.current.get(fromId) || "ضيف";
-        setActiveCoHosts(prev => [...prev.filter(c => c.socketId !== fromId), { socketId: fromId, name }]);
+        setActiveCoHosts(prev => {
+          const existing = prev.find(c => c.socketId === fromId);
+          return [...prev.filter(c => c.socketId !== fromId), { socketId: fromId, name, hasCamera: existing?.hasCamera ?? true }];
+        });
       });
 
       socket.on("cohost-candidate", async (fromId: string, candidate: RTCIceCandidateInit) => {
-        const pc = coHostPeers.current.get(fromId) || coHostPeer.current;
-        if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+        const pc = coHostPeers.current.get(fromId);
+        if (!pc || !pc.remoteDescription) {
+          const queue = coHostCandidateQueues.current.get(fromId) || [];
+          queue.push(candidate);
+          coHostCandidateQueues.current.set(fromId, queue);
+          return;
+        }
+        await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
       });
 
       socket.on("cohost-left", (socketId: string) => {
@@ -563,6 +620,7 @@ export default function LiveStream() {
         coHostStreams.current.delete(socketId);
         coHostVideoRefs.current.delete(socketId);
         coHostNamesMap.current.delete(socketId);
+        coHostCandidateQueues.current.delete(socketId);
         toast({ title: "انتهت المشاركة", description: "غادر أحد الضيوف البث" });
       });
     }
@@ -653,11 +711,21 @@ export default function LiveStream() {
       });
 
       socket.on("cohost-answer", async (_fromId: string, answer: RTCSessionDescriptionInit) => {
-        if (coHostPeer.current) await coHostPeer.current.setRemoteDescription(answer).catch(() => {});
+        if (!coHostPeer.current) return;
+        await coHostPeer.current.setRemoteDescription(answer).catch(() => {});
+        const queued = coHostCandidateQueues.current.get("broadcaster") || [];
+        coHostCandidateQueues.current.delete("broadcaster");
+        await Promise.all(queued.map(candidate => coHostPeer.current!.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {})));
       });
 
       socket.on("cohost-candidate", async (_fromId: string, candidate: RTCIceCandidateInit) => {
-        if (coHostPeer.current) await coHostPeer.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+        if (!coHostPeer.current?.remoteDescription) {
+          const queue = coHostCandidateQueues.current.get("broadcaster") || [];
+          queue.push(candidate);
+          coHostCandidateQueues.current.set("broadcaster", queue);
+          return;
+        }
+        await coHostPeer.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
       });
 
       socket.on("cohost-rejected", () => {
@@ -688,6 +756,11 @@ export default function LiveStream() {
         setHandRaised(false);
         toast({ title: "🎉 دعوة من المذيع!", description: "المذيع دعاك للتحدث — انضم كضيف الآن" });
       });
+      socket.on("viewer-cohost-invite", () => {
+        setHandInvited(true);
+        setHandRaised(false);
+        toast({ title: "🎉 دعوة من المذيع!", description: "اختر كاميرا أو مايك ثم أرسل طلب المشاركة" });
+      });
 
       socket.on("hand-dismissed", () => {
         setHandRaised(false);
@@ -700,6 +773,8 @@ export default function LiveStream() {
         coHostStream.current?.getTracks().forEach(t => t.stop());
         coHostStream.current = null;
         if (coHostPeer.current) { coHostPeer.current.close(); coHostPeer.current = null; }
+        if (coHostSelfVideo.current) coHostSelfVideo.current.srcObject = null;
+        setSelfCamSwapped(false);
         toast({ title: "تمت إزالتك من البث", variant: "destructive" });
       });
     }
@@ -1151,7 +1226,7 @@ export default function LiveStream() {
   };
 
   const rejectCoHost = (socketId: string) => {
-    socketRef.current?.emit("reject-cohost", { guestSocketId: socketId });
+    socketRef.current?.emit("reject-cohost", { streamId: id, guestSocketId: socketId });
     setCoHostRequests(prev => prev.filter(r => r.socketId !== socketId));
   };
 
@@ -1161,8 +1236,7 @@ export default function LiveStream() {
     coHostStreams.current.delete(socketId);
     coHostVideoRefs.current.delete(socketId);
     setActiveCoHosts(prev => prev.filter(c => c.socketId !== socketId));
-    // Notify guest they've been removed
-    socketRef.current?.emit("reject-cohost", { guestSocketId: socketId });
+    socketRef.current?.emit("kick-cohost", { streamId: id, guestSocketId: socketId });
   };
 
   const toggleAutoAccept = () => {
@@ -2029,7 +2103,7 @@ export default function LiveStream() {
         {/* Hand raise count badge for broadcaster */}
         {isBroadcast && raisedHands.length > 0 && !showHandsList && (
           <button
-            onClick={() => setShowHandsList(true)}
+            onClick={() => { setShowCohostRequests(false); setShowViewerPicker(false); setShowHandsList(true); }}
             className="absolute top-16 start-4 z-20 flex items-center gap-1.5 bg-orange-500 rounded-full px-3 py-1.5 shadow-lg animate-bounce"
             data-testid="btn-show-hands-list"
           >
@@ -2039,8 +2113,9 @@ export default function LiveStream() {
         )}
 
         {/* CO-HOST REQUESTS PANEL (broadcaster) */}
-        {isBroadcast && coHostRequests.length > 0 && (
+        {isBroadcast && coHostRequests.length > 0 && showCohostRequests && (
           <div className="absolute top-32 inset-x-4 z-20 flex flex-col gap-2">
+            <button onClick={() => setShowCohostRequests(false)} className="self-end w-7 h-7 rounded-full bg-black/80 border border-white/15 flex items-center justify-center" aria-label="إغلاق طلبات المشاركة"><X className="w-3.5 h-3.5 text-white" /></button>
             {coHostRequests.map(req => (
               <div key={req.socketId} className="flex items-center gap-2 bg-black/80 backdrop-blur rounded-2xl px-3 py-2.5 border border-purple-500/40">
                 <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center flex-shrink-0">
@@ -2066,6 +2141,36 @@ export default function LiveStream() {
                 </button>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Viewer invitations are a separate, host-only panel. Inviting never
+            admits the person; their normal camera/mic request still follows. */}
+        {isBroadcast && showViewerPicker && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowViewerPicker(false)}>
+            <div className="absolute inset-0 bg-black/65 backdrop-blur-sm" />
+            <div className="relative w-full max-w-lg max-h-[70dvh] overflow-y-auto rounded-t-3xl bg-zinc-900 p-5 pb-safe" onClick={e => e.stopPropagation()} dir="rtl">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-base font-bold text-white"><Users className="w-5 h-5 text-cyan-300" /> دعوة مشاهد</h3>
+                <button onClick={() => setShowViewerPicker(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center" aria-label="إغلاق"><X className="w-4 h-4 text-white" /></button>
+              </div>
+              <p className="mb-3 text-xs text-white/55">الدعوة لا تضيف المشاهد تلقائياً؛ سيختار الكاميرا أو الميكروفون ثم يرسل طلبه لموافقتك.</p>
+              {viewersLoading ? (
+                <div className="py-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-cyan-300" /></div>
+              ) : streamViewers.length === 0 ? (
+                <p className="py-8 text-center text-sm text-white/50">لا يوجد مشاهدون مسجّلون متاحون للدعوة الآن.</p>
+              ) : (
+                <div className="space-y-2">
+                  {streamViewers.map(viewer => (
+                    <div key={viewer.socketId} className="flex items-center gap-3 rounded-2xl bg-white/5 px-3 py-2.5">
+                      {viewer.profileImageUrl ? <img src={viewer.profileImageUrl} alt="" className="w-9 h-9 rounded-full object-cover" /> : <div className="w-9 h-9 rounded-full bg-cyan-500/20 flex items-center justify-center"><UserIcon className="w-4 h-4 text-cyan-200" /></div>}
+                      <span className="flex-1 truncate text-sm font-bold text-white">{viewer.name}</span>
+                      <button onClick={() => { socketRef.current?.emit("invite-viewer-to-cohost", { streamId: id, guestSocketId: viewer.socketId }); setStreamViewers(prev => prev.filter(v => v.socketId !== viewer.socketId)); toast({ title: "تم إرسال الدعوة", description: `بانتظار ${viewer.name} ليختار وسيلة المشاركة` }); }} className="rounded-full bg-cyan-600 px-3 py-1.5 text-xs font-bold text-white active:scale-95">دعوة</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -2182,7 +2287,7 @@ export default function LiveStream() {
                 {battleMode === "2v2" && activeCoHosts[1] && (
                   <div className="absolute bottom-16 inset-x-0 flex justify-center">
                     <div className="w-20 h-28 rounded-xl overflow-hidden border border-red-400 relative">
-                      <video autoPlay playsInline ref={el => { if (el) { coHostVideoRefs.current.set(activeCoHosts[1].socketId, el); const ms = coHostStreams.current.get(activeCoHosts[1].socketId); if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); } }}} className="w-full h-full object-cover" />
+                      <video autoPlay playsInline ref={el => bindCohostVideo(activeCoHosts[1].socketId, el)} className="w-full h-full object-cover" />
                       <div className="absolute top-0.5 right-0.5 bg-black/60 rounded-full px-1 py-px" data-testid="badge-slot-a1">
                         <span className="text-[8px] font-black text-cyan-300">💎 {(battlePlayerScores[activeCoHosts[1].socketId] || 0).toLocaleString()}</span>
                       </div>
@@ -2197,7 +2302,7 @@ export default function LiveStream() {
                     {activeCoHosts[0].hasCamera !== false ? (
                       <video
                         autoPlay playsInline
-                        ref={el => { if (el) { coHostVideoRefs.current.set(activeCoHosts[0].socketId, el); const ms = coHostStreams.current.get(activeCoHosts[0].socketId); if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); } }}}
+                        ref={el => bindCohostVideo(activeCoHosts[0].socketId, el)}
                         className="w-full h-full object-cover"
                       />
                     ) : (
@@ -2214,7 +2319,7 @@ export default function LiveStream() {
                     {battleMode === "2v2" && activeCoHosts[2] && (
                       <div className="absolute bottom-16 inset-x-0 flex justify-center">
                         <div className="w-20 h-28 rounded-xl overflow-hidden border border-blue-400 relative">
-                          <video autoPlay playsInline ref={el => { if (el) { coHostVideoRefs.current.set(activeCoHosts[2].socketId, el); const ms = coHostStreams.current.get(activeCoHosts[2].socketId); if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); } }}} className="w-full h-full object-cover" />
+                          <video autoPlay playsInline ref={el => bindCohostVideo(activeCoHosts[2].socketId, el)} className="w-full h-full object-cover" />
                           <div className="absolute top-0.5 left-0.5 bg-black/60 rounded-full px-1 py-px" data-testid="badge-slot-b1">
                             <span className="text-[8px] font-black text-cyan-300">💎 {(battlePlayerScores[activeCoHosts[2].socketId] || 0).toLocaleString()}</span>
                           </div>
@@ -2315,7 +2420,7 @@ export default function LiveStream() {
                   <div key={ch.socketId} className="absolute inset-0 z-10" onClick={() => setSwappedCohostId("")}>
                     {ch.hasCamera !== false ? (
                       <video autoPlay playsInline
-                        ref={el => { if (el) { coHostVideoRefs.current.set(ch.socketId, el); const ms = coHostStreams.current.get(ch.socketId); if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); }}}}
+                        ref={el => bindCohostVideo(ch.socketId, el)}
                         className="w-full h-full object-cover cursor-pointer" />
                     ) : (
                       <div className="w-full h-full bg-zinc-900 flex items-center justify-center cursor-pointer">
@@ -2359,7 +2464,7 @@ export default function LiveStream() {
                     <audio autoPlay ref={el => { if (el) { const ms = coHostStreams.current.get(ch.socketId); if (ms && !ch.hasCamera && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); }}}} style={{ display: "none" }} />
                     {ch.hasCamera !== false ? (
                       <video autoPlay playsInline
-                        ref={el => { if (el) { coHostVideoRefs.current.set(ch.socketId, el); const ms = coHostStreams.current.get(ch.socketId); if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(()=>{}); }}}}
+                        ref={el => bindCohostVideo(ch.socketId, el)}
                         onClick={() => setSwappedCohostId(ch.socketId)}
                         className="w-full h-full rounded-2xl object-cover border-2 border-purple-500 shadow-xl cursor-pointer"
                         data-testid={`video-cohost-${idx}`}
@@ -2559,22 +2664,6 @@ export default function LiveStream() {
           );
         })()}
 
-        {/* AUTO-ACCEPT TOGGLE (broadcaster only) */}
-        {isBroadcast && streaming && (
-          <button
-            onClick={toggleAutoAccept}
-            className={`absolute top-3 end-3 z-20 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-bold border transition-all ${
-              autoAccept
-                ? "bg-purple-600 border-purple-400 text-white"
-                : "bg-black/60 border-white/20 text-white/70"
-            }`}
-            data-testid="btn-toggle-auto-accept"
-          >
-            <Users className="w-3.5 h-3.5" />
-            {autoAccept ? "قبول تلقائي" : "قبول يدوي"}
-          </button>
-        )}
-
         {/* AD TOGGLE BUTTON (broadcaster only) — عرض/إخفاء إعلان بدون انقطاع البث */}
         {isBroadcast && streaming && streamAds.length > 0 && stream?.showAds !== false && (
           <button
@@ -2626,7 +2715,10 @@ export default function LiveStream() {
 
         {/* BROADCASTER CONTROLS (WebRTC) */}
         {isBroadcast && streaming && broadcastMode === "webrtc" && !battleActive && (
-          <div className="absolute inset-x-0 z-10 flex items-center justify-center gap-2 px-3" style={{ bottom: "84px" }}>
+          <div
+            className="absolute inset-x-0 z-30 flex items-center justify-center gap-2 px-3"
+            style={salonMode ? { top: "8px" } : { bottom: "84px" }}
+          >
             <button
               onClick={toggleMute}
               data-testid="btn-toggle-mic"
@@ -2650,21 +2742,14 @@ export default function LiveStream() {
                 <FlipHorizontal className="w-5 h-5 text-white" />
               </button>
             )}
-            {/* Background button */}
             <button
-              onClick={() => { setShowBgPanel(p => !p); setShowPresenterPanel(false); }}
-              data-testid="btn-toggle-bg-panel"
-              className={`w-12 h-12 rounded-full flex items-center justify-center shadow-xl transition-all border-2 ${bgMode !== "none" ? "bg-violet-600 border-violet-400" : "bg-black/70 border-white/20"}`}
+              onClick={() => { if (showHostMenu) setShowHostMenu(false); else { closeHostOverlays(); setShowHostMenu(true); } }}
+              data-testid="btn-host-tools"
+              aria-label="أدوات البث"
+              aria-expanded={showHostMenu}
+              className="w-12 h-12 rounded-full flex items-center justify-center shadow-xl bg-black/70 border-2 border-white/20"
             >
-              <Layers className="w-5 h-5 text-white" />
-            </button>
-            {/* Presenter overlay button */}
-            <button
-              onClick={() => { setShowPresenterPanel(p => !p); setShowBgPanel(false); }}
-              data-testid="btn-toggle-presenter-panel"
-              className={`w-12 h-12 rounded-full flex items-center justify-center shadow-xl transition-all border-2 ${showLowerThird || showTicker ? "bg-blue-600 border-blue-400" : "bg-black/70 border-white/20"}`}
-            >
-              <Tv2 className="w-5 h-5 text-white" />
+              <ChevronUp className="w-5 h-5 text-white" />
             </button>
             <button
               onClick={endStream}
@@ -2677,57 +2762,17 @@ export default function LiveStream() {
           </div>
         )}
 
-        {/* ══ BROADCASTER MODE BAR — فردي / تحدي 1v1 / تحدي 2v2 / صالون 8 ══ */}
-        {isBroadcast && streaming && broadcastMode === "webrtc" && (
-          <div className="absolute inset-x-0 z-30 flex items-center justify-center gap-1.5 px-3" style={{ bottom: "8px" }} dir="rtl">
-            <button
-              onClick={() => {
-                setSalonMode(false);
-                if (battleRunning) endBattle();
-              }}
-              className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 ${
-                !battleActive && !salonMode
-                  ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white shadow-lg shadow-orange-900/40"
-                  : "bg-black/60 backdrop-blur border-white/15 text-white/70"
-              }`}
-              data-testid="btn-mode-solo"
-            >
-              <UserIcon className="w-3.5 h-3.5" />
-              فردي
-            </button>
-            {/* ── زرار التحدي الذكي الوحيد — يفتح قائمة التحدي الكاملة ── */}
-            <button
-              onClick={() => {
-                if (battleRunning) { toast({ title: "المعركة شغالة بالفعل ⚔️", description: "أنهِها أولاً من زرار الإنهاء" }); return; }
-                setSalonMode(false);
-                setShowBattleSetup(true);
-              }}
-              className={`flex items-center gap-1 px-3.5 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 ${
-                battleActive
-                  ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white shadow-lg shadow-orange-900/40"
-                  : "bg-black/60 backdrop-blur border-white/15 text-white/70"
-              }`}
-              data-testid="btn-start-battle"
-            >
-              <Swords className="w-3.5 h-3.5" />
-              تحدي ⚔️
-            </button>
-            <button
-              onClick={() => {
-                if (battleRunning) { toast({ title: "أنهِ المعركة أولاً", variant: "destructive" }); return; }
-                setSalonMode(s => !s);
-                if (!salonMode && !autoAccept) toggleAutoAccept();
-              }}
-              className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 ${
-                salonMode && !battleActive
-                  ? "bg-gradient-to-l from-red-600 to-orange-500 border-orange-400/50 text-white shadow-lg shadow-orange-900/40"
-                  : "bg-black/60 backdrop-blur border-white/15 text-white/70"
-              }`}
-              data-testid="btn-mode-salon"
-            >
-              <Armchair className="w-3.5 h-3.5" />
-              صالون 8
-            </button>
+        {/* Single, mobile-first host tools menu keeps production controls from overlapping. */}
+        {isBroadcast && streaming && broadcastMode === "webrtc" && showHostMenu && (
+          <div className={`absolute end-3 z-40 w-52 rounded-2xl border border-white/15 bg-zinc-950/95 p-2 shadow-2xl backdrop-blur ${salonMode ? "top-16" : "bottom-36"}`} role="menu" aria-label="أدوات البث">
+            <button onClick={() => { closeHostOverlays(); if (!battleRunning) setShowBattleSetup(true); else toast({ title: "أنهِ المعركة أولاً" }); }} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold text-white hover:bg-white/10" role="menuitem"><Swords className="w-4 h-4 text-orange-300" /> تحدي PK</button>
+            <button onClick={() => { closeHostOverlays(); if (!battleRunning) setSalonMode(v => !v); else toast({ title: "أنهِ المعركة أولاً" }); }} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold text-white hover:bg-white/10" role="menuitem"><Armchair className="w-4 h-4 text-orange-300" /> {salonMode ? "إغلاق صالون 8" : "صالون 8"}</button>
+            <button onClick={() => { closeHostOverlays(); setShowBgPanel(true); }} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold text-white hover:bg-white/10" role="menuitem"><Layers className="w-4 h-4 text-violet-300" /> الخلفية</button>
+            <button onClick={() => { closeHostOverlays(); setShowPresenterPanel(true); }} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold text-white hover:bg-white/10" role="menuitem"><Tv2 className="w-4 h-4 text-blue-300" /> عرض المقدّم</button>
+            <button onClick={() => { closeHostOverlays(); setShowShare(true); }} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold text-white hover:bg-white/10" role="menuitem"><Share2 className="w-4 h-4 text-white" /> مشاركة البث</button>
+            <button onClick={() => { closeHostOverlays(); if (coHostRequests.length) setShowCohostRequests(true); else setShowHandsList(true); }} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold text-white hover:bg-white/10" role="menuitem"><UserPlus className="w-4 h-4 text-purple-300" /> الطلبات ({coHostRequests.length + raisedHands.length})</button>
+            <button onClick={openViewerPicker} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold text-white hover:bg-white/10" role="menuitem"><Users className="w-4 h-4 text-cyan-300" /> دعوة مشاهد</button>
+            <button onClick={toggleAutoAccept} className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold text-white hover:bg-white/10" role="menuitem"><Users className="w-4 h-4 text-white" /> {autoAccept ? "القبول التلقائي: تشغيل" : "القبول اليدوي: تشغيل"}</button>
           </div>
         )}
 
@@ -2759,7 +2804,7 @@ export default function LiveStream() {
                       {ch.hasCamera !== false ? (
                         <video
                           autoPlay playsInline
-                          ref={el => { if (el) { coHostVideoRefs.current.set(ch.socketId, el); const ms = coHostStreams.current.get(ch.socketId); if (ms && !el.srcObject) { el.srcObject = ms; el.play().catch(() => {}); } } }}
+                          ref={el => bindCohostVideo(ch.socketId, el)}
                           className="w-full h-full object-cover"
                         />
                       ) : (
@@ -2792,8 +2837,15 @@ export default function LiveStream() {
                   <button
                     key={`empty-${i}`}
                     onClick={() => {
-                      setShowShare(true);
-                      toast({ title: "مقعد فارغ", description: "شارك رابط البث — كل من يطلب المشاركة سينضم للمقعد" });
+                      if (coHostRequests.length > 0 || raisedHands.length > 0) {
+                        closeHostOverlays();
+                        if (coHostRequests.length > 0) setShowCohostRequests(true);
+                        else setShowHandsList(true);
+                        toast({ title: "مقعد فارغ", description: "راجع طلبات الضيوف المعلّقة لملء المقعد" });
+                      } else {
+                        openViewerPicker();
+                        toast({ title: "مقعد فارغ", description: "اختر مشاهدًا موجودًا لدعوته إلى المقعد" });
+                      }
                     }}
                     className="seat-empty relative rounded-2xl border-2 border-dashed border-orange-500/25 bg-black/40 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform"
                     data-testid={`btn-salon-seat-${i}`}
