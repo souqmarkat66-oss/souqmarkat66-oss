@@ -114,6 +114,12 @@ export default function TickerAds() {
               {balanceEGP.toFixed(2)} ج.م
             </span>
           </div>
+          <a
+            href="/payments"
+            className="mt-3 flex w-full items-center justify-center rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300"
+          >
+            💳 اشحن المحفظة بالبطاقة عبر AFS · Visa / Mastercard / Meeza
+          </a>
         </CardHeader>
       </Card>
 

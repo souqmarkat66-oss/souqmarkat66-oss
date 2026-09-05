@@ -1,7 +1,7 @@
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "wouter";
-import { useState } from "react";
+import { Link, useLocation } from "wouter";
+import { useRef, useState } from "react";
 import { useWalletSocket } from "@/hooks/use-wallet-socket";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -66,6 +66,8 @@ type Tab = "overview" | "advertiser" | "publisher" | "prices" | "myads";
 function SubscriptionCard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
+  const cardIntentKey = useRef<string | null>(null);
 
   const { data: sub, isLoading: subLoading } = useQuery<any>({
     queryKey: ["/api/subscription/status"],
@@ -87,6 +89,30 @@ function SubscriptionCard() {
     onError: (e: Error) => {
       toast({ title: "❌ فشل التجديد", description: e.message, variant: "destructive" });
     },
+  });
+
+  const cardRenewMutation = useMutation({
+    mutationFn: async () => {
+      const idempotencyKey = cardIntentKey.current || crypto.randomUUID();
+      cardIntentKey.current = idempotencyKey;
+      const response = await fetch("/api/payments/afs/checkout", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+        body: JSON.stringify({
+          purpose: "service_payment",
+          serviceType: "subscription",
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "تعذر بدء الدفع بالبطاقة");
+      return data;
+    },
+    onSuccess: (order) => {
+      cardIntentKey.current = null;
+      setLocation(`/payments/afs/${order.id}`);
+    },
+    onError: (e: Error) => toast({ title: "تعذر بدء الدفع", description: e.message, variant: "destructive" }),
   });
 
   if (subLoading) return (
@@ -137,22 +163,27 @@ function SubscriptionCard() {
               </p>
             </div>
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="border-green-500/40 text-green-600 hover:bg-green-500/10 text-xs shrink-0"
-            onClick={() => renewMutation.mutate()}
-            disabled={renewMutation.isPending || sub.balance < 250}
-          >
-            {renewMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-            <span className="mr-1">جدّد مبكراً</span>
-          </Button>
+          <div className="flex flex-col gap-1.5 shrink-0">
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-green-500/40 text-green-600 hover:bg-green-500/10 text-xs"
+              onClick={() => renewMutation.mutate()}
+              disabled={renewMutation.isPending || sub.balance < sub.priceEGP}
+            >
+              {renewMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              <span className="mr-1">من المحفظة</span>
+            </Button>
+            <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-xs" onClick={() => cardRenewMutation.mutate()} disabled={cardRenewMutation.isPending}>
+              💳 بالبطاقة
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );
   }
 
-  const canAfford = sub.balance >= 250;
+  const canAfford = sub.balance >= sub.priceEGP;
   return (
     <Card className="border-red-500/50 bg-red-50/50 dark:bg-red-950/20 rounded-2xl">
       <CardContent className="p-4 flex items-center justify-between gap-3">
@@ -168,20 +199,25 @@ function SubscriptionCard() {
             <p className="text-[11px] mt-0.5">
               {canAfford
                 ? <span className="text-muted-foreground">رصيدك: <b className="text-foreground">{Number(sub.balance).toFixed(2)} ج.م</b> — اضغط جدّد الاشتراك</span>
-                : <span className="text-red-500">رصيدك {Number(sub.balance).toFixed(2)} ج.م — تحتاج {250 - Number(sub.balance)} ج.م إضافية</span>
+                : <span className="text-red-500">رصيدك {Number(sub.balance).toFixed(2)} ج.م — تحتاج {(sub.priceEGP - Number(sub.balance)).toFixed(2)} ج.م إضافية</span>
               }
             </p>
           </div>
         </div>
-        <Button
-          size="sm"
-          className="bg-red-500 hover:bg-red-600 text-white text-xs shrink-0"
-          onClick={() => renewMutation.mutate()}
-          disabled={renewMutation.isPending || !canAfford}
-        >
-          {renewMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-          جدّد — 250 ج.م
-        </Button>
+        <div className="flex flex-col gap-1.5 shrink-0">
+          <Button
+            size="sm"
+            className="bg-red-500 hover:bg-red-600 text-white text-xs"
+            onClick={() => renewMutation.mutate()}
+            disabled={renewMutation.isPending || !canAfford}
+          >
+            {renewMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+            من المحفظة — {sub.priceEGP} ج.م
+          </Button>
+          <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-white text-xs" onClick={() => cardRenewMutation.mutate()} disabled={cardRenewMutation.isPending}>
+            💳 بالبطاقة عبر AFS
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );

@@ -72,6 +72,7 @@ export interface IStorage {
   getRevenueTransactions(userId: string, options?: { limit?: number; offset?: number; type?: 'earning' | 'spending' | 'withdrawal' | 'ai_charge' | 'wallet_recharge'; channelId?: number; from?: Date; to?: Date }): Promise<RevenueTransaction[]>;
   getRevenueTotals(userId: string, options?: { channelId?: number }): Promise<{ earning: number; spending: number; withdrawal: number; ai_charge: number; wallet_recharge: number }>;
   getUserBalanceEGP(userId: string): Promise<number>;
+  getWithdrawableBalanceEGP(userId: string): Promise<number>;
   createTransaction(tx: Omit<RevenueTransaction, 'id' | 'createdAt'>): Promise<RevenueTransaction>;
 
   // Reports
@@ -527,6 +528,22 @@ export class DatabaseStorage implements IStorage {
     return Number(row?.balance ?? 0);
   }
 
+  async getWithdrawableBalanceEGP(userId: string): Promise<number> {
+    const [row] = await db
+      .select({
+        balance: sql<number>`COALESCE(SUM(
+          CASE
+            WHEN ${revenueTransactions.type} = 'earning' THEN ${revenueTransactions.amountEGP}
+            WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
+            ELSE 0
+          END
+        ), 0)`,
+      })
+      .from(revenueTransactions)
+      .where(eq(revenueTransactions.userId, userId));
+    return Math.max(0, Number(row?.balance ?? 0));
+  }
+
   async createTransaction(tx: Omit<RevenueTransaction, 'id' | 'createdAt'>): Promise<RevenueTransaction> {
     // ── الحارس: لا خصم بقيمة صفر أو سالب ──────────────────────
     if (tx.amountEGP === undefined || tx.amountEGP === null) {
@@ -713,7 +730,7 @@ export class DatabaseStorage implements IStorage {
       } else if (locked.type === 'top_up') {
         await tx.insert(revenueTransactions).values({
           userId: locked.userId,
-          type: 'earning',
+          type: 'wallet_recharge',
           amountEGP: locked.amountEGP,
           description: `شحن رصيد - ${locked.method}`,
           campaignId: null,

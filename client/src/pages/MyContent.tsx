@@ -1,7 +1,7 @@
 import { useAuth } from "@/hooks/use-auth";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -57,6 +57,7 @@ export default function MyContent() {
 function AuthenticatedContent({ user }: { user: any }) {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [, setLocation] = useLocation();
   const [editingAd, setEditingAd] = useState<any | null>(null);
   const [editingReel, setEditingReel] = useState<any | null>(null);
 
@@ -119,6 +120,44 @@ function AuthenticatedContent({ user }: { user: any }) {
   const [boostScreenshotUrl, setBoostScreenshotUrl] = useState<string>("");
   const [boostUploadLoading, setBoostUploadLoading] = useState(false);
   const [boostReceipt, setBoostReceipt]   = useState<{ orderNumber: string; adId: number; amount: number } | null>(null);
+  const [afsLoading, setAfsLoading] = useState<string | null>(null);
+  const afsIntentKeys = useRef<Record<string, string>>({});
+
+  const startAfsServicePayment = async (
+    serviceType: "ad_boost" | "ad_renewal",
+    adId: number,
+    durationDays?: number,
+  ) => {
+    const loadingKey = `${serviceType}:${adId}:${durationDays || 0}`;
+    const idempotencyKey = afsIntentKeys.current[loadingKey] || crypto.randomUUID();
+    afsIntentKeys.current[loadingKey] = idempotencyKey;
+    setAfsLoading(loadingKey);
+    try {
+      const response = await fetch("/api/payments/afs/checkout", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+        body: JSON.stringify({
+          purpose: "service_payment",
+          serviceType,
+          adId,
+          ...(durationDays ? { durationDays } : {}),
+        }),
+      });
+      const order = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(order.message || "تعذر بدء الدفع بالبطاقة");
+      delete afsIntentKeys.current[loadingKey];
+      setLocation(`/payments/afs/${order.id}`);
+    } catch (error) {
+      toast({
+        title: "تعذر بدء الدفع بالبطاقة",
+        description: error instanceof Error ? error.message : "حاول مرة أخرى",
+        variant: "destructive",
+      });
+    } finally {
+      setAfsLoading(null);
+    }
+  };
 
   useEffect(() => {
     fetch("/api/boost/settings").then(r => r.json()).then(setBoostSettings).catch(() => {});
@@ -604,8 +643,20 @@ function AuthenticatedContent({ user }: { user: any }) {
             {/* السعر */}
             <div className="bg-orange-50 dark:bg-orange-950/20 rounded-xl p-3 text-center border border-orange-200 dark:border-orange-800">
               <p className="text-3xl font-black text-orange-600">{boostSettings?.price} ج.م</p>
-              <p className="text-xs text-muted-foreground mt-1">تعزيز لمدة 7 أيام — إعلانك في أعلى القائمة 📣</p>
+              <p className="text-xs text-muted-foreground mt-1">تعزيز لمدة 30 يوماً — إعلانك في أعلى القائمة 📣</p>
             </div>
+
+            <button
+              onClick={() => boostPayDialog && startAfsServicePayment("ad_boost", boostPayDialog.adId)}
+              disabled={!boostPayDialog || afsLoading === `ad_boost:${boostPayDialog?.adId}:0`}
+              className="w-full rounded-xl bg-violet-600 hover:bg-violet-700 text-white px-3 py-3 text-sm font-extrabold disabled:opacity-50"
+              data-testid="btn-afs-boost-payment"
+            >
+              {afsLoading === `ad_boost:${boostPayDialog?.adId}:0` ? "جارٍ فتح الدفع..." : "💳 ادفع الآن: Visa / Mastercard / Meeza"}
+              <span className="block text-[10px] font-normal opacity-80">AFS · ads-as.com — تفعيل تلقائي بعد نجاح الدفع</span>
+            </button>
+
+            <div className="text-center text-xs text-muted-foreground">أو استخدم طرق الدفع القديمة</div>
 
             {/* اختيار طريقة الدفع */}
             <div>
@@ -815,8 +866,18 @@ function AuthenticatedContent({ user }: { user: any }) {
               </div>
             </div>
 
+            <button
+              onClick={() => renewDialog && startAfsServicePayment("ad_renewal", renewDialog.ad.id, selectedDays)}
+              disabled={!renewDialog || afsLoading === `ad_renewal:${renewDialog?.ad?.id}:${selectedDays}`}
+              className="w-full rounded-xl bg-violet-600 hover:bg-violet-700 text-white px-3 py-3 text-sm font-extrabold disabled:opacity-50"
+              data-testid="btn-afs-renewal-payment"
+            >
+              {afsLoading === `ad_renewal:${renewDialog?.ad?.id}:${selectedDays}` ? "جارٍ فتح الدفع..." : "💳 ادفع التجديد الآن بالبطاقة"}
+              <span className="block text-[10px] font-normal opacity-80">Visa / Mastercard / Meeza · تفعيل تلقائي عبر AFS</span>
+            </button>
+
             <div className="bg-yellow-50 dark:bg-yellow-950/20 rounded-lg p-3 border border-yellow-200 dark:border-yellow-800 text-xs text-muted-foreground">
-              💡 ادفع المبلغ المطلوب ثم اضغط "إرسال الطلب" — سيتم تفعيل التجديد خلال 24 ساعة بعد مراجعة الإدارة
+              💡 الزر البنفسجي يفعّل التجديد تلقائياً بعد نجاح البطاقة. أما الطرق القديمة فتحتاج إرسال الطلب ومراجعة الإدارة.
             </div>
 
             <button

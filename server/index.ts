@@ -287,7 +287,10 @@ async function runMigrations() {
     await db.execute(sql`CREATE TABLE IF NOT EXISTS afs_payment_orders (
       id SERIAL PRIMARY KEY,
       user_id VARCHAR NOT NULL REFERENCES users(id),
-      purpose TEXT NOT NULL CHECK (purpose IN ('wallet_top_up', 'coin_purchase')),
+      purpose TEXT NOT NULL CHECK (purpose IN ('wallet_top_up', 'coin_purchase', 'service_payment')),
+      service_type TEXT,
+      service_reference JSONB,
+      idempotency_key TEXT,
       package_id INTEGER,
       amount_egp NUMERIC(12,2) NOT NULL,
       coins INTEGER,
@@ -302,8 +305,38 @@ async function runMigrations() {
       coin_transaction_id INTEGER,
       revenue_transaction_id INTEGER,
       created_at TIMESTAMP DEFAULT NOW(),
-      paid_at TIMESTAMP
+      paid_at TIMESTAMP,
+      fulfilled_at TIMESTAMP
     )`);
+    await db.execute(sql`ALTER TABLE afs_payment_orders ADD COLUMN IF NOT EXISTS service_type TEXT`);
+    await db.execute(sql`ALTER TABLE afs_payment_orders ADD COLUMN IF NOT EXISTS service_reference JSONB`);
+    await db.execute(sql`ALTER TABLE afs_payment_orders ADD COLUMN IF NOT EXISTS idempotency_key TEXT`);
+    await db.execute(sql`ALTER TABLE afs_payment_orders ADD COLUMN IF NOT EXISTS fulfilled_at TIMESTAMP`);
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS afs_payment_orders_user_idempotency_idx
+      ON afs_payment_orders(user_id, idempotency_key)
+      WHERE idempotency_key IS NOT NULL
+    `);
+    await db.execute(sql`
+      DO $$
+      DECLARE constraint_name TEXT;
+      BEGIN
+        SELECT c.conname INTO constraint_name
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        WHERE t.relname = 'afs_payment_orders'
+          AND c.contype = 'c'
+          AND pg_get_constraintdef(c.oid) ILIKE '%purpose%';
+        IF constraint_name IS NOT NULL THEN
+          EXECUTE format('ALTER TABLE afs_payment_orders DROP CONSTRAINT %I', constraint_name);
+        END IF;
+        ALTER TABLE afs_payment_orders
+          ADD CONSTRAINT afs_payment_orders_purpose_check
+          CHECK (purpose IN ('wallet_top_up', 'coin_purchase', 'service_payment'));
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END
+      $$
+    `);
     await db.execute(sql`
       DO $$
       BEGIN
@@ -326,6 +359,46 @@ async function runMigrations() {
       END
       $$
     `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS gift_events (
+        id SERIAL PRIMARY KEY,
+        event_id TEXT NOT NULL UNIQUE,
+        sender_user_id VARCHAR NOT NULL REFERENCES users(id),
+        recipient_user_id VARCHAR NOT NULL REFERENCES users(id),
+        stream_id INTEGER NOT NULL,
+        gift_type TEXT NOT NULL,
+        gross_coins INTEGER NOT NULL CHECK (gross_coins > 0),
+        broadcaster_coins INTEGER NOT NULL CHECK (broadcaster_coins >= 0),
+        platform_coins INTEGER NOT NULL CHECK (platform_coins >= 0),
+        egp_rate NUMERIC(8,4) NOT NULL DEFAULT 0.0500,
+        created_at TIMESTAMP DEFAULT NOW(),
+        CONSTRAINT gift_events_split_check CHECK (gross_coins = broadcaster_coins + platform_coins)
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS gift_events_sender_created_idx ON gift_events(sender_user_id, created_at DESC)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS gift_events_recipient_created_idx ON gift_events(recipient_user_id, created_at DESC)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS gift_events_stream_created_idx ON gift_events(stream_id, created_at DESC)`);
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        ALTER TABLE coin_recharge_codes
+          ADD CONSTRAINT coin_recharge_codes_usage_pair_check
+          CHECK ((used_by_user_id IS NULL) = (used_at IS NULL)) NOT VALID;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END
+      $$
+    `);
+    await db.execute(sql`
+      UPDATE revenue_transactions rt
+      SET type = 'wallet_recharge'
+      FROM payment_requests pr
+      WHERE pr.type = 'top_up'
+        AND pr.status = 'approved'
+        AND rt.user_id = pr.user_id
+        AND rt.type = 'earning'
+        AND rt.description = ('شحن رصيد - ' || pr.method)
+        AND ABS(rt.amount_egp - pr.amount_egp) < 0.001
+    `);
     // Backfill users.governorate from their most recent ad's target_region
     await db.execute(sql`
       UPDATE users u
@@ -346,6 +419,18 @@ async function runMigrations() {
             AND a2.target_region <> ''
         )
     `);
+    // revenue_transactions.amount is a legacy pre-EGP column. New code uses
+    // amount_egp exclusively; keeping the old NOT NULL constraint would make
+    // otherwise valid wallet/gift inserts fail unless both columns were written.
+    await db.execute(sql`
+      UPDATE revenue_transactions
+      SET amount_egp = COALESCE(amount_egp, amount, 0)
+      WHERE amount_egp IS NULL
+    `);
+    await db.execute(sql`ALTER TABLE revenue_transactions ALTER COLUMN amount_egp SET DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE revenue_transactions ALTER COLUMN amount_egp SET NOT NULL`);
+    await db.execute(sql`ALTER TABLE revenue_transactions ALTER COLUMN amount SET DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE revenue_transactions ALTER COLUMN amount DROP NOT NULL`);
     console.log("Migrations applied successfully");
   } catch (e: any) {
     console.error("Migration warning:", e.message);

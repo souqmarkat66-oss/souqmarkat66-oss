@@ -300,7 +300,10 @@ export type RevenueTransaction = typeof revenueTransactions.$inferSelect;
 export const afsPaymentOrders = pgTable("afs_payment_orders", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").references(() => users.id).notNull(),
-  purpose: text("purpose", { enum: ["wallet_top_up", "coin_purchase"] }).notNull(),
+  purpose: text("purpose", { enum: ["wallet_top_up", "coin_purchase", "service_payment"] }).notNull(),
+  serviceType: text("service_type"),
+  serviceReference: jsonb("service_reference"),
+  idempotencyKey: text("idempotency_key"),
   packageId: integer("package_id"),
   amountEGP: numeric("amount_egp", { precision: 12, scale: 2 }).notNull(),
   coins: integer("coins"),
@@ -316,6 +319,7 @@ export const afsPaymentOrders = pgTable("afs_payment_orders", {
   revenueTransactionId: integer("revenue_transaction_id"),
   createdAt: timestamp("created_at").defaultNow(),
   paidAt: timestamp("paid_at"),
+  fulfilledAt: timestamp("fulfilled_at"),
 });
 export type AfsPaymentOrder = typeof afsPaymentOrders.$inferSelect;
 
@@ -383,11 +387,11 @@ export const insertPaymentRequestSchema = createInsertSchema(paymentRequests)
       .min(10, "الحد الأدنى للمبلغ هو 10 جنيه")
       .max(1_000_000, "المبلغ كبير جداً، تواصل مع الإدارة"),
     phoneNumber: z.string().trim().optional().nullable(),
-    screenshotUrl: z.string().trim().min(1, "صورة الإيصال مطلوبة"),
+    screenshotUrl: z.string().trim().optional().nullable(),
     serviceType: z.string().trim().optional().nullable(),
   })
   .superRefine((data, ctx) => {
-    // Phone required for all methods EXCEPT in-app souq market payment
+    // Payout destination is required except for an in-app balance transfer.
     if (data.method !== "souq") {
       if (!data.phoneNumber || data.phoneNumber.length === 0) {
         ctx.addIssue({
@@ -395,7 +399,7 @@ export const insertPaymentRequestSchema = createInsertSchema(paymentRequests)
           path: ["phoneNumber"],
           message: "رقم محفظتك مطلوب لإتمام التحويل",
         });
-      } else if (!EG_PHONE_REGEX.test(data.phoneNumber)) {
+      } else if (data.method !== "visa_bank" && !EG_PHONE_REGEX.test(data.phoneNumber)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["phoneNumber"],
@@ -403,8 +407,15 @@ export const insertPaymentRequestSchema = createInsertSchema(paymentRequests)
         });
       }
     }
-    // Screenshot must point to a server-uploaded file (not an external URL)
-    if (!data.screenshotUrl.startsWith("/uploads/")) {
+    // Only incoming legacy payments need an uploaded receipt. Withdrawals are
+    // validated against the server ledger and therefore have no receipt.
+    if (data.type === "top_up" && !data.screenshotUrl) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["screenshotUrl"],
+        message: "صورة الإيصال مطلوبة",
+      });
+    } else if (data.screenshotUrl && !data.screenshotUrl.startsWith("/uploads/")) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["screenshotUrl"],
@@ -592,6 +603,27 @@ export const coinTransactions = pgTable("coin_transactions", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 export type CoinTransaction = typeof coinTransactions.$inferSelect;
+
+// Canonical, immutable gift record. The unique event id makes a client retry
+// idempotent while keeping the broadcaster/platform 60/40 split auditable.
+export const giftEvents = pgTable("gift_events", {
+  id: serial("id").primaryKey(),
+  eventId: text("event_id").notNull().unique(),
+  senderUserId: varchar("sender_user_id").references(() => users.id).notNull(),
+  recipientUserId: varchar("recipient_user_id").references(() => users.id).notNull(),
+  streamId: integer("stream_id").notNull(),
+  giftType: text("gift_type").notNull(),
+  grossCoins: integer("gross_coins").notNull(),
+  broadcasterCoins: integer("broadcaster_coins").notNull(),
+  platformCoins: integer("platform_coins").notNull(),
+  egpRate: numeric("egp_rate", { precision: 8, scale: 4 }).notNull().default("0.0500"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  senderCreatedIdx: index("gift_events_sender_created_idx").on(table.senderUserId, table.createdAt),
+  recipientCreatedIdx: index("gift_events_recipient_created_idx").on(table.recipientUserId, table.createdAt),
+  streamCreatedIdx: index("gift_events_stream_created_idx").on(table.streamId, table.createdAt),
+}));
+export type GiftEvent = typeof giftEvents.$inferSelect;
 
 // ============================================================
 // TICKER ADS TABLE — Global breaking-news style ticker ads

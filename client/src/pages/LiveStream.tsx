@@ -1401,6 +1401,7 @@ export default function LiveStream() {
       !!(battleTeams && [...battleTeams.A, ...battleTeams.B].some(m => m.socketId === giftTargetSocketId));
     const validTargetSocketId = giftTargetSocketId && knownTarget ? giftTargetSocketId : undefined;
     socketRef.current?.emit("send-gift", {
+      eventId: crypto.randomUUID(),
       streamId: id, giftType: gift.type, giftEmoji: gift.emoji,
       giftName: gift.name, giftCoins: gift.coins, userName, userId: (user as any).id,
       broadcasterUserId: stream?.userId,

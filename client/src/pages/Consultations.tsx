@@ -556,6 +556,12 @@ export default function Consultations() {
                 <PayFromAppButton price={amount} label="ادفع من تطبيق سوق ماركات" className="w-full" />
               </div>
             )}
+            <a
+              href="/payments"
+              className="flex w-full items-center justify-center rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300"
+            >
+              💳 شحن المحفظة بالبطاقة عبر AFS · Visa / Mastercard / Meeza
+            </a>
 
             {/* Submit */}
             <Button

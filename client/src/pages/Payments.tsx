@@ -52,7 +52,7 @@ const METHOD_LABELS: Record<string, { label: string; emoji: string; color: strin
   instapay:  { label: "InstaPay",        emoji: "💳", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
   souq:      { label: "سوق ماركات",      emoji: "🛒", color: "bg-primary/10 text-primary" },
   visa_bank: { label: "بطاقة بنكية",     emoji: "💳", color: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" },
-  afs_card:  { label: "بطاقة AFS",       emoji: "💳", color: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" },
+  afs_card:  { label: "بطاقة عبر AFS",   emoji: "💳", color: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" },
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -60,7 +60,7 @@ const SOURCE_LABELS: Record<string, string> = {
   coin_purchase_order: "طلب عملات",
   coin_transaction: "محفظة العملات",
   revenue_transaction: "محفظة الأرباح",
-  afs_card: "دفع AFS",
+  afs_card: "AFS · ads-as.com",
 };
 
 const STATUS_MAP: Record<string, { label: string; icon: any; color: string }> = {
@@ -78,6 +78,7 @@ const ACTIVITY_KINDS: Record<string, { label: string; icon: any; color: string }
   coin_recharge: { label: "شحن عملات", icon: Coins, color: "text-amber-600 bg-amber-500/10" },
   gift_sent:     { label: "هدية مرسلة", icon: ArrowUpRight, color: "text-rose-600 bg-rose-500/10" },
   gift_received: { label: "هدية مستلمة", icon: ArrowDownLeft, color: "text-green-600 bg-green-500/10" },
+  platform_share:{ label: "حصة المنصة", icon: CircleDollarSign, color: "text-violet-600 bg-violet-500/10" },
   revenue:       { label: "أرباح", icon: CircleDollarSign, color: "text-green-600 bg-green-500/10" },
   spending:      { label: "إنفاق", icon: ArrowUpRight, color: "text-rose-600 bg-rose-500/10" },
   adjustment:    { label: "تسوية", icon: Receipt, color: "text-muted-foreground bg-muted" },
@@ -131,22 +132,44 @@ export default function Payments() {
     queryKey: ["/api/coins/packages"],
     queryFn: () => fetch("/api/coins/packages", { credentials: "include" }).then(r => r.json()),
   });
-  const [afsPurpose, setAfsPurpose] = useState<"wallet_top_up" | "coin_purchase">("wallet_top_up");
+  const [afsPurpose, setAfsPurpose] = useState<"wallet_top_up" | "coin_purchase" | "service_payment">("wallet_top_up");
   const [afsAmount, setAfsAmount] = useState("");
   const [afsPackageId, setAfsPackageId] = useState("");
+  const [afsServiceType, setAfsServiceType] = useState<"ad_boost" | "ad_renewal" | "subscription">("ad_boost");
+  const [afsAdId, setAfsAdId] = useState("");
+  const [afsRenewalDays, setAfsRenewalDays] = useState("30");
+  const afsIntentKey = useRef<string | null>(null);
+  useEffect(() => {
+    afsIntentKey.current = null;
+  }, [afsPurpose, afsAmount, afsPackageId, afsServiceType, afsAdId, afsRenewalDays]);
   const afsCheckout = useMutation({
     mutationFn: async () => {
+      const idempotencyKey = afsIntentKey.current || crypto.randomUUID();
+      afsIntentKey.current = idempotencyKey;
       const payload = afsPurpose === "wallet_top_up"
         ? { purpose: afsPurpose, amount: Number(afsAmount) }
-        : { purpose: afsPurpose, packageId: Number(afsPackageId) };
+        : afsPurpose === "coin_purchase"
+          ? { purpose: afsPurpose, packageId: Number(afsPackageId) }
+          : {
+              purpose: afsPurpose,
+              serviceType: afsServiceType,
+              ...(afsServiceType !== "subscription" ? { adId: Number(afsAdId) } : {}),
+              ...(afsServiceType === "ad_renewal" ? { durationDays: Number(afsRenewalDays) } : {}),
+            };
       const response = await fetch("/api/payments/afs/checkout", {
-        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+        body: JSON.stringify(payload),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.message || "تعذر بدء الدفع بالبطاقة");
       return body;
     },
-    onSuccess: (order) => setLocation(`/payments/afs/${order.id}`),
+    onSuccess: (order) => {
+      afsIntentKey.current = null;
+      setLocation(`/payments/afs/${order.id}`);
+    },
     onError: (err: Error) => toast({ title: "تعذر بدء الدفع", description: err.message, variant: "destructive" }),
   });
 
@@ -332,21 +355,57 @@ export default function Payments() {
 
        {/* Unified activity summary */}
       <section className="mb-5 rounded-2xl border-2 border-primary/30 bg-primary/5 p-4 sm:p-5">
-        <div className="flex items-center gap-2 mb-3"><CreditCard className="w-5 h-5 text-primary" /><h2 className="font-extrabold">ادفع بالبطاقة مباشرة عبر AFS</h2></div>
-        <p className="text-xs text-muted-foreground mb-3">لن نطلب بيانات بطاقتك هنا؛ ستدخلها فقط في صفحة الدفع الآمنة.</p>
-        <div className="flex gap-2 mb-3">
+        <div className="flex items-center gap-2 mb-1"><CreditCard className="w-5 h-5 text-primary" /><h2 className="font-extrabold">الدفع الآمن بالبطاقة عبر AFS</h2></div>
+        <p className="text-xs font-bold">ads-as.com — إحدى منصات شركة سوق ماركات</p>
+        <p className="text-xs text-muted-foreground mt-1 mb-3">Visa · Mastercard · Meeza ميزة. لن نطلب بيانات بطاقتك هنا؛ ستدخلها فقط داخل نموذج AFS الآمن.</p>
+        <div className="flex flex-wrap gap-2 mb-3">
           <Button size="sm" variant={afsPurpose === "wallet_top_up" ? "default" : "outline"} onClick={() => setAfsPurpose("wallet_top_up")}>شحن المحفظة</Button>
           <Button size="sm" variant={afsPurpose === "coin_purchase" ? "default" : "outline"} onClick={() => setAfsPurpose("coin_purchase")}>شراء عملات</Button>
+          <Button size="sm" variant={afsPurpose === "service_payment" ? "default" : "outline"} onClick={() => setAfsPurpose("service_payment")}>دفع خدمة</Button>
         </div>
         {afsPurpose === "wallet_top_up" ? (
-          <Input type="number" min="10" max="1000000" value={afsAmount} onChange={e => setAfsAmount(e.target.value)} placeholder="المبلغ بالجنيه (10 – 1,000,000)" />
-        ) : (
+          <div className="space-y-2">
+            <Input type="number" min="10" max="1000000" value={afsAmount} onChange={e => setAfsAmount(e.target.value)} placeholder="المبلغ بالجنيه (10 – 1,000,000)" />
+            <p className="text-[11px] text-muted-foreground">يمكن استخدام رصيد المحفظة في الحملات، إعلانات الشريط، الكوبونات، الاستشارات وخدمات الذكاء، مع استمرار طرق الدفع القديمة.</p>
+          </div>
+        ) : afsPurpose === "coin_purchase" ? (
           <Select value={afsPackageId} onValueChange={setAfsPackageId}>
             <SelectTrigger><SelectValue placeholder="اختر باقة العملات" /></SelectTrigger>
             <SelectContent>{coinPackages.map((p: any) => <SelectItem key={p.id} value={String(p.id)}>{p.name} — {p.coins + (p.bonusCoins || p.bonus_coins || 0)} عملة / {p.priceEGP || p.price_egp} ج.م</SelectItem>)}</SelectContent>
           </Select>
+        ) : (
+          <div className="space-y-2">
+            <Select value={afsServiceType} onValueChange={(v: any) => setAfsServiceType(v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ad_boost">تعزيز إعلان — {pricing.boost_price_egp || 250} ج.م</SelectItem>
+                <SelectItem value="ad_renewal">تجديد إعلان</SelectItem>
+                <SelectItem value="subscription">اشتراك أسبوعي — {pricing.subscription_price_egp || 250} ج.م</SelectItem>
+              </SelectContent>
+            </Select>
+            {afsServiceType !== "subscription" && (
+              <Select value={afsAdId} onValueChange={setAfsAdId}>
+                <SelectTrigger><SelectValue placeholder="اختر إعلانك" /></SelectTrigger>
+                <SelectContent>{userAds.map((a: any) => <SelectItem key={a.id} value={String(a.id)}>#{a.id} — {a.title}</SelectItem>)}</SelectContent>
+              </Select>
+            )}
+            {afsServiceType === "ad_renewal" && (
+              <Select value={afsRenewalDays} onValueChange={setAfsRenewalDays}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="7">7 أيام — {pricing.renewal_price_7d || 20} ج.م</SelectItem>
+                  <SelectItem value="15">15 يوماً — {pricing.renewal_price_15d || 35} ج.م</SelectItem>
+                  <SelectItem value="30">30 يوماً — {pricing.renewal_price_30d || 60} ج.م</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
         )}
-        <Button className="w-full mt-3" disabled={afsCheckout.isPending || (afsPurpose === "wallet_top_up" ? Number(afsAmount) < 10 : !afsPackageId)} onClick={() => afsCheckout.mutate()}>
+        <Button className="w-full mt-3" disabled={afsCheckout.isPending || (
+          afsPurpose === "wallet_top_up" ? Number(afsAmount) < 10
+            : afsPurpose === "coin_purchase" ? !afsPackageId
+              : afsServiceType !== "subscription" && !afsAdId
+        )} onClick={() => afsCheckout.mutate()}>
           {afsCheckout.isPending ? "جارٍ التحويل..." : "المتابعة للدفع بالبطاقة"}
         </Button>
       </section>

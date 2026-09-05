@@ -863,10 +863,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
 
     // ── TikTok-style Live Features ──────────────────────────────────
-    socket.on("send-gift", async (data: { streamId: string; giftType: string; giftEmoji?: string; giftName?: string; giftCoins?: number; userName: string; userId: string; broadcasterUserId?: string; battleTeam?: "A" | "B"; recipientSocketId?: string }) => {
+    socket.on("send-gift", async (data: { eventId?: string; streamId: string; giftType: string; giftEmoji?: string; giftName?: string; giftCoins?: number; userName: string; userId: string; broadcasterUserId?: string; battleTeam?: "A" | "B"; recipientSocketId?: string }) => {
       // Never trust price/name/emoji from the browser.
       const gift = GIFT_CATALOG[data.giftType];
       if (!gift || !data.streamId) return;
+      if (typeof data.eventId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(data.eventId)) {
+        socket.emit("gift-rejected", { reason: "invalid_event_id" });
+        return;
+      }
       const originalGiftCoins = gift.coins;
       let accepted = false;
       let battleState: any = null;
@@ -915,11 +919,54 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         socket.emit("gift-rejected", { reason: "self_gift" });
         return;
       }
+      if (!recipientUserId) {
+        socket.emit("gift-rejected", { reason: "recipient_unavailable" });
+        return;
+      }
       data.broadcasterUserId = recipientUserId;
       try {
         const client = await pool.connect();
         try {
           await client.query("BEGIN");
+          const broadcasterCoins = Math.floor(originalGiftCoins * 0.6);
+          const platformCoins = originalGiftCoins - broadcasterCoins;
+          const giftEvent = await client.query(
+            `INSERT INTO gift_events
+              (event_id, sender_user_id, recipient_user_id, stream_id, gift_type,
+               gross_coins, broadcaster_coins, platform_coins, egp_rate)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0.0500)
+             ON CONFLICT (event_id) DO NOTHING
+             RETURNING id`,
+            [data.eventId, authUid, recipientUserId, parseInt(data.streamId), data.giftType,
+             originalGiftCoins, broadcasterCoins, platformCoins]
+          );
+          if (giftEvent.rows.length === 0) {
+            const existing = await client.query(
+              `SELECT sender_user_id, recipient_user_id, stream_id, gift_type, gross_coins
+               FROM gift_events WHERE event_id = $1`,
+              [data.eventId]
+            );
+            const sameEvent = existing.rows[0]
+              && existing.rows[0].sender_user_id === authUid
+              && existing.rows[0].recipient_user_id === recipientUserId
+              && Number(existing.rows[0].stream_id) === Number(data.streamId)
+              && existing.rows[0].gift_type === data.giftType
+              && Number(existing.rows[0].gross_coins) === originalGiftCoins;
+            if (!sameEvent) {
+              await client.query("ROLLBACK");
+              socket.emit("gift-rejected", { reason: "duplicate_event_mismatch" });
+              return;
+            }
+            const duplicateWallet = await client.query(`SELECT balance FROM coin_wallets WHERE user_id = $1`, [authUid]);
+            await client.query("COMMIT");
+            socket.emit("gift-accepted", {
+              balance: Number(duplicateWallet.rows[0]?.balance || 0),
+              giftType: data.giftType,
+              eventId: data.eventId,
+              duplicate: true,
+            });
+            return;
+          }
           const wallet = await client.query(
             `SELECT balance FROM coin_wallets WHERE user_id = $1 FOR UPDATE`,
             [data.userId]
@@ -945,7 +992,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           );
           // 60/40 is always calculated from the original gift value.
           if (data.broadcasterUserId) {
-            const broadcasterCoins = Math.floor(originalGiftCoins * 0.6);
             await client.query(
               `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
                VALUES ($1, $2::int, 0, $2::int)
@@ -984,7 +1030,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       if (!accepted) return;
       // Push the sender's new balance immediately (no client-side polling race).
-      socket.emit("gift-accepted", { balance: newSenderBalance, giftType: data.giftType });
+      socket.emit("gift-accepted", { balance: newSenderBalance, giftType: data.giftType, eventId: data.eventId });
 
       const room = streamRooms.get(data.streamId);
       if (room?.battle?.active) {
@@ -1244,6 +1290,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(r.rows);
   });
 
+  const makeRechargeCode = () => {
+    const token = randomUUID().replace(/-/g, "").toUpperCase();
+    return `SOUQ-${token.slice(0, 8)}-${token.slice(8, 16)}-${token.slice(16, 24)}`;
+  };
+
+  const insertReplacementRechargeCode = async (
+    client: PoolClient,
+    coins: number,
+    priceEGP: number,
+  ) => {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = makeRechargeCode();
+      const inserted = await client.query(
+        `INSERT INTO coin_recharge_codes (code, coins, price_egp, expires_at)
+         VALUES ($1, $2, $3, NOW() + INTERVAL '30 days')
+         ON CONFLICT (code) DO NOTHING RETURNING code`,
+        [code, coins, priceEGP]
+      );
+      if (inserted.rows[0]?.code) return inserted.rows[0].code as string;
+    }
+    throw new Error("Could not allocate a unique recharge code");
+  };
+
   // Redeem a recharge code
   app.post("/api/coins/redeem", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
@@ -1269,32 +1338,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       if (row.expires_at && new Date(row.expires_at) < new Date()) {
         // Keep the inventory replenished when an unused code expires.
-        const replacementCode = `SOUQ-${randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase()}-${randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase()}`;
         // Consume the expired code in the same transaction so retrying it
         // cannot mint unlimited replacement codes.
         await client.query(
           `UPDATE coin_recharge_codes SET used_by_user_id = $1, used_at = NOW() WHERE id = $2`,
           [userId, row.id]
         );
-        await client.query(
-          `INSERT INTO coin_recharge_codes (code, coins, price_egp, expires_at)
-           VALUES ($1, $2, $3, NOW() + INTERVAL '30 days')`,
-          [replacementCode, row.coins, row.price_egp]
-        );
+        const replacementCode = await insertReplacementRechargeCode(client, Number(row.coins), Number(row.price_egp));
         await client.query("COMMIT");
         return res.status(400).json({ message: "الكود منتهي الصلاحية", replacementCode });
       }
 
-      const replacementCode = `SOUQ-${randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase()}-${randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase()}`;
       await client.query(
         `UPDATE coin_recharge_codes SET used_by_user_id = $1, used_at = NOW() WHERE id = $2`,
         [userId, row.id]
       );
-      await client.query(
-        `INSERT INTO coin_recharge_codes (code, coins, price_egp, expires_at)
-         VALUES ($1, $2, $3, NOW() + INTERVAL '30 days')`,
-        [replacementCode, row.coins, row.price_egp]
-      );
+      const replacementCode = await insertReplacementRechargeCode(client, Number(row.coins), Number(row.price_egp));
       await client.query(
         `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
          VALUES ($1, $2::int, 0, $2::int)
@@ -1434,19 +1493,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/admin/coins/generate-codes", isAuthenticated, async (req: any, res) => {
     if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
     const { coins, priceEGP, count, expiresInDays } = req.body || {};
-    if (!coins || !priceEGP || !count) return res.status(400).json({ message: "Missing fields" });
+    const parsedCoins = Number(coins);
+    const parsedCount = Number(count);
+    const parsedPriceEGP = priceEGP === undefined || priceEGP === null || priceEGP === ""
+      ? parsedCoins / 20
+      : Number(priceEGP);
+    if (!Number.isInteger(parsedCoins) || parsedCoins < 1
+      || !Number.isInteger(parsedCount) || parsedCount < 1 || parsedCount > 200
+      || !Number.isFinite(parsedPriceEGP) || parsedPriceEGP <= 0) {
+      return res.status(400).json({ message: "بيانات أكواد الشحن غير صالحة" });
+    }
 
     const codes: string[] = [];
     const expiresAt = expiresInDays ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000) : null;
 
-    for (let i = 0; i < Math.min(count, 500); i++) {
-      const code = `SOUQ-${Math.random().toString(36).toUpperCase().slice(2, 7)}-${Math.random().toString(36).toUpperCase().slice(2, 7)}`;
-      codes.push(code);
-      await pool.query(
-        `INSERT INTO coin_recharge_codes (code, coins, price_egp, expires_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-        [code, coins, priceEGP, expiresAt]
+    const targetCount = parsedCount;
+    for (let attempt = 0; codes.length < targetCount && attempt < targetCount * 5; attempt++) {
+      const code = makeRechargeCode();
+      const inserted = await pool.query(
+        `INSERT INTO coin_recharge_codes (code, coins, price_egp, expires_at)
+         VALUES ($1, $2, $3, $4) ON CONFLICT (code) DO NOTHING RETURNING code`,
+        [code, parsedCoins, parsedPriceEGP, expiresAt]
       );
+      if (inserted.rows[0]?.code) codes.push(inserted.rows[0].code);
     }
+    if (codes.length !== targetCount) return res.status(503).json({ message: "تعذر توليد كل الأكواد المطلوبة، حاول مرة أخرى" });
     res.json({ success: true, codes, count: codes.length });
   });
 
@@ -3531,12 +3602,23 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       }
       txOptions.to = toDate;
     }
-    const [transactions, balanceEGP, channel] = await Promise.all([
+    const [transactions, balanceEGP, withdrawableBalanceEGP, channel, minWithdrawalRaw] = await Promise.all([
       storage.getRevenueTransactions(userId, txOptions),
       storage.getUserBalanceEGP(userId),
+      storage.getWithdrawableBalanceEGP(userId),
       storage.getChannelByUserId(userId),
+      storage.getSetting('wallet_min_withdrawal_egp'),
     ]);
-    res.json({ transactions, balanceEGP, channel, hasMore: transactions.length === limit, limit, offset });
+    res.json({
+      transactions,
+      balanceEGP,
+      withdrawableBalanceEGP,
+      minWithdrawalEGP: Math.max(10, Number(minWithdrawalRaw || 100)),
+      channel,
+      hasMore: transactions.length === limit,
+      limit,
+      offset,
+    });
   });
 
   // ── تقرير المعلن التفصيلي ──────────────────────────────────────
@@ -3622,10 +3704,11 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       // معاملات الأرباح فقط (الصفحة الأولى فقط — استخدم /api/revenue?type=earning للترقيم)
       const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 30, 1), 100);
       const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
-      const [txs, totals, balance] = await Promise.all([
+      const [txs, totals, balance, minWithdrawalRaw] = await Promise.all([
         storage.getRevenueTransactions(userId, { type: 'earning', limit, offset }),
         storage.getRevenueTotals(userId),
-        storage.getUserBalanceEGP(userId),
+        storage.getWithdrawableBalanceEGP(userId),
+        storage.getSetting('wallet_min_withdrawal_egp'),
       ]);
 
       res.json({
@@ -3633,6 +3716,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         totalEarnedEGP: totals.earning,
         withdrawnEGP: totals.withdrawal,
         balanceEGP: balance,
+        minWithdrawalEGP: Math.max(10, Number(minWithdrawalRaw || 100)),
         hasMore: txs.length === limit,
         limit, offset,
       });
@@ -3661,7 +3745,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     const requestedKind = typeof req.query.kind === "string" ? req.query.kind : undefined;
     const allowedKinds = new Set([
       "deposit", "withdrawal", "coin_purchase", "coin_recharge",
-      "gift_sent", "gift_received", "revenue", "spending", "adjustment",
+      "gift_sent", "gift_received", "platform_share", "revenue", "spending", "adjustment",
     ]);
     if (requestedKind && !allowedKinds.has(requestedKind)) {
       return res.status(400).json({ message: "نوع النشاط غير صالح" });
@@ -3681,7 +3765,9 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
             COALESCE(service_type, CASE WHEN type = 'withdrawal' THEN 'طلب سحب أرباح' ELSE 'طلب إيداع' END) AS description,
             order_number AS reference, NULL::varchar AS related_user_id, NULL::integer AS related_stream_id,
             screenshot_url, created_at
-          FROM payment_requests WHERE ($1::varchar IS NULL OR user_id = $1)
+          FROM payment_requests
+          WHERE ($1::varchar IS NULL OR user_id = $1)
+            AND NOT (status = 'approved' AND type IN ('top_up', 'withdrawal'))
 
           UNION ALL
           SELECT
@@ -3716,6 +3802,16 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
 
           UNION ALL
           SELECT
+            'gift_event:' || id::text, 'gift_event'::text, id::text, NULL::varchar,
+            'platform_share'::text, 'COIN'::text, platform_coins::numeric, platform_coins::numeric,
+            ROUND(platform_coins::numeric * egp_rate, 2), 'completed'::text, NULL::text,
+            ('حصة المنصة 40% من هدية ' || gift_type)::text, event_id,
+            recipient_user_id, stream_id, NULL::text, created_at
+          FROM gift_events
+          WHERE $1::varchar IS NULL
+
+          UNION ALL
+          SELECT
             'revenue_transaction:' || id::text, 'revenue_transaction'::text, id::text, user_id,
             CASE type
               WHEN 'earning' THEN 'revenue'
@@ -3740,14 +3836,24 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           UNION ALL
           SELECT
             'afs_card:' || id::text, 'afs_card'::text, id::text, user_id,
-            CASE WHEN purpose = 'coin_purchase' THEN 'coin_purchase' ELSE 'deposit' END,
+            CASE WHEN purpose = 'coin_purchase' THEN 'coin_purchase'
+                 WHEN purpose = 'service_payment' THEN 'spending' ELSE 'deposit' END,
             CASE WHEN purpose = 'coin_purchase' THEN 'COIN' ELSE 'EGP' END,
             CASE WHEN purpose = 'coin_purchase' THEN COALESCE(coins, 0)::numeric ELSE ABS(amount_egp)::numeric END,
             CASE WHEN status = 'paid' THEN
-              CASE WHEN purpose = 'coin_purchase' THEN COALESCE(coins, 0)::numeric ELSE ABS(amount_egp)::numeric END
+              CASE WHEN purpose = 'coin_purchase' THEN COALESCE(coins, 0)::numeric
+                   WHEN purpose = 'service_payment' THEN -ABS(amount_egp)::numeric
+                   ELSE ABS(amount_egp)::numeric END
               ELSE 0::numeric END,
             amount_egp::numeric, status, 'afs_card'::text,
-            CASE WHEN purpose = 'coin_purchase' THEN 'شراء عملات بالبطاقة' ELSE 'شحن المحفظة بالبطاقة' END,
+            CASE
+              WHEN purpose = 'coin_purchase' THEN 'شراء عملات بالبطاقة'
+              WHEN service_type = 'ad_boost' THEN 'تعزيز إعلان بالبطاقة'
+              WHEN service_type = 'ad_renewal' THEN 'تجديد إعلان بالبطاقة'
+              WHEN service_type = 'subscription' THEN 'اشتراك المنصة بالبطاقة'
+              WHEN purpose = 'service_payment' THEN 'دفع خدمة بالبطاقة'
+              ELSE 'شحن المحفظة بالبطاقة'
+            END,
             checkout_id, NULL::varchar, NULL::integer, NULL::text, created_at
           FROM afs_payment_orders WHERE ($1::varchar IS NULL OR user_id = $1)
         ) activity
@@ -3769,6 +3875,8 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   const afsSafeOrder = (order: any, includeWidget = false) => ({
     id: order.id,
     purpose: order.purpose,
+    serviceType: order.service_type,
+    serviceReference: order.service_reference,
     packageId: order.package_id,
     amountEGP: Number(order.amount_egp),
     coins: order.coins,
@@ -3779,6 +3887,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     last4: order.last4,
     createdAt: order.created_at,
     paidAt: order.paid_at,
+    fulfilledAt: order.fulfilled_at,
   });
 
   const normalizeAfsAmount = (value: unknown) => {
@@ -3788,12 +3897,66 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     return minorUnits / 100;
   };
 
+  const resolveAfsServiceOrder = async (userId: string, body: any) => {
+    const serviceType = typeof body?.serviceType === "string" ? body.serviceType : "";
+    const settingAmount = async (key: string, fallback: number) => {
+      const amount = normalizeAfsAmount(await storage.getSetting(key) || fallback);
+      if (amount === null) throw new Error("invalid_service_price");
+      return amount;
+    };
+
+    if (serviceType === "ad_boost") {
+      const adId = Number(body?.adId);
+      if (!Number.isSafeInteger(adId) || adId < 1) throw new Error("invalid_ad");
+      const ad = await pool.query(`SELECT id, user_id FROM ads WHERE id = $1`, [adId]);
+      if (!ad.rows[0] || ad.rows[0].user_id !== userId) throw new Error("invalid_ad");
+      const enabled = (await storage.getSetting("boost_enabled") || "true") === "true";
+      if (!enabled) throw new Error("service_unavailable");
+      return {
+        serviceType,
+        amount: await settingAmount("boost_price_egp", 250),
+        serviceReference: { adId, durationDays: 30 },
+      };
+    }
+
+    if (serviceType === "ad_renewal") {
+      const adId = Number(body?.adId);
+      const durationDays = Number(body?.durationDays);
+      if (!Number.isSafeInteger(adId) || adId < 1 || ![7, 15, 30].includes(durationDays)) {
+        throw new Error("invalid_renewal");
+      }
+      const ad = await pool.query(`SELECT id, user_id FROM ads WHERE id = $1`, [adId]);
+      if (!ad.rows[0] || ad.rows[0].user_id !== userId) throw new Error("invalid_ad");
+      return {
+        serviceType,
+        amount: await settingAmount(`renewal_price_${durationDays}d`, durationDays === 7 ? 20 : durationDays === 15 ? 35 : 60),
+        serviceReference: { adId, durationDays },
+      };
+    }
+
+    if (serviceType === "subscription") {
+      return {
+        serviceType,
+        amount: await settingAmount("subscription_price_egp", SUB_PRICE_EGP),
+        serviceReference: { durationDays: SUB_DURATION_DAYS },
+      };
+    }
+
+    throw new Error("invalid_service");
+  };
+
   app.post("/api/payments/afs/checkout", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
     const { purpose } = req.body || {};
+    const idempotencyKey = String(req.get("Idempotency-Key") || req.body?.idempotencyKey || "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+      return res.status(400).json({ message: "تعذر تأمين محاولة الدفع، أعد المحاولة من زر الدفع" });
+    }
     let amount: number;
     let packageId: number | null = null;
     let coins: number | null = null;
+    let serviceType: string | null = null;
+    let serviceReference: Record<string, unknown> | null = null;
     try {
       if (purpose === "coin_purchase") {
         packageId = Number(req.body?.packageId);
@@ -3818,23 +3981,71 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           return res.status(400).json({ message: "مبلغ الشحن يجب أن يكون بين 10 و1,000,000 جنيه" });
         }
         amount = requestedAmount;
+      } else if (purpose === "service_payment") {
+        const service = await resolveAfsServiceOrder(userId, req.body);
+        amount = service.amount;
+        serviceType = service.serviceType;
+        serviceReference = service.serviceReference;
       } else {
         return res.status(400).json({ message: "نوع عملية الدفع غير صالح" });
       }
 
-      const checkout = await prepareAfsCheckout(amount);
-      const inserted = await pool.query(
-        `INSERT INTO afs_payment_orders
-          (user_id, purpose, package_id, amount_egp, coins, checkout_id, integrity)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [userId, purpose, packageId, amount, coins, checkout.checkoutId, checkout.integrity],
+      const existingResult = await pool.query(
+        `SELECT * FROM afs_payment_orders WHERE user_id = $1 AND idempotency_key = $2 LIMIT 1`,
+        [userId, idempotencyKey],
       );
+      const existing = existingResult.rows[0];
+      if (existing) {
+        const sameIntent = existing.purpose === purpose
+          && Number(existing.amount_egp) === amount
+          && Number(existing.package_id || 0) === Number(packageId || 0)
+          && String(existing.service_type || "") === String(serviceType || "")
+          && JSON.stringify(existing.service_reference || null) === JSON.stringify(serviceReference || null);
+        if (!sameIntent) {
+          return res.status(409).json({ message: "مفتاح محاولة الدفع مستخدم لعملية مختلفة" });
+        }
+        return res.status(200).json({
+          ...afsSafeOrder(existing, true),
+          ...getAfsWidget(existing.checkout_id),
+        });
+      }
+
+      const checkout = await prepareAfsCheckout(amount);
+      let inserted;
+      try {
+        inserted = await pool.query(
+          `INSERT INTO afs_payment_orders
+            (user_id, purpose, service_type, service_reference, idempotency_key,
+             package_id, amount_egp, coins, checkout_id, integrity)
+           VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10) RETURNING *`,
+          [userId, purpose, serviceType, serviceReference ? JSON.stringify(serviceReference) : null,
+           idempotencyKey, packageId, amount, coins, checkout.checkoutId, checkout.integrity],
+        );
+      } catch (insertError: any) {
+        if (insertError?.code !== "23505") throw insertError;
+        const winner = await pool.query(
+          `SELECT * FROM afs_payment_orders WHERE user_id = $1 AND idempotency_key = $2 LIMIT 1`,
+          [userId, idempotencyKey],
+        );
+        if (!winner.rows[0]) throw insertError;
+        return res.status(200).json({
+          ...afsSafeOrder(winner.rows[0], true),
+          ...getAfsWidget(winner.rows[0].checkout_id),
+        });
+      }
       res.status(201).json({
         ...afsSafeOrder(inserted.rows[0], true),
         widgetUrl: checkout.widgetUrl,
         isTestMode: checkout.isTestMode,
       });
-    } catch {
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "";
+      if (["invalid_ad", "invalid_renewal", "invalid_service"].includes(code)) {
+        return res.status(400).json({ message: "بيانات الخدمة غير صالحة أو لا تخص حسابك" });
+      }
+      if (code === "service_unavailable") {
+        return res.status(409).json({ message: "الخدمة غير متاحة للدفع حالياً" });
+      }
       res.status(503).json({ message: "تعذر بدء الدفع بالبطاقة، حاول مرة أخرى" });
     }
   });
@@ -3870,7 +4081,12 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     }
     // Verifying is intentionally owner-only: admin inspection cannot cause credit.
     if (!initial || initial.user_id !== req.user.claims.sub) return res.status(404).json({ message: "عملية الدفع غير موجودة" });
-    if (initial.status === "paid") return res.json({ status: "paid", message: "تم تأكيد الدفع وإضافة الرصيد." });
+    if (initial.status === "paid") {
+      return res.json({
+        status: "paid",
+        message: initial.purpose === "service_payment" ? "تم تأكيد الدفع وتفعيل الخدمة." : "تم تأكيد الدفع وإضافة الرصيد.",
+      });
+    }
 
     let provider: Record<string, any>;
     try {
@@ -3905,7 +4121,10 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       const order = locked.rows[0];
       if (order.status === "paid") {
         await client.query("COMMIT");
-        return res.json({ status: "paid", message: "تم تأكيد الدفع وإضافة الرصيد." });
+        return res.json({
+          status: "paid",
+          message: order.purpose === "service_payment" ? "تم تأكيد الدفع وتفعيل الخدمة." : "تم تأكيد الدفع وإضافة الرصيد.",
+        });
       }
       if (outcome === "paid") {
         let coinTransactionId: number | null = null, revenueTransactionId: number | null = null;
@@ -3923,17 +4142,55 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
             [order.user_id, order.coins],
           );
           coinTransactionId = ledger.rows[0].id;
-        } else {
+        } else if (order.purpose === "wallet_top_up") {
           const ledger = await client.query(
             `INSERT INTO revenue_transactions (user_id, type, amount_egp, description)
              VALUES ($1, 'wallet_recharge', $2, 'شحن المحفظة ببطاقة') RETURNING id`,
             [order.user_id, order.amount_egp],
           );
           revenueTransactionId = ledger.rows[0].id;
+        } else if (order.purpose === "service_payment") {
+          const reference = order.service_reference || {};
+          if (order.service_type === "ad_boost") {
+            const updated = await client.query(
+              `UPDATE ads
+               SET is_boosted = true,
+                   boosted_until = GREATEST(COALESCE(boosted_until, NOW()), NOW()) + INTERVAL '30 days'
+               WHERE id = $1 AND user_id = $2 RETURNING id`,
+              [Number(reference.adId), order.user_id]
+            );
+            if (!updated.rows[0]) throw new Error("AFS paid service target is unavailable");
+          } else if (order.service_type === "ad_renewal") {
+            const durationDays = Number(reference.durationDays);
+            if (![7, 15, 30].includes(durationDays)) throw new Error("AFS paid renewal duration is invalid");
+            const updated = await client.query(
+              `UPDATE ads
+               SET status = 'active',
+                   expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + ($3::int * INTERVAL '1 day')
+               WHERE id = $1 AND user_id = $2 RETURNING id`,
+              [Number(reference.adId), order.user_id, durationDays]
+            );
+            if (!updated.rows[0]) throw new Error("AFS paid service target is unavailable");
+          } else if (order.service_type === "subscription") {
+            const durationDays = Number(reference.durationDays);
+            if (durationDays !== SUB_DURATION_DAYS) throw new Error("AFS subscription duration is invalid");
+            await client.query(
+              `UPDATE users
+               SET subscription_ends_at =
+                 GREATEST(COALESCE(subscription_ends_at, NOW()), NOW()) + ($2::int * INTERVAL '1 day')
+               WHERE id = $1`,
+              [order.user_id, durationDays]
+            );
+          } else {
+            throw new Error("AFS paid service type is invalid");
+          }
+        } else {
+          throw new Error("AFS paid order purpose is invalid");
         }
         await client.query(
           `UPDATE afs_payment_orders SET status='paid', payment_id=$2, result_code=$3, result_description=$4,
-           payment_brand=$5, last4=$6, coin_transaction_id=$7, revenue_transaction_id=$8, paid_at=NOW() WHERE id=$1`,
+           payment_brand=$5, last4=$6, coin_transaction_id=$7, revenue_transaction_id=$8,
+           paid_at=NOW(), fulfilled_at=NOW() WHERE id=$1`,
           [id, paymentId, code || null, description, brand, last4, coinTransactionId, revenueTransactionId],
         );
       } else {
@@ -3946,7 +4203,8 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       await client.query("COMMIT");
       res.json({
         status: outcome,
-        message: outcome === "paid" ? "تم تأكيد الدفع وإضافة الرصيد." :
+        message: outcome === "paid"
+          ? (order.purpose === "service_payment" ? "تم تأكيد الدفع وتفعيل الخدمة." : "تم تأكيد الدفع وإضافة الرصيد.") :
           outcome === "pending" ? "الدفع ما زال قيد المعالجة، أعد المحاولة بعد قليل." : "لم يتم تأكيد عملية الدفع.",
       });
     } catch (err) {
@@ -3985,27 +4243,27 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       }
       const input = parsed.data;
 
-      // Anti-fraud: verify the receipt screenshot was actually uploaded by THIS user.
-      // Prevents users from pasting a URL of someone else's receipt.
-      const filename = input.screenshotUrl.replace(/^\/uploads\//, "");
-      const ownedFile = await db
-        .select({ id: uploadedFiles.id, mimeType: uploadedFiles.mimeType })
-        .from(uploadedFiles)
-        .where(and(eq(uploadedFiles.userId, userId), eq(uploadedFiles.filename, filename)))
-        .limit(1);
+      if (input.type === "top_up" && input.screenshotUrl) {
+        // Anti-fraud: verify the receipt screenshot was uploaded by this user.
+        const filename = input.screenshotUrl.replace(/^\/uploads\//, "");
+        const ownedFile = await db
+          .select({ id: uploadedFiles.id, mimeType: uploadedFiles.mimeType })
+          .from(uploadedFiles)
+          .where(and(eq(uploadedFiles.userId, userId), eq(uploadedFiles.filename, filename)))
+          .limit(1);
 
-      if (ownedFile.length === 0) {
-        return res.status(400).json({
-          message: "صورة الإيصال غير صالحة — لازم ترفعها من نفس حسابك دلوقتي",
-          field: "screenshotUrl",
-        });
-      }
-      // Receipt must be an image, not a video / pdf / random file
-      if (ownedFile[0].mimeType && !ownedFile[0].mimeType.startsWith("image/")) {
-        return res.status(400).json({
-          message: "صورة الإيصال لازم تكون صورة (PNG / JPG / WEBP) — مش فيديو أو ملف تاني",
-          field: "screenshotUrl",
-        });
+        if (ownedFile.length === 0) {
+          return res.status(400).json({
+            message: "صورة الإيصال غير صالحة — لازم ترفعها من نفس حسابك دلوقتي",
+            field: "screenshotUrl",
+          });
+        }
+        if (ownedFile[0].mimeType && !ownedFile[0].mimeType.startsWith("image/")) {
+          return res.status(400).json({
+            message: "صورة الإيصال لازم تكون صورة (PNG / JPG / WEBP) — مش فيديو أو ملف تاني",
+            field: "screenshotUrl",
+          });
+        }
       }
 
       // Anti-fraud: if adId provided, must belong to the same user
@@ -4017,6 +4275,54 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         }
         if (adRow.rows[0].user_id !== userId) {
           return res.status(403).json({ message: "لا يمكنك ربط الطلب بإعلان مش بتاعك", field: "adId" });
+        }
+      }
+
+      if (input.type === "withdrawal") {
+        const minimum = Math.max(10, Number(await storage.getSetting('wallet_min_withdrawal_egp') || 100));
+        if (Number(input.amountEGP) < minimum) {
+          return res.status(400).json({ message: `الحد الأدنى لسحب الأرباح هو ${minimum} ج.م`, minimum });
+        }
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`withdrawal:${userId}`]);
+          const availableResult = await client.query(
+            `SELECT
+               COALESCE(SUM(CASE
+                 WHEN type = 'earning' THEN amount_egp
+                 WHEN type IN ('spending', 'withdrawal', 'ai_charge') THEN -amount_egp
+                 ELSE 0 END), 0)::numeric AS ledger_balance,
+               COALESCE((SELECT SUM(amount_egp) FROM payment_requests
+                         WHERE user_id = $1 AND type = 'withdrawal' AND status = 'pending'), 0)::numeric AS reserved
+             FROM revenue_transactions WHERE user_id = $1`,
+            [userId]
+          );
+          const ledgerBalance = Number(availableResult.rows[0]?.ledger_balance || 0);
+          const reserved = Number(availableResult.rows[0]?.reserved || 0);
+          const available = Math.max(0, ledgerBalance - reserved);
+          if (Number(input.amountEGP) > available) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({
+              message: `الرصيد القابل للسحب غير كافٍ. المتاح بعد الطلبات المعلقة ${available.toFixed(2)} ج.م`,
+              availableBalanceEGP: available,
+            });
+          }
+          const inserted = await client.query(
+            `INSERT INTO payment_requests
+              (order_number, user_id, ad_id, type, amount_egp, method, phone_number,
+               service_type, screenshot_url, status)
+             VALUES ($1, $2, NULL, 'withdrawal', $3, $4, $5, 'withdrawal', NULL, 'pending')
+             RETURNING *`,
+            [orderNumber, userId, input.amountEGP, input.method, input.phoneNumber || null]
+          );
+          await client.query("COMMIT");
+          return res.status(201).json(inserted.rows[0]);
+        } catch (error) {
+          await client.query("ROLLBACK").catch(() => undefined);
+          throw error;
+        } finally {
+          client.release();
         }
       }
 
@@ -4290,10 +4596,23 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         ORDER BY total_spent DESC
         LIMIT 20`);
 
-      // إيراد المنصة (40% من الإنفاق الكلي)
+      const giftStats = await db.execute(sql`
+        SELECT
+          COALESCE(SUM(gross_coins), 0) AS gross_coins,
+          COALESCE(SUM(broadcaster_coins), 0) AS broadcaster_coins,
+          COALESCE(SUM(platform_coins), 0) AS platform_coins,
+          COALESCE(SUM(broadcaster_coins * egp_rate), 0) AS broadcaster_egp,
+          COALESCE(SUM(platform_coins * egp_rate), 0) AS platform_egp
+        FROM gift_events`);
+      const gs = giftStats.rows[0] as any;
+
+      // Campaign and gift income are combined for headline totals, while the
+      // immutable gift event rows retain the explicit 60/40 split.
       const totalSpent = Number(cs.total_spent || 0);
-      const platformRevenue = totalSpent * 0.40;
-      const publishersRevenue = totalSpent * 0.60;
+      const campaignPlatformRevenue = totalSpent * 0.40;
+      const campaignPublishersRevenue = totalSpent * 0.60;
+      const giftPlatformRevenue = Number(gs.platform_egp || 0);
+      const giftBroadcasterRevenue = Number(gs.broadcaster_egp || 0);
 
       // آخر 50 معاملة على مستوى المنصة
       const recentTx = await db.execute(sql`
@@ -4317,8 +4636,14 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           totalImpressions: Number(cs.total_impressions || 0),
           totalClicks: Number(cs.total_clicks || 0),
           totalSpentEGP: totalSpent,
-          platformRevenueEGP: platformRevenue,
-          publishersRevenueEGP: publishersRevenue,
+          platformRevenueEGP: campaignPlatformRevenue + giftPlatformRevenue,
+          publishersRevenueEGP: campaignPublishersRevenue + giftBroadcasterRevenue,
+          campaignPlatformRevenueEGP: campaignPlatformRevenue,
+          giftPlatformRevenueEGP: giftPlatformRevenue,
+          giftBroadcasterRevenueEGP: giftBroadcasterRevenue,
+          giftGrossCoins: Number(gs.gross_coins || 0),
+          giftPlatformCoins: Number(gs.platform_coins || 0),
+          giftBroadcasterCoins: Number(gs.broadcaster_coins || 0),
           totalBudgetEGP: Number(cs.total_budget || 0),
           fraudTotal: Number(fc.fraud_total || 0),
           fraudClicks: Number(fc.fraud_clicks || 0),
@@ -6681,10 +7006,17 @@ ${reelTags}
         if (balance < priceEGP) {
           return res.status(402).json({ message: "insufficient_balance", required: priceEGP, balance });
         }
-        // Deduct balance
-        await db.execute(sql`
-          UPDATE users SET balance_egp = COALESCE(balance_egp, 0) - ${priceEGP} WHERE id = ${userId}
-        `);
+        // The revenue ledger is the wallet source of truth. Charging the legacy
+        // users.balance_egp column here made card top-ups invisible to coupons
+        // and allowed the two balances to drift.
+        await storage.createTransaction({
+          userId,
+          type: 'ai_charge',
+          amountEGP: priceEGP,
+          description: 'توليد كوبون ذكي',
+          campaignId: null,
+          channelId: null,
+        });
       }
 
       // Generate coupon code
@@ -6847,9 +7179,18 @@ ${reelTags}
   app.get("/api/admin/wallet-topups", isAuthenticated, requireAdmin, async (_req: any, res) => {
     try {
       const r = await pool.query(
-        `SELECT o.*, u.first_name, u.last_name, u.email, u.balance_egp
+        `SELECT o.*, u.first_name, u.last_name, u.email,
+                GREATEST(COALESCE(wallet.current_balance_egp, 0), 0) AS current_balance_egp
          FROM wallet_top_up_orders o
          LEFT JOIN users u ON u.id = o.user_id
+         LEFT JOIN LATERAL (
+           SELECT SUM(CASE
+             WHEN type IN ('earning','wallet_recharge') THEN amount_egp
+             WHEN type IN ('spending','withdrawal','ai_charge') THEN -amount_egp
+             ELSE 0 END) AS current_balance_egp
+           FROM revenue_transactions
+           WHERE user_id = o.user_id
+         ) wallet ON true
          ORDER BY o.created_at DESC
          LIMIT 200`
       );
@@ -6882,16 +7223,7 @@ ${reelTags}
       }
 
       if (action === "approve") {
-        await client.query(
-          `UPDATE users SET balance_egp = COALESCE(balance_egp, 0) + $1 WHERE id = $2`,
-          [order.amount_egp, order.user_id]
-        );
-        await client.query(
-          `INSERT INTO wallet_transactions (user_id, type, amount_egp, description, ref_id)
-           VALUES ($1, 'top_up', $2, $3, $4)`,
-          [order.user_id, order.amount_egp, `شحن محفظة — ${order.payment_method}`, order.order_number]
-        );
-        // ── تسجيل في revenue_transactions كـ wallet_recharge ──
+        // revenue_transactions is the only operational wallet ledger.
         await client.query(
           `INSERT INTO revenue_transactions (user_id, type, amount_egp, description)
            VALUES ($1, 'wallet_recharge', $2, $3)`,
@@ -6922,9 +7254,26 @@ ${reelTags}
   app.get("/api/admin/wallet-stats", isAuthenticated, requireAdmin, async (_req, res) => {
     try {
       const [topupRes, spendRes, balanceRes, pendingRes] = await Promise.all([
-        pool.query(`SELECT COALESCE(SUM(amount_egp),0) as total_approved, COUNT(*) FILTER (WHERE status='approved') as count_approved FROM wallet_top_up_orders WHERE status = 'approved'`),
-        pool.query(`SELECT COALESCE(SUM(amount_egp),0) as total_spent FROM wallet_transactions WHERE type IN ('boost_debit','renewal_debit','ai_debit')`),
-        pool.query(`SELECT COALESCE(SUM(balance_egp),0) as total_wallet_balance, COUNT(*) as users_with_balance FROM users WHERE balance_egp > 0`),
+        pool.query(`
+          SELECT COALESCE(SUM(amount_egp),0) AS total_approved, COUNT(*) AS count_approved
+          FROM revenue_transactions
+          WHERE type = 'wallet_recharge'`),
+        pool.query(`
+          SELECT COALESCE(SUM(amount_egp),0) AS total_spent
+          FROM revenue_transactions
+          WHERE type IN ('spending','ai_charge')`),
+        pool.query(`
+          SELECT
+            COALESCE(SUM(GREATEST(balance, 0)),0) AS total_wallet_balance,
+            COUNT(*) FILTER (WHERE balance > 0) AS users_with_balance
+          FROM (
+            SELECT user_id, COALESCE(SUM(CASE
+              WHEN type IN ('earning','wallet_recharge') THEN amount_egp
+              WHEN type IN ('spending','withdrawal','ai_charge') THEN -amount_egp
+              ELSE 0 END),0) AS balance
+            FROM revenue_transactions
+            GROUP BY user_id
+          ) balances`),
         pool.query(`SELECT COALESCE(SUM(amount_egp),0) as pending_amount, COUNT(*) as pending_count FROM wallet_top_up_orders WHERE status = 'pending'`),
       ]);
       const t = topupRes.rows[0] as any;

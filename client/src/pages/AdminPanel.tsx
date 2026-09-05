@@ -321,11 +321,12 @@ function DashboardSection() {
 
       {/* Revenue quick view */}
       {adminRevenue && (
-        <div className="grid md:grid-cols-3 gap-4">
+        <div className="grid md:grid-cols-4 gap-4">
           {[
             { label: "إجمالي الإنفاق الإعلاني", value: adminRevenue.summary.totalSpentEGP.toFixed(2), unit: "ج.م", icon: Banknote, cls: "border-blue-500/20 from-blue-500/5" },
-            { label: "دخل المنصة (40%)",         value: adminRevenue.summary.platformRevenueEGP.toFixed(2), unit: "ج.م", icon: DollarSign, cls: "border-emerald-500/20 from-emerald-500/5" },
-            { label: "أرباح الناشرين (60%)",      value: adminRevenue.summary.publishersRevenueEGP.toFixed(2), unit: "ج.م", icon: TrendingUp, cls: "border-green-500/20 from-green-500/5" },
+            { label: "دخل المنصة الكلي",          value: adminRevenue.summary.platformRevenueEGP.toFixed(2), unit: "ج.م", icon: DollarSign, cls: "border-emerald-500/20 from-emerald-500/5" },
+            { label: "حصة المنصة من الهدايا (40%)", value: Number(adminRevenue.summary.giftPlatformCoins || 0).toLocaleString("ar-EG"), unit: "عملة", icon: Gift, cls: "border-yellow-500/20 from-yellow-500/5" },
+            { label: "أرباح الناشرين والمذيعين",   value: adminRevenue.summary.publishersRevenueEGP.toFixed(2), unit: "ج.م", icon: TrendingUp, cls: "border-green-500/20 from-green-500/5" },
           ].map(r => (
             <Card key={r.label} className={`rounded-2xl border bg-gradient-to-br ${r.cls} to-transparent`}>
               <CardContent className="p-5 flex items-center gap-4">
@@ -1443,8 +1444,9 @@ function RevenueSection() {
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard icon={Banknote}   label="إجمالي الإنفاق الإعلاني" value={`${rev.summary.totalSpentEGP.toFixed(2)} ج.م`}     color="text-blue-500" />
-        <StatCard icon={DollarSign} label="دخل المنصة (40%)"         value={`${rev.summary.platformRevenueEGP.toFixed(2)} ج.م`} color="text-emerald-500" />
-        <StatCard icon={TrendingUp} label="أرباح الناشرين (60%)"      value={`${rev.summary.publishersRevenueEGP.toFixed(2)} ج.م`} color="text-green-500" />
+        <StatCard icon={DollarSign} label="دخل المنصة الكلي"          value={`${rev.summary.platformRevenueEGP.toFixed(2)} ج.م`} color="text-emerald-500" />
+        <StatCard icon={Gift}       label="حصة هدايا المنصة (40%)"   value={`${Number(rev.summary.giftPlatformCoins || 0).toLocaleString("ar-EG")} عملة`} color="text-yellow-500" />
+        <StatCard icon={TrendingUp} label="أرباح الناشرين والمذيعين" value={`${rev.summary.publishersRevenueEGP.toFixed(2)} ج.م`} color="text-green-500" />
         <StatCard icon={PieChart}   label="الميزانية الإجمالية"       value={`${rev.summary.totalBudgetEGP.toFixed(2)} ج.م`}     color="text-purple-500" />
         <StatCard icon={Eye}        label="مشاهدات حقيقية"            value={rev.summary.totalImpressions.toLocaleString()}       color="text-teal-500" />
         <StatCard icon={BarChart2}  label="نقرات حقيقية"              value={rev.summary.totalClicks.toLocaleString()}            color="text-indigo-500" />
@@ -3205,7 +3207,7 @@ function RenewalOrdersSection() {
 // ── CoinsSection ────────────────────────────────────────────────
 function CoinsSection({ logAction }: { logAction: any }) {
   const { toast } = useToast();
-  const [coinTab, setCoinTab] = useState<"orders"|"codes"|"packages">("orders");
+  const [coinTab, setCoinTab] = useState<"movements"|"orders"|"codes"|"packages">("movements");
   const [genCount, setGenCount] = useState("10");
   const [genCoins, setGenCoins] = useState("100");
   const [generating, setGenerating] = useState(false);
@@ -3233,6 +3235,16 @@ function CoinsSection({ logAction }: { logAction: any }) {
   const { data: purchaseOrders, isLoading: ordersLoading, refetch: refetchOrders } = useQuery<any[]>({
     queryKey: ["/api/admin/coins/purchase-orders", ordersFilter],
     queryFn: () => fetch(`/api/admin/coins/purchase-orders?status=${ordersFilter}`).then(r => r.json()),
+  });
+
+  const { data: unifiedMovements = [], isLoading: movementsLoading, refetch: refetchMovements } = useQuery<any[]>({
+    queryKey: ["/api/payments/unified", "admin-coins"],
+    queryFn: async () => {
+      const response = await fetch("/api/payments/unified?limit=100", { credentials: "include" });
+      if (!response.ok) throw new Error("تعذر تحميل حركة العملات");
+      const rows = await response.json();
+      return Array.isArray(rows) ? rows.filter((row: any) => row.asset === "COIN") : [];
+    },
   });
 
   const reviewOrder = async (orderId: number, action: "approve" | "reject") => {
@@ -3299,12 +3311,13 @@ function CoinsSection({ logAction }: { logAction: any }) {
     <div className="space-y-6" dir="rtl">
       <div>
         <h2 className="text-2xl font-bold text-white mb-1">نظام العملات 🪙</h2>
-        <p className="text-white/50 text-sm">إدارة طلبات الشحن بالدفع وأكواد الشحن والباقات</p>
+        <p className="text-white/50 text-sm">كل حركة العملات وحصة المنصة وطلبات الشحن والأكواد والباقات</p>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-2">
         {[
+          { key: "movements", label: "كل حركة العملات",       badge: 0 },
           { key: "orders",   label: "طلبات الشحن بالدفع", badge: (purchaseOrders || []).filter((o: any) => o.status === "pending").length },
           { key: "codes",    label: "أكواد الشحن",         badge: 0 },
           { key: "packages", label: "الباقات",              badge: 0 },
@@ -3318,6 +3331,63 @@ function CoinsSection({ logAction }: { logAction: any }) {
           </button>
         ))}
       </div>
+
+      {/* ── TAB: All coin movements ── */}
+      {coinTab === "movements" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-white/50">آخر 100 حركة — جميع المستخدمين، الهدايا وحصة المنصة</p>
+            <button onClick={() => refetchMovements()} className="px-3 py-1.5 rounded-lg bg-zinc-800 text-white/60 hover:text-white text-xs">
+              <RefreshCw className="w-3 h-3" />
+            </button>
+          </div>
+          {movementsLoading ? (
+            <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-yellow-400" /></div>
+          ) : unifiedMovements.length === 0 ? (
+            <div className="text-center py-16 text-white/30">لا توجد حركات عملات بعد</div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-zinc-700">
+              <table className="w-full text-xs text-white">
+                <thead className="bg-zinc-800 text-white/60">
+                  <tr>
+                    <th className="p-3 text-right">المرجع</th>
+                    <th className="p-3 text-right">المستخدم</th>
+                    <th className="p-3 text-right">النوع</th>
+                    <th className="p-3 text-right">العملات</th>
+                    <th className="p-3 text-right">التفاصيل</th>
+                    <th className="p-3 text-right">التاريخ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unifiedMovements.map((row: any) => {
+                    const signed = Number(row.signedAmount || 0);
+                    const kindLabel: Record<string, string> = {
+                      coin_purchase: "شراء عملات",
+                      coin_recharge: "شحن عملات",
+                      gift_sent: "هدية مرسلة",
+                      gift_received: "هدية مستلمة",
+                      platform_share: "حصة المنصة 40%",
+                      adjustment: "تسوية",
+                    };
+                    return (
+                      <tr key={row.id} className="border-t border-zinc-800">
+                        <td className="p-3 font-mono">{row.reference || row.sourceId}</td>
+                        <td className="p-3 font-mono text-white/60">{row.userId || "المنصة"}</td>
+                        <td className="p-3">{kindLabel[row.kind] || row.kind}</td>
+                        <td className={`p-3 font-bold ${signed < 0 ? "text-rose-400" : "text-emerald-400"}`}>
+                          {signed > 0 ? "+" : ""}{signed.toLocaleString("ar-EG")}
+                        </td>
+                        <td className="p-3 text-white/70">{row.description || "—"}</td>
+                        <td className="p-3 text-white/50 whitespace-nowrap">{new Date(row.createdAt).toLocaleString("ar-EG")}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── TAB: Purchase Orders ── */}
       {coinTab === "orders" && (
@@ -3835,7 +3905,7 @@ function WalletChargesSection({ logAction }: { logAction: any }) {
                       {o.payment_ref && <span> — مرجع: <span className="font-mono font-bold">{o.payment_ref}</span></span>}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      رصيد حالي: <span className="font-bold text-primary">{o.balance_egp || 0} ج.م</span>
+                      رصيد حالي: <span className="font-bold text-primary">{Number(o.currentBalanceEgp || 0).toFixed(2)} ج.م</span>
                       {" | "}{o.created_at ? new Date(o.created_at).toLocaleString("ar-EG") : ""}
                     </div>
                     <input

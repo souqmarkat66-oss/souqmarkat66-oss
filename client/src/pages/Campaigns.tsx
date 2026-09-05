@@ -251,6 +251,12 @@ export default function Campaigns() {
                   </div>
                 </div>
 
+                <a
+                  href="/payments"
+                  className="flex w-full items-center justify-center rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300"
+                >
+                  💳 اشحن ميزانية الحملة بالبطاقة عبر AFS · Visa / Mastercard / Meeza
+                </a>
                 <Button type="submit" className="w-full" disabled={createMutation.isPending} data-testid="btn-submit-campaign">
                   {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin me-2" /> : null}
                   إنشاء الحملة

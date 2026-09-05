@@ -26,7 +26,7 @@ const PAYMENT_METHODS = [
   { value: "souq", label: "رصيد تطبيق سوق ماركات", number: "", color: "bg-primary/10 text-primary" },
 ];
 
-function WithdrawDialog({ balanceEGP, label }: { balanceEGP: number; label: string }) {
+function WithdrawDialog({ balanceEGP, label, minWithdrawalEGP = 100 }: { balanceEGP: number; label: string; minWithdrawalEGP?: number }) {
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("");
@@ -36,9 +36,9 @@ function WithdrawDialog({ balanceEGP, label }: { balanceEGP: number; label: stri
   const { toast } = useToast();
 
   const mutation = useMutation({
-    mutationFn: () => apiRequest('/api/payments', 'POST', {
+    mutationFn: () => apiRequest('POST', '/api/payments', {
       type: 'withdrawal', amountEGP: parseFloat(amount),
-      method, phoneNumber: phone, adminNote: cardNote || undefined,
+      method, phoneNumber: method === 'visa_bank' ? cardNote : phone,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/publisher/report'] });
@@ -69,7 +69,7 @@ function WithdrawDialog({ balanceEGP, label }: { balanceEGP: number; label: stri
           <div>
             <label className="text-sm font-medium">المبلغ (ج.م)</label>
             <Input type="number" value={amount} onChange={e => setAmount(e.target.value)}
-              placeholder="الحد الأدنى 50 ج.م" className="mt-1" data-testid="input-withdraw-amount" />
+              placeholder={`الحد الأدنى ${minWithdrawalEGP} ج.م`} className="mt-1" data-testid="input-withdraw-amount" />
           </div>
           <div>
             <label className="text-sm font-medium">طريقة الاستلام</label>
@@ -108,11 +108,11 @@ function WithdrawDialog({ balanceEGP, label }: { balanceEGP: number; label: stri
           <div className="flex items-start gap-2 bg-yellow-50 dark:bg-yellow-950/20 rounded-xl p-3">
             <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 shrink-0" />
             <p className="text-xs text-yellow-700 dark:text-yellow-400">
-              مراجعة الطلبات خلال 24-48 ساعة عمل. الحد الأدنى 50 ج.م.
+               مراجعة الطلبات خلال 24-48 ساعة عمل. الحد الأدنى {minWithdrawalEGP} ج.م.
             </p>
           </div>
           <Button className="w-full" onClick={() => mutation.mutate()}
-            disabled={!amount || !method || parseFloat(amount) < 50 || parseFloat(amount) > balanceEGP || mutation.isPending}
+            disabled={!amount || !method || parseFloat(amount) < minWithdrawalEGP || parseFloat(amount) > balanceEGP || mutation.isPending}
             data-testid="btn-confirm-withdraw">
             {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin me-2" /> : null}
             تأكيد طلب السحب
@@ -319,7 +319,7 @@ function PublisherTab() {
     </div>
   );
 
-  const { channel, channelStats, totalEarnedEGP, withdrawnEGP, balanceEGP } = data;
+  const { channel, channelStats, totalEarnedEGP, withdrawnEGP, balanceEGP, minWithdrawalEGP = 100 } = data;
   const realImpr = Number(channelStats?.real_impressions || 0);
   const realClicks = Number(channelStats?.real_clicks || 0);
   const fraudImpr = Number(channelStats?.fraud_impressions || 0);
@@ -339,7 +339,7 @@ function PublisherTab() {
               <Badge className="mt-1 bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 border-0 text-xs">ناشر معتمد ✓</Badge>
             </div>
           </div>
-          {balanceEGP > 0 && <WithdrawDialog balanceEGP={balanceEGP} label="أرباحي" />}
+          {balanceEGP >= minWithdrawalEGP && <WithdrawDialog balanceEGP={balanceEGP} label="أرباحي" minWithdrawalEGP={minWithdrawalEGP} />}
         </CardContent>
       </Card>
 
