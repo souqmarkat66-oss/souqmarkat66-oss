@@ -4,4 +4,4 @@
 - [PK battle flow](pk-battle-flow.md) — invite accept auto-starts 1v1 via shared validated helper; guest split screen needs captureStream for HLS; gift button can't rely on WebRTC streaming flag alone
 - [Follow & Friends system](pk-battle-flow.md) — user_follows table (mutual = friend); presence via global user:<id> room join on socket auth; battle friend-invite reuses challenge-user-invite flow
 - [AFS COPYandPAY credential format](afs-copyandpay.md) — AFS test access tokens may be supplied with a Bearer prefix; normalize it once before authorization.
-- [Wallet ledger and AFS retry safety](wallet-ledger-and-afs-retries.md) — EGP balances use one ledger; card intents retain one idempotency key across retries.
+- [Wallet ledger and payment retry safety](wallet-ledger-and-afs-retries.md) — one EGP ledger; wallet debits lock per user and commit with fulfillment; card intents keep one retry key.

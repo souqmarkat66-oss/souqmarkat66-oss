@@ -150,6 +150,10 @@ async function runMigrations() {
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP`);
     await db.execute(sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS voice_url TEXT`);
     await db.execute(sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS sender_user_id VARCHAR`);
+    await db.execute(sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS dedupe_key TEXT`);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS notifications_dedupe_key_idx ON notifications(dedupe_key)`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS fulfillment_status TEXT`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS fulfilled_at TIMESTAMP`);
     await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_voice BOOLEAN DEFAULT FALSE`);
     await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS voice_url TEXT`);
     await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS image_url TEXT`);
@@ -378,6 +382,42 @@ async function runMigrations() {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS gift_events_sender_created_idx ON gift_events(sender_user_id, created_at DESC)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS gift_events_recipient_created_idx ON gift_events(recipient_user_id, created_at DESC)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS gift_events_stream_created_idx ON gift_events(stream_id, created_at DESC)`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS payment_failures (
+        id SERIAL PRIMARY KEY,
+        dedupe_key TEXT NOT NULL UNIQUE,
+        user_id VARCHAR NOT NULL REFERENCES users(id),
+        method TEXT NOT NULL,
+        service_type TEXT,
+        amount_egp NUMERIC(12,2) NOT NULL DEFAULT 0,
+        reason_code TEXT NOT NULL,
+        reason_message TEXT NOT NULL,
+        reference TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS payment_failures_created_at_idx ON payment_failures(created_at DESC)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS payment_failures_method_idx ON payment_failures(method)`);
+    await db.execute(sql`
+      INSERT INTO payment_failures
+        (dedupe_key, user_id, method, service_type, amount_egp, reason_code, reason_message, reference, created_at)
+      SELECT
+        'afs:' || id || ':failed', user_id, 'afs_card', service_type, amount_egp,
+        'bank_declined', 'رفض البنك العملية أو تعذر التحقق منها', id::text, created_at
+      FROM afs_payment_orders
+      WHERE status = 'failed'
+      ON CONFLICT (dedupe_key) DO NOTHING
+    `);
+    await db.execute(sql`
+      INSERT INTO payment_failures
+        (dedupe_key, user_id, method, service_type, amount_egp, reason_code, reason_message, reference, created_at)
+      SELECT
+        'manual:' || id || ':rejected', user_id, method, service_type, amount_egp,
+        'admin_rejected', COALESCE(NULLIF(admin_note, ''), 'رفضت الإدارة طلب الدفع'), COALESCE(order_number, id::text), created_at
+      FROM payment_requests
+      WHERE status = 'rejected' AND type = 'top_up'
+      ON CONFLICT (dedupe_key) DO NOTHING
+    `);
     await db.execute(sql`
       DO $$
       BEGIN

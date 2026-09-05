@@ -323,6 +323,25 @@ export const afsPaymentOrders = pgTable("afs_payment_orders", {
 });
 export type AfsPaymentOrder = typeof afsPaymentOrders.$inferSelect;
 
+// Rejected payment attempts are kept outside the wallet/revenue ledger. They
+// are audit records only and never change balances or earnings.
+export const paymentFailures = pgTable("payment_failures", {
+  id: serial("id").primaryKey(),
+  dedupeKey: text("dedupe_key").notNull().unique(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  method: text("method").notNull(),
+  serviceType: text("service_type"),
+  amountEGP: numeric("amount_egp", { precision: 12, scale: 2 }).notNull().default("0"),
+  reasonCode: text("reason_code").notNull(),
+  reasonMessage: text("reason_message").notNull(),
+  reference: text("reference"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  createdIdx: index("payment_failures_created_at_idx").on(table.createdAt),
+  methodIdx: index("payment_failures_method_idx").on(table.method),
+}));
+export type PaymentFailure = typeof paymentFailures.$inferSelect;
+
 // ============================================================
 // REPORTS TABLE
 // ============================================================
@@ -373,6 +392,8 @@ export const paymentRequests = pgTable("payment_requests", {
   screenshotUrl: text("screenshot_url"),
   status: text("status", { enum: ["pending", "approved", "rejected"] }).default("pending"),
   adminNote: text("admin_note"),
+  fulfillmentStatus: text("fulfillment_status"),
+  fulfilledAt: timestamp("fulfilled_at"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -380,7 +401,7 @@ export const paymentRequests = pgTable("payment_requests", {
 const EG_PHONE_REGEX = /^01[0125]\d{8}$/;
 
 export const insertPaymentRequestSchema = createInsertSchema(paymentRequests)
-  .omit({ id: true, createdAt: true, status: true, adminNote: true })
+  .omit({ id: true, createdAt: true, status: true, adminNote: true, fulfillmentStatus: true, fulfilledAt: true })
   .extend({
     amountEGP: z.coerce.number()
       .positive("المبلغ لازم يكون أكبر من صفر")
@@ -446,6 +467,7 @@ export const notifications = pgTable("notifications", {
   link: text("link"),
   voiceUrl: text("voice_url"),
   senderUserId: varchar("sender_user_id"),
+  dedupeKey: text("dedupe_key").unique(),
   isRead: boolean("is_read").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });

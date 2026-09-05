@@ -42,6 +42,7 @@ const NAV = [
   { key: "campaigns",      label: "الحملات الإعلانية",    icon: BarChart2,       color: "text-teal-400" },
   { key: "ticker_ads",     label: "شريط الإعلان العاجل",   icon: Megaphone,       color: "text-red-500" },
   { key: "payments",       label: "طلبات السحب",          icon: Banknote,        color: "text-green-400" },
+  { key: "payment_report", label: "تقرير المدفوعات",      icon: DollarSign,      color: "text-violet-400" },
   { key: "boostorders",    label: "طلبات التعزيز",         icon: Zap,             color: "text-orange-400" },
   { key: "payreceipts",    label: "إيصالات الدفع",          icon: Banknote,        color: "text-emerald-500" },
   { key: "walletcharges",  label: "طلبات شحن المحفظة",    icon: Banknote,        color: "text-emerald-400" },
@@ -219,6 +220,7 @@ export default function AdminPanel() {
           {section === "campaigns"  && <CampaignsSection logAction={logAction} />}
           {section === "ticker_ads" && <TickerAdsAdminSection />}
           {section === "payments"   && <PaymentsSection logAction={logAction} />}
+          {section === "payment_report" && <PaymentReportSection />}
           {section === "boostorders" && <BoostOrdersSection logAction={logAction} />}
           {section === "payreceipts"   && <PayReceiptsSection />}
           {section === "walletcharges" && <WalletChargesSection logAction={logAction} />}
@@ -1287,6 +1289,158 @@ function PaymentsSection({ logAction }: { logAction: any }) {
       {payments.length === 0 && !isLoading && (
         <div className="text-center py-16 text-muted-foreground"><Banknote className="w-12 h-12 mx-auto mb-3 opacity-20" /><p>لا توجد طلبات</p></div>
       )}
+    </div>
+  );
+}
+
+function PaymentReportSection() {
+  const { data: report, isLoading, isError } = useQuery<any>({
+    queryKey: ["/api/admin/payment-report"],
+    queryFn: async () => {
+      const response = await fetch("/api/admin/payment-report", { credentials: "include" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message || "تعذر تحميل تقرير المدفوعات");
+      return body;
+    },
+    refetchInterval: 30000,
+  });
+
+  if (isLoading) {
+    return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  }
+  if (isError || !report) {
+    return <div className="py-16 text-center text-destructive">تعذر تحميل تقرير المدفوعات حالياً</div>;
+  }
+
+  const summary = report.summary || {};
+  const failures = report.recentFailures || [];
+  const methodLabel: Record<string, string> = {
+    afs_card: "بطاقة AFS",
+    wallet: "المحفظة",
+    manual_transfer: "تحويل يدوي",
+    vodafone: "فودافون كاش",
+    etisalat: "اتصالات كاش",
+    instapay: "InstaPay",
+    visa_bank: "تحويل بنكي",
+  };
+  const reasonLabel: Record<string, string> = {
+    insufficient_funds: "رصيد البطاقة غير كافٍ",
+    insufficient_balance: "رصيد المحفظة غير كافٍ",
+    card_details: "بيانات البطاقة غير صحيحة",
+    bank_declined: "رفض البنك",
+    verification_failed: "فشل التحقق",
+    technical_error: "خطأ تقني",
+    admin_rejected: "رفض إداري",
+  };
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      <div>
+        <h2 className="text-xl font-bold">تقرير مدفوعات الخدمات</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          منفصل عن الأرباح والهدايا — مقارنة واضحة بين البطاقة والمحفظة والتحويلات اليدوية
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          icon={Banknote}
+          label="خدمات مدفوعة بالبطاقة"
+          value={`${Number(summary.cardServicePaidEGP || 0).toFixed(2)} ج.م`}
+          color="text-violet-500"
+          sub={`${summary.cardServicePaidCount || 0} عملية ناجحة`}
+        />
+        <StatCard
+          icon={DollarSign}
+          label="خدمات مدفوعة من المحفظة"
+          value={`${Number(summary.walletPaidEGP || 0).toFixed(2)} ج.م`}
+          color="text-blue-500"
+          sub={`${summary.walletPaidCount || 0} حركة خصم`}
+        />
+        <StatCard
+          icon={CheckCircle}
+          label="تحويلات خدمات يدوية"
+          value={`${Number(summary.manualServicePaidEGP || 0).toFixed(2)} ج.م`}
+          color="text-emerald-500"
+          sub={`${summary.manualServicePaidCount || 0} طلب مقبول`}
+        />
+        <StatCard
+          icon={XCircle}
+          label="عمليات مرفوضة"
+          value={Number(summary.rejectedCount || 0)}
+          color="text-red-500"
+          sub={`منها ${summary.cardFailedCount || 0} عبر البطاقة`}
+        />
+      </div>
+
+      <Card className="rounded-2xl">
+        <CardHeader>
+          <CardTitle className="text-sm">ملخص بوابة AFS</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="rounded-xl bg-green-500/10 p-3">
+            <div className="text-xs text-muted-foreground">إجمالي المقبوض بالبطاقة</div>
+            <div className="font-bold text-green-600 mt-1">{Number(summary.cardAllPaidEGP || 0).toFixed(2)} ج.م</div>
+          </div>
+          <div className="rounded-xl bg-green-500/10 p-3">
+            <div className="text-xs text-muted-foreground">عمليات بطاقة ناجحة</div>
+            <div className="font-bold text-green-600 mt-1">{summary.cardAllPaidCount || 0}</div>
+          </div>
+          <div className="rounded-xl bg-amber-500/10 p-3">
+            <div className="text-xs text-muted-foreground">قيد المعالجة</div>
+            <div className="font-bold text-amber-600 mt-1">{summary.cardPendingCount || 0}</div>
+          </div>
+          <div className="rounded-xl bg-red-500/10 p-3">
+            <div className="text-xs text-muted-foreground">مرفوضة من البطاقة</div>
+            <div className="font-bold text-red-600 mt-1">{summary.cardFailedCount || 0}</div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl">
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-500" />
+            آخر العمليات المرفوضة
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {failures.length === 0 ? (
+            <div className="text-center py-10 text-muted-foreground text-sm">لا توجد عمليات دفع مرفوضة</div>
+          ) : (
+            <div className="space-y-2 max-h-[480px] overflow-y-auto">
+              {failures.map((failure: any) => (
+                <div key={failure.id} className="rounded-xl border border-red-500/15 bg-red-500/5 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-sm">
+                          {SERVICE_TYPE_LABELS[failure.serviceType] || failure.serviceType || "عملية دفع"}
+                        </span>
+                        <Badge variant="destructive">{reasonLabel[failure.reasonCode] || "مرفوضة"}</Badge>
+                        <Badge variant="outline">{methodLabel[failure.method] || failure.method}</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">{failure.reasonMessage}</p>
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        المستخدم: {failure.firstName || failure.lastName
+                          ? `${failure.firstName || ""} ${failure.lastName || ""}`.trim()
+                          : failure.email || failure.userId}
+                        {failure.reference ? ` · المرجع: ${failure.reference}` : ""}
+                      </p>
+                    </div>
+                    <div className="text-left flex-shrink-0">
+                      <div className="font-bold text-red-600">{Number(failure.amountEGP || 0).toFixed(2)} ج.م</div>
+                      <div className="text-[10px] text-muted-foreground mt-1">
+                        {failure.createdAt ? format(new Date(failure.createdAt), "dd/MM/yy HH:mm", { locale: ar }) : ""}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

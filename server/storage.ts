@@ -20,6 +20,12 @@ export interface IStorage {
   getAds(language?: string, userId?: string): Promise<Ad[]>;
   getAd(id: number): Promise<Ad | undefined>;
   createAd(ad: InsertAd): Promise<Ad>;
+  createAdWithWalletDebitAtomic(
+    ad: InsertAd,
+    amountEGP: number,
+    description: string,
+    expiresAt: Date,
+  ): Promise<{ ad?: Ad; success: boolean; balance: number }>;
   updateAd(id: number, ad: Partial<InsertAd>): Promise<Ad | undefined>;
   deleteAd(id: number): Promise<void>;
 
@@ -72,6 +78,7 @@ export interface IStorage {
   getRevenueTransactions(userId: string, options?: { limit?: number; offset?: number; type?: 'earning' | 'spending' | 'withdrawal' | 'ai_charge' | 'wallet_recharge'; channelId?: number; from?: Date; to?: Date }): Promise<RevenueTransaction[]>;
   getRevenueTotals(userId: string, options?: { channelId?: number }): Promise<{ earning: number; spending: number; withdrawal: number; ai_charge: number; wallet_recharge: number }>;
   getUserBalanceEGP(userId: string): Promise<number>;
+  debitWalletAtomic(userId: string, amountEGP: number, type: 'spending' | 'ai_charge', description: string): Promise<{ success: boolean; balance: number }>;
   getWithdrawableBalanceEGP(userId: string): Promise<number>;
   createTransaction(tx: Omit<RevenueTransaction, 'id' | 'createdAt'>): Promise<RevenueTransaction>;
 
@@ -151,6 +158,43 @@ export class DatabaseStorage implements IStorage {
   async createAd(insertAd: InsertAd): Promise<Ad> {
     const [ad] = await db.insert(ads).values(insertAd).returning();
     return ad;
+  }
+
+  async createAdWithWalletDebitAtomic(
+    insertAd: InsertAd,
+    amountEGP: number,
+    description: string,
+    expiresAt: Date,
+  ): Promise<{ ad?: Ad; success: boolean; balance: number }> {
+    const amount = Number(amountEGP);
+    return await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${'wallet:' + insertAd.userId}, 0))`);
+      const [row] = await tx
+        .select({
+          balance: sql<number>`COALESCE(SUM(
+            CASE
+              WHEN ${revenueTransactions.type} IN ('earning', 'wallet_recharge') THEN ${revenueTransactions.amountEGP}
+              WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
+              ELSE 0
+            END
+          ), 0)`,
+        })
+        .from(revenueTransactions)
+        .where(eq(revenueTransactions.userId, insertAd.userId));
+      const balance = Number(row?.balance ?? 0);
+      if (balance < amount) return { success: false, balance };
+      await tx.insert(revenueTransactions).values({
+        userId: insertAd.userId,
+        type: "spending",
+        amountEGP: amount,
+        description,
+        campaignId: null,
+        channelId: null,
+      });
+      const [ad] = await tx.insert(ads).values(insertAd).returning();
+      await tx.execute(sql`UPDATE ads SET expires_at = ${expiresAt} WHERE id = ${ad.id}`);
+      return { ad, success: true, balance: balance - amount };
+    });
   }
 
   async updateAd(id: number, updates: Partial<InsertAd>): Promise<Ad | undefined> {
@@ -528,6 +572,54 @@ export class DatabaseStorage implements IStorage {
     return Number(row?.balance ?? 0);
   }
 
+  async debitWalletAtomic(
+    userId: string,
+    amountEGP: number,
+    type: 'spending' | 'ai_charge',
+    description: string,
+  ): Promise<{ success: boolean; balance: number }> {
+    const amount = Number(amountEGP);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error("debitWalletAtomic: المبلغ يجب أن يكون أكبر من صفر");
+    }
+    const result = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${'wallet:' + userId}, 0))`);
+      const [row] = await tx
+        .select({
+          balance: sql<number>`COALESCE(SUM(
+            CASE
+              WHEN ${revenueTransactions.type} IN ('earning', 'wallet_recharge') THEN ${revenueTransactions.amountEGP}
+              WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
+              ELSE 0
+            END
+          ), 0)`,
+        })
+        .from(revenueTransactions)
+        .where(eq(revenueTransactions.userId, userId));
+      const balance = Number(row?.balance ?? 0);
+      if (balance < amount) return { success: false, balance };
+      await tx.insert(revenueTransactions).values({
+        userId,
+        type,
+        amountEGP: amount,
+        description,
+        campaignId: null,
+        channelId: null,
+      });
+      return { success: true, balance: balance - amount };
+    });
+    if (result.success) {
+      walletEmitter.emit("wallet:update", {
+        userId,
+        amountEGP: amount,
+        type,
+        description,
+        newBalance: result.balance,
+      });
+    }
+    return result;
+  }
+
   async getWithdrawableBalanceEGP(userId: string): Promise<number> {
     const [row] = await db
       .select({
@@ -713,11 +805,7 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
-      const [updated] = await tx.update(paymentRequests)
-        .set({ status: 'approved', adminNote })
-        .where(eq(paymentRequests.id, id))
-        .returning();
-
+      let fulfillmentStatus: string | null = null;
       if (locked.type === 'withdrawal') {
         await tx.insert(revenueTransactions).values({
           userId: locked.userId,
@@ -727,16 +815,68 @@ export class DatabaseStorage implements IStorage {
           campaignId: null,
           channelId: null,
         });
+        fulfillmentStatus = 'fulfilled';
       } else if (locked.type === 'top_up') {
-        await tx.insert(revenueTransactions).values({
-          userId: locked.userId,
-          type: 'wallet_recharge',
-          amountEGP: locked.amountEGP,
-          description: `شحن رصيد - ${locked.method}`,
-          campaignId: null,
-          channelId: null,
-        });
+        const services = String(locked.serviceType || "")
+          .split(",")
+          .map((service) => service.trim())
+          .filter(Boolean);
+        // A paid service must not also become spendable wallet credit. Legacy
+        // requests without a service marker remain wallet top-ups.
+        const isWalletRecharge = services.length === 0
+          || (services.length === 1 && services[0] === "wallet_recharge");
+        if (services.includes("wallet_recharge") && !isWalletRecharge) {
+          throw new Error("لا يمكن جمع شحن المحفظة مع شراء خدمة في طلب واحد");
+        }
+        if (isWalletRecharge) {
+          await tx.insert(revenueTransactions).values({
+            userId: locked.userId,
+            type: 'wallet_recharge',
+            amountEGP: locked.amountEGP,
+            description: `شحن رصيد - ${locked.method}`,
+            campaignId: null,
+            channelId: null,
+          });
+          fulfillmentStatus = 'fulfilled';
+        } else {
+          let requiresManualFulfillment = false;
+          for (const service of services) {
+            if (service === 'ad_boost') {
+              if (!locked.adId) throw new Error("طلب تعزيز الإعلان غير مرتبط بإعلان");
+              const result = await tx.execute(sql`
+                UPDATE ads
+                SET is_boosted = true,
+                    boosted_until = GREATEST(COALESCE(boosted_until, NOW()), NOW()) + INTERVAL '30 days'
+                WHERE id = ${locked.adId} AND user_id = ${locked.userId}
+                RETURNING id
+              `);
+              if (result.rows.length === 0) throw new Error("تعذر العثور على الإعلان المطلوب تعزيزه");
+            } else if (service === 'renewal') {
+              if (!locked.adId) throw new Error("طلب تجديد الإعلان غير مرتبط بإعلان");
+              const result = await tx.execute(sql`
+                UPDATE ads
+                SET status = 'active',
+                    expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + INTERVAL '30 days'
+                WHERE id = ${locked.adId} AND user_id = ${locked.userId}
+                RETURNING id
+              `);
+              if (result.rows.length === 0) throw new Error("تعذر العثور على الإعلان المطلوب تجديده");
+            } else {
+              requiresManualFulfillment = true;
+            }
+          }
+          fulfillmentStatus = requiresManualFulfillment ? 'manual_required' : 'fulfilled';
+        }
       }
+      const [updated] = await tx.update(paymentRequests)
+        .set({
+          status: 'approved',
+          adminNote,
+          fulfillmentStatus,
+          fulfilledAt: fulfillmentStatus === 'fulfilled' ? new Date() : null,
+        })
+        .where(eq(paymentRequests.id, id))
+        .returning();
       return { payment: updated, alreadyProcessed: false };
     });
   }
@@ -839,6 +979,22 @@ export class DatabaseStorage implements IStorage {
         .for("update");
       if (!locked || locked.status !== "active") {
         return undefined;
+      }
+      if (chargeAdvertiser && amountEGP > 0) {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${'wallet:' + advertiserId}, 0))`);
+        const [balanceRow] = await tx
+          .select({
+            balance: sql<number>`COALESCE(SUM(
+              CASE
+                WHEN ${revenueTransactions.type} IN ('earning', 'wallet_recharge') THEN ${revenueTransactions.amountEGP}
+                WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
+                ELSE 0
+              END
+            ), 0)`,
+          })
+          .from(revenueTransactions)
+          .where(eq(revenueTransactions.userId, advertiserId));
+        if (Number(balanceRow?.balance ?? 0) < amountEGP) return undefined;
       }
       const [updated] = await tx.update(tickerAds).set({
         spentEGP: sql`${tickerAds.spentEGP} + ${amountEGP}`,

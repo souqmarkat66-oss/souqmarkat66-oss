@@ -1477,12 +1477,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         `UPDATE coin_purchase_orders SET status = 'rejected', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
         [adminNote || null, adminId, orderId]
       );
-      try {
-        await pool.query(
-          `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coins_rejected', $2, $3)`,
-          [order.user_id, `❌ تم رفض طلب شحن العملات${adminNote ? ": " + adminNote : ""}`, JSON.stringify({ orderId })]
-        );
-      } catch (_) {}
+      await recordPaymentFailure({
+        dedupeKey: `coins:${orderId}:rejected`,
+        userId: order.user_id,
+        method: order.payment_method || "manual_transfer",
+        serviceType: "coin_purchase",
+        amountEGP: order.amount_egp,
+        reasonCode: "admin_rejected",
+        reasonMessage: adminNote || "رفضت الإدارة طلب شراء العملات",
+        reference: orderId,
+      });
       return res.json({ success: true, message: "تم رفض الطلب" });
     }
 
@@ -2101,6 +2105,8 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       const { insertAdSchema } = await import("@shared/schema");
       const userId = req.user.claims.sub;
       const isAdmin = isAdminUser(req);
+      let listingPrice = 0;
+      let listingExpiresAt: Date | null = null;
 
       // ── Listing fee: charge wallet for non-admin users ─────────────────
       const listingDurationDays = parseInt(req.body.listingDurationDays) || 7;
@@ -2111,30 +2117,37 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         }
         const priceKey = `listing_price_${listingDurationDays}d`;
         const priceRow = await db.execute(sql`SELECT value FROM platform_settings WHERE key = ${priceKey}`);
-        const listingPrice = parseFloat((priceRow.rows[0] as any)?.value ?? (listingDurationDays === 7 ? '400' : listingDurationDays === 15 ? '700' : '900'));
-        const balance = await storage.getUserBalanceEGP(userId);
-        if (balance < listingPrice) {
-          return res.status(402).json({
-            message: `رصيد غير كافٍ — يلزم ${listingPrice} ج.م لنشر الإعلان ${listingDurationDays} يوماً، رصيدك الحالي: ${balance.toFixed(2)} ج.م`,
-            required: listingPrice, balance,
-          });
-        }
-        // Deduct from wallet
-       await storage.createTransaction({
-  userId, type: "spending", amountEGP: listingPrice, channelId: null, campaignId: null,
-  description: `نشر إعلان ${listingDurationDays} يوماً`,
-});
-
-
-        // Force expires_at based on chosen duration
-        req.body.expiresAt = new Date(Date.now() + listingDurationDays * 24 * 60 * 60 * 1000).toISOString();
-      } else {
-        // Admin ads have no expiry by default
-        if (!req.body.expiresAt) req.body.expiresAt = null;
+        listingPrice = parseFloat((priceRow.rows[0] as any)?.value ?? (listingDurationDays === 7 ? '400' : listingDurationDays === 15 ? '700' : '900'));
+        listingExpiresAt = new Date(Date.now() + listingDurationDays * 24 * 60 * 60 * 1000);
       }
 
       const input = insertAdSchema.parse(req.body);
-      const ad = await storage.createAd({ ...input, userId });
+      let ad;
+      if (isAdmin) {
+        ad = await storage.createAd({ ...input, userId });
+      } else {
+        const created = await storage.createAdWithWalletDebitAtomic(
+          { ...input, userId },
+          listingPrice,
+          `نشر إعلان ${listingDurationDays} يوماً`,
+          listingExpiresAt!,
+        );
+        if (!created.success || !created.ad) {
+          return res.status(402).json({
+            message: `رصيد غير كافٍ — يلزم ${listingPrice} ج.م لنشر الإعلان ${listingDurationDays} يوماً، رصيدك الحالي: ${created.balance.toFixed(2)} ج.م`,
+            required: listingPrice,
+            balance: created.balance,
+          });
+        }
+        ad = created.ad;
+        walletEmitter.emit("wallet:update", {
+          userId,
+          amountEGP: listingPrice,
+          type: "spending",
+          description: `نشر إعلان ${listingDurationDays} يوماً`,
+          newBalance: created.balance,
+        });
+      }
       res.status(201).json(ad);
 
       // ── Notify targeted users about the new ad (async, non-blocking) ──
@@ -2358,11 +2371,16 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           VALUES (${ADMIN_USER_ID}, ${order.user_id}, ${order.ad_id}, ${confirmMsg}, false)
         `);
       } else if (status === 'rejected') {
-        await createNotification(order.user_id, "system",
-          `❌ طلب التعزيز مرفوض`,
-          `رقم الطلب ${order.order_number} — للاستفسار تواصل مع الإدارة.`,
-          `/ads/${order.ad_id}`
-        );
+        await recordPaymentFailure({
+          dedupeKey: `boost:${order.id}:rejected`,
+          userId: order.user_id,
+          method: order.payment_method || "manual_transfer",
+          serviceType: "ad_boost",
+          amountEGP: order.amount,
+          reasonCode: "admin_rejected",
+          reasonMessage: "رفضت الإدارة طلب التعزيز. للاستفسار تواصل مع الإدارة.",
+          reference: order.order_number || order.id,
+        });
         // DM rejection to user
         const rejectMsg =
           `❌ تم رفض طلب التعزيز\n` +
@@ -2764,12 +2782,24 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   // SOCIAL FEATURES - LIKES & COMMENTS
   // ================================================================
   // Helper: create notification silently
-  async function createNotification(userId: string, type: string, title: string, body: string, link?: string, voiceUrl?: string, senderUserId?: string) {
+  async function createNotification(
+    userId: string,
+    type: string,
+    title: string,
+    body: string,
+    link?: string,
+    voiceUrl?: string,
+    senderUserId?: string,
+    dedupeKey?: string,
+  ) {
     try {
-      await db.execute(
-        sql`INSERT INTO notifications (user_id, type, title, body, link, voice_url, sender_user_id)
-            VALUES (${userId}, ${type}, ${title}, ${body}, ${link ?? null}, ${voiceUrl ?? null}, ${senderUserId ?? null})`
+      const inserted = await db.execute(
+        sql`INSERT INTO notifications (user_id, type, title, body, link, voice_url, sender_user_id, dedupe_key)
+            VALUES (${userId}, ${type}, ${title}, ${body}, ${link ?? null}, ${voiceUrl ?? null}, ${senderUserId ?? null}, ${dedupeKey ?? null})
+            ON CONFLICT (dedupe_key) DO NOTHING
+            RETURNING id`
       );
+      if (inserted.rows.length === 0) return;
       // Deliver web push if user has subscriptions
       const subs = await db.execute(sql`SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ${userId}`);
       for (const sub of subs.rows as any[]) {
@@ -2782,6 +2812,124 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         });
       }
     } catch {}
+  }
+
+  function paymentServiceLabel(serviceType?: string | null, purpose?: string | null) {
+    if (serviceType === "ad_boost") return "تعزيز الإعلان";
+    if (serviceType === "ad_renewal" || serviceType === "renewal") return "تجديد الإعلان";
+    if (serviceType === "subscription") return "اشتراك المنصة";
+    if (serviceType === "campaign") return "الحملة الإعلانية";
+    if (serviceType === "ai_credits") return "رصيد الذكاء الاصطناعي";
+    if (serviceType === "wallet_recharge" || purpose === "wallet_top_up") return "شحن المحفظة";
+    if (purpose === "coin_purchase") return "شراء العملات";
+    return serviceType ? `خدمة ${serviceType}` : "الخدمة";
+  }
+
+  function classifyAfsFailure(code: string, description: string | null, verificationMismatch = false) {
+    if (verificationMismatch) {
+      return { code: "verification_failed", message: "تعذر التحقق من بيانات العملية. لم يتم خصم أو تفعيل أي خدمة." };
+    }
+    const text = `${code} ${description || ""}`.toLowerCase();
+    if (/(insufficient|not sufficient|low balance|funds|exceed.*limit|limit exceeded)/.test(text)) {
+      return { code: "insufficient_funds", message: "الرصيد المتاح في البطاقة غير كافٍ لإتمام العملية." };
+    }
+    if (/(cvv|cvc|expiry|expired|card number|invalid card|holder|pan)/.test(text)) {
+      return { code: "card_details", message: "بيانات البطاقة غير صحيحة أو منتهية. راجع البيانات وحاول مرة أخرى." };
+    }
+    if (/(declin|denied|refus|reject|not permitted|restricted|blocked)/.test(text)) {
+      return { code: "bank_declined", message: "رفض البنك العملية. يمكنك التواصل مع البنك أو استخدام بطاقة أخرى." };
+    }
+    return { code: "technical_error", message: "تعذر إتمام الدفع حالياً. حاول مرة أخرى أو استخدم وسيلة دفع أخرى." };
+  }
+
+  async function recordPaymentFailure(input: {
+    dedupeKey: string;
+    userId: string;
+    method: string;
+    serviceType?: string | null;
+    amountEGP?: number | string | null;
+    reasonCode: string;
+    reasonMessage: string;
+    reference?: string | number | null;
+  }) {
+    try {
+      const amount = Math.max(0, Number(input.amountEGP || 0));
+      const inserted = await pool.query(
+        `INSERT INTO payment_failures
+          (dedupe_key, user_id, method, service_type, amount_egp, reason_code, reason_message, reference)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (dedupe_key) DO NOTHING
+         RETURNING id`,
+        [input.dedupeKey, input.userId, input.method, input.serviceType || null, amount,
+         input.reasonCode, input.reasonMessage, input.reference == null ? null : String(input.reference)],
+      );
+      if (inserted.rowCount === 0) return;
+      const service = paymentServiceLabel(input.serviceType);
+      const amountText = amount > 0 ? ` بقيمة ${amount.toFixed(2)} ج.م` : "";
+      await Promise.all([
+        createNotification(
+          input.userId,
+          "payment",
+          "❌ تم رفض عملية الدفع",
+          `${service}${amountText}. السبب: ${input.reasonMessage}`,
+          "/payments",
+          undefined,
+          undefined,
+          `${input.dedupeKey}:user`,
+        ),
+        createNotification(
+          ADMIN_USER_ID,
+          "payment",
+          "⚠️ عملية دفع مرفوضة",
+          `${service}${amountText} — المستخدم ${input.userId}. السبب: ${input.reasonMessage}`,
+          "/admin",
+          undefined,
+          undefined,
+          `${input.dedupeKey}:admin`,
+        ),
+      ]);
+    } catch (error) {
+      console.error("[payment-failure] audit failed:", error instanceof Error ? error.message : "unknown error");
+    }
+  }
+
+  async function notifyAfsPaid(order: any) {
+    const service = paymentServiceLabel(order.service_type, order.purpose);
+    const isService = order.purpose === "service_payment";
+    const title = isService ? "✅ تم الدفع وتشغيل الخدمة" : "✅ تم الدفع بنجاح";
+    const result = isService
+      ? `تم دفع ${Number(order.amount_egp).toFixed(2)} ج.م وتشغيل ${service} بنجاح.`
+      : order.purpose === "coin_purchase"
+        ? `تم الدفع وإضافة ${Number(order.coins || 0).toLocaleString("ar-EG")} عملة إلى محفظتك.`
+        : `تم الدفع وإضافة ${Number(order.amount_egp).toFixed(2)} ج.م إلى محفظتك.`;
+    await createNotification(
+      order.user_id,
+      "payment",
+      title,
+      result,
+      "/payments",
+      undefined,
+      undefined,
+      `afs:${order.id}:paid:user`,
+    );
+  }
+
+  async function settleAiWalletCharge(req: any, userId: string, serviceType: string, description: string) {
+    const amount = Number(req.aiChargeEGP || 0);
+    if (amount <= 0) return true;
+    const debit = await storage.debitWalletAtomic(userId, amount, "ai_charge", description);
+    if (debit.success) return true;
+    const reason = `رصيد المحفظة غير كافٍ. المطلوب ${amount.toFixed(2)} ج.م والمتاح ${debit.balance.toFixed(2)} ج.م.`;
+    await recordPaymentFailure({
+      dedupeKey: `wallet:${serviceType}:${randomUUID()}`,
+      userId,
+      method: "wallet",
+      serviceType,
+      amountEGP: amount,
+      reasonCode: "insufficient_balance",
+      reasonMessage: reason,
+    });
+    return false;
   }
 
   app.post("/api/likes", isAuthenticated, async (req: any, res) => {
@@ -3547,29 +3695,72 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   app.post("/api/subscription/renew", isAuthenticated, async (req: any, res) => {
     if (isAdminUser(req)) return res.json({ ok: true, message: "الأدمن مش محتاج اشتراك" });
     const userId = req.user.claims.sub;
+    let client: PoolClient | null = null;
     try {
-      const balance = await storage.getUserBalanceEGP(userId);
+      client = await pool.connect();
+      await client.query("BEGIN");
+      await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`wallet:${userId}`]);
+      const balanceRow = await client.query(
+        `SELECT COALESCE(SUM(CASE
+           WHEN type IN ('earning', 'wallet_recharge') THEN amount_egp
+           WHEN type IN ('spending', 'withdrawal', 'ai_charge') THEN -amount_egp
+           ELSE 0 END), 0)::float AS balance
+         FROM revenue_transactions WHERE user_id = $1`,
+        [userId],
+      );
+      const balance = Number(balanceRow.rows[0]?.balance || 0);
       if (balance < SUB_PRICE_EGP) {
+        await client.query("ROLLBACK");
+        await recordPaymentFailure({
+          dedupeKey: `wallet:subscription:${randomUUID()}`,
+          userId,
+          method: "wallet",
+          serviceType: "subscription",
+          amountEGP: SUB_PRICE_EGP,
+          reasonCode: "insufficient_balance",
+          reasonMessage: `رصيد المحفظة غير كافٍ. المطلوب ${SUB_PRICE_EGP.toFixed(2)} ج.م والمتاح ${balance.toFixed(2)} ج.م.`,
+        });
         return res.status(402).json({ message: "رصيد المحفظة غير كافٍ", balance, required: SUB_PRICE_EGP });
       }
-      // Deduct subscription fee
-      await storage.createTransaction({
+      await client.query(
+        `INSERT INTO revenue_transactions (user_id, type, amount_egp, description)
+         VALUES ($1, 'spending', $2, $3)`,
+        [userId, SUB_PRICE_EGP, `اشتراك أسبوعي — ${SUB_DURATION_DAYS} أيام`],
+      );
+      const subscription = await client.query(
+        `UPDATE users
+         SET subscription_ends_at =
+           GREATEST(COALESCE(subscription_ends_at, NOW()), NOW()) + ($2::int * INTERVAL '1 day')
+         WHERE id = $1
+         RETURNING subscription_ends_at`,
+        [userId, SUB_DURATION_DAYS],
+      );
+      if (!subscription.rows[0]) throw new Error("تعذر العثور على حساب المستخدم");
+      const newEndsAt = new Date(subscription.rows[0].subscription_ends_at);
+      await client.query("COMMIT");
+      walletEmitter.emit("wallet:update", {
         userId,
-        type: 'spending',
         amountEGP: SUB_PRICE_EGP,
+        type: "spending",
         description: `اشتراك أسبوعي — ${SUB_DURATION_DAYS} أيام`,
-        channelId: null,
-        campaignId: null,
+        newBalance: balance - SUB_PRICE_EGP,
       });
-      // Extend subscription
-      const info = await storage.getUserSubscriptionInfo(userId);
-      const now = new Date();
-      const base = info.subscriptionEndsAt && info.subscriptionEndsAt > now ? info.subscriptionEndsAt : now;
-      const newEndsAt = new Date(base.getTime() + SUB_DURATION_DAYS * 24 * 60 * 60 * 1000);
-      await storage.updateUserSubscription(userId, newEndsAt);
+      await createNotification(
+        userId,
+        "payment",
+        "✅ تم الدفع وتشغيل الخدمة",
+        `تم خصم ${SUB_PRICE_EGP.toFixed(2)} ج.م من المحفظة وتفعيل الاشتراك لمدة ${SUB_DURATION_DAYS} أيام.`,
+        "/my-dashboard",
+        undefined,
+        undefined,
+        `wallet:subscription:paid:${userId}:${newEndsAt.toISOString()}`,
+      );
       res.json({ ok: true, subscriptionEndsAt: newEndsAt.toISOString(), deducted: SUB_PRICE_EGP });
     } catch (e: any) {
+      if (client) await client.query("ROLLBACK").catch(() => undefined);
       res.status(500).json({ message: e.message });
+    } finally {
+      client?.release();
     }
   });
 
@@ -4082,9 +4273,32 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     // Verifying is intentionally owner-only: admin inspection cannot cause credit.
     if (!initial || initial.user_id !== req.user.claims.sub) return res.status(404).json({ message: "عملية الدفع غير موجودة" });
     if (initial.status === "paid") {
+      await notifyAfsPaid(initial);
       return res.json({
         status: "paid",
+        purpose: initial.purpose,
+        serviceActivated: initial.purpose === "service_payment",
         message: initial.purpose === "service_payment" ? "تم تأكيد الدفع وتفعيل الخدمة." : "تم تأكيد الدفع وإضافة الرصيد.",
+      });
+    }
+    if (initial.status === "failed") {
+      const rejection = classifyAfsFailure(initial.result_code || "", initial.result_description || null);
+      await recordPaymentFailure({
+        dedupeKey: `afs:${initial.id}:failed`,
+        userId: initial.user_id,
+        method: "afs_card",
+        serviceType: initial.service_type,
+        amountEGP: initial.amount_egp,
+        reasonCode: rejection.code,
+        reasonMessage: rejection.message,
+        reference: initial.id,
+      });
+      return res.json({
+        status: "failed",
+        purpose: initial.purpose,
+        serviceActivated: false,
+        reasonCode: rejection.code,
+        message: `تم رفض عملية الدفع. ${rejection.message}`,
       });
     }
 
@@ -4100,13 +4314,20 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     let outcome: "paid" | "pending" | "failed" =
       /^(000\.000\.|000\.100\.1|000\.[36])/.test(code) ? "paid" :
       (/^(000\.200|000\.400|800\.400|100\.400\.500)/.test(code) ? "pending" : "failed");
+    let verificationMismatch = false;
     try {
       const providerMinorUnits = Math.round(providerAmount * 100);
       const orderMinorUnits = Math.round(Number(initial.amount_egp) * 100);
       if (provider.currency !== "EGP" || provider.paymentType !== "DB"
           || !Number.isSafeInteger(providerMinorUnits) || providerMinorUnits !== orderMinorUnits
-          || typeof entity !== "string" || !entity || entity !== getAfsEntityId()) outcome = "failed";
-    } catch { outcome = "failed"; }
+          || typeof entity !== "string" || !entity || entity !== getAfsEntityId()) {
+        outcome = "failed";
+        verificationMismatch = true;
+      }
+    } catch {
+      outcome = "failed";
+      verificationMismatch = true;
+    }
 
     const brand = typeof provider.paymentBrand === "string" ? provider.paymentBrand.slice(0, 40) : null;
     const last4Candidate = provider.card?.last4Digits || provider.card?.last4 || provider.last4;
@@ -4121,8 +4342,11 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       const order = locked.rows[0];
       if (order.status === "paid") {
         await client.query("COMMIT");
+        await notifyAfsPaid(order);
         return res.json({
           status: "paid",
+          purpose: order.purpose,
+          serviceActivated: order.purpose === "service_payment",
           message: order.purpose === "service_payment" ? "تم تأكيد الدفع وتفعيل الخدمة." : "تم تأكيد الدفع وإضافة الرصيد.",
         });
       }
@@ -4201,16 +4425,54 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         );
       }
       await client.query("COMMIT");
+      if (outcome === "paid") {
+        await notifyAfsPaid(order);
+      } else if (outcome === "failed") {
+        const rejection = classifyAfsFailure(code, description, verificationMismatch);
+        await recordPaymentFailure({
+          dedupeKey: `afs:${order.id}:failed`,
+          userId: order.user_id,
+          method: "afs_card",
+          serviceType: order.service_type,
+          amountEGP: order.amount_egp,
+          reasonCode: rejection.code,
+          reasonMessage: rejection.message,
+          reference: order.id,
+        });
+      }
+      const rejection = outcome === "failed"
+        ? classifyAfsFailure(code, description, verificationMismatch)
+        : null;
       res.json({
         status: outcome,
+        purpose: order.purpose,
+        serviceActivated: outcome === "paid" && order.purpose === "service_payment",
+        reasonCode: rejection?.code,
         message: outcome === "paid"
           ? (order.purpose === "service_payment" ? "تم تأكيد الدفع وتفعيل الخدمة." : "تم تأكيد الدفع وإضافة الرصيد.") :
-          outcome === "pending" ? "الدفع ما زال قيد المعالجة، أعد المحاولة بعد قليل." : "لم يتم تأكيد عملية الدفع.",
+          outcome === "pending" ? "الدفع ما زال قيد المعالجة، أعد المحاولة بعد قليل." : `تم رفض عملية الدفع. ${rejection?.message}`,
       });
     } catch (err) {
       if (client) await client.query("ROLLBACK").catch(() => undefined);
       console.error("[payments/afs] verify persistence failed:", err instanceof Error ? err.message : "unknown database error");
-      res.status(500).json({ message: "تعذر حفظ نتيجة الدفع، حاول مرة أخرى." });
+      if (outcome === "paid") {
+        await createNotification(
+          ADMIN_USER_ID,
+          "payment",
+          "⚠️ دفع مؤكد يحتاج مراجعة",
+          `أكدت AFS الدفع للعملية #${id} لكن تعذر إكمال تفعيل الخدمة تلقائياً. راجع العملية فوراً.`,
+          "/admin",
+          undefined,
+          undefined,
+          `afs:${id}:fulfillment-error:admin`,
+        );
+      }
+      res.status(500).json({
+        status: "pending",
+        message: outcome === "paid"
+          ? "تم استلام نتيجة الدفع، ويجري استكمال تشغيل الخدمة. ستصلك رسالة عند اكتمالها."
+          : "تعذر حفظ نتيجة الدفع، حاول مرة أخرى.",
+      });
     } finally {
       client?.release();
     }
@@ -4242,6 +4504,32 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         });
       }
       const input = parsed.data;
+      if (input.type === "top_up") {
+        const allowedServices = new Set([
+          "wallet_recharge", "ad_boost", "campaign", "renewal", "fire_notify",
+          "ai_image", "ai_video", "ai_content", "ai_credits",
+        ]);
+        const services = Array.from(new Set(
+          String(input.serviceType || "").split(",").map((service) => service.trim()).filter(Boolean),
+        ));
+        const invalidService = services.find((service) => !allowedServices.has(service));
+        if (invalidService) {
+          return res.status(400).json({ message: "نوع الخدمة غير صالح", field: "serviceType" });
+        }
+        if (services.includes("wallet_recharge") && services.length !== 1) {
+          return res.status(400).json({
+            message: "شحن المحفظة يجب أن يكون في طلب مستقل ولا يمكن جمعه مع خدمة أخرى",
+            field: "serviceType",
+          });
+        }
+        if (services.some((service) => service === "ad_boost" || service === "renewal") && !input.adId) {
+          return res.status(400).json({
+            message: "اختر الإعلان المطلوب تعزيزه أو تجديده",
+            field: "adId",
+          });
+        }
+        input.serviceType = services.join(",");
+      }
 
       if (input.type === "top_up" && input.screenshotUrl) {
         // Anti-fraud: verify the receipt screenshot was uploaded by this user.
@@ -4333,62 +4621,6 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     }
   });
 
-  // ── Helper: activate service after payment approval ──
-  async function activateServiceForPayment(p: any) {
-    if (!p || p.type !== 'top_up') return;
-    const adId   = p.adId ? Number(p.adId) : null;
-    const userId = p.userId;
-    const services = (p.serviceType || "")
-      .split(",")
-      .map((s: string) => s.trim())
-      .filter(Boolean);
-
-    if (services.length === 0) {
-      await createNotification(userId, 'payment', '✅ تم استلام الدفع',
-        `تم تأكيد دفعتك — رقم الطلب: ${p.orderNumber}`, '/payments');
-      return;
-    }
-
-    for (const svcType of services) {
-      try {
-        if (svcType === 'ad_boost' && adId) {
-          await pool.query(
-            `UPDATE ads SET is_boosted = true, boosted_until = NOW() + INTERVAL '30 days' WHERE id = $1`,
-            [adId]
-          );
-          await createNotification(userId, 'system', '⚡ تم تعزيز إعلانك!',
-            `إعلانك #${adId} أصبح مميزاً في الصدارة لمدة 30 يوماً`, `/ads/${adId}`);
-        } else if (svcType === 'renewal' && adId) {
-          await pool.query(
-            `UPDATE ads SET status = 'active', expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + INTERVAL '30 days' WHERE id = $1`,
-            [adId]
-          );
-          await createNotification(userId, 'system', '🔄 تم تجديد إعلانك!',
-            `إعلانك #${adId} تم تجديده لمدة 30 يوماً إضافية`, `/ads/${adId}`);
-        } else if (svcType === 'ai_credits') {
-          const creditsRow = await pool.query(
-            `SELECT value FROM platform_settings WHERE key = 'ai_free_credits' LIMIT 1`
-          );
-          const credits = parseInt(creditsRow.rows[0]?.value || '3');
-          await pool.query(
-            `INSERT INTO ai_usage (user_id, credits_used, credits_limit)
-             VALUES ($1, 0, $2)
-             ON CONFLICT (user_id) DO UPDATE SET credits_limit = ai_usage.credits_limit + $2`,
-            [userId, credits]
-          );
-          await createNotification(userId, 'system', '🤖 تم إضافة رصيد AI!',
-            `تمت إضافة ${credits} كريديت للذكاء الاصطناعي لحسابك`, '/create');
-        } else {
-          // Generic: just notify
-          await createNotification(userId, 'payment', '✅ تم تفعيل خدمتك!',
-            `تم تفعيل خدمة "${svcType}" — رقم الطلب: ${p.orderNumber}`, '/payments');
-        }
-      } catch (e: any) {
-        console.error(`[activateService] error for ${svcType}:`, e?.message);
-      }
-    }
-  }
-
   app.put("/api/payments/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { status, adminNote } = req.body;
     const id = Number(req.params.id);
@@ -4402,28 +4634,53 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         });
       }
       if (p && !alreadyProcessed) {
-        // ── Auto-activate the paid service ──
-        await activateServiceForPayment(p);
+        const services = String(p.serviceType || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+        const isWalletRecharge = services.length === 0 || (services.length === 1 && services[0] === "wallet_recharge");
+        const needsManualFulfillment = p.fulfillmentStatus === "manual_required";
         await createNotification(
           p.userId,
           'payment',
-          '✅ تم قبول طلب الدفع وتفعيل الخدمة',
-          `رقم الطلب ${p.orderNumber} — تمت الموافقة وتفعيل الخدمة تلقائياً`,
-          '/payments'
+          isWalletRecharge
+            ? '✅ تم قبول الدفع وشحن المحفظة'
+            : needsManualFulfillment ? '✅ تم قبول الدفع' : '✅ تم الدفع وتشغيل الخدمة',
+          isWalletRecharge
+            ? `رقم الطلب ${p.orderNumber} — تمت إضافة ${Number(p.amountEGP || 0).toFixed(2)} ج.م إلى محفظتك`
+            : needsManualFulfillment
+              ? `رقم الطلب ${p.orderNumber} — تم اعتماد الدفع والخدمة قيد التنفيذ بواسطة الإدارة`
+              : `رقم الطلب ${p.orderNumber} — تمت الموافقة وتفعيل الخدمة تلقائياً`,
+          '/payments',
+          undefined,
+          undefined,
+          `manual:${p.id}:approved:result`
         );
+        if (needsManualFulfillment) {
+          await createNotification(
+            ADMIN_USER_ID,
+            "payment",
+            "⚠️ خدمة مدفوعة تحتاج تنفيذاً",
+            `تم اعتماد الطلب ${p.orderNumber}. نفّذ الخدمات: ${p.serviceType}.`,
+            "/admin",
+            undefined,
+            undefined,
+            `manual:${p.id}:fulfillment:admin`,
+          );
+        }
       }
       return res.json(p);
     }
     if (status === 'rejected') {
       const { payment: p, alreadyProcessed } = await storage.rejectPaymentRequestAtomic(id, adminNote);
       if (p && !alreadyProcessed) {
-        await createNotification(
-          p.userId,
-          'payment',
-          '❌ تم رفض طلب الدفع',
-          `رقم الطلب ${p.orderNumber} — تم رفض الطلب. ${adminNote || 'للاستفسار تواصل مع الإدارة.'}`,
-          '/payments'
-        );
+        await recordPaymentFailure({
+          dedupeKey: `manual:${p.id}:rejected`,
+          userId: p.userId,
+          method: p.method,
+          serviceType: p.serviceType,
+          amountEGP: p.amountEGP,
+          reasonCode: "admin_rejected",
+          reasonMessage: adminNote || "رفضت الإدارة طلب الدفع. للاستفسار تواصل مع الإدارة.",
+          reference: p.orderNumber || p.id,
+        });
       }
       return res.json(p);
     }
@@ -4517,6 +4774,68 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     res.json(enriched);
   });
 
+  app.get("/api/admin/payment-report", isAuthenticated, requireAdmin, async (_req: any, res) => {
+    try {
+      const [card, wallet, manual, failures] = await Promise.all([
+        pool.query(`
+          SELECT
+            COALESCE(SUM(amount_egp) FILTER (WHERE status = 'paid' AND purpose = 'service_payment'), 0)::float AS service_paid_egp,
+            COUNT(*) FILTER (WHERE status = 'paid' AND purpose = 'service_payment')::int AS service_paid_count,
+            COALESCE(SUM(amount_egp) FILTER (WHERE status = 'paid'), 0)::float AS all_paid_egp,
+            COUNT(*) FILTER (WHERE status = 'paid')::int AS all_paid_count,
+            COUNT(*) FILTER (WHERE status = 'pending')::int AS pending_count,
+            COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_count
+          FROM afs_payment_orders
+        `),
+        pool.query(`
+          SELECT
+            COALESCE(SUM(amount_egp), 0)::float AS paid_egp,
+            COUNT(*)::int AS paid_count
+          FROM revenue_transactions
+          WHERE type IN ('spending', 'ai_charge')
+        `),
+        pool.query(`
+          SELECT
+            COALESCE(SUM(amount_egp), 0)::float AS paid_egp,
+            COUNT(*)::int AS paid_count
+          FROM payment_requests
+          WHERE type = 'top_up'
+            AND status = 'approved'
+            AND COALESCE(NULLIF(TRIM(service_type), ''), 'wallet_recharge') <> 'wallet_recharge'
+        `),
+        pool.query(`
+          SELECT pf.*, u.first_name, u.last_name, u.email, COUNT(*) OVER()::int AS total_count
+          FROM payment_failures pf
+          LEFT JOIN users u ON u.id = pf.user_id
+          ORDER BY pf.created_at DESC
+          LIMIT 100
+        `),
+      ]);
+      const cardRow = card.rows[0] as any;
+      const walletRow = wallet.rows[0] as any;
+      const manualRow = manual.rows[0] as any;
+      res.json({
+        summary: {
+          cardServicePaidEGP: Number(cardRow.service_paid_egp || 0),
+          cardServicePaidCount: Number(cardRow.service_paid_count || 0),
+          cardAllPaidEGP: Number(cardRow.all_paid_egp || 0),
+          cardAllPaidCount: Number(cardRow.all_paid_count || 0),
+          cardPendingCount: Number(cardRow.pending_count || 0),
+          cardFailedCount: Number(cardRow.failed_count || 0),
+          walletPaidEGP: Number(walletRow.paid_egp || 0),
+          walletPaidCount: Number(walletRow.paid_count || 0),
+          manualServicePaidEGP: Number(manualRow.paid_egp || 0),
+          manualServicePaidCount: Number(manualRow.paid_count || 0),
+          rejectedCount: Number(failures.rows[0]?.total_count || 0),
+        },
+        recentFailures: failures.rows,
+      });
+    } catch (error) {
+      console.error("[admin/payment-report] failed:", error instanceof Error ? error.message : "unknown error");
+      res.status(500).json({ message: "تعذر تحميل تقرير المدفوعات" });
+    }
+  });
+
   app.put("/api/admin/payments/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { status, adminNote } = req.body;
     const id = Number(req.params.id);
@@ -4530,27 +4849,53 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         });
       }
       if (p && !alreadyProcessed) {
-        await activateServiceForPayment(p);
+        const services = String(p.serviceType || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+        const isWalletRecharge = services.length === 0 || (services.length === 1 && services[0] === "wallet_recharge");
+        const needsManualFulfillment = p.fulfillmentStatus === "manual_required";
         await createNotification(
           p.userId,
           'payment',
-          '✅ تم قبول طلب الدفع وتفعيل الخدمة',
-          `رقم الطلب ${p.orderNumber} — تمت الموافقة وتفعيل الخدمة تلقائياً`,
-          '/payments'
+          isWalletRecharge
+            ? '✅ تم قبول الدفع وشحن المحفظة'
+            : needsManualFulfillment ? '✅ تم قبول الدفع' : '✅ تم الدفع وتشغيل الخدمة',
+          isWalletRecharge
+            ? `رقم الطلب ${p.orderNumber} — تمت إضافة ${Number(p.amountEGP || 0).toFixed(2)} ج.م إلى محفظتك`
+            : needsManualFulfillment
+              ? `رقم الطلب ${p.orderNumber} — تم اعتماد الدفع والخدمة قيد التنفيذ بواسطة الإدارة`
+              : `رقم الطلب ${p.orderNumber} — تمت الموافقة وتفعيل الخدمة تلقائياً`,
+          '/payments',
+          undefined,
+          undefined,
+          `manual:${p.id}:approved:result`
         );
+        if (needsManualFulfillment) {
+          await createNotification(
+            ADMIN_USER_ID,
+            "payment",
+            "⚠️ خدمة مدفوعة تحتاج تنفيذاً",
+            `تم اعتماد الطلب ${p.orderNumber}. نفّذ الخدمات: ${p.serviceType}.`,
+            "/admin",
+            undefined,
+            undefined,
+            `manual:${p.id}:fulfillment:admin`,
+          );
+        }
       }
       return res.json(p);
     }
     if (status === 'rejected') {
       const { payment: p, alreadyProcessed } = await storage.rejectPaymentRequestAtomic(id, adminNote);
       if (p && !alreadyProcessed) {
-        await createNotification(
-          p.userId,
-          'payment',
-          '❌ تم رفض طلب الدفع',
-          `رقم الطلب ${p.orderNumber} — ${adminNote || 'للاستفسار تواصل مع الإدارة.'}`,
-          '/payments'
-        );
+        await recordPaymentFailure({
+          dedupeKey: `manual:${p.id}:rejected`,
+          userId: p.userId,
+          method: p.method,
+          serviceType: p.serviceType,
+          amountEGP: p.amountEGP,
+          reasonCode: "admin_rejected",
+          reasonMessage: adminNote || "رفضت الإدارة طلب الدفع. للاستفسار تواصل مع الإدارة.",
+          reference: p.orderNumber || p.id,
+        });
       }
       return res.json(p);
     }
@@ -4892,10 +5237,10 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         response_format: { type: "json_object" },
       });
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
-      await storage.recordAiUsage(userId, 'copy');
-      if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد نص بالذكاء الاصطناعي', channelId: null, campaignId: null });
+      if (!(await settleAiWalletCharge(req, userId, "ai_content", "رسوم توليد نص بالذكاء الاصطناعي"))) {
+        return res.status(402).json({ message: "insufficient_credits" });
       }
+      await storage.recordAiUsage(userId, 'copy');
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
       res.status(500).json({ message: "Failed to generate ad copy: " + error.message });
@@ -4924,10 +5269,10 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         response_format: { type: "json_object" },
       });
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
-      await storage.recordAiUsage(userId, 'viral_ad');
-      if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد إعلان فيروسي', channelId: null, campaignId: null });
+      if (!(await settleAiWalletCharge(req, userId, "ai_content", "رسوم توليد إعلان فيروسي"))) {
+        return res.status(402).json({ message: "insufficient_credits" });
       }
+      await storage.recordAiUsage(userId, 'viral_ad');
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
       res.status(500).json({ message: "Failed to generate viral ad: " + error.message });
@@ -4947,10 +5292,10 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         response_format: { type: "json_object" },
       });
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
-      await storage.recordAiUsage(userId, 'article');
-      if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد مقالة بالذكاء الاصطناعي', channelId: null, campaignId: null });
+      if (!(await settleAiWalletCharge(req, userId, "ai_content", "رسوم توليد مقالة بالذكاء الاصطناعي"))) {
+        return res.status(402).json({ message: "insufficient_credits" });
       }
+      await storage.recordAiUsage(userId, 'article');
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
       res.status(500).json({ message: "Failed to generate article: " + error.message });
@@ -4971,10 +5316,10 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         response_format: { type: "json_object" },
       });
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
-      await storage.recordAiUsage(userId, 'video_script');
-      if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد سكريبت فيديو', channelId: null, campaignId: null });
+      if (!(await settleAiWalletCharge(req, userId, "ai_video", "رسوم توليد سكريبت فيديو"))) {
+        return res.status(402).json({ message: "insufficient_credits" });
       }
+      await storage.recordAiUsage(userId, 'video_script');
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
       res.status(500).json({ message: "Failed to generate script: " + error.message });
@@ -5007,10 +5352,11 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         throw new Error("No image generated");
       }
       const finalUrl = `/uploads/${filename}`;
-      await storage.recordAiUsage(userId, 'image');
-      if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم توليد صورة بالذكاء الاصطناعي', channelId: null, campaignId: null });
+      if (!(await settleAiWalletCharge(req, userId, "ai_image", "رسوم توليد صورة بالذكاء الاصطناعي"))) {
+        await unlink(savePath).catch(() => undefined);
+        return res.status(402).json({ message: "insufficient_credits" });
       }
+      await storage.recordAiUsage(userId, 'image');
       res.json({ url: finalUrl, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
       res.status(500).json({ message: "Failed to generate image: " + error.message });
@@ -5048,10 +5394,10 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       });
 
       const result = JSON.parse(response.choices[0].message.content || "{}");
-      await storage.recordAiUsage(userId, 'text');
-      if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم تحليل صورة بالذكاء الاصطناعي', channelId: null, campaignId: null });
+      if (!(await settleAiWalletCharge(req, userId, "ai_image", "رسوم تحليل صورة بالذكاء الاصطناعي"))) {
+        return res.status(402).json({ message: "insufficient_credits" });
       }
+      await storage.recordAiUsage(userId, 'text');
       res.json({ title: result.title || "", description: result.description || "" });
     } catch (error: any) {
       res.status(500).json({ message: "فشل تحليل الصورة: " + error.message });
@@ -5076,10 +5422,10 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       });
 
       const result = JSON.parse(response.choices[0].message.content || "{}");
-      await storage.recordAiUsage(userId, 'text');
-      if (req.aiChargeEGP) {
-        await storage.createTransaction({ userId, type: 'ai_charge', amountEGP: req.aiChargeEGP, description: 'رسوم ترجمة بالذكاء الاصطناعي', channelId: null, campaignId: null });
+      if (!(await settleAiWalletCharge(req, userId, "ai_content", "رسوم ترجمة بالذكاء الاصطناعي"))) {
+        return res.status(402).json({ message: "insufficient_credits" });
       }
+      await storage.recordAiUsage(userId, 'text');
       res.json({ title: result.title || "", description: result.description || "" });
     } catch (error: any) {
       res.status(500).json({ message: "فشل الترجمة: " + error.message });
@@ -6574,11 +6920,16 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           `/ads/${order.ad_id}`
         );
       } else {
-        await createNotification(order.user_id, "system",
-          `❌ طلب التجديد مرفوض`,
-          `رقم الطلب ${order.order_number} — للاستفسار تواصل مع الإدارة.`,
-          "/messages"
-        );
+        await recordPaymentFailure({
+          dedupeKey: `renewal:${order.id}:rejected`,
+          userId: order.user_id,
+          method: "manual_transfer",
+          serviceType: "ad_renewal",
+          amountEGP: order.amount,
+          reasonCode: "admin_rejected",
+          reasonMessage: "رفضت الإدارة طلب التجديد. للاستفسار تواصل مع الإدارة.",
+          reference: order.order_number || order.id,
+        });
       }
       res.json({ ok: true });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
@@ -6993,31 +7344,14 @@ ${reelTags}
 
   // POST /api/coupons/generate — AI generate + save coupon
   app.post("/api/coupons/generate", isAuthenticated, async (req: any, res) => {
+    let couponClient: PoolClient | null = null;
     try {
       const userId = req.user.claims.sub;
+      const isAdmin = isAdminUser(req);
       const { businessName, productDescription, discountType, discountValue, imageUrl, expiresAt, usageLimit } = req.body;
       if (!businessName || !productDescription) return res.status(400).json({ message: "اسم النشاط التجاري والوصف مطلوبان" });
 
       const priceEGP = parseFloat(await storage.getSetting('coupon_price_egp') || '15');
-
-      // Admin is free
-      if (!isAdminUser(req)) {
-        const balance = await storage.getUserBalanceEGP(userId);
-        if (balance < priceEGP) {
-          return res.status(402).json({ message: "insufficient_balance", required: priceEGP, balance });
-        }
-        // The revenue ledger is the wallet source of truth. Charging the legacy
-        // users.balance_egp column here made card top-ups invisible to coupons
-        // and allowed the two balances to drift.
-        await storage.createTransaction({
-          userId,
-          type: 'ai_charge',
-          amountEGP: priceEGP,
-          description: 'توليد كوبون ذكي',
-          campaignId: null,
-          channelId: null,
-        });
-      }
 
       // Generate coupon code
       const rawCode = `${businessName.replace(/\s+/g, '').substring(0, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Date.now().toString(36).toUpperCase().slice(-4)}`;
@@ -7060,14 +7394,69 @@ ${reelTags}
       const termsAr = generated.terms || `• الكوبون للاستخدام لمرة واحدة فقط\n• لا يمكن دمجه مع عروض أخرى\n• العرض سار حتى نفاد الكمية`;
 
       const expires = expiresAt ? new Date(expiresAt) : null;
-      const result = await db.execute(sql`
-        INSERT INTO coupons (user_id, business_name, title, code, discount_type, discount_value, image_url, description, terms_ar, expires_at, usage_limit, amount_paid_egp)
-        VALUES (${userId}, ${businessName}, ${title}, ${rawCode}, ${discountType || 'percentage'}, ${discountValue || null}, ${imageUrl || null}, ${description}, ${termsAr}, ${expires}, ${usageLimit || null}, ${isAdminUser(req) ? 0 : priceEGP})
-        RETURNING *
-      `);
+      let result: any;
+      if (isAdmin) {
+        result = await db.execute(sql`
+          INSERT INTO coupons (user_id, business_name, title, code, discount_type, discount_value, image_url, description, terms_ar, expires_at, usage_limit, amount_paid_egp)
+          VALUES (${userId}, ${businessName}, ${title}, ${rawCode}, ${discountType || 'percentage'}, ${discountValue || null}, ${imageUrl || null}, ${description}, ${termsAr}, ${expires}, ${usageLimit || null}, 0)
+          RETURNING *
+        `);
+      } else {
+        couponClient = await pool.connect();
+        await couponClient.query("BEGIN");
+        await couponClient.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`wallet:${userId}`]);
+        const balanceRow = await couponClient.query(
+          `SELECT COALESCE(SUM(CASE
+             WHEN type IN ('earning', 'wallet_recharge') THEN amount_egp
+             WHEN type IN ('spending', 'withdrawal', 'ai_charge') THEN -amount_egp
+             ELSE 0 END), 0)::float AS balance
+           FROM revenue_transactions WHERE user_id = $1`,
+          [userId],
+        );
+        const balance = Number(balanceRow.rows[0]?.balance || 0);
+        if (balance < priceEGP) {
+          await couponClient.query("ROLLBACK");
+          await recordPaymentFailure({
+            dedupeKey: `wallet:coupon:${randomUUID()}`,
+            userId,
+            method: "wallet",
+            serviceType: "ai_content",
+            amountEGP: priceEGP,
+            reasonCode: "insufficient_balance",
+            reasonMessage: `رصيد المحفظة غير كافٍ. المطلوب ${priceEGP.toFixed(2)} ج.م والمتاح ${balance.toFixed(2)} ج.م.`,
+          });
+          return res.status(402).json({ message: "insufficient_balance", required: priceEGP, balance });
+        }
+        await couponClient.query(
+          `INSERT INTO revenue_transactions (user_id, type, amount_egp, description)
+           VALUES ($1, 'ai_charge', $2, 'توليد كوبون ذكي')`,
+          [userId, priceEGP],
+        );
+        result = await couponClient.query(
+          `INSERT INTO coupons
+            (user_id, business_name, title, code, discount_type, discount_value, image_url, description, terms_ar, expires_at, usage_limit, amount_paid_egp)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+           RETURNING *`,
+          [userId, businessName, title, rawCode, discountType || "percentage", discountValue || null,
+           imageUrl || null, description, termsAr, expires, usageLimit || null, priceEGP],
+        );
+        await couponClient.query("COMMIT");
+        walletEmitter.emit("wallet:update", {
+          userId,
+          amountEGP: priceEGP,
+          type: "ai_charge",
+          description: "توليد كوبون ذكي",
+          newBalance: balance - priceEGP,
+        });
+      }
 
       res.status(201).json(result.rows[0]);
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
+    } catch (e: any) {
+      if (couponClient) await couponClient.query("ROLLBACK").catch(() => undefined);
+      res.status(500).json({ message: e.message });
+    } finally {
+      couponClient?.release();
+    }
   });
 
   // PATCH /api/coupons/:id — update coupon image / toggle active
@@ -7241,6 +7630,16 @@ ${reelTags}
           [adminNote || null, req.user.claims.sub, orderId]
         );
         await client.query("COMMIT");
+        await recordPaymentFailure({
+          dedupeKey: `wallet-topup:${order.id}:rejected`,
+          userId: order.user_id,
+          method: order.payment_method || "manual_transfer",
+          serviceType: "wallet_recharge",
+          amountEGP: order.amount_egp,
+          reasonCode: "admin_rejected",
+          reasonMessage: adminNote || "رفضت الإدارة طلب شحن المحفظة. للاستفسار تواصل مع الإدارة.",
+          reference: order.order_number || order.id,
+        });
         return res.json({ success: true, message: "تم رفض الطلب" });
       }
     } catch (e: any) {
@@ -7514,6 +7913,15 @@ ${reelTags}
       if (price > budget) return res.status(400).json({ message: "الميزانية أقل من سعر الثانية الحالي" });
       const balance = await storage.getUserBalanceEGP(userId);
       if (balance < budget) {
+        await recordPaymentFailure({
+          dedupeKey: `wallet:ticker:${randomUUID()}`,
+          userId,
+          method: "wallet",
+          serviceType: "ticker_ad",
+          amountEGP: budget,
+          reasonCode: "insufficient_balance",
+          reasonMessage: `رصيد المحفظة غير كافٍ. المطلوب ${budget.toFixed(2)} ج.م والمتاح ${balance.toFixed(2)} ج.م.`,
+        });
         return res.status(402).json({ message: "رصيد المحفظة غير كافٍ — اشحن محفظتك أولاً", balance, required: budget });
       }
     }

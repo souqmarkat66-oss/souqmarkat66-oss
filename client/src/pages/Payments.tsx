@@ -199,15 +199,26 @@ export default function Payments() {
   const toggleService = (value: string) => {
     setSelectedServices(prev => {
       const next = new Set(prev);
-      if (next.has(value)) next.delete(value);
-      else next.add(value);
+      if (value === "wallet_recharge") {
+        if (next.has(value)) next.clear();
+        else {
+          next.clear();
+          next.add(value);
+        }
+      } else {
+        next.delete("wallet_recharge");
+        if (next.has(value)) next.delete(value);
+        else next.add(value);
+      }
       return next;
     });
     setAmountOverride(false);
   };
 
   const selectAll = () => {
-    setSelectedServices(new Set(serviceList.map(s => s.value)));
+    // Wallet recharge is a balance credit, not a paid service. Never combine
+    // it with services in the same manual payment request.
+    setSelectedServices(new Set(serviceList.filter(s => s.value !== "wallet_recharge").map(s => s.value)));
     setAmountOverride(false);
   };
 
@@ -217,7 +228,8 @@ export default function Payments() {
     setAmountOverride(false);
   };
 
-  const allSelected = serviceList.every(s => selectedServices.has(s.value));
+  const paidServices = serviceList.filter(s => s.value !== "wallet_recharge");
+  const allSelected = paidServices.length > 0 && paidServices.every(s => selectedServices.has(s.value));
   const noneSelected = selectedServices.size === 0;
 
   const createMutation = useMutation({
