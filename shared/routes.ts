@@ -40,7 +40,9 @@ export const api = {
     create: {
       method: 'POST' as const,
       path: '/api/ads',
-      input: insertAdSchema,
+      input: insertAdSchema.extend({
+        listingDurationDays: z.number().int().optional(),
+      }),
       responses: {
         201: z.custom<typeof ads.$inferSelect>(),
         400: errorSchemas.validation,

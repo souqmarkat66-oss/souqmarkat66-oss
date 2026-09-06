@@ -63,10 +63,23 @@ export const ads = pgTable("ads", {
   couponCode: text("coupon_code"),
   couponDiscountType: text("coupon_discount_type"),
   couponDiscountValue: real("coupon_discount_value"),
+  isBoosted: boolean("is_boosted").default(false),
+  boostedUntil: timestamp("boosted_until"),
+  isAdminPromo: boolean("is_admin_promo").default(false),
+  expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const insertAdSchema = createInsertSchema(ads).omit({ id: true, createdAt: true, likesCount: true, commentsCount: true, viewsCount: true });
+export const insertAdSchema = createInsertSchema(ads).omit({
+  id: true,
+  createdAt: true,
+  likesCount: true,
+  commentsCount: true,
+  viewsCount: true,
+  isBoosted: true,
+  boostedUntil: true,
+  isAdminPromo: true,
+});
 export type Ad = typeof ads.$inferSelect;
 export type InsertAd = z.infer<typeof insertAdSchema>;
 

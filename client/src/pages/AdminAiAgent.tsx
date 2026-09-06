@@ -25,6 +25,10 @@ type AIResponse = {
   severity?: "low" | "medium" | "high";
   proposedChanges?: ProposedChange[];
   requiresApproval?: boolean;
+  planId?: string;
+  approvalToken?: string;
+  expiresAt?: string;
+  diffPreview?: string;
 };
 
 type ChatMessage = {
@@ -154,6 +158,12 @@ function PlanCard({
             )}
           </div>
         )}
+        {response.diffPreview && (
+          <details className="text-xs">
+            <summary className="cursor-pointer text-primary">معاينة الفرق الكاملة قبل الموافقة</summary>
+            <pre dir="ltr" className="mt-2 max-h-64 overflow-auto rounded bg-zinc-950 p-2 text-[10px] text-zinc-100 whitespace-pre-wrap">{response.diffPreview}</pre>
+          </details>
+        )}
         {response.requiresApproval && !alreadyHandled && (
           <div className="flex items-center gap-2 pt-2 border-t border-border">
             <Button size="sm" onClick={onApprove} disabled={isExecuting} className="gap-1.5" data-testid="btn-approve-plan">
@@ -277,7 +287,20 @@ export default function AdminAiAgent() {
       const apiMsgs = updated.filter(m => m.id !== "welcome").map(m => ({
         role: m.role,
         content: m.role === "assistant"
-          ? (m.rawResponse?.type === "plan" ? JSON.stringify(m.rawResponse) : (m.rawResponse?.content ?? m.content))
+          ? (m.rawResponse?.type === "plan" ? JSON.stringify({
+              type: "plan",
+              analysis: m.rawResponse.analysis,
+              plan: m.rawResponse.plan,
+              affectedFiles: m.rawResponse.affectedFiles,
+              risks: m.rawResponse.risks,
+              severity: m.rawResponse.severity,
+              proposedChanges: m.rawResponse.proposedChanges?.map(change => ({
+                filePath: change.filePath,
+                action: change.action,
+                description: change.description,
+              })),
+              requiresApproval: m.rawResponse.requiresApproval,
+            }) : (m.rawResponse?.content ?? m.content))
           : m.content,
       }));
       const fileContext = selectedFile && fileContent
@@ -301,24 +324,28 @@ export default function AdminAiAgent() {
     }
   }
   async function approvePlan(msg: ChatMessage) {
-    if (!msg.rawResponse?.proposedChanges || isExecuting) return;
+      if (!msg.rawResponse?.proposedChanges || !msg.rawResponse.planId || !msg.rawResponse.approvalToken || isExecuting) return;
     setIsExecuting(true);
     try {
       const res = await fetch("/api/admin/ai-agent/execute", {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: msg.rawResponse }),
+        body: JSON.stringify({ planId: msg.rawResponse.planId, approvalToken: msg.rawResponse.approvalToken, validation: "build" }),
       });
       const data = await res.json();
-      setHandledIds(prev => new Set([...prev, msg.id]));
-      const ok  = (data.results ?? []).filter((r: any) => r.status === "ok").length;
-      const err = (data.results ?? []).filter((r: any) => r.status === "error").length;
+      if (!res.ok) throw new Error(data.message || "فشل التنفيذ");
+      setHandledIds(prev => new Set(Array.from(prev).concat(msg.id)));
+      const ok  = (data.results ?? []).filter((r: any) => r.success).length;
+      const err = (data.results ?? []).filter((r: any) => !r.success).length;
       const errDetails = err > 0
-        ? "\n\nأخطاء:\n" + (data.results ?? []).filter((r: any) => r.status === "error").map((r: any) => `- ${r.filePath}: ${r.message}`).join("\n")
+        ? "\n\nأخطاء:\n" + (data.results ?? []).filter((r: any) => !r.success).map((r: any) => `- ${r.filePath}: ${r.message}`).join("\n")
         : "";
       setMessages(prev => [...prev, {
         id: (Date.now() + 2).toString(), role: "assistant", content: "",
-        rawResponse: { type: "message", content: `✅ تم التنفيذ!\n• نسخة احتياطية: ${data.backupName ?? "تم إنشاؤها"}\n• ملفات معدّلة: ${ok}\n• أخطاء: ${err}${errDetails}` },
+        rawResponse: {
+          type: "message",
+          content: `تم التنفيذ.\n• ملفات معدّلة: ${ok}\n• أخطاء: ${err}${errDetails}\n• التحقق: ${data.validation?.success ? "نجح" : data.validation?.preExistingFailures ? "توجد أخطاء سابقة لم يزدها التعديل" : "فشل"}${data.diff ? `\n\nفرق Git:\n${data.diff}` : ""}`,
+        },
         timestamp: new Date(),
       }]);
       toast({ title: "تم التنفيذ", description: `${ok} ملف تم تعديله` });
@@ -329,7 +356,7 @@ export default function AdminAiAgent() {
     }
   }
   function rejectPlan(msg: ChatMessage) {
-    setHandledIds(prev => new Set([...prev, msg.id]));
+    setHandledIds(prev => new Set(Array.from(prev).concat(msg.id)));
     setMessages(prev => [...prev, {
       id: (Date.now() + 3).toString(), role: "assistant", content: "",
       rawResponse: { type: "message", content: "تم رفض الخطة. يمكنك تعديل طلبك أو طرح سؤال آخر." },

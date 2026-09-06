@@ -177,26 +177,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   } catch {}
 
-  // ── DB Migrations (safe — ADD COLUMN IF NOT EXISTS) ──
-  try {
-    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS is_admin_promo boolean DEFAULT false`);
-    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS coupon_code text`);
-    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS coupon_discount_type text`);
-    await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS coupon_discount_value real`);
-    await db.execute(sql`ALTER TABLE reels ADD COLUMN IF NOT EXISTS audio_url text`);
-    // User social / profile columns
-    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio text`);
-    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS governorate text`);
-    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code text`);
-    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS interests text`);
-    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthday date`);
-    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title text`);
-    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS company text`);
-    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS city text`);
-    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS relationship_status text`);
-    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_ends_at timestamp`);
-  } catch { /* columns may already exist */ }
-
   // ── Auto-cleanup stale live streams (older than 12 hours) ──
   const cleanupStaleStreams = async () => {
     try {
@@ -216,63 +196,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   cleanupStaleStreams();
   setInterval(cleanupStaleStreams, 60 * 60 * 1000);
 
-  // ── Coupons table migration ──
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS coupons (
-        id serial PRIMARY KEY,
-        user_id varchar REFERENCES users(id) NOT NULL,
-        business_name text NOT NULL DEFAULT '',
-        title text NOT NULL DEFAULT '',
-        code text NOT NULL,
-        discount_type text DEFAULT 'percentage',
-        discount_value real,
-        image_url text,
-        description text,
-        terms_ar text,
-        is_active boolean DEFAULT true,
-        expires_at timestamp,
-        usage_limit integer,
-        used_count integer DEFAULT 0,
-        amount_paid_egp real DEFAULT 0,
-        created_at timestamp DEFAULT NOW()
-      )
-    `);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('coupon_price_egp', '15') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('platform_name', 'شبكة سوق للإعلانات') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('platform_tagline', 'أفضل منصة إعلانية في مصر والعالم العربي') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('app_play_store', 'https://play.google.com/store/apps/details?id=com.apmo.souqmarket') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('app_app_store', 'https://apps.apple.com/eg/app/as-souqmarket/id6740153334') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('app_huawei', 'https://app.as-souqmarkat.com/?from-splash=false') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_vodafone_cash', '01098553911') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_instapay', '01285558567') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('contact_whatsapp', '01126665741') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('listing_price_7d',  '400') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('listing_price_15d', '700') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('listing_price_30d', '900') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_ads', '1') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_reels', '1') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_channels', '1') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_livestream', '1') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_messages', '1') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_campaigns', '1') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_ai', '1') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_registration', '1') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_boost', '1') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('feature_assistant', '1') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('fire_price_egp', '100') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('renewal_price_7d', '20') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('renewal_price_15d', '35') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('renewal_price_30d', '60') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('subscription_price_egp', '250') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('boost_price_egp', '250') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('promo_banner_enabled', '1') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('promo_banner_text', '🎉 قسّط على 18 شهر بدون فوائد | حمّل تطبيق سوق ماركات | واتساب: 01126665741 | InstaPay: 01285558567 | ads-as.com') ON CONFLICT (key) DO NOTHING`);
-    await db.execute(sql`INSERT INTO platform_settings (key, value) VALUES ('promo_banner_url', 'https://play.google.com/store/apps/details?id=com.apmo.souqmarket') ON CONFLICT (key) DO NOTHING`);
-  } catch { /* table may already exist */ }
-
-  // ── Seed promo ads (run once if none exist and admin user exists) ──
-  try {
+  // Demo content is development-only; production data is operator-managed.
+  if (process.env.NODE_ENV !== "production") {
+    try {
     const existingPromo = await db.execute(sql`SELECT COUNT(*) as cnt FROM ads WHERE is_admin_promo = true`);
     const promoCount = Number((existingPromo.rows[0] as any).cnt);
     const adminUser = await db.execute(sql`SELECT id FROM users WHERE id = '54219806' LIMIT 1`);
@@ -299,7 +225,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         `);
       }
     }
-  } catch { /* promo seed failed silently */ }
+    } catch { /* development promo seed failed silently */ }
+  }
 
   // Serve uploads directory
   const uploadsDir = path.join(process.cwd(), "uploads");
@@ -1846,34 +1773,15 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   });
 
   // ────────────────────────────────────────────────────────────────
-  // SYSTEM DEPLOY — pull latest code, install deps, restart pm2
-  // Admin-only. Designed for the VPS environment.
+  // SYSTEM DEPLOY
+  // Deploying from a web request is unsafe: it would execute mutable source code
+  // in the running release and could restart unrelated PM2 applications. Releases
+  // must instead use scripts/deploy.sh from a trusted operator/CI environment.
   // ────────────────────────────────────────────────────────────────
   app.post("/api/admin/system-deploy", isAuthenticated, requireAdmin, async (_req: any, res) => {
-    const { exec } = await import("child_process");
-    const cmd = "git pull origin main && npm install && pm2 restart all";
-    console.log(`[system-deploy] starting: ${cmd}`);
-    exec(cmd, { cwd: process.cwd(), timeout: 5 * 60 * 1000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) {
-        console.error("[system-deploy] FAILED:", err.message);
-        if (stderr) console.error("[system-deploy] stderr:", stderr);
-        if (stdout) console.error("[system-deploy] stdout:", stdout);
-        return res.status(500).json({
-          success: false,
-          message: "فشل التحديث — راجع الكونسول",
-          error: err.message,
-          stderr: stderr?.slice(-2000),
-          stdout: stdout?.slice(-2000),
-        });
-      }
-      console.log("[system-deploy] SUCCESS");
-      console.log("[system-deploy] stdout:", stdout);
-      if (stderr) console.log("[system-deploy] stderr:", stderr);
-      res.json({
-        success: true,
-        message: "تم تحديث النظام بنجاح",
-        output: stdout?.slice(-2000),
-      });
+    res.status(410).json({
+      success: false,
+      message: "النشر من لوحة الإدارة معطّل. استخدم مسار النشر الموثوق.",
     });
   });
 
@@ -5302,10 +5210,6 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     const { users } = await import("@shared/models/auth");
     const { eq } = await import("drizzle-orm");
     const { isBanned, role } = req.body;
-    try {
-      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned boolean DEFAULT false`);
-      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role text DEFAULT 'user'`);
-    } catch {}
     if (typeof isBanned !== 'undefined') {
       await db.execute(sql`UPDATE users SET is_banned = ${isBanned} WHERE id = ${req.params.id}`);
     }
@@ -5321,10 +5225,6 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   });
 
   app.get("/api/admin/users", isAuthenticated, requireAdmin, async (req: any, res) => {
-    try {
-      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned boolean DEFAULT false`);
-      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role text DEFAULT 'user'`);
-    } catch {}
     const search = req.query.search as string || '';
     const rows = await db.execute(sql`
       SELECT u.id, u.email, u.first_name, u.last_name, u.profile_image_url, u.created_at,
@@ -5389,9 +5289,6 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     const adminId = req.user.claims.sub;
     const { action, target, details } = req.body;
     try {
-      await db.execute(sql`CREATE TABLE IF NOT EXISTS admin_activity_log (
-        id serial PRIMARY KEY, admin_id varchar, action text, target text, details text, created_at timestamp DEFAULT now()
-      )`);
       await db.execute(sql`INSERT INTO admin_activity_log (admin_id, action, target, details) VALUES (${adminId}, ${action}, ${target}, ${details})`);
     } catch {}
     res.json({ success: true });
@@ -6194,11 +6091,6 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     const fromUserId = req.user.claims.sub;
     const { toUserId, message, adId, isVoice, voiceUrl, imageUrl, isPaymentProof, replyToId, replyToText } = req.body;
     if (!toUserId || (!message && !imageUrl)) return res.status(400).json({ message: "Missing required fields" });
-    // Ensure reply_to columns exist
-    try {
-      await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS reply_to_id integer`);
-      await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS reply_to_text text`);
-    } catch {}
     // Anti-spam: max 10 messages per minute per user
     try {
       const spamCheck = await db.execute(
@@ -7381,31 +7273,6 @@ ${reelTags}
   });
 
   // ── Consultations ──────────────────────────────────────────────────────────
-  // Create consultation table on startup (already done via migrations block ideally)
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS consultations (
-        id SERIAL PRIMARY KEY,
-        user_id text NOT NULL,
-        user_name text,
-        package_id text NOT NULL,
-        package_label text,
-        amount_egp numeric(10,2) DEFAULT 0,
-        title text NOT NULL,
-        description text,
-        file_urls text,
-        status text DEFAULT 'pending',
-        admin_note text,
-        reply text,
-        payment_ref text,
-        payment_method text,
-        payment_screenshot_url text,
-        created_at timestamp DEFAULT now(),
-        updated_at timestamp DEFAULT now()
-      )
-    `);
-  } catch {}
-
   // GET /api/consultations — list (admin sees all, user sees own)
   app.get("/api/consultations", isAuthenticated, async (req: any, res) => {
     try {

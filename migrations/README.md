@@ -1,0 +1,46 @@
+# Production migrations
+
+Place reviewed, backwards-compatible SQL migrations here using names such as
+`0001_add_example_column.sql`. The generated `0000_schema_baseline.sql` is the
+first versioned migration. On a fresh database, run the normal workflow and the
+baseline will execute transactionally like any other pending migration.
+`0001_existing_schema_reconciliation.sql` then idempotently adds legacy fields,
+support tables, and default settings that were previously provisioned by
+application startup. It is safe after either a fresh baseline or one-time
+adoption of an existing complete schema.
+
+Each file must contain SQL statements only: do not include transaction control
+or psql meta-commands. The runner applies pending files in filename order,
+wraps each file in a transaction, records its SHA-256 checksum in
+`public.schema_migrations`, and holds a PostgreSQL advisory lock.
+
+Production migrations must follow expand/contract compatibility so both the
+new release and previous release work during rollback. Run migrations
+separately from application deployment:
+
+```sh
+MIGRATE_PRODUCTION_CONFIRM=YES DATABASE_URL='...' \
+  bash scripts/migrate-production.sh
+```
+
+## Adopting the existing VPS database
+
+The VPS schema predates the migration ledger. After reviewing the generated
+baseline, adopt it without replaying its `CREATE TABLE` statements:
+
+```sh
+MIGRATE_PRODUCTION_CONFIRM=YES MIGRATE_BASELINE_EXISTING=YES \
+  DATABASE_URL='...' bash scripts/migrate-production.sh
+```
+
+This exceptional mode works only when `0000_schema_baseline.sql` is first, the
+ledger has no rows, baseline table parsing is complete and unambiguous, and
+every table declared by the baseline already exists in `public`. The checks and
+baseline ledger insert run under the same advisory lock. A fresh or partial
+database is rejected; omit this mode on a fresh database so the baseline is
+executed normally. Once the baseline ledger row exists, never use adoption mode
+again.
+
+The runner creates and prints a `pg_dump` backup path first. It never
+automatically restores a backup because doing so could erase writes made after
+the migration began.

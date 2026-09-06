@@ -1,149 +1,83 @@
 #!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────────────
-# VPS First-Time Setup Script — ads-as.com
-#
-# Security model:
-#   • The GitHub token is used INLINE for clone/pull ONLY.
-#   • It is NEVER written to ~/.git-credentials, NEVER stored in
-#     git config, and NEVER embedded in the saved remote URL.
-#   • Token must be supplied fresh on every run (1st arg or env var).
-#
-# Usage:
-#   sudo GITHUB_TOKEN=ghp_xxx bash scripts/vps-setup.sh
-#   # or:
-#   sudo bash scripts/vps-setup.sh ghp_xxx
-# ─────────────────────────────────────────────────────────────────────
+# Idempotent host preparation. It does not clone, install application code, or deploy.
+set -euo pipefail
+IFS=$'\n\t'
 
-set -e
+: "${APP_DOMAIN:?set APP_DOMAIN (for example ads-as.example)}"
+APP_ROOT="${APP_ROOT:-/var/www/ads-as}"
+DEPLOY_USER="${DEPLOY_USER:-ads-as}"
+PM2_APP_NAME="${PM2_APP_NAME:-ads-as}"
+SSH_PORT="${SSH_PORT:-22}"
+ENABLE_SSL="${ENABLE_SSL:-0}"
+ALLOW_RTMP="${ALLOW_RTMP:-0}"
+CERTBOT_EMAIL="${CERTBOT_EMAIL:-}"
+APP_ROOT="$(realpath -m "$APP_ROOT")"
+[[ "$APP_ROOT" = /var/www/* && "$APP_ROOT" != "/var/www" ]] || { echo "APP_ROOT must resolve below /var/www" >&2; exit 1; }
+[[ "$ENABLE_SSL" =~ ^[01]$ && "$ALLOW_RTMP" =~ ^[01]$ ]] || { echo "ENABLE_SSL and ALLOW_RTMP must be 0 or 1" >&2; exit 1; }
+[[ "$APP_DOMAIN" =~ ^[A-Za-z0-9.-]+$ && "$APP_DOMAIN" != .* && "$APP_DOMAIN" != *..* ]] || { echo "APP_DOMAIN is invalid" >&2; exit 1; }
+[[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || { echo "DEPLOY_USER is invalid" >&2; exit 1; }
+[[ "$PM2_APP_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "PM2_APP_NAME is invalid" >&2; exit 1; }
+[[ "$SSH_PORT" =~ ^[1-9][0-9]{0,4}$ && "$SSH_PORT" -le 65535 ]] || { echo "SSH_PORT must be a valid TCP port" >&2; exit 1; }
+[[ "$(id -u)" = 0 ]] || { echo "Run as root" >&2; exit 1; }
 
-# ── Config ──────────────────────────────────────────────────────────
-REPO_URL_HTTPS="https://github.com/souqmarkat66-oss/ads-as.git"
-REPO_NAME="ads-as"
-APP_DIR="/var/www/${REPO_NAME}"
-PM2_APP_NAME="ads-as"
-NODE_VERSION="20"
-
-GITHUB_TOKEN="${1:-${GITHUB_TOKEN:-}}"
-
-# ── Pretty output ───────────────────────────────────────────────────
-GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
-step()  { echo -e "\n${CYAN}▶ $*${NC}"; }
-ok()    { echo -e "${GREEN}✓ $*${NC}"; }
-warn()  { echo -e "${YELLOW}⚠ $*${NC}"; }
-fail()  { echo -e "${RED}✗ $*${NC}" >&2; exit 1; }
-
-# ── Sanity ──────────────────────────────────────────────────────────
-[ "$(id -u)" = "0" ] || fail "Run this script as root (use: sudo bash scripts/vps-setup.sh)"
-[ -n "$GITHUB_TOKEN" ] || fail "GITHUB_TOKEN missing. Pass it as 1st arg or env var."
-
-# Helper: run any git command with the token injected as a request
-# header just for that invocation. Nothing is persisted on disk.
-git_with_token() {
-  git -c "http.extraheader=Authorization: Bearer ${GITHUB_TOKEN}" "$@"
-}
-
-# ── 1. System packages ──────────────────────────────────────────────
-step "Updating apt + installing system packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq curl git build-essential ca-certificates ufw
-
-if ! command -v node >/dev/null || [ "$(node -v | cut -d. -f1 | tr -d v)" -lt "$NODE_VERSION" ]; then
-  step "Installing Node.js ${NODE_VERSION}.x"
-  curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | bash -
+apt-get install -y -qq ca-certificates curl gnupg nginx certbot python3-certbot-nginx ffmpeg postgresql-client ufw
+if ! command -v node >/dev/null || [[ "$(node -p 'process.versions.node.split(`.`)[0]')" != "20" ]]; then
+  install -d -m 0755 /etc/apt/keyrings
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --yes --dearmor -o /etc/apt/keyrings/nodesource.gpg
+  printf '%s\n' 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main' > /etc/apt/sources.list.d/nodesource.list
+  apt-get update -qq
   apt-get install -y -qq nodejs
 fi
-ok "Node $(node -v), npm $(npm -v), git $(git --version | awk '{print $3}')"
+command -v pm2 >/dev/null 2>&1 || npm install --global pm2
 
-# ── 2. PM2 ──────────────────────────────────────────────────────────
-if ! command -v pm2 >/dev/null; then
-  step "Installing pm2 globally"
-  npm install -g pm2
+if ! id "$DEPLOY_USER" >/dev/null 2>&1; then
+  useradd --create-home --shell /bin/bash --user-group "$DEPLOY_USER"
 fi
-ok "pm2 $(pm2 -v)"
+DEPLOY_HOME="$(getent passwd "$DEPLOY_USER" | cut -d: -f6)"
+[[ -n "$DEPLOY_HOME" && -d "$DEPLOY_HOME" ]] || { echo "DEPLOY_USER must have a real home directory" >&2; exit 1; }
+install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0755 "$APP_ROOT/releases" "$APP_ROOT/shared/uploads" "$APP_ROOT/shared/backups"
+touch "$APP_ROOT/shared/.env"; chmod 600 "$APP_ROOT/shared/.env"; chown "$DEPLOY_USER:$DEPLOY_USER" "$APP_ROOT/shared/.env"
 
-# ── 3. Git identity (no credential helper, no stored token) ────────
-step "Configuring git identity (token NOT stored on disk)"
-git config --global user.name  "${GIT_USER_NAME:-Souq Admin}"
-git config --global user.email "${GIT_USER_EMAIL:-admin@ads-as.com}"
-# Defensive cleanup: if a previous run stored credentials, remove them.
-git config --global --unset credential.helper 2>/dev/null || true
-rm -f "${HOME}/.git-credentials" 2>/dev/null || true
-ok "Git identity set; no credentials persisted"
+cat > "/etc/nginx/sites-available/$PM2_APP_NAME" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $APP_DOMAIN;
+    client_max_body_size 25m;
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 3600s;
+        proxy_read_timeout 3600s;
+        proxy_buffering off;
+    }
+}
+EOF
+ln -sfn "/etc/nginx/sites-available/$PM2_APP_NAME" "/etc/nginx/sites-enabled/$PM2_APP_NAME"
+rm -f /etc/nginx/sites-enabled/default
+nginx -t
+systemctl enable --now nginx
+systemctl reload nginx
 
-# ── 4. Clone or update the repo (token used inline only) ───────────
-if [ ! -d "$APP_DIR/.git" ]; then
-  step "Cloning $REPO_URL_HTTPS into $APP_DIR"
-  mkdir -p "$(dirname "$APP_DIR")"
-  git_with_token clone "$REPO_URL_HTTPS" "$APP_DIR"
-else
-  step "Repo already exists — pulling latest"
-  git_with_token -C "$APP_DIR" pull origin main
+ufw allow "$SSH_PORT"/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+if [[ "$ALLOW_RTMP" = 1 ]]; then ufw allow 1935/tcp; fi
+ufw --force enable
+
+if [[ "$ENABLE_SSL" = 1 ]]; then
+  : "${CERTBOT_EMAIL:?set CERTBOT_EMAIL when ENABLE_SSL=1}"
+  certbot --nginx --non-interactive --agree-tos --email "$CERTBOT_EMAIL" -d "$APP_DOMAIN" --redirect
 fi
-
-cd "$APP_DIR"
-# Saved remote URL is plain HTTPS — token is NOT embedded.
-git remote set-url origin "$REPO_URL_HTTPS"
-ok "Repo ready at $APP_DIR (remote URL is token-free)"
-
-# ── 5. .env check ───────────────────────────────────────────────────
-if [ ! -f "$APP_DIR/.env" ]; then
-  warn ".env file is MISSING at $APP_DIR/.env"
-  warn "Copy .env.example -> .env and fill in DATABASE_URL, SESSION_SECRET, OPENAI_API_KEY, etc."
-  if [ -f "$APP_DIR/.env.example" ]; then
-    cp "$APP_DIR/.env.example" "$APP_DIR/.env"
-    chmod 600 "$APP_DIR/.env"
-    warn "Created blank .env from template — edit it before continuing."
-  fi
-fi
-
-# ── 6. Install dependencies + build ────────────────────────────────
-step "Installing npm dependencies (this may take a few minutes)"
-npm install --no-audit --no-fund
-
-step "Building production bundle"
-npm run build || warn "Build step failed or not configured — continuing"
-
-if [ -f "$APP_DIR/.env" ] && grep -q "DATABASE_URL=" "$APP_DIR/.env"; then
-  step "Applying DB schema (npm run db:push)"
-  npm run db:push || warn "db:push failed — check DATABASE_URL in .env"
-fi
-
-# ── 7. Start with pm2 + autostart on reboot ────────────────────────
-step "Starting app with pm2"
-if pm2 describe "$PM2_APP_NAME" >/dev/null 2>&1; then
-  pm2 restart "$PM2_APP_NAME"
-else
-  pm2 start npm --name "$PM2_APP_NAME" -- start
-fi
-
-pm2 save
-pm2 startup systemd -u root --hp /root | tail -1 | bash || warn "pm2 startup setup failed (may already be configured)"
-ok "App is running under pm2 — name: $PM2_APP_NAME"
-
-# ── 8. Firewall (optional but recommended) ─────────────────────────
-if command -v ufw >/dev/null; then
-  step "Opening firewall ports 22 (SSH), 80, 443"
-  ufw allow 22/tcp  >/dev/null 2>&1 || true
-  ufw allow 80/tcp  >/dev/null 2>&1 || true
-  ufw allow 443/tcp >/dev/null 2>&1 || true
-  ufw --force enable >/dev/null 2>&1 || true
-fi
-
-# Scrub the token from this shell before exit
-unset GITHUB_TOKEN
-
-# ── Done ────────────────────────────────────────────────────────────
-echo ""
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}✓ VPS SETUP COMPLETE${NC}"
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-echo -e "App dir       : ${CYAN}$APP_DIR${NC}"
-echo -e "PM2 app name  : ${CYAN}$PM2_APP_NAME${NC}"
-echo -e "Status        : ${CYAN}pm2 status${NC}"
-echo -e "Live logs     : ${CYAN}pm2 logs $PM2_APP_NAME${NC}"
-echo ""
-echo -e "${YELLOW}Future pulls (token NOT stored, supply each time):${NC}"
-echo -e "  ${CYAN}cd $APP_DIR && git -c \"http.extraheader=Authorization: Bearer \$GITHUB_TOKEN\" pull origin main${NC}"
-echo ""
+pm2 startup systemd -u "$DEPLOY_USER" --hp "$DEPLOY_HOME"
+runuser -u "$DEPLOY_USER" -- env HOME="$DEPLOY_HOME" pm2 save
+echo "Host ready for deploy user $DEPLOY_USER. Put production secrets in $APP_ROOT/shared/.env, then run scripts/deploy.sh from trusted CI/operator tooling."

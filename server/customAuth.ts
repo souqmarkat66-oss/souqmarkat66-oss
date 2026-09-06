@@ -40,16 +40,8 @@ export function isAuthenticated(req: Request, res: Response, next: NextFunction)
   return res.status(401).json({ message: "Unauthorized" });
 }
 
-// ── Ensure columns exist ──────────────────────────────────────────
-async function ensureColumns() {
-  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
-  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)`);
-}
-
 // ── Register custom auth routes ───────────────────────────────────
 export function registerCustomAuthRoutes(app: Express) {
-  ensureColumns().catch(console.error);
-
   // ── GET /api/auth/user ──────────────────────────────────────────
   app.get("/api/auth/user", async (req: Request, res: Response) => {
     const u = (req.session as any).customUser;

@@ -22,7 +22,7 @@ interface FileNode {
   size?: number; children?: FileNode[];
 }
 
-interface ChatMsg { role: "user" | "assistant"; content: string; parsed?: any; modelUsed?: string; attachmentNames?: string[]; }
+interface ChatMsg { role: "user" | "assistant"; content: string; parsed?: any; modelUsed?: string; toolTrace?: { tool: string; summary: string; ok: boolean }[]; fallbackHistory?: string[]; attachmentNames?: string[]; }
 interface Attachment { name: string; mimeType: string; data: string; }
 
 function FileTree({ nodes, onSelect, selected }: {
@@ -146,6 +146,12 @@ function PlanCard({ plan, onApprove, isApproving }: {
             ))}
           </div>
         </div>
+      )}
+      {plan.diffPreview && (
+        <details className="text-xs">
+          <summary className="cursor-pointer font-medium">معاينة الفرق قبل التنفيذ</summary>
+          <pre dir="ltr" className="mt-2 max-h-48 overflow-auto rounded bg-zinc-950 p-2 text-[10px] text-zinc-100 whitespace-pre-wrap">{plan.diffPreview}</pre>
+        </details>
       )}
 
       <div className="flex gap-2 pt-1">
@@ -271,7 +277,7 @@ export default function AiAgent() {
     onSuccess: (data: any) => {
       const resp = data?.response || data;
       const text = resp?.content || (resp?.type === "plan" ? resp?.analysis : "") || JSON.stringify(resp);
-      setMessages(prev => [...prev, { role: "assistant", content: text, parsed: resp, modelUsed: data?.modelUsed }]);
+      setMessages(prev => [...prev, { role: "assistant", content: text, parsed: resp, modelUsed: data?.modelUsed, toolTrace: data?.toolTrace, fallbackHistory: data?.fallbackHistory }]);
       // رد صوتي بالعربي لو مفعّل (للردود النصية فقط)
       if (voiceReply && resp?.type !== "plan" && typeof resp?.content === "string" && resp.content.trim()) {
         tts.generate(resp.content.slice(0, 900), "nova", true).catch(() => {});
@@ -289,11 +295,18 @@ export default function AiAgent() {
   });
 
   const executeMutation = useMutation({
-    mutationFn: (plan: any) => apiRequest("POST", "/api/admin/ai-agent/execute", { plan }).then((r: any) => (typeof r?.json === "function" ? r.json() : r)),
+    mutationFn: (plan: any) => apiRequest("POST", "/api/admin/ai-agent/execute", {
+      planId: plan.planId, approvalToken: plan.approvalToken, validation: "build",
+    }).then((r: any) => (typeof r?.json === "function" ? r.json() : r)),
     onSuccess: (data: any) => {
       const ok = data?.results?.filter((r: any) => r.success).length || 0;
       const fail = data?.results?.filter((r: any) => !r.success).length || 0;
       toast({ title: `✅ ${ok} ملف تم | ${fail > 0 ? `❌ ${fail} فشل` : ""}` });
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: `نتيجة التنفيذ: ${data?.summary || ""}\nالتحقق: ${data?.validation?.success ? "نجح" : data?.validation?.preExistingFailures ? "تعذر بسبب أخطاء موجودة مسبقاً" : "فشل"}\n${data?.validation?.output || ""}\n${data?.diff ? `فرق Git:\n${data.diff}` : ""}`,
+        parsed: { type: "message", content: `نتيجة التنفيذ: ${data?.summary || ""}\nالتحقق: ${data?.validation?.success ? "نجح" : data?.validation?.preExistingFailures ? "أخطاء موجودة مسبقاً" : "فشل"}\n${data?.validation?.output || ""}\n${data?.diff ? `فرق Git:\n${data.diff}` : ""}` },
+      }]);
       refetchFiles();
     },
     onError: () => toast({ title: "❌ فشل التنفيذ", variant: "destructive" }),
@@ -328,7 +341,25 @@ export default function AiAgent() {
     const atts = attachments;
     setAttachments([]);
     chatMutation.mutate({
-      messages: updatedMsgs.map(m => ({ role: m.role, content: m.content })),
+      messages: updatedMsgs.map(m => ({
+        role: m.role,
+        content: m.role === "assistant" && m.parsed?.type === "plan"
+          ? JSON.stringify({
+              type: "plan",
+              analysis: m.parsed.analysis,
+              plan: m.parsed.plan,
+              affectedFiles: m.parsed.affectedFiles,
+              risks: m.parsed.risks,
+              severity: m.parsed.severity,
+              proposedChanges: m.parsed.proposedChanges?.map((change: any) => ({
+                filePath: change.filePath,
+                action: change.action,
+                description: change.description,
+              })),
+              requiresApproval: m.parsed.requiresApproval,
+            })
+          : m.content,
+      })),
       fileContext,
       model: aiModel,
       webSearch,
@@ -559,6 +590,13 @@ export default function AiAgent() {
                           {m.modelUsed && (
                             <div className="text-[9px] text-muted-foreground/70 mt-1.5" dir="ltr">{m.modelUsed}</div>
                           )}
+                          {(m.toolTrace?.length || m.fallbackHistory?.length) ? (
+                            <details className="mt-2 text-[10px] text-muted-foreground">
+                              <summary className="cursor-pointer">سجل التحقيق والمزوّد</summary>
+                              {m.toolTrace?.map((t, n) => <div key={`${t.tool}-${n}`} className={t.ok ? "" : "text-red-600"}>{t.ok ? "✓" : "×"} {t.tool}: {t.summary}</div>)}
+                              {m.fallbackHistory?.map((f, n) => <div key={n}>↪ {f}</div>)}
+                            </details>
+                          ) : null}
                         </div>
                       )}
                     </div>

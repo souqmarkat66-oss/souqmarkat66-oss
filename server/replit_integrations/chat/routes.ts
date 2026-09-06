@@ -12,6 +12,12 @@ const _chatBase = process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.startsWith("sk-")
 
 const openai = new OpenAI({ apiKey: _chatKey, baseURL: _chatBase });
 
+function parseConversationId(id: string | string[]): number | null {
+  if (typeof id !== "string") return null;
+  const parsed = Number(id);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 export function registerChatRoutes(app: Express): void {
   // Get all conversations
   app.get("/api/conversations", async (req: Request, res: Response) => {
@@ -27,7 +33,10 @@ export function registerChatRoutes(app: Express): void {
   // Get single conversation with messages
   app.get("/api/conversations/:id", async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseConversationId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: "Invalid conversation ID" });
+      }
       const conversation = await chatStorage.getConversation(id);
       if (!conversation) {
         return res.status(404).json({ error: "Conversation not found" });
@@ -55,7 +64,10 @@ export function registerChatRoutes(app: Express): void {
   // Delete conversation
   app.delete("/api/conversations/:id", async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseConversationId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: "Invalid conversation ID" });
+      }
       await chatStorage.deleteConversation(id);
       res.status(204).send();
     } catch (error) {
@@ -67,7 +79,10 @@ export function registerChatRoutes(app: Express): void {
   // Send message and get AI response (streaming)
   app.post("/api/conversations/:id/messages", async (req: Request, res: Response) => {
     try {
-      const conversationId = parseInt(req.params.id);
+      const conversationId = parseConversationId(req.params.id);
+      if (conversationId === null) {
+        return res.status(400).json({ error: "Invalid conversation ID" });
+      }
       const { content } = req.body;
 
       // Save user message

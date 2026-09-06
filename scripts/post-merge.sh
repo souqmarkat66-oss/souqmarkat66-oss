@@ -1,25 +1,17 @@
 #!/bin/bash
 # Runs automatically after every Replit task merge.
 # 1. Installs dependencies
-# 2. Pushes any DB schema changes
-# 3. If VPS_SSH_PRIVATE_KEY secret is set, also auto-deploys to VPS.
-#    Deployment failure causes this script to exit non-zero so Replit
-#    surfaces the error instead of silently masking a broken deploy.
-set -e
+# 2. Never mutates a production database.
+# 3. Deploys only when explicitly opted in with DEPLOY_AFTER_MERGE=1.
+set -euo pipefail
 
 echo "▶ Installing dependencies..."
 npm install --no-audit --no-fund
 
-echo "▶ Pushing DB schema..."
-# NOTE: --force was removed intentionally. Forced schema pushes can drop
-# columns / truncate tables on schema drift, which is unacceptable on a
-# production database with real user data. If a destructive change is
-# genuinely required, run `npm run db:push -- --force` MANUALLY after
-# reviewing the diff.
-npm run db:push
+echo "ℹ Database migrations are never run post-merge; use the reviewed production migration workflow."
 
-if [ -n "${VPS_SSH_PRIVATE_KEY:-}" ]; then
-  echo "▶ VPS_SSH_PRIVATE_KEY detected — running auto-deploy to VPS..."
+if [ "${DEPLOY_AFTER_MERGE:-0}" = "1" ]; then
+  echo "▶ DEPLOY_AFTER_MERGE=1 — running opted-in deploy..."
   if bash scripts/deploy.sh; then
     echo "✅ Post-merge complete — deployed to VPS."
   else
@@ -27,6 +19,6 @@ if [ -n "${VPS_SSH_PRIVATE_KEY:-}" ]; then
     exit 1
   fi
 else
-  echo "ℹ Skipping VPS deploy — set VPS_SSH_PRIVATE_KEY secret to enable auto-deploy."
+  echo "ℹ Skipping VPS deploy — set DEPLOY_AFTER_MERGE=1 explicitly to opt in."
   echo "✅ Post-merge setup complete (no deploy)."
 fi

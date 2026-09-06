@@ -35,7 +35,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
 
 const app = express();
@@ -66,6 +66,18 @@ app.use((req, res, next) =>
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+// This is intentionally registered before authentication and application routes.
+// Keep its response generic: health probes need availability, not infrastructure
+// details such as database hosts, errors, or deployment metadata.
+app.get("/api/health", async (_req, res) => {
+  try {
+    await pool.query("SELECT 1");
+    res.status(200).json({ status: "ok" });
+  } catch {
+    res.status(503).json({ status: "unavailable" });
+  }
+});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -489,7 +501,17 @@ async function runMigrations() {
 }
 
 (async () => {
-  await runMigrations();
+  // Startup DDL is useful for local development, but production schema changes
+  // must be an explicit, reviewed deployment step (with a backup). This also
+  // prevents every PM2 restart from unexpectedly mutating the production DB.
+  const runStartupMigrations =
+    process.env.NODE_ENV !== "production" ||
+    process.env.RUN_STARTUP_MIGRATIONS === "1";
+  if (runStartupMigrations) {
+    await runMigrations();
+  } else {
+    console.log("[migrations] Startup migrations disabled in production");
+  }
 
   // Serve HLS segments from RTMP transcoding
   const HLS_DIR = "/tmp/hls";
