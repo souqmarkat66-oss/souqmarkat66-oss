@@ -95,8 +95,8 @@ export default function LiveStream() {
   const [giftTeamChoice,  setGiftTeamChoice]  = useState<"A"|"B">("A"); // viewer's chosen side
   const [giftTargetSocketId, setGiftTargetSocketId] = useState<string|null>(null); // null = المذيع
   // قائمة المشاركين في المعركة كما أعلنها الخادم — يراها الجميع (مذيع ومشاهدين)
-  const [battleTeams, setBattleTeams] = useState<{A:{socketId:string;name:string}[];B:{socketId:string;name:string}[]}|null>(null);
-  // عدادات فردية مستقلة لكل خانة (Slot) — المفتاح socketId؛ لا تتأثر خانة بأخرى
+  const [battleTeams, setBattleTeams] = useState<{A:{socketId:string;userId:string;name:string;audienceCount:number}[];B:{socketId:string;userId:string;name:string;audienceCount:number}[]}|null>(null);
+  // عدادات فردية مستقلة لكل حساب — المفتاح userId الدائم؛ لا تتأثر خانة بأخرى
   const [battlePlayerScores, setBattlePlayerScores] = useState<Record<string, number>>({});
   const [showBattleSetup, setShowBattleSetup] = useState(false);
   // ── Salon 8-seat mode (عرض شبكة الكراسي) ──
@@ -149,7 +149,7 @@ export default function LiveStream() {
   const [payMethod,       setPayMethod]       = useState<"vodafone"|"vodafone2"|"instapay"|"bank">("vodafone");
   const [payRef,          setPayRef]          = useState("");
   const [payLoading,      setPayLoading]      = useState(false);
-  interface FlyingGift { id: number; emoji: string; x: number; glow?: string; big?: boolean; }
+  interface FlyingGift { id: number; emoji: string; x: number; glow?: string; big?: boolean; recipientSocketId?: string; }
   const [flyingGifts,     setFlyingGifts]     = useState<FlyingGift[]>([]);
   const [myCoins,         setMyCoins]         = useState(0); // loaded from DB
   const giftAudioContextRef = useRef<AudioContext | null>(null);
@@ -245,7 +245,16 @@ export default function LiveStream() {
   const animFrameRef     = useRef<number>(0);
   const canvasStreamRef  = useRef<MediaStream | null>(null);
   const bgImageElem      = useRef<HTMLImageElement | null>(null);
+  const bgImageLoadToken = useRef(0);
   const bgInputRef       = useRef<HTMLInputElement>(null);
+  // Separate browser-side battle output. It is sent only to viewer peers.
+  const battleCanvasRef   = useRef<HTMLCanvasElement | null>(null);
+  const battleStreamRef   = useRef<MediaStream | null>(null);
+  const battleAnimRef     = useRef<number>(0);
+  const battleAudioCtxRef = useRef<AudioContext | null>(null);
+  const battleAudioDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const battleActiveRef   = useRef(false);
+  const [battleAudioReady, setBattleAudioReady] = useState(false);
   // Rapid-fire gift (نظام التكبيث)
   const rapidFireTimer   = useRef<ReturnType<typeof setInterval> | null>(null);
   const rapidFireCount   = useRef(0);
@@ -453,7 +462,7 @@ export default function LiveStream() {
       multiplierEndsAt: number | null;
       winner: "A" | "B" | "draw" | null;
       playerScores?: Record<string, number>;
-      teams?: { A: { socketId: string; name: string }[]; B: { socketId: string; name: string }[] };
+      teams?: { A: { socketId: string; userId: string; name: string; audienceCount: number }[]; B: { socketId: string; userId: string; name: string; audienceCount: number }[] };
     };
     const applyBattleState = (state: BattleState) => {
       if (state.teams) setBattleTeams(state.teams);
@@ -516,7 +525,13 @@ export default function LiveStream() {
         if (!localStream.current) return;
         const pc = newPeer(watcherId);
         peers.current.set(watcherId, pc);
-        localStream.current.getTracks().forEach(t => pc.addTrack(t, localStream.current!));
+        // A watcher joining mid-battle must receive the same compositor output
+        // as existing viewers. The compositor effect will also replace these
+        // senders on its next animation frame.
+        const outgoing = battleStreamRef.current && battleActiveRef.current
+          ? battleStreamRef.current
+          : (bgMode !== "none" && canvasStreamRef.current ? canvasStreamRef.current : localStream.current);
+        outgoing.getTracks().forEach(t => pc.addTrack(t, outgoing));
         try {
           const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
           await pc.setLocalDescription(offer);
@@ -795,11 +810,18 @@ export default function LiveStream() {
     });
 
     // ── Gift events (both broadcaster and viewer) ──
-    socket.on("stream-gift", (data: { id: number; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId?: string; battleTeam?: "A"|"B"; glow?: string }) => {
+    socket.on("stream-gift", (data: { id: number; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId?: string; battleTeam?: "A"|"B"; glow?: string; recipientSocketId?: string }) => {
       const x = 10 + Math.random() * 60;
       const flyId = Date.now() + Math.random();
       const big = data.giftCoins >= 100;
-      setFlyingGifts(prev => [...prev, { id: flyId, emoji: data.giftEmoji, x, glow: data.glow, big }]);
+      setFlyingGifts(prev => [...prev, {
+        id: flyId,
+        emoji: data.giftEmoji,
+        x,
+        glow: data.glow,
+        big,
+        recipientSocketId: data.recipientSocketId,
+      }]);
       setTimeout(() => setFlyingGifts(prev => prev.filter(g => g.id !== flyId)), 3000);
       playGiftSound(data.giftCoins);
       if (isBroadcast) {
@@ -869,6 +891,10 @@ export default function LiveStream() {
       peers.current.forEach(pc => pc.close());
       peers.current.clear();
       if (hlsInstance.current) { hlsInstance.current.destroy(); hlsInstance.current = null; }
+      if (battleAudioCtxRef.current) {
+        void battleAudioCtxRef.current.close().catch(() => {});
+        battleAudioCtxRef.current = null;
+      }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isBroadcast]);
@@ -934,11 +960,20 @@ export default function LiveStream() {
     canvas.height = 720;
 
     // Load background image if needed
-    if ((bgMode === "image") && bgImageUrl && (!bgImageElem.current || bgImageElem.current.src !== bgImageUrl)) {
+    const imageLoadToken = ++bgImageLoadToken.current;
+    if ((bgMode === "image") && bgImageUrl) {
+      bgImageElem.current = null;
       const img = new Image();
       img.crossOrigin = "anonymous";
       img.src = bgImageUrl;
-      img.onload = () => { bgImageElem.current = img; };
+      img.onload = () => {
+        if (bgImageLoadToken.current === imageLoadToken) bgImageElem.current = img;
+      };
+      img.onerror = () => {
+        if (bgImageLoadToken.current === imageLoadToken) bgImageElem.current = null;
+      };
+    } else if (bgMode !== "image" || !bgImageUrl) {
+      bgImageElem.current = null;
     }
 
     const drawFrame = () => {
@@ -992,7 +1027,11 @@ export default function LiveStream() {
 
     cancelAnimationFrame(animFrameRef.current);
     drawFrame();
-    return () => cancelAnimationFrame(animFrameRef.current);
+    return () => {
+      if (bgImageLoadToken.current === imageLoadToken) bgImageLoadToken.current++;
+      cancelAnimationFrame(animFrameRef.current);
+      if (bgMode !== "image" || !bgImageUrl) bgImageElem.current = null;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bgMode, bgColor, bgImageUrl, chromaThreshold, isBroadcast]);
 
@@ -1009,6 +1048,183 @@ export default function LiveStream() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bgMode]);
+
+  const battleRosterKey = battleTeams
+    ? [...battleTeams.A, ...battleTeams.B].map(member => `${member.socketId}:${member.name}`).join("|")
+    : activeCoHosts.map(member => `${member.socketId}:${member.name}:${member.hasCamera !== false}`).join("|");
+
+  /* ─── Browser battle compositor ─────────────────────────
+     Co-host tracks terminate at the broadcaster. During a WebRTC battle we
+     therefore publish a canvas mosaic to normal viewer peers. Co-host peers
+     are intentionally excluded from this replacement. */
+  useEffect(() => {
+    if (!isBroadcast || !battleActive || broadcastMode !== "webrtc" || !localStream.current) return;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 1280;
+    canvas.height = 720;
+    battleCanvasRef.current = canvas;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const roster = battleTeams
+      ? [...battleTeams.A, ...battleTeams.B]
+      : [
+          { socketId: socketRef.current?.id || "host", name: stream?.channelName || "المذيع" },
+          ...activeCoHosts.slice(0, battleMode === "2v2" ? 3 : 1),
+        ];
+    const orderedRoster = roster.slice(0, battleMode === "2v2" ? 4 : 2);
+    const sourceVideos = new Map<string, HTMLVideoElement>();
+    const audioSources = new Map<string, MediaStreamAudioSourceNode>();
+    let audioContext: AudioContext | null = null;
+    let audioDestination: MediaStreamAudioDestinationNode | null = null;
+
+    const getStreamFor = (socketId: string) =>
+      socketId === socketRef.current?.id
+        ? localStream.current
+        : coHostStreams.current.get(socketId) || null;
+
+    const ensureVideo = (socketId: string, stream: MediaStream | null) => {
+      if (!stream) return null;
+      let video = sourceVideos.get(socketId);
+      if (!video) {
+        video = document.createElement("video");
+        video.autoplay = true;
+        video.muted = true;
+        video.playsInline = true;
+        sourceVideos.set(socketId, video);
+      }
+      if (video.srcObject !== stream) {
+        video.srcObject = stream;
+        void video.play().catch(() => {});
+      }
+      return video;
+    };
+
+    // AudioContext output is a MediaStream, not an audible graph destination,
+    // so mixed co-host audio is sent to viewers without echoing locally.
+    try {
+      audioContext = battleAudioCtxRef.current;
+      if (audioContext?.state === "running" && battleAudioReady) {
+        audioDestination = audioContext.createMediaStreamDestination();
+        battleAudioDestRef.current = audioDestination;
+      } else {
+        audioContext = null;
+      }
+    } catch {
+      audioContext = null;
+      audioDestination = null;
+    }
+
+    const ensureAudio = (socketId: string, stream: MediaStream | null) => {
+      if (!audioContext || !audioDestination || !stream || audioSources.has(socketId)) return;
+      if (!stream.getAudioTracks().length) return;
+      try {
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(audioDestination);
+        audioSources.set(socketId, source);
+      } catch { /* a browser may reject a reused MediaStream source */ }
+    };
+
+    const output = canvas.captureStream(30);
+    if (audioDestination) {
+      const mixedTrack = audioDestination.stream.getAudioTracks()[0];
+      if (mixedTrack) output.addTrack(mixedTrack);
+    } else {
+      const localAudio = localStream.current.getAudioTracks()[0];
+      if (localAudio) output.addTrack(localAudio);
+    }
+    battleStreamRef.current = output;
+
+    const replaceViewerTracks = (videoTrack: MediaStreamTrack, audioTrack?: MediaStreamTrack) => {
+      peers.current.forEach(pc => {
+        // `peers` contains ordinary watcher connections only. Co-host
+        // negotiation uses coHostPeers/coHostPeer and is never touched here.
+        const videoSender = pc.getSenders().find(sender => sender.track?.kind === "video");
+        const audioSender = pc.getSenders().find(sender => sender.track?.kind === "audio");
+        if (videoSender) void videoSender.replaceTrack(videoTrack);
+        if (audioSender && audioTrack) void audioSender.replaceTrack(audioTrack);
+      });
+    };
+
+    const draw = () => {
+      const count = orderedRoster.length || 2;
+      const columns = count === 4 ? 2 : count;
+      const rows = count === 4 ? 2 : 1;
+      const tileWidth = canvas.width / columns;
+      const tileHeight = canvas.height / rows;
+      ctx.fillStyle = "#101a2a";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      orderedRoster.forEach((member, index) => {
+        const streamForMember = getStreamFor(member.socketId);
+        const video = ensureVideo(member.socketId, streamForMember);
+        ensureAudio(member.socketId, streamForMember);
+        const column = index % columns;
+        const row = Math.floor(index / columns);
+        const x = column * tileWidth;
+        const y = row * tileHeight;
+        if (video && video.readyState >= 2 && video.videoWidth > 0) {
+          const scale = Math.max(tileWidth / video.videoWidth, tileHeight / video.videoHeight);
+          const width = video.videoWidth * scale;
+          const height = video.videoHeight * scale;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(x, y, tileWidth, tileHeight);
+          ctx.clip();
+          ctx.drawImage(video, x + (tileWidth - width) / 2, y + (tileHeight - height) / 2, width, height);
+          ctx.restore();
+        } else {
+          ctx.fillStyle = "#17283a";
+          ctx.fillRect(x, y, tileWidth, tileHeight);
+          ctx.fillStyle = "#d7e8f4";
+          ctx.font = "700 30px Cairo, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText((member.name || "مشارك").trim().slice(0, 1), x + tileWidth / 2, y + tileHeight / 2);
+        }
+        ctx.fillStyle = "rgba(5, 12, 24, .72)";
+        ctx.fillRect(x, y + tileHeight - 46, tileWidth, 46);
+        ctx.fillStyle = "#fff";
+        ctx.font = "700 18px Cairo, sans-serif";
+        ctx.textAlign = "start";
+        ctx.fillText(member.name || "مشارك", x + 16, y + tileHeight - 17);
+      });
+
+      const mixedAudio = audioDestination?.stream.getAudioTracks()[0];
+      replaceViewerTracks(output.getVideoTracks()[0], mixedAudio);
+      battleAnimRef.current = requestAnimationFrame(draw);
+    };
+
+    draw();
+    return () => {
+      cancelAnimationFrame(battleAnimRef.current);
+      sourceVideos.forEach(video => { video.pause(); video.srcObject = null; });
+      audioSources.forEach(source => { try { source.disconnect(); } catch {} });
+      battleAudioDestRef.current = null;
+
+      // Restore the real camera or the active virtual-background track.
+      const normalVideo = (bgMode !== "none" ? canvasStreamRef.current?.getVideoTracks()[0] : localStream.current?.getVideoTracks()[0]);
+      const normalAudio = localStream.current?.getAudioTracks()[0];
+      if (normalVideo) {
+        peers.current.forEach(pc => {
+          const sender = pc.getSenders().find(candidate => candidate.track?.kind === "video");
+          if (sender) void sender.replaceTrack(normalVideo);
+          const audioSender = pc.getSenders().find(candidate => candidate.track?.kind === "audio");
+          if (audioSender && normalAudio) void audioSender.replaceTrack(normalAudio);
+        });
+      }
+      output.getVideoTracks().forEach(track => track.stop());
+      if (audioDestination) audioDestination.stream.getAudioTracks().forEach(track => track.stop());
+      battleStreamRef.current = null;
+      battleCanvasRef.current = null;
+    };
+  // Battle roster changes rebuild the mosaic; viewer peer connections remain intact.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBroadcast, battleActive, battleMode, battleRosterKey, broadcastMode, bgMode, battleAudioReady]);
+
+  useEffect(() => {
+    battleActiveRef.current = battleActive;
+  }, [battleActive]);
 
   /* ─── startWebRTC: called directly from button click (or auto-start useEffect) ─── */
   const startWebRTC = useCallback(async () => {
@@ -1320,7 +1536,39 @@ export default function LiveStream() {
   };
 
   /* ─── Battle helpers ─────────────────────────────────── */
+  const unlockBattleAudio = () => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      let context = battleAudioCtxRef.current;
+      if (!context || context.state === "closed") {
+        context = new AudioContextClass();
+        battleAudioCtxRef.current = context;
+      }
+      if (context.state === "running") {
+        setBattleAudioReady(true);
+      } else {
+        void context.resume()
+          .then(() => setBattleAudioReady(context?.state === "running"))
+          .catch(() => setBattleAudioReady(false));
+      }
+    } catch {
+      setBattleAudioReady(false);
+    }
+  };
+
   const startBattle = (mode: "1v1"|"2v2") => {
+    if (broadcastMode !== "webrtc") {
+      toast({
+        title: "الجولات متاحة في البث من المتصفح",
+        description: "استخدم كاميرا المتصفح لعرض جميع المشاركين للمشاهدين. بث RTMP الخارجي لا يمكن دمج ضيوفه داخل المتصفح.",
+        variant: "destructive",
+      });
+      return;
+    }
+    // Audio mixing must be unlocked by this direct user gesture. If a browser
+    // still refuses it, the compositor keeps the broadcaster's original audio
+    // rather than replacing it with a silent destination track.
+    unlockBattleAudio();
     setBattleMode(mode);
     setBattleScoreA(0); setBattleScoreB(0);
     battleScoreARef.current = 0; battleScoreBRef.current = 0;
@@ -2229,6 +2477,89 @@ export default function LiveStream() {
               </div>
             </div>
 
+            {/* Roster keyed battle seats. The server roster is the source of
+                truth; socket ids are never inferred from array positions. */}
+            <div className={`absolute inset-x-2 z-30 ${battleMode === "2v2" ? "top-[108px] bottom-[116px]" : "top-[108px] bottom-[150px]"} pointer-events-none`}>
+              <div className={`grid h-full gap-2 ${battleMode === "2v2" ? "grid-cols-2 grid-rows-2" : "grid-cols-2"}`}>
+                {(() => {
+                  const teams = battleTeams || {
+                    A: [{ socketId: socketRef.current?.id || "host", userId: String((user as any)?.id || "host"), name: stream?.channelName || "المذيع", audienceCount: Number(stream?.subscriberCount || 0) }],
+                    B: activeCoHosts.slice(0, battleMode === "2v2" ? 2 : 1).map(c => ({ socketId: c.socketId, userId: c.socketId, name: c.name, audienceCount: 0 })),
+                  };
+                  const members = [
+                    ...teams.A.map(member => ({ ...member, team: "A" as const })),
+                    ...teams.B.map(member => ({ ...member, team: "B" as const })),
+                  ];
+                  return members.map(member => {
+                    const isSelf = member.socketId === socketRef.current?.id;
+                    const hostSeat = member.socketId === socketRef.current?.id ||
+                      (isBroadcast && member.team === "A" && member === teams.A[0]);
+                    const cohost = activeCoHosts.find(c => c.socketId === member.socketId);
+                    const score = battlePlayerScores[member.userId];
+                    return (
+                      <div key={`${member.team}-${member.userId}`} className={`relative min-h-0 overflow-hidden rounded-2xl border ${member.team === "A" ? "border-orange-300/55" : "border-cyan-300/55"} ${isBroadcast ? "bg-[#101a2a]/90 shadow-2xl" : "bg-transparent"}`}>
+                        {isBroadcast && (
+                          <div className={`absolute inset-0 flex items-center justify-center ${member.team === "A" ? "bg-[#241b24]" : "bg-[#12252d]"}`}>
+                            <div className={`flex h-16 w-16 items-center justify-center rounded-full text-2xl font-black ${member.team === "A" ? "bg-orange-400/20 text-orange-100" : "bg-cyan-400/20 text-cyan-50"}`}>
+                              {(member.name || "?").trim().slice(0, 1)}
+                            </div>
+                          </div>
+                        )}
+                        {isBroadcast && (hostSeat ? (
+                          <video autoPlay playsInline muted={isBroadcast}
+                            ref={el => {
+                              if (!el) return;
+                              const source = localStream.current;
+                              if (source && el.srcObject !== source) { el.srcObject = source; el.play().catch(() => {}); }
+                            }}
+                            onError={e => { e.currentTarget.style.display = "none"; }}
+                            className="relative z-10 h-full w-full object-cover"
+                            style={{ transform: isBroadcast && camFacing === "user" ? "scaleX(-1)" : "none" }} />
+                        ) : cohost?.hasCamera !== false ? (
+                          <video autoPlay playsInline
+                            ref={el => bindCohostVideo(member.socketId, el)}
+                            onError={e => { e.currentTarget.style.display = "none"; }}
+                            className="relative z-10 h-full w-full object-cover" />
+                        ) : (
+                          <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-[#152238]">
+                            <div className={`flex h-14 w-14 items-center justify-center rounded-full text-xl font-black ${member.team === "A" ? "bg-orange-400/20 text-orange-200" : "bg-cyan-400/20 text-cyan-100"}`}>
+                              {(member.name || "?").trim().slice(0, 1)}
+                            </div>
+                            <MicOff className="h-4 w-4 text-white/45" />
+                          </div>
+                        ))}
+                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#07101e] via-[#07101e]/85 to-transparent px-2 pb-2 pt-8">
+                          <div className="flex items-end justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-black text-white">{member.name || "مشارك"}</p>
+                              <p className={`text-[10px] font-bold ${member.team === "A" ? "text-orange-200" : "text-cyan-200"}`}>
+                                {member.team === "A" ? "فريق أ" : "فريق ب"}{isSelf ? " · أنت" : ""}
+                              </p>
+                              <p className="text-[9px] font-semibold text-white/65">
+                                {Number(member.audienceCount || 0).toLocaleString()} متابع
+                              </p>
+                            </div>
+                            <div className="shrink-0 rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-amber-200">
+                              {typeof score === "number" ? `${score.toLocaleString()} نقطة` : "—"}
+                            </div>
+                          </div>
+                        </div>
+                        {flyingGifts.some(g => g.recipientSocketId === member.socketId) && (
+                          <div className="absolute end-2 top-2 rounded-full border border-amber-200/40 bg-amber-500/20 px-2 py-1 text-[10px] font-black text-amber-100">
+                            هدية الآن
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+              <div className="pointer-events-auto absolute bottom-2 start-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-[#07101e]/90 px-3 py-1.5 text-[10px] font-bold text-white/70 backdrop-blur">
+                <Users className="h-3.5 w-3.5 text-cyan-200" />
+                {viewerCount.toLocaleString()} مشاهد
+              </div>
+            </div>
+
             {/* ── هدايا وشحن — تحت الجولة مباشرة ── */}
             {!isBroadcast && user && (
               <div className="absolute inset-x-0 z-40 flex items-center justify-center gap-2" style={{ top: "76px" }}>
@@ -2280,7 +2611,7 @@ export default function LiveStream() {
                 />
                 {/* شارة مستقلة: اسم صاحب الخانة + عداده الخاص فقط */}
                 <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-black/60 backdrop-blur rounded-full px-2 py-0.5" data-testid="badge-slot-a0">
-                  <span className="text-[10px] font-black text-cyan-300">💎 {((battleTeams?.A?.[0] && battlePlayerScores[battleTeams.A[0].socketId]) || 0).toLocaleString()}</span>
+                  <span className="text-[10px] font-black text-cyan-300">💎 {((battleTeams?.A?.[0] && battlePlayerScores[battleTeams.A[0].userId]) || 0).toLocaleString()}</span>
                 </div>
                 <div className="absolute bottom-2 inset-x-0 flex justify-center">
                   <span className="text-[10px] text-white bg-red-600 rounded-full px-2 py-0.5 font-bold">🔴 {battleTeams?.A?.[0]?.name || "الفريق أ"}</span>
@@ -2290,7 +2621,7 @@ export default function LiveStream() {
                     <div className="w-20 h-28 rounded-xl overflow-hidden border border-red-400 relative">
                       <video autoPlay playsInline ref={el => bindCohostVideo(activeCoHosts[1].socketId, el)} className="w-full h-full object-cover" />
                       <div className="absolute top-0.5 right-0.5 bg-black/60 rounded-full px-1 py-px" data-testid="badge-slot-a1">
-                        <span className="text-[8px] font-black text-cyan-300">💎 {(battlePlayerScores[activeCoHosts[1].socketId] || 0).toLocaleString()}</span>
+                        <span className="text-[8px] font-black text-cyan-300">💎 {(battlePlayerScores[battleTeams?.A?.[1]?.userId || ""] || 0).toLocaleString()}</span>
                       </div>
                     </div>
                   </div>
@@ -2312,7 +2643,7 @@ export default function LiveStream() {
                       </div>
                     )}
                     <div className="absolute top-2 left-2 z-10 flex items-center gap-1 bg-black/60 backdrop-blur rounded-full px-2 py-0.5" data-testid="badge-slot-b0">
-                      <span className="text-[10px] font-black text-cyan-300">💎 {(battlePlayerScores[activeCoHosts[0].socketId] || 0).toLocaleString()}</span>
+                      <span className="text-[10px] font-black text-cyan-300">💎 {(battlePlayerScores[battleTeams?.B?.[0]?.userId || ""] || 0).toLocaleString()}</span>
                     </div>
                     <div className="absolute bottom-2 inset-x-0 flex justify-center">
                       <span className="text-[10px] text-white bg-blue-600 rounded-full px-2 py-0.5 font-bold">🔵 {battleTeams?.B?.find(m => m.socketId === activeCoHosts[0].socketId)?.name || "الفريق ب"}</span>
@@ -2322,7 +2653,7 @@ export default function LiveStream() {
                         <div className="w-20 h-28 rounded-xl overflow-hidden border border-blue-400 relative">
                           <video autoPlay playsInline ref={el => bindCohostVideo(activeCoHosts[2].socketId, el)} className="w-full h-full object-cover" />
                           <div className="absolute top-0.5 left-0.5 bg-black/60 rounded-full px-1 py-px" data-testid="badge-slot-b1">
-                            <span className="text-[8px] font-black text-cyan-300">💎 {(battlePlayerScores[activeCoHosts[2].socketId] || 0).toLocaleString()}</span>
+                            <span className="text-[8px] font-black text-cyan-300">💎 {(battlePlayerScores[battleTeams?.B?.[1]?.userId || ""] || 0).toLocaleString()}</span>
                           </div>
                         </div>
                       </div>
@@ -2353,7 +2684,7 @@ export default function LiveStream() {
                   className="w-full h-full object-cover"
                 />
                 <div className="absolute top-2 right-2 z-10 bg-black/60 backdrop-blur rounded-full px-2 py-0.5" data-testid="badge-guest-slot-a">
-                  <span className="text-[10px] font-black text-cyan-300">💎 {((battleTeams?.A?.[0] && battlePlayerScores[battleTeams.A[0].socketId]) || 0).toLocaleString()}</span>
+                  <span className="text-[10px] font-black text-cyan-300">💎 {((battleTeams?.A?.[0] && battlePlayerScores[battleTeams.A[0].userId]) || 0).toLocaleString()}</span>
                 </div>
                 <div className="absolute bottom-2 inset-x-0 flex justify-center">
                   <span className="text-[10px] text-white bg-red-600 rounded-full px-2 py-0.5 font-bold">🔴 {battleTeams?.A?.[0]?.name || "الفريق أ"}</span>
@@ -2386,7 +2717,7 @@ export default function LiveStream() {
                   return (
                     <>
                       <div className="absolute top-2 left-2 z-10 bg-black/60 backdrop-blur rounded-full px-2 py-0.5" data-testid="badge-guest-slot-b">
-                        <span className="text-[10px] font-black text-cyan-300">💎 {(me ? battlePlayerScores[me.socketId] || 0 : 0).toLocaleString()}</span>
+                        <span className="text-[10px] font-black text-cyan-300">💎 {(me ? battlePlayerScores[me.userId] || 0 : 0).toLocaleString()}</span>
                       </div>
                       <div className="absolute bottom-2 inset-x-0 flex justify-center">
                         <span className={`text-[10px] text-white rounded-full px-2 py-0.5 font-bold ${inA ? "bg-red-600" : "bg-blue-600"}`}>{myTeamLabel}</span>
@@ -2539,7 +2870,15 @@ export default function LiveStream() {
           <div
             key={g.id}
             className="absolute bottom-40 z-[60] pointer-events-none flex flex-col items-center"
-            style={{ left: `${g.x}%`, animation: "giftFly 3s ease-out forwards" }}
+            style={{
+              left: `${(() => {
+                if (!g.recipientSocketId || !battleTeams) return g.x;
+                const roster = [...battleTeams.A, ...battleTeams.B];
+                const index = roster.findIndex(member => member.socketId === g.recipientSocketId);
+                return index < 0 ? g.x : ((index + 0.5) / Math.max(roster.length, 1)) * 100;
+              })()}%`,
+              animation: "giftFly 3s ease-out forwards",
+            }}
           >
             {g.glow && g.big && (
               <div className="absolute inset-0 rounded-full animate-ping opacity-40"
@@ -3640,6 +3979,7 @@ export default function LiveStream() {
                           <button
                             disabled={st === "sent" || st === "sending"}
                             onClick={() => {
+                              unlockBattleAudio();
                               setInviteStatus(p => ({ ...p, [String(u.id)]: "sending" }));
                               socketRef.current?.emit("challenge-user-invite", {
                                 targetUserId: String(u.id),
@@ -3724,6 +4064,7 @@ export default function LiveStream() {
                         <button
                           disabled={st === "sent" || st === "sending"}
                           onClick={() => {
+                          unlockBattleAudio();
                             setInviteStatus(p => ({ ...p, [String(u.id)]: "sending" }));
                             socketRef.current?.emit("challenge-user-invite", {
                               targetUserId: String(u.id),
@@ -3776,14 +4117,14 @@ export default function LiveStream() {
                 <span className="text-white/50 text-xs">أنت ضد ضيف موجود</span>
               </button>
               <button
-                onClick={() => activeCoHosts.length >= 2 ? startBattle("2v2") : toast({ title: "تحتاج ضيفين على الأقل!", variant: "destructive" })}
-                className={`flex flex-col items-center gap-2 rounded-2xl p-5 active:scale-95 transition-all border ${activeCoHosts.length >= 2 ? "bg-gradient-to-br from-blue-500/20 to-purple-500/20 border-blue-500/40" : "bg-white/5 border-white/10 opacity-60"}`}
+                onClick={() => activeCoHosts.length >= 3 ? startBattle("2v2") : toast({ title: "تحتاج ثلاثة ضيوف لجولة 2 ضد 2!", variant: "destructive" })}
+                className={`flex flex-col items-center gap-2 rounded-2xl p-5 active:scale-95 transition-all border ${activeCoHosts.length >= 3 ? "bg-gradient-to-br from-blue-500/20 to-purple-500/20 border-blue-500/40" : "bg-white/5 border-white/10 opacity-60"}`}
                 data-testid="btn-battle-2v2"
               >
                 <span className="text-3xl">🛡️</span>
                 <span className="text-white font-extrabold text-base">2 ضد 2</span>
                 <span className="text-white/50 text-xs">فريقان كل فريق 2</span>
-                {activeCoHosts.length < 2 && <span className="text-red-400 text-[10px]">تحتاج ضيفين</span>}
+                {activeCoHosts.length < 3 && <span className="text-red-400 text-[10px]">تحتاج ثلاثة ضيوف</span>}
               </button>
             </div>
             <p className="text-center text-white/40 text-xs">⏱️ مدة المعركة: دقيقتان | 🪙 النقاط من الهدايا فقط (لا تُسحب)</p>
@@ -3825,6 +4166,7 @@ export default function LiveStream() {
                     key={s.id}
                     disabled={!!challengeSentTo}
                     onClick={() => {
+                      unlockBattleAudio();
                       setChallengeSentTo(String(s.id));
                       socketRef.current?.emit("battle-challenge", {
                         challengerStreamId: String(id),
@@ -3876,6 +4218,7 @@ export default function LiveStream() {
             <div className="flex gap-3">
               <button
                 onClick={() => {
+                  unlockBattleAudio();
                   socketRef.current?.emit("battle-challenge-response", {
                     accepted: true,
                     challengerSocketId: incomingChallenge.challengerSocketId,
@@ -3933,6 +4276,7 @@ export default function LiveStream() {
             <div className="flex gap-3">
               <button
                 onClick={() => {
+                  unlockBattleAudio();
                   const ch = incomingUserChallenge;
                   socketRef.current?.emit("challenge-user-response", {
                     accepted: true,

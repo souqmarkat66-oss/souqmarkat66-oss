@@ -3,13 +3,21 @@
  * consumed server-side; callers should expose their own safe status messages.
  */
 const DEFAULT_BASE_URL = "https://eu-test.oppwa.com";
+const PRODUCTION_BASE_URL = "https://eu-prod.oppwa.com";
 const ALLOWED_BASE_URLS = new Set([
   "https://eu-test.oppwa.com",
-  "https://eu-prod.oppwa.com",
+  PRODUCTION_BASE_URL,
 ]);
 
 function config() {
-  const baseUrl = (process.env.AFS_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const configuredBaseUrl = process.env.AFS_BASE_URL?.trim();
+  // Development may deliberately use the provider sandbox, but a published
+  // build must never silently fall back to test mode. Production checkout
+  // stays disabled until production AFS credentials and URL are configured.
+  if (process.env.NODE_ENV === "production" && !configuredBaseUrl) {
+    throw new Error("بوابة الدفع الإنتاجية غير مهيأة");
+  }
+  const baseUrl = (configuredBaseUrl || DEFAULT_BASE_URL).replace(/\/+$/, "");
   let parsed: URL;
   try {
     parsed = new URL(baseUrl);
@@ -20,6 +28,12 @@ function config() {
       || (parsed.pathname !== "/" && parsed.pathname !== "")
       || !ALLOWED_BASE_URLS.has(parsed.origin)) {
     throw new Error("AFS payment configuration is invalid");
+  }
+  if (process.env.NODE_ENV === "production" && parsed.origin !== PRODUCTION_BASE_URL) {
+    throw new Error("بوابة الدفع الإنتاجية غير مهيأة");
+  }
+  if (process.env.NODE_ENV !== "production" && parsed.origin !== DEFAULT_BASE_URL) {
+    throw new Error("يُمنع استخدام بوابة الدفع الحقيقية خارج بيئة الإنتاج");
   }
   const entityId = process.env.AFS_ENTITY_ID?.trim();
   // Accept either the raw token or the exact "Bearer <token>" value commonly
