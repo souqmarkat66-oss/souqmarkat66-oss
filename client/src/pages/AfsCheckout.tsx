@@ -59,7 +59,6 @@ export default function AfsCheckout() {
             <p className="text-sm text-muted-foreground">دفع آمن عبر AFS COPYandPAY</p>
           </div>
         </div>
-        {order.isTestMode && <div className="mb-4 rounded-lg bg-amber-100 text-amber-800 px-3 py-2 text-sm font-bold">وضع الاختبار — لا تستخدم بطاقة حقيقية</div>}
         <div className="mb-4 rounded-xl border bg-muted/20 p-3">
           <p className="font-bold text-sm">ads-as.com</p>
           <p className="text-xs text-muted-foreground">إحدى منصات شركة سوق ماركات</p>
