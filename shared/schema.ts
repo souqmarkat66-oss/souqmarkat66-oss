@@ -1,7 +1,7 @@
-import { pgTable, text, serial, integer, boolean, timestamp, varchar, real, numeric, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, varchar, real, numeric, jsonb, index, check } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 export * from "./models/auth";
 export * from "./models/chat";
@@ -620,7 +620,12 @@ export const coinRechargeCodes = pgTable("coin_recharge_codes", {
   usedAt: timestamp("used_at"),
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  usagePairCheck: check(
+    "coin_recharge_codes_usage_pair_check",
+    sql`(${table.usedByUserId} IS NULL) = (${table.usedAt} IS NULL)`,
+  ),
+}));
 export type CoinRechargeCode = typeof coinRechargeCodes.$inferSelect;
 
 // ============================================================
@@ -657,6 +662,21 @@ export const giftEvents = pgTable("gift_events", {
   senderCreatedIdx: index("gift_events_sender_created_idx").on(table.senderUserId, table.createdAt),
   recipientCreatedIdx: index("gift_events_recipient_created_idx").on(table.recipientUserId, table.createdAt),
   streamCreatedIdx: index("gift_events_stream_created_idx").on(table.streamId, table.createdAt),
+  grossCoinsCheck: check("gift_events_gross_coins_check", sql`${table.grossCoins} > 0`),
+  broadcasterCoinsCheck: check("gift_events_broadcaster_coins_check", sql`${table.broadcasterCoins} >= 0`),
+  platformCoinsCheck: check("gift_events_platform_coins_check", sql`${table.platformCoins} >= 0`),
+  splitCheck: check(
+    "gift_events_split_check",
+    sql`${table.grossCoins} = ${table.broadcasterCoins} + ${table.platformCoins}`,
+  ),
+  broadcasterSixtyPercentCheck: check(
+    "gift_events_broadcaster_sixty_percent_check",
+    sql`${table.broadcasterCoins} * 5 = ${table.grossCoins} * 3`,
+  ),
+  platformFortyPercentCheck: check(
+    "gift_events_platform_forty_percent_check",
+    sql`${table.platformCoins} * 5 = ${table.grossCoins} * 2`,
+  ),
 }));
 export type GiftEvent = typeof giftEvents.$inferSelect;
 

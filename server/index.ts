@@ -395,16 +395,6 @@ async function runMigrations() {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS gift_events_sender_created_idx ON gift_events(sender_user_id, created_at DESC)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS gift_events_recipient_created_idx ON gift_events(recipient_user_id, created_at DESC)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS gift_events_stream_created_idx ON gift_events(stream_id, created_at DESC)`);
-    // Catalog gifts are multiples of five, so these constraints enforce the
-    // exact 60/40 split at the database boundary as well as in the transaction.
-    await db.execute(sql`ALTER TABLE gift_events DROP CONSTRAINT IF EXISTS gift_events_broadcaster_sixty_percent_check`);
-    await db.execute(sql`ALTER TABLE gift_events DROP CONSTRAINT IF EXISTS gift_events_platform_forty_percent_check`);
-    await db.execute(sql`ALTER TABLE gift_events
-      ADD CONSTRAINT gift_events_broadcaster_sixty_percent_check
-      CHECK (broadcaster_coins * 5 = gross_coins * 3) NOT VALID`);
-    await db.execute(sql`ALTER TABLE gift_events
-      ADD CONSTRAINT gift_events_platform_forty_percent_check
-      CHECK (platform_coins * 5 = gross_coins * 2) NOT VALID`);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS payment_failures (
         id SERIAL PRIMARY KEY,
@@ -440,16 +430,6 @@ async function runMigrations() {
       FROM payment_requests
       WHERE status = 'rejected' AND type = 'top_up'
       ON CONFLICT (dedupe_key) DO NOTHING
-    `);
-    await db.execute(sql`
-      DO $$
-      BEGIN
-        ALTER TABLE coin_recharge_codes
-          ADD CONSTRAINT coin_recharge_codes_usage_pair_check
-          CHECK ((used_by_user_id IS NULL) = (used_at IS NULL)) NOT VALID;
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END
-      $$
     `);
     await db.execute(sql`
       UPDATE revenue_transactions rt
