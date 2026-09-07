@@ -37,7 +37,7 @@ const ROLES = [
   },
 ];
 
-type Screen = "welcome" | "login" | "register" | "set-password" | "forgot";
+type Screen = "welcome" | "login" | "register" | "forgot" | "otp" | "set-password";
 
 export default function Login() {
   const { user, login, register, setPassword } = useAuth();
@@ -61,8 +61,9 @@ export default function Login() {
   const [regShowPw, setRegShowPw] = useState(false);
   const [regIdentifierType, setRegIdentifierType] = useState<"email" | "phone">("email");
 
-  // Set-password (first login)
-  const [firstLoginUserId, setFirstLoginUserId] = useState("");
+  // Verified password recovery
+  const [resetChallengeId, setResetChallengeId] = useState("");
+  const [resetProof, setResetProof] = useState("");
   const [newPw1, setNewPw1] = useState("");
   const [newPw2, setNewPw2] = useState("");
   const [showNewPw, setShowNewPw] = useState(false);
@@ -70,6 +71,10 @@ export default function Login() {
   // Forgot password
   const [forgotIdentifier, setForgotIdentifier] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
+  const [resetDestination, setResetDestination] = useState("");
+  const [channelChoices, setChannelChoices] = useState<Array<{ channel: "email" | "sms"; destination: string }>>([]);
+  const [otp, setOtp] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -86,9 +91,10 @@ export default function Login() {
       if (selectedRole) localStorage.setItem("souq_role", selectedRole);
       await login.mutateAsync({ identifier, password });
     } catch (err: any) {
-      if (err?.message === "first_login" || err?.status === 403) {
-        setFirstLoginUserId(err.userId || "");
-        setScreen("set-password");
+      if (err?.status === 403) {
+        setForgotIdentifier(identifier);
+        setScreen("forgot");
+        toast({ title: "تحقق من وسيلة الاتصال لتعيين كلمة مرور" });
       } else {
         toast({ variant: "destructive", title: err?.message || "فشل تسجيل الدخول" });
       }
@@ -115,37 +121,62 @@ export default function Login() {
   };
 
   const handleSetPassword = async () => {
-    if (newPw1.length < 6) return toast({ variant: "destructive", title: "كلمة المرور 6 أحرف على الأقل" });
+    if (newPw1.length < 8) return toast({ variant: "destructive", title: "كلمة المرور 8 أحرف على الأقل" });
     if (newPw1 !== newPw2) return toast({ variant: "destructive", title: "كلمتا المرور غير متطابقتين" });
     try {
-      await setPassword.mutateAsync({ userId: firstLoginUserId, password: newPw1 });
+      await setPassword.mutateAsync({ challengeId: resetChallengeId, resetProof, password: newPw1 });
     } catch (err: any) {
       toast({ variant: "destructive", title: err?.message || "فشل تعيين كلمة المرور" });
     }
   };
 
-  const handleForgotPassword = async () => {
-    if (!forgotIdentifier.trim()) return toast({ variant: "destructive", title: "أدخل البريد الإلكتروني أو رقم الهاتف أو الـ ID" });
+  const handleForgotPassword = async (channel?: "email" | "sms") => {
+    if (!forgotIdentifier.trim()) return toast({ variant: "destructive", title: "أدخل البريد الإلكتروني أو رقم الهاتف" });
     setForgotLoading(true);
     try {
       const res = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ identifier: forgotIdentifier }),
+        body: JSON.stringify({ identifier: forgotIdentifier.trim(), channel }),
       });
       const json = await res.json();
-      if (json.notFound || !json.userId) {
-        toast({ variant: "destructive", title: "البيانات غير مسجّلة، تأكد من الإيميل أو الـ ID" });
+      if (!res.ok) throw new Error(json.message || "تعذر إرسال الرمز");
+      if (json.requiresChannel) {
+        setChannelChoices(json.destinations || []);
         return;
       }
-      setFirstLoginUserId(json.userId);
-      setScreen("set-password");
-      toast({ title: `مرحباً ${json.firstName || ""}، عيّن كلمة مرور جديدة` });
+      setChannelChoices([]);
+      setResetChallengeId(json.challengeId || "");
+      setResetDestination(json.destination || "وسيلة الاتصال المسجلة");
+      setOtp("");
+      setScreen("otp");
+      toast({ title: json.message });
     } catch {
       toast({ variant: "destructive", title: "حدث خطأ، حاول مجدداً" });
     } finally {
       setForgotLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!/^\d{6}$/.test(otp)) return toast({ variant: "destructive", title: "أدخل رمز التحقق المكون من 6 أرقام" });
+    setOtpLoading(true);
+    try {
+      const res = await fetch("/api/auth/verify-reset-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ challengeId: resetChallengeId, otp }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || "رمز التحقق غير صالح");
+      setResetProof(json.resetProof);
+      setScreen("set-password");
+    } catch (err: any) {
+      toast({ variant: "destructive", title: err?.message || "تعذر التحقق من الرمز" });
+    } finally {
+      setOtpLoading(false);
     }
   };
 
@@ -436,7 +467,7 @@ export default function Login() {
         )}
 
         {/* ══════════════════════════════════════════════════════ */}
-        {/* SET PASSWORD SCREEN (first login) */}
+        {/* SET PASSWORD SCREEN (verified recovery) */}
         {/* ══════════════════════════════════════════════════════ */}
         {screen === "set-password" && (
           <div className="bg-card border border-border/60 rounded-3xl p-6 sm:p-8 shadow-xl">
@@ -446,13 +477,13 @@ export default function Login() {
               </div>
               <div>
                 <h2 className="text-lg font-bold">تعيين كلمة المرور</h2>
-                <p className="text-xs text-muted-foreground">عيّن كلمة مرور جديدة لحسابك — ستُحفظ وتُستخدم في المرات القادمة</p>
+                 <p className="text-xs text-muted-foreground">تم التحقق بنجاح. عيّن كلمة مرور قوية جديدة.</p>
               </div>
             </div>
 
             <div className="space-y-4 mt-4">
               <div>
-                <label className="text-xs font-semibold mb-1 block">كلمة المرور الجديدة</label>
+                 <label className="text-xs font-semibold mb-1 block">كلمة المرور الجديدة (8 أحرف على الأقل)</label>
                 <div className="relative">
                   <Lock className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
@@ -488,7 +519,7 @@ export default function Login() {
               <Button
                 size="lg" className="w-full h-12 gap-2 rounded-xl"
                 onClick={handleSetPassword}
-                disabled={setPassword.isPending || !newPw1 || !newPw2}
+                 disabled={setPassword.isPending || !resetProof || !newPw1 || !newPw2}
                 data-testid="btn-set-password"
               >
                 {setPassword.isPending
@@ -512,34 +543,30 @@ export default function Login() {
               </button>
               <div>
                 <h2 className="text-xl font-bold">إعادة تعيين كلمة المرور</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">أدخل الإيميل أو رقم الهاتف أو الـ ID المسجّل</p>
+                 <p className="text-xs text-muted-foreground mt-0.5">أدخل البريد الإلكتروني أو رقم الهاتف المسجّل</p>
               </div>
-            </div>
-
-            <div className="p-3 mb-4 bg-blue-500/10 border border-blue-500/20 rounded-xl text-sm text-blue-600">
-              💡 <strong>ملاحظة:</strong> إذا كنت سجّلت حسابك قبلاً عبر Replit أو Google، أدخل إيميلك هنا وستتمكن من تعيين كلمة مرور جديدة
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-semibold mb-1.5 block">البريد الإلكتروني أو رقم الهاتف أو الـ ID</label>
+                 <label className="text-sm font-semibold mb-1.5 block">البريد الإلكتروني أو رقم الهاتف</label>
                 <div className="relative">
                   <Mail className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     value={forgotIdentifier}
                     onChange={e => setForgotIdentifier(e.target.value)}
-                    placeholder="example@email.com أو 01XXXXXXXXX أو 54219806"
+                     placeholder="example@email.com أو 01XXXXXXXXX"
                     className="pr-9 h-11"
                     dir="ltr"
                     data-testid="input-forgot-identifier"
-                    onKeyDown={e => e.key === "Enter" && handleForgotPassword()}
+                     onKeyDown={e => e.key === "Enter" && handleForgotPassword()}
                   />
                 </div>
               </div>
 
               <Button
                 size="lg" className="w-full h-12 gap-2 rounded-xl"
-                onClick={handleForgotPassword}
+                 onClick={() => handleForgotPassword()}
                 disabled={forgotLoading || !forgotIdentifier.trim()}
                 data-testid="btn-forgot-submit"
               >
@@ -547,13 +574,58 @@ export default function Login() {
                   ? <span className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
                   : <KeyRound className="w-4 h-4" />
                 }
-                إعادة تعيين كلمة المرور
+                 إرسال رمز التحقق
               </Button>
+
+              {channelChoices.length > 1 && (
+                <div className="space-y-2 rounded-xl border p-3">
+                  <p className="text-xs font-semibold">اختر طريقة استلام الرمز:</p>
+                  {channelChoices.map(choice => (
+                    <Button key={choice.channel} variant="outline" className="w-full justify-start gap-2"
+                      onClick={() => handleForgotPassword(choice.channel)} disabled={forgotLoading}>
+                      {choice.channel === "email" ? <Mail className="w-4 h-4" /> : <Phone className="w-4 h-4" />}
+                      {choice.destination}
+                    </Button>
+                  ))}
+                </div>
+              )}
 
               <p className="text-center text-sm text-muted-foreground">
                 تذكرت كلمة المرور؟{" "}
                 <button onClick={() => setScreen("login")} className="text-primary hover:underline font-medium">سجّل الدخول</button>
               </p>
+            </div>
+          </div>
+        )}
+
+        {/* OTP VERIFICATION SCREEN */}
+        {screen === "otp" && (
+          <div className="bg-card border border-border/60 rounded-3xl p-6 sm:p-8 shadow-xl">
+            <div className="flex items-center gap-2 mb-6">
+              <button onClick={() => setScreen("forgot")} className="p-1 rounded-lg hover:bg-muted transition-colors">
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+              <div>
+                <h2 className="text-xl font-bold">أدخل رمز التحقق</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">أرسلنا رمزاً من 6 أرقام إلى {resetDestination}</p>
+              </div>
+            </div>
+            <div className="space-y-4">
+              <Input value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                inputMode="numeric" autoComplete="one-time-code" maxLength={6} dir="ltr"
+                className="h-14 text-center text-2xl tracking-[0.5em]" placeholder="000000"
+                data-testid="input-reset-otp" onKeyDown={e => e.key === "Enter" && handleVerifyOtp()} />
+              <p className="text-xs text-muted-foreground">ينتهي الرمز خلال 10 دقائق، ولديك 5 محاولات فقط.</p>
+              <Button size="lg" className="w-full h-12 gap-2 rounded-xl" onClick={handleVerifyOtp}
+                disabled={otpLoading || otp.length !== 6} data-testid="btn-verify-reset-otp">
+                {otpLoading
+                  ? <span className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  : <Shield className="w-4 h-4" />}
+                تحقق من الرمز
+              </Button>
+              <button className="w-full text-xs text-primary hover:underline" onClick={() => setScreen("forgot")}>
+                لم يصلك الرمز؟ اطلب رمزاً جديداً
+              </button>
             </div>
           </div>
         )}

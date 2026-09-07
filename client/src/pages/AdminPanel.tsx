@@ -25,7 +25,7 @@ import {
   AlertTriangle, Activity, Menu, ChevronLeft, VideoOff, PieChart,
   Star, MessageSquare, Clock, BanIcon, UserCheck, FolderOpen, FileImage,
   FileVideo, File, Lock, Phone, Mail, Shield, RefreshCw, ToggleLeft, ToggleRight, Zap,
-  Sparkles, Image, Video, Wand2, FileText, Gift, Check, Globe, Plus, PlusCircle, Bot
+  Sparkles, Image, Video, Wand2, FileText, Gift, Check, Globe, Plus, PlusCircle, Bot, KeyRound
 } from "lucide-react";
 
 const ADMIN_ID = "54165148";
@@ -58,6 +58,7 @@ const NAV = [
   { key: "aipricing",      label: "أسعار الذكاء الاصطناعي", icon: Sparkles,       color: "text-violet-400" },
   { key: "ai_control",     label: "تحكم الذكاء الاصطناعي", icon: Sparkles,        color: "text-violet-400" },
   { key: "ai_agent",       label: "🤖 مساعد التطوير AI",    icon: Bot,             color: "text-violet-500" },
+  { key: "integrations",   label: "التكاملات والأسرار",      icon: KeyRound,        color: "text-amber-500" },
   { key: "coins",          label: "نظام العملات",          icon: Gift,            color: "text-yellow-400" },
   { key: "settings",       label: "إعدادات المنصة",       icon: Settings,        color: "text-gray-400" },
   { key: "activity",       label: "سجل النشاط",           icon: Activity,        color: "text-slate-400" },
@@ -237,12 +238,161 @@ export default function AdminPanel() {
           {section === "aipricing"  && <AiPricingSection />}
           {section === "ai_control" && <AdminAiControl />}
           {section === "ai_agent"   && <AiAgentEmbed />}
+           {section === "integrations" && <IntegrationsVaultSection />}
           {section === "coins"      && <CoinsSection logAction={logAction} />}
           {section === "settings"   && <SettingsSection logAction={logAction} />}
           {section === "activity"   && <ActivitySection />}
           {section === "admins"     && <AdminsSection />}
         </div>
       </main>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INTEGRATIONS / SECRET VAULT
+// The API intentionally returns metadata only. Values entered here are never
+// retained after a successful request and are never rendered back to the page.
+// ═══════════════════════════════════════════════════════════════
+type VaultSecretStatus = {
+  name: string;
+  label: string;
+  configured: boolean;
+  source: "environment" | "vault" | null;
+  updatedAt: string | null;
+  maskedLast4?: string | null;
+  environmentManaged?: boolean;
+  description?: string;
+};
+
+function IntegrationsVaultSection() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [values, setValues] = useState<Record<string, string>>({});
+
+  const statusQuery = useQuery<VaultSecretStatus[]>({
+    queryKey: ["/api/admin/secret-vault"],
+    queryFn: async () => {
+      const response = await fetch("/api/admin/secret-vault", { credentials: "include" });
+      if (!response.ok) throw new Error("تعذر تحميل حالة التكاملات");
+      return response.json();
+    },
+  });
+
+  const saveSecret = useMutation({
+    mutationFn: async ({ name, value }: { name: string; value: string }) => {
+      const response = await fetch(`/api/admin/secret-vault/${encodeURIComponent(name)}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.message || "تعذر حفظ السر");
+      }
+    },
+    onSuccess: (_, { name }) => {
+      setValues(current => ({ ...current, [name]: "" }));
+      qc.invalidateQueries({ queryKey: ["/api/admin/secret-vault"] });
+      toast({ title: "تم حفظ السر بأمان", description: "لا يمكن عرضه مرة أخرى من لوحة الإدارة." });
+    },
+    onError: (error: Error) => toast({ variant: "destructive", title: "تعذر الحفظ", description: error.message }),
+  });
+
+  const deleteSecret = useMutation({
+    mutationFn: async (name: string) => {
+      const response = await fetch(`/api/admin/secret-vault/${encodeURIComponent(name)}`, {
+        method: "DELETE", credentials: "include",
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.message || "تعذر حذف السر");
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/admin/secret-vault"] });
+      toast({ title: "تم حذف السر المخزن" });
+    },
+    onError: (error: Error) => toast({ variant: "destructive", title: "تعذر الحذف", description: error.message }),
+  });
+
+  const entries = statusQuery.data || [];
+  return (
+    <div className="space-y-6 max-w-5xl">
+      <Card className="rounded-2xl border-amber-500/25 bg-amber-500/[0.03]">
+        <CardContent className="p-5 flex gap-3">
+          <Shield className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <h2 className="font-bold">خزنة مفاتيح التكاملات</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              تُشفّر القيم المخزنة قبل حفظها ولا تُعاد إلى المتصفح مطلقاً. متغيرات البيئة لها أولوية ولا يمكن تعديلها أو حذفها هنا.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {statusQuery.isLoading && <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-primary" /></div>}
+      {statusQuery.isError && <Card><CardContent className="p-5 text-sm text-destructive">تعذر تحميل حالة الخزنة. تحقق من صلاحيات الأدمن.</CardContent></Card>}
+      <div className="grid gap-4">
+        {entries.map(entry => {
+          const isEnvironment = entry.source === "environment" || entry.environmentManaged;
+          const pending = saveSecret.isPending || deleteSecret.isPending;
+          return (
+            <Card key={entry.name} className="rounded-2xl">
+              <CardContent className="p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-start gap-2 justify-between">
+                  <div>
+                    <h3 className="font-semibold">{entry.label}</h3>
+                    {entry.description && <p className="text-xs text-muted-foreground mt-1">{entry.description}</p>}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant={entry.configured ? "default" : "secondary"}>{entry.configured ? "مُعدّ" : "غير مُعدّ"}</Badge>
+                    {isEnvironment && <Badge variant="outline">مدار من البيئة</Badge>}
+                    {entry.source === "vault" && <Badge variant="outline">الخزنة المشفرة</Badge>}
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+                  {entry.updatedAt && <span>آخر تحديث: {new Date(entry.updatedAt).toLocaleString("ar-EG")}</span>}
+                  {entry.maskedLast4 && <span dir="ltr">••••{entry.maskedLast4}</span>}
+                  {entry.name === "database_url" && <span>اتصال قاعدة البيانات يُدار من بيئة التشغيل فقط ولا يُخزن في الخزنة.</span>}
+                </div>
+                {!isEnvironment && entry.name !== "database_url" && (
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Input
+                      type="password"
+                      autoComplete="new-password"
+                      maxLength={4096}
+                      value={values[entry.name] || ""}
+                      onChange={event => setValues(current => ({ ...current, [entry.name]: event.target.value }))}
+                      placeholder={entry.configured ? "أدخل قيمة جديدة للتدوير" : "أدخل السر"}
+                      aria-label={`سر ${entry.label}`}
+                    />
+                    <Button
+                      disabled={pending || !(values[entry.name] || "").trim()}
+                      onClick={() => saveSecret.mutate({ name: entry.name, value: values[entry.name].trim() })}
+                      className="gap-2 shrink-0"
+                    >
+                      {saveSecret.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      {entry.configured ? "تدوير" : "حفظ"}
+                    </Button>
+                    {entry.configured && (
+                      <Button
+                        variant="outline"
+                        disabled={pending}
+                        onClick={() => { if (window.confirm("حذف السر المخزن؟ لا يمكن التراجع عن ذلك.")) deleteSecret.mutate(entry.name); }}
+                        className="gap-2 shrink-0 text-destructive"
+                      >
+                        <Trash2 className="w-4 h-4" /> حذف
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1090,11 +1240,15 @@ function CampaignCard({ c, updateCampaign }: any) {
               <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <span className="font-semibold text-sm">{c.name}</span>
                 <StatusBadge status={c.status} />
+                <Badge variant="outline" className={c.paymentType === "free" ? "text-emerald-600 border-emerald-500/30" : "text-amber-600 border-amber-500/30"}>
+                  {c.paymentType === "free" ? "مجاني (المنصة)" : "مدفوع من المحفظة"}
+                </Badge>
               </div>
               <div className="flex gap-3 text-xs text-muted-foreground flex-wrap">
                 <span>👁️ {c.impressions?.toLocaleString()}</span>
                 <span>🖱️ {c.clicks?.toLocaleString()}</span>
                 <span>💸 {spent.toFixed(2)} / {budget.toFixed(2)} ج.م</span>
+                {c.paymentType !== "free" && <span>التفعيل بعد تأكيد التمويل</span>}
               </div>
               <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden w-48">
                 <div className={`h-full rounded-full ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-yellow-500" : "bg-primary"}`} style={{ width: `${pct}%` }} />

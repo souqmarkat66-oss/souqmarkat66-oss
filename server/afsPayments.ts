@@ -1,3 +1,4 @@
+import { getProviderSecret } from "./secretVault";
 /**
  * Small, deliberately isolated COPYandPAY client. Provider responses are only
  * consumed server-side; callers should expose their own safe status messages.
@@ -9,7 +10,7 @@ const ALLOWED_BASE_URLS = new Set([
   PRODUCTION_BASE_URL,
 ]);
 
-function config() {
+async function config() {
   const configuredBaseUrl = process.env.AFS_BASE_URL?.trim();
   // Development may deliberately use the provider sandbox, but a published
   // build must never silently fall back to test mode. Production checkout
@@ -35,10 +36,10 @@ function config() {
   if (process.env.NODE_ENV !== "production" && parsed.origin !== DEFAULT_BASE_URL) {
     throw new Error("يُمنع استخدام بوابة الدفع الحقيقية خارج بيئة الإنتاج");
   }
-  const entityId = process.env.AFS_ENTITY_ID?.trim();
+  const entityId = await getProviderSecret("afs_entity_id");
   // Accept either the raw token or the exact "Bearer <token>" value commonly
   // copied from AFS examples, while always sending one Authorization prefix.
-  const accessToken = process.env.AFS_ACCESS_TOKEN?.trim().replace(/^Bearer\s+/i, "");
+  const accessToken = (await getProviderSecret("afs_access_token"))?.replace(/^Bearer\s+/i, "");
   if (!entityId || !accessToken) throw new Error("AFS payment service is not configured");
   return { baseUrl: parsed.origin, entityId, accessToken };
 }
@@ -56,7 +57,7 @@ async function providerRequest(url: string, init: RequestInit) {
 }
 
 export async function prepareAfsCheckout(amountEGP: number) {
-  const { baseUrl, entityId, accessToken } = config();
+  const { baseUrl, entityId, accessToken } = await config();
   if (!Number.isFinite(amountEGP) || amountEGP <= 0) {
     throw new Error("مبلغ عملية الدفع غير صالح");
   }
@@ -86,7 +87,7 @@ export async function prepareAfsCheckout(amountEGP: number) {
 }
 
 export async function getAfsPaymentStatus(checkoutId: string) {
-  const { baseUrl, entityId, accessToken } = config();
+  const { baseUrl, entityId, accessToken } = await config();
   // checkoutId originates exclusively from our database. Encoding also prevents
   // it from ever changing the provider resource path.
   const safeId = encodeURIComponent(checkoutId);
@@ -95,12 +96,12 @@ export async function getAfsPaymentStatus(checkoutId: string) {
   });
 }
 
-export function getAfsEntityId() {
-  return config().entityId;
+export async function getAfsEntityId() {
+  return (await config()).entityId;
 }
 
-export function getAfsWidget(checkoutId: string) {
-  const { baseUrl } = config();
+export async function getAfsWidget(checkoutId: string) {
+  const { baseUrl } = await config();
   return {
     widgetUrl: `${baseUrl}/v1/paymentWidgets.js?checkoutId=${encodeURIComponent(checkoutId)}`,
     isTestMode: baseUrl.includes("test.oppwa.com"),

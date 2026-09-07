@@ -435,9 +435,25 @@ export class DatabaseStorage implements IStorage {
       // If the campaign is no longer active, or its budget is exhausted,
       // do not charge for this impression.
       if (locked.status !== 'active') return {};
+      // Serialize wallet debits across every campaign owned by this
+      // advertiser. A campaign may only spend verified EGP wallet funds.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${'wallet:' + locked.advertiserId}, 0))`);
       const currentSpent = locked.spentEGP || 0;
       const budget = locked.budgetEGP || 0;
-      if (budget > 0 && currentSpent >= budget) return {};
+      if (budget > 0 && currentSpent + revenueEGP > budget) {
+        await tx.update(adCampaigns).set({ status: 'paused' }).where(eq(adCampaigns.id, campaignId));
+        return {};
+      }
+      const [wallet] = await tx.select({
+        balance: sql<number>`COALESCE(SUM(CASE
+          WHEN ${revenueTransactions.type} IN ('earning', 'wallet_recharge') THEN ${revenueTransactions.amountEGP}
+          WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
+          ELSE 0 END), 0)`,
+      }).from(revenueTransactions).where(eq(revenueTransactions.userId, locked.advertiserId));
+      if (Number(wallet?.balance ?? 0) < revenueEGP) {
+        await tx.update(adCampaigns).set({ status: 'paused' }).where(eq(adCampaigns.id, campaignId));
+        return {};
+      }
 
       const newSpent = currentSpent + revenueEGP;
       await tx.update(adCampaigns).set({
@@ -481,9 +497,23 @@ export class DatabaseStorage implements IStorage {
         .for("update");
       if (!locked) return {};
       if (locked.status !== 'active') return {};
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${'wallet:' + locked.advertiserId}, 0))`);
       const currentSpent = locked.spentEGP || 0;
       const budget = locked.budgetEGP || 0;
-      if (budget > 0 && currentSpent >= budget) return {};
+      if (budget > 0 && currentSpent + cpcRate > budget) {
+        await tx.update(adCampaigns).set({ status: 'paused' }).where(eq(adCampaigns.id, campaignId));
+        return {};
+      }
+      const [wallet] = await tx.select({
+        balance: sql<number>`COALESCE(SUM(CASE
+          WHEN ${revenueTransactions.type} IN ('earning', 'wallet_recharge') THEN ${revenueTransactions.amountEGP}
+          WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
+          ELSE 0 END), 0)`,
+      }).from(revenueTransactions).where(eq(revenueTransactions.userId, locked.advertiserId));
+      if (Number(wallet?.balance ?? 0) < cpcRate) {
+        await tx.update(adCampaigns).set({ status: 'paused' }).where(eq(adCampaigns.id, campaignId));
+        return {};
+      }
 
       const newSpent = currentSpent + cpcRate;
       await tx.update(adCampaigns).set({

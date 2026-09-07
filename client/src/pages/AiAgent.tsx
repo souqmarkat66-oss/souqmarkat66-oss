@@ -15,8 +15,6 @@ import {
 } from "lucide-react";
 import { useTTS } from "@/hooks/use-tts";
 
-const ADMIN_ID = "54219806";
-
 interface FileNode {
   name: string; path: string; type: "file" | "dir";
   size?: number; children?: FileNode[];

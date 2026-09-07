@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { deleteVaultSecret, getProviderSecret, hasEnvironmentSecret, setVaultSecret, validateVaultSecret } from "./secretVault";
 
 const execFileAsync = promisify(execFile);
 const PROJECT_ROOT = process.cwd();
@@ -242,7 +243,7 @@ async function callGemini(
   webSearch: boolean,
   apiKey?: string,
 ): Promise<{ text: string; model: string }> {
-  const key = apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  const key = apiKey || await getProviderSecret("gemini_api_key");
   if (!key) throw new Error("no_gemini_key");
   const contents = messages.map(m => ({
     role: m.role === "assistant" ? "model" : "user",
@@ -371,8 +372,7 @@ const INTENT_FALLBACK_CHAINS: Record<string, AiProvider[]> = {
 };
 
 function maskKey(k: string): string {
-  if (k.length <= 8) return "****";
-  return `${k.slice(0, 4)}...${k.slice(-4)}`;
+  return k.length >= 4 ? `••••${k.slice(-4)}` : "••••";
 }
 
 /* تشفير مفاتيح API قبل تخزينها (AES-256-GCM بمفتاح مشتق من SESSION_SECRET) */
@@ -402,16 +402,13 @@ function decryptSecret(stored: string): string | null {
 }
 
 async function getCustomKey(p: AiProvider): Promise<string | null> {
-  try {
-    const raw = await storage.getSetting(PROVIDER_KEY_SETTING(p));
-    return raw ? decryptSecret(raw) : null;
-  } catch { return null; }
+  return getProviderSecret(`${p}_api_key` as "openai_api_key" | "gemini_api_key" | "deepseek_api_key" | "anthropic_api_key");
 }
 
 async function providerAvailable(p: AiProvider): Promise<boolean> {
   if (await getCustomKey(p)) return true;
   if (p === "openai") return true; // متوفر دائماً عبر تكامل Replit
-  if (p === "gemini") return !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+  if (p === "gemini") return !!(await getProviderSecret("gemini_api_key"));
   return false; // deepseek و anthropic يحتاجان مفتاح مخصص
 }
 
@@ -685,13 +682,16 @@ export function registerAiAgentRoutes(
         if (provider) {
           if (!AI_PROVIDERS.includes(provider))
             return res.status(400).json({ message: "مزوّد غير معروف" });
-          if (typeof apiKey !== "string" || apiKey.trim().length < 10)
+          const validKey = validateVaultSecret(apiKey);
+          if (!validKey)
             return res.status(400).json({ message: "مفتاح API غير صالح" });
-          await storage.setSetting(PROVIDER_KEY_SETTING(provider), encryptSecret(apiKey.trim()));
+          if (hasEnvironmentSecret(`${provider}_api_key` as any))
+            return res.status(409).json({ message: "هذا المزوّد مُدار من متغيرات البيئة" });
+          await setVaultSecret(`${provider}_api_key` as any, validKey, adminId(req));
         }
         res.json({ success: true });
       } catch (e: any) {
-        res.status(500).json({ message: e.message });
+        res.status(500).json({ message: "تعذر حفظ إعدادات المزوّد" });
       }
     }
   );
@@ -705,10 +705,12 @@ export function registerAiAgentRoutes(
         const p = req.params.provider as AiProvider;
         if (!AI_PROVIDERS.includes(p))
           return res.status(400).json({ message: "مزوّد غير معروف" });
-        await storage.setSetting(PROVIDER_KEY_SETTING(p), "");
+        if (hasEnvironmentSecret(`${p}_api_key` as any))
+          return res.status(409).json({ message: "هذا المزوّد مُدار من متغيرات البيئة" });
+        await deleteVaultSecret(`${p}_api_key` as any);
         res.json({ success: true });
       } catch (e: any) {
-        res.status(500).json({ message: e.message });
+        res.status(500).json({ message: "تعذر حذف إعدادات المزوّد" });
       }
     }
   );

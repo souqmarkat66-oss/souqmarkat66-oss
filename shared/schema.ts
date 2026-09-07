@@ -18,6 +18,19 @@ export const platformSettings = pgTable("platform_settings", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Encrypted integration values only. DATABASE_URL and all environment values
+// are deliberately excluded from this table.
+export const secretVault = pgTable("secret_vault", {
+  name: text("name").primaryKey(),
+  encryptedValue: text("encrypted_value").notNull(),
+  iv: varchar("iv", { length: 24 }).notNull(),
+  authTag: varchar("auth_tag", { length: 24 }).notNull(),
+  maskedLast4: varchar("masked_last4", { length: 4 }).notNull(),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type SecretVault = typeof secretVault.$inferSelect;
+
 // ============================================================
 // AI USAGE TABLE
 // ============================================================

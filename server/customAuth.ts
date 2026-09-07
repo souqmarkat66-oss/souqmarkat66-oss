@@ -4,6 +4,107 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { checkIsAdmin } from "./adminCheck";
+import { createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { ReplitConnectors } from "@replit/connectors-sdk";
+
+const RESET_TTL_MS = 10 * 60 * 1000;
+const PROOF_TTL_MS = 5 * 60 * 1000;
+const RESEND_COOLDOWN_MS = 60 * 1000;
+const GENERIC_RESET_MESSAGE = "إذا كان الحساب مسجلاً، فسنرسل رمز تحقق إلى وسيلة الاتصال المختارة";
+const ipResetRequests = new Map<string, number[]>();
+
+function resetSecret(): string {
+  const value = process.env.PASSWORD_RESET_HMAC_SECRET;
+  if (!value || value.length < 32) throw new Error("PASSWORD_RESET_HMAC_SECRET must contain at least 32 characters");
+  return value;
+}
+
+function keyedHash(kind: string, challengeId: string, value: string): string {
+  return createHmac("sha256", resetSecret()).update(`${kind}:${challengeId}:${value}`).digest("hex");
+}
+
+function requestIp(req: Request): string {
+  return req.ip || req.socket.remoteAddress || "unknown";
+}
+
+function consumeIpLimit(ip: string): boolean {
+  const now = Date.now();
+  if (ipResetRequests.size > 10_000) {
+    ipResetRequests.forEach((times, key) => {
+      if (!times.some((time: number) => now - time < 60 * 60 * 1000)) ipResetRequests.delete(key);
+    });
+    while (ipResetRequests.size > 10_000) {
+      const oldestKey = ipResetRequests.keys().next().value;
+      if (!oldestKey) break;
+      ipResetRequests.delete(oldestKey);
+    }
+  }
+  const recent = (ipResetRequests.get(ip) || []).filter((time) => now - time < 60 * 60 * 1000);
+  if (recent.length >= 10) return false;
+  recent.push(now);
+  ipResetRequests.set(ip, recent);
+  return true;
+}
+
+function hashesEqual(left: string, right: string): boolean {
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
+}
+
+function validIdentifier(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 254) return false;
+  const input = value.trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input) || /^\+?[0-9]{8,15}$/.test(input);
+}
+
+function maskEmail(email: string): string {
+  const [local, domain] = email.split("@");
+  return `${local.slice(0, 2)}${"*".repeat(Math.max(2, local.length - 2))}@${domain}`;
+}
+
+function maskPhone(phone: string): string {
+  return `${phone.slice(0, Math.min(3, phone.length))}${"*".repeat(Math.max(3, phone.length - 5))}${phone.slice(-2)}`;
+}
+
+async function sendResetOtp(channel: "email" | "sms", destination: string, otp: string) {
+  const connectors = new ReplitConnectors();
+  if (channel === "email") {
+    const from = process.env.PASSWORD_RESET_EMAIL_FROM;
+    if (!from) throw new Error("PASSWORD_RESET_EMAIL_FROM is not configured");
+    const response = await connectors.proxy("resend", "/emails", {
+      method: "POST",
+      body: {
+        from,
+        to: [destination],
+        subject: "رمز إعادة تعيين كلمة المرور",
+        html: `<p dir="rtl">رمز التحقق الخاص بك هو <strong>${otp}</strong>. تنتهي صلاحيته خلال 10 دقائق. لا تشاركه مع أحد.</p>`,
+      },
+    });
+    if (!response.ok) throw new Error(`Resend delivery failed (${response.status})`);
+    return;
+  }
+
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const from = process.env.TWILIO_FROM_NUMBER;
+  if (!accountSid || !from) throw new Error("Twilio sender configuration is missing");
+  const body = new URLSearchParams({
+    To: destination,
+    From: from,
+    Body: `رمز إعادة تعيين كلمة المرور: ${otp}. صالح لمدة 10 دقائق.`,
+  });
+  const response = await connectors.proxy(
+    "twilio",
+    `/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`,
+    { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded" } },
+  );
+  if (!response.ok) throw new Error(`Twilio delivery failed (${response.status})`);
+}
+
+function regenerateSession(req: Request): Promise<void> {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate((error) => error ? reject(error) : resolve());
+  });
+}
 
 // ── Extend session ────────────────────────────────────────────────
 declare module "express-session" {
@@ -86,16 +187,15 @@ export function registerCustomAuthRoutes(app: Express) {
       const result = await db.execute(
         sql`SELECT id, email, phone, first_name, last_name, profile_image_url, password_hash
             FROM users
-            WHERE (LOWER(email) = LOWER(${identifier}) OR phone = ${identifier} OR id = ${identifier})
+            WHERE (LOWER(email) = LOWER(${identifier}) OR phone = ${identifier})
             LIMIT 1`
       );
       const user: any = result.rows[0];
       if (!user) return res.status(401).json({ message: "البريد الإلكتروني أو رقم الهاتف أو الـ ID غير موجود" });
 
       // First-time login for Replit-imported accounts (no password set)
-      if (!user.password_hash) {
-        return res.status(403).json({ message: "first_login", userId: user.id });
-      }
+      if (!user.password_hash)
+        return res.status(403).json({ message: "يلزم التحقق من وسيلة الاتصال لتعيين كلمة مرور" });
 
       const match = await bcrypt.compare(password, user.password_hash);
       if (!match) return res.status(401).json({ message: "كلمة المرور غير صحيحة" });
@@ -155,20 +255,47 @@ export function registerCustomAuthRoutes(app: Express) {
     }
   });
 
-  // ── POST /api/auth/set-password (first-login / forgot-password) ─
+  // ── POST /api/auth/set-password (verified recovery only) ────────
   app.post("/api/auth/set-password", async (req: Request, res: Response) => {
-    const { userId, password } = req.body;
-    if (!userId || !password || password.length < 6)
+    const { challengeId, resetProof, password } = req.body;
+    if (
+      typeof challengeId !== "string" || typeof resetProof !== "string" ||
+      typeof password !== "string" || password.length < 8 || password.length > 128
+    )
       return res.status(400).json({ message: "بيانات غير صحيحة" });
     try {
-      const hash = await bcrypt.hash(password, 10);
-      await db.execute(sql`UPDATE users SET password_hash = ${hash} WHERE id = ${userId}`);
-      // Fetch user and log them in
-      const result = await db.execute(
-        sql`SELECT id, email, phone, first_name, last_name, profile_image_url FROM users WHERE id = ${userId} LIMIT 1`
-      );
-      const user: any = result.rows[0];
-      if (!user) return res.status(404).json({ message: "المستخدم غير موجود" });
+      const proofHash = keyedHash("proof", challengeId, resetProof);
+      const passwordHash = await bcrypt.hash(password, 12);
+      const user = await db.transaction(async (tx) => {
+        const result = await tx.execute(sql`
+          SELECT c.user_id, u.id, u.email, u.phone, u.first_name, u.last_name, u.profile_image_url
+          FROM password_reset_challenges c
+          JOIN users u ON u.id = c.user_id
+          WHERE c.id = ${challengeId}
+            AND c.proof_hash = ${proofHash}
+            AND c.verified_at IS NOT NULL
+            AND c.proof_expires_at > NOW()
+            AND c.used_at IS NULL
+          FOR UPDATE OF c
+        `);
+        const selected: any = result.rows[0];
+        if (!selected) return null;
+        await tx.execute(sql`UPDATE users SET password_hash = ${passwordHash}, updated_at = NOW() WHERE id = ${selected.user_id}`);
+        await tx.execute(sql`
+          UPDATE password_reset_challenges SET used_at = NOW()
+          WHERE user_id = ${selected.user_id} AND used_at IS NULL
+        `);
+        return selected;
+      });
+      if (!user) return res.status(400).json({ message: "انتهت صلاحية جلسة إعادة التعيين، ابدأ من جديد" });
+
+      // Remove old custom-login sessions. The current anonymous reset session
+      // is then regenerated below, preventing session fixation.
+      await db.execute(sql`
+        DELETE FROM sessions
+        WHERE sess->'customUser'->>'id' = ${user.id}
+      `);
+      await regenerateSession(req);
       (req.session as any).customUser = {
         id:              user.id,
         email:           user.email,
@@ -177,32 +304,170 @@ export function registerCustomAuthRoutes(app: Express) {
         lastName:        user.last_name,
         profileImageUrl: user.profile_image_url,
       };
-      res.json({ success: true });
+      req.session.save((error) => {
+        if (error) return res.status(500).json({ message: "تعذر إنشاء جلسة تسجيل الدخول" });
+        res.json({ success: true });
+      });
     } catch (e: any) {
-      res.status(500).json({ message: e.message });
+      console.error("[Password reset] completion failed:", e?.message);
+      res.status(500).json({ message: "تعذر إكمال إعادة تعيين كلمة المرور" });
     }
   });
 
   // ── POST /api/auth/forgot-password ─────────────────────────────
   app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
-    const { email, phone, identifier } = req.body;
-    const lookup = identifier || email || phone;
-    if (!lookup)
-      return res.status(400).json({ message: "البريد الإلكتروني أو رقم الهاتف أو الـ ID مطلوب" });
+    const { identifier, channel } = req.body;
+    if (!validIdentifier(identifier))
+      return res.status(400).json({ message: "أدخل بريداً إلكترونياً أو رقم هاتف صالحاً" });
+    if (channel !== undefined && channel !== "email" && channel !== "sms")
+      return res.status(400).json({ message: "قناة الإرسال غير صالحة" });
+    const ip = requestIp(req);
+    if (!consumeIpLimit(ip))
+      return res.status(429).json({ message: GENERIC_RESET_MESSAGE, retryAfterSeconds: 60 });
+
     try {
+      resetSecret();
+      const lookup = identifier.trim();
       const result = await db.execute(
-        sql`SELECT id, email, phone, first_name FROM users
-            WHERE (LOWER(email) = LOWER(${lookup}) OR phone = ${lookup} OR id = ${lookup})
+        sql`SELECT id, email, phone FROM users
+            WHERE LOWER(email) = LOWER(${lookup}) OR phone = ${lookup}
             LIMIT 1`
       );
       const user: any = result.rows[0];
-      // For security, always respond the same even if user not found
-      if (!user) return res.status(200).json({ message: "first_login", userId: null, notFound: true });
-      // Clear password to force reset
-      await db.execute(sql`UPDATE users SET password_hash = NULL WHERE id = ${user.id}`);
-      return res.json({ message: "first_login", userId: user.id, firstName: user.first_name });
+      const fallbackChannel: "email" | "sms" = lookup.includes("@") ? "email" : "sms";
+      if (!user) {
+        return res.status(202).json({
+          message: GENERIC_RESET_MESSAGE,
+          challengeId: randomBytes(24).toString("hex"),
+          channel: fallbackChannel,
+          destination: fallbackChannel === "email" ? maskEmail(lookup) : maskPhone(lookup),
+          expiresInSeconds: 600,
+          resendAfterSeconds: 60,
+        });
+      }
+
+      const destinations = [
+        ...(user.email ? [{ channel: "email" as const, destination: maskEmail(user.email) }] : []),
+        ...(user.phone ? [{ channel: "sms" as const, destination: maskPhone(user.phone) }] : []),
+      ];
+      if (destinations.length > 1 && !channel) {
+        return res.status(202).json({ message: GENERIC_RESET_MESSAGE, requiresChannel: true, destinations });
+      }
+      const selectedChannel = (channel || destinations[0]?.channel) as "email" | "sms" | undefined;
+      const destination = selectedChannel === "email" ? user.email : user.phone;
+      if (!selectedChannel || !destination) {
+        return res.status(202).json({
+          message: GENERIC_RESET_MESSAGE,
+          challengeId: randomBytes(24).toString("hex"),
+          channel: fallbackChannel,
+          destination: fallbackChannel === "email" ? maskEmail(lookup) : maskPhone(lookup),
+          expiresInSeconds: 600,
+          resendAfterSeconds: 60,
+        });
+      }
+
+      const rateResult = await db.execute(sql`
+        SELECT
+          COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour')::int AS hourly_count,
+          MAX(last_sent_at) AS last_sent_at,
+          (ARRAY_AGG(id ORDER BY last_sent_at DESC))[1] AS latest_id
+        FROM password_reset_challenges WHERE user_id = ${user.id}
+      `);
+      const rate: any = rateResult.rows[0];
+      const lastSent = rate?.last_sent_at ? new Date(rate.last_sent_at).getTime() : 0;
+      const coolingDown = Date.now() - lastSent < RESEND_COOLDOWN_MS;
+      if ((rate?.hourly_count || 0) >= 5 || coolingDown) {
+        return res.status(202).json({
+          message: GENERIC_RESET_MESSAGE,
+          challengeId: coolingDown && rate.latest_id ? rate.latest_id : randomBytes(24).toString("hex"),
+          channel: selectedChannel,
+          destination: selectedChannel === "email" ? maskEmail(destination) : maskPhone(destination),
+          expiresInSeconds: 600,
+          resendAfterSeconds: 60,
+        });
+      }
+
+      const challengeId = randomBytes(24).toString("hex");
+      const otp = randomInt(0, 1_000_000).toString().padStart(6, "0");
+      const masked = selectedChannel === "email" ? maskEmail(destination) : maskPhone(destination);
+      await db.execute(sql`
+        INSERT INTO password_reset_challenges
+          (id, user_id, channel, destination_masked, otp_hash, expires_at, request_ip_hash)
+        VALUES (
+          ${challengeId}, ${user.id}, ${selectedChannel}, ${masked},
+          ${keyedHash("otp", challengeId, otp)}, ${new Date(Date.now() + RESET_TTL_MS)},
+          ${keyedHash("ip", challengeId, ip)}
+        )
+      `);
+      try {
+        await sendResetOtp(selectedChannel, destination, otp);
+      } catch (deliveryError: any) {
+        await db.execute(sql`UPDATE password_reset_challenges SET used_at = NOW() WHERE id = ${challengeId}`);
+        console.error("[Password reset] OTP delivery failed:", deliveryError?.message);
+        // Preserve the same external response as a successful request so a
+        // connector outage cannot become an account-existence oracle.
+        return res.status(202).json({
+          message: GENERIC_RESET_MESSAGE,
+          challengeId,
+          channel: selectedChannel,
+          destination: masked,
+          expiresInSeconds: 600,
+          resendAfterSeconds: 60,
+        });
+      }
+      return res.status(202).json({
+        message: GENERIC_RESET_MESSAGE,
+        challengeId,
+        channel: selectedChannel,
+        destination: masked,
+        expiresInSeconds: 600,
+        resendAfterSeconds: 60,
+      });
     } catch (e: any) {
-      res.status(500).json({ message: e.message });
+      console.error("[Password reset] request failed:", e?.message);
+      res.status(500).json({ message: "تعذر بدء إعادة تعيين كلمة المرور" });
+    }
+  });
+
+  // ── POST /api/auth/verify-reset-otp ─────────────────────────────
+  app.post("/api/auth/verify-reset-otp", async (req: Request, res: Response) => {
+    const { challengeId, otp } = req.body;
+    if (typeof challengeId !== "string" || !/^\d{6}$/.test(otp || ""))
+      return res.status(400).json({ message: "رمز التحقق غير صالح أو منتهي" });
+    try {
+      const otpHash = keyedHash("otp", challengeId, otp);
+      const proof = randomBytes(32).toString("base64url");
+      const verified = await db.transaction(async (tx) => {
+        const result = await tx.execute(sql`
+          SELECT id, otp_hash, attempts FROM password_reset_challenges
+          WHERE id = ${challengeId} AND used_at IS NULL AND verified_at IS NULL
+          FOR UPDATE
+        `);
+        const challenge: any = result.rows[0];
+        if (!challenge || challenge.attempts >= 5) return false;
+        if (!hashesEqual(challenge.otp_hash, otpHash)) {
+          await tx.execute(sql`
+            UPDATE password_reset_challenges
+            SET attempts = attempts + 1,
+                used_at = CASE WHEN attempts + 1 >= 5 THEN NOW() ELSE used_at END
+            WHERE id = ${challengeId}
+          `);
+          return false;
+        }
+        const update = await tx.execute(sql`
+          UPDATE password_reset_challenges
+          SET verified_at = NOW(), proof_hash = ${keyedHash("proof", challengeId, proof)},
+              proof_expires_at = ${new Date(Date.now() + PROOF_TTL_MS)}
+          WHERE id = ${challengeId} AND expires_at > NOW()
+          RETURNING id
+        `);
+        return update.rows.length === 1;
+      });
+      if (!verified) return res.status(400).json({ message: "رمز التحقق غير صالح أو منتهي" });
+      return res.json({ resetProof: proof, expiresInSeconds: 300 });
+    } catch (e: any) {
+      console.error("[Password reset] verification failed:", e?.message);
+      return res.status(500).json({ message: "تعذر التحقق من الرمز" });
     }
   });
 

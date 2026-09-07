@@ -23,6 +23,15 @@ import { getAfsEntityId, getAfsPaymentStatus, getAfsWidget, prepareAfsCheckout }
 import express from "express";
 import type { PoolClient } from "pg";
 import * as webpushModule from "web-push";
+import { isAdminIdentity, SUPER_ADMIN_IDS, SUPER_ADMIN_EMAILS } from "./adminCheck";
+import {
+  deleteVaultSecret,
+  hasEnvironmentSecret,
+  isVaultSecretName,
+  listVaultSecretMetadata,
+  setVaultSecret,
+  validateVaultSecret,
+} from "./secretVault";
 const webpush: typeof webpushModule = (webpushModule as any).default || webpushModule;
 
 // Deep-convert snake_case keys to camelCase recursively
@@ -39,51 +48,42 @@ function deepToCamel(obj: any): any {
   return obj;
 }
 
-// Admin user (single super-admin, hardcoded — cannot be removed via UI)
-const ADMIN_USER_ID  = "54165148";
-const ADMIN_EMAIL    = "ahmedesmat.5151@gmail.com";
-
-// Extra admins added via the admin panel (persisted in platform_settings.extra_admin_ids)
-const _extraAdminIds = new Set<string>();
-let _extraAdminLoaded = false;
-
-async function loadExtraAdminIds() {
-  try {
-    const v = await storage.getSetting("extra_admin_ids");
-    _extraAdminIds.clear();
-    if (v && v.trim()) {
-      v.split(",").map(s => s.trim()).filter(Boolean).forEach(id => _extraAdminIds.add(id));
-    }
-    _extraAdminLoaded = true;
-  } catch (e: any) {
-    console.error("[admin] loadExtraAdminIds failed:", e?.message);
-    _extraAdminLoaded = true;
-  }
-}
-
-async function saveExtraAdminIds() {
-  try {
-    await storage.setSetting("extra_admin_ids", Array.from(_extraAdminIds).join(","));
-  } catch (e: any) {
-    console.error("[admin] saveExtraAdminIds failed:", e?.message);
-  }
-}
+// These aliases are used only for system-authored messages and ledger rows.
+// The canonical identity policy itself lives in adminCheck.ts.
+const ADMIN_USER_ID = SUPER_ADMIN_IDS[0];
+const ADMIN_EMAIL = SUPER_ADMIN_EMAILS[0];
 
 function isSuperAdmin(req: any): boolean {
-  const sub   = req.user?.claims?.sub;
-  const email = req.user?.claims?.email?.toLowerCase();
-  return sub === ADMIN_USER_ID || email === ADMIN_EMAIL.toLowerCase();
+  return isAdminIdentity({
+    id: req.user?.claims?.sub,
+    email: req.user?.claims?.email,
+  });
 }
 
 function isAdminUser(req: any): boolean {
-  // Single-admin policy: extra_admin_ids is intentionally ignored.
   return isSuperAdmin(req);
 }
 
 async function requireAdmin(req: any, res: any, next: any) {
   if (!req.user) return res.status(401).json({ message: "Unauthorized" });
-  if (!_extraAdminLoaded) await loadExtraAdminIds();
   if (!isAdminUser(req)) return res.status(403).json({ message: "Admin access required" });
+  next();
+}
+
+// Session-authenticated JSON mutations must originate from this deployment.
+// Browsers send Origin for fetch requests; accepting its absence preserves
+// non-browser administrative tooling without trusting a foreign origin.
+function requireSameOrigin(req: any, res: any, next: any) {
+  const origin = req.get("origin");
+  if (origin) {
+    try {
+      if (new URL(origin).host !== req.get("host")) {
+        return res.status(403).json({ message: "Invalid request origin" });
+      }
+    } catch {
+      return res.status(403).json({ message: "Invalid request origin" });
+    }
+  }
   next();
 }
 
@@ -201,9 +201,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
     const existingPromo = await db.execute(sql`SELECT COUNT(*) as cnt FROM ads WHERE is_admin_promo = true`);
     const promoCount = Number((existingPromo.rows[0] as any).cnt);
-    const adminUser = await db.execute(sql`SELECT id FROM users WHERE id = '54219806' LIMIT 1`);
+    const adminUser = await db.execute(sql`SELECT id FROM users WHERE id = ${ADMIN_USER_ID} LIMIT 1`);
     if (promoCount === 0 && adminUser.rows.length > 0) {
-      const adminId = '54219806';
+      const adminId = ADMIN_USER_ID;
       const promoAdsData = [
         { title: 'iPhone 15 Pro Max — 256GB أزرق تيتانيوم', description: 'آيفون 15 برو ماكس جديد متبرشم بضمان الوكيل سنة كاملة — الكاميرا الأفضل في السوق', mediaUrl: 'https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=600', price: 42000 },
         { title: 'لابتوب Dell XPS 15 — Core i7 الجيل 13', description: 'لابتوب Dell XPS 15 بمعالج i7 وشاشة 4K OLED — مثالي للمصممين والمبرمجين، بحالة ممتازة', mediaUrl: 'https://images.unsplash.com/photo-1593642632559-0c6d3fc62b89?w=600', price: 28500 },
@@ -1465,7 +1465,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     );
     // Notify admin
     try {
-      const adminId = "54219806";
+      const adminId = ADMIN_USER_ID;
       await pool.query(
         `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coin_purchase', $2, $3)`,
         [adminId, `طلب شحن عملات: ${userName || userId} دفع ${amountEGP} ج.م مقابل ${coins} عملة`, JSON.stringify({ orderId: r.rows[0].id, paymentMethod })]
@@ -3165,13 +3165,19 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   // AD CAMPAIGNS - Meta/AdSense Style (isolated per advertiser)
   // ================================================================
   app.get("/api/campaigns", isAuthenticated, async (req: any, res) => {
+    const withPaymentType = (campaigns: any[]) => campaigns.map((campaign) => ({
+      ...campaign,
+      // Platform-owned campaigns are free; every advertiser campaign is
+      // wallet-funded and remains pending until an admin verifies funding.
+      paymentType: isAdminIdentity({ id: campaign.advertiserId }) ? "free" : "wallet_required",
+    }));
     // Only admin sees all campaigns, others see only their own
     if (isAdminUser(req) && req.query.all === 'true') {
       const campaigns = await storage.getAllAdCampaigns();
-      return res.json(campaigns);
+      return res.json(withPaymentType(campaigns));
     }
     const campaigns = await storage.getAdCampaigns(req.user.claims.sub);
-    res.json(campaigns);
+    res.json(withPaymentType(campaigns));
   });
 
   app.get("/api/campaigns/active", async (req, res) => {
@@ -3197,7 +3203,9 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     try {
       const { insertAdCampaignSchema } = await import("@shared/schema");
       const userId = req.user.claims.sub;
-      const input = insertAdCampaignSchema.parse({ ...req.body, advertiserId: userId });
+      // Campaigns always start pending.  The client must never be able to
+      // self-activate an unfunded (or unreviewed) campaign.
+      const input = insertAdCampaignSchema.parse({ ...req.body, advertiserId: userId, status: "pending" });
       const campaign = await storage.createAdCampaign(input);
       res.status(201).json(campaign);
     } catch (err: any) {
@@ -3209,7 +3217,13 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     const campaign = await storage.getAdCampaign(Number(req.params.id));
     if (!campaign) return res.status(404).json({ message: "Not found" });
     if (campaign.advertiserId !== req.user.claims.sub && !isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
-    const updated = await storage.updateAdCampaign(Number(req.params.id), req.body);
+    // Advertisers may pause their own campaign, but activation is an admin
+    // approval action after payment/funding checks.
+    const requestedStatus = req.body?.status;
+    if (requestedStatus && requestedStatus !== "paused") {
+      return res.status(403).json({ message: "لا يمكن تفعيل الحملة ذاتياً؛ يجب اعتمادها بعد تأكيد التمويل." });
+    }
+    const updated = await storage.updateAdCampaign(Number(req.params.id), { status: "paused" });
     res.json(updated);
   });
 
@@ -4251,7 +4265,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         }
         return res.status(200).json({
           ...afsSafeOrder(existing, true),
-          ...getAfsWidget(existing.checkout_id),
+          ...(await getAfsWidget(existing.checkout_id)),
         });
       }
 
@@ -4275,7 +4289,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         if (!winner.rows[0]) throw insertError;
         return res.status(200).json({
           ...afsSafeOrder(winner.rows[0], true),
-          ...getAfsWidget(winner.rows[0].checkout_id),
+          ...(await getAfsWidget(winner.rows[0].checkout_id)),
         });
       }
       res.status(201).json({
@@ -4306,7 +4320,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       }
       // Widget values are only supplied to the owner, never to an inspecting admin.
       const own = order.user_id === req.user.claims.sub;
-      res.json({ ...afsSafeOrder(order, own), ...(own ? getAfsWidget(order.checkout_id) : {}) });
+      res.json({ ...afsSafeOrder(order, own), ...(own ? await getAfsWidget(order.checkout_id) : {}) });
     } catch (err) {
       console.error("[payments/afs] order lookup failed:", err instanceof Error ? err.message : "unknown error");
       res.status(503).json({ message: "تعذر تحميل عملية الدفع حالياً" });
@@ -4328,6 +4342,16 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     if (!initial || initial.user_id !== req.user.claims.sub) return res.status(404).json({ message: "عملية الدفع غير موجودة" });
     if (initial.status === "paid") {
       await notifyAfsPaid(initial);
+      if (initial.purpose === "wallet_top_up") {
+        const balance = await storage.getUserBalanceEGP(initial.user_id);
+        walletEmitter.emit("wallet:update", {
+          userId: initial.user_id,
+          amountEGP: Number(initial.amount_egp),
+          type: "wallet_recharge",
+          description: "شحن المحفظة ببطاقة",
+          newBalance: balance,
+        });
+      }
       return res.json({
         status: "paid",
         purpose: initial.purpose,
@@ -4374,7 +4398,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       const orderMinorUnits = Math.round(Number(initial.amount_egp) * 100);
       if (provider.currency !== "EGP" || provider.paymentType !== "DB"
           || !Number.isSafeInteger(providerMinorUnits) || providerMinorUnits !== orderMinorUnits
-          || typeof entity !== "string" || !entity || entity !== getAfsEntityId()) {
+          || typeof entity !== "string" || !entity || entity !== await getAfsEntityId()) {
         outcome = "failed";
         verificationMismatch = true;
       }
@@ -4483,6 +4507,18 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       await client.query("COMMIT");
       if (outcome === "paid") {
         await notifyAfsPaid(order);
+        // The ledger insert and paid marker have committed together. Emit only
+        // afterwards so connected clients never observe credit that rolled back.
+        if (order.purpose === "wallet_top_up") {
+          const balance = await storage.getUserBalanceEGP(order.user_id);
+          walletEmitter.emit("wallet:update", {
+            userId: order.user_id,
+            amountEGP: Number(order.amount_egp),
+            type: "wallet_recharge",
+            description: "شحن المحفظة ببطاقة",
+            newBalance: balance,
+          });
+        }
       } else if (outcome === "failed") {
         const rejection = classifyAfsFailure(code, description, verificationMismatch);
         await recordPaymentFailure({
@@ -4781,11 +4817,32 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
 
   app.get("/api/admin/campaigns", isAuthenticated, requireAdmin, async (req: any, res) => {
     const campaigns = await storage.getAllAdCampaigns();
-    res.json(campaigns);
+    res.json(campaigns.map((campaign) => ({
+      ...campaign,
+      paymentType: isAdminIdentity({ id: campaign.advertiserId }) ? "free" : "wallet_required",
+    })));
   });
 
   app.put("/api/admin/campaigns/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
-    const updated = await storage.updateAdCampaign(Number(req.params.id), req.body);
+    const id = Number(req.params.id);
+    const requestedStatus = req.body?.status;
+    if (!Number.isSafeInteger(id) || !["active", "paused", "rejected", "completed", "pending"].includes(requestedStatus)) {
+      return res.status(400).json({ message: "حالة الحملة غير صالحة" });
+    }
+    const campaign = await storage.getAdCampaign(id);
+    if (!campaign) return res.status(404).json({ message: "الحملة غير موجودة" });
+    if (requestedStatus === "active" && !isAdminIdentity({ id: campaign.advertiserId })) {
+      const required = Math.max(0, Number(campaign.budgetEGP || 0) - Number(campaign.spentEGP || 0));
+      const balance = await storage.getUserBalanceEGP(campaign.advertiserId);
+      if (balance < required) {
+        return res.status(402).json({
+          message: "لا يمكن تفعيل الحملة قبل تأكيد تمويل رصيد المحفظة.",
+          required,
+          balance,
+        });
+      }
+    }
+    const updated = await storage.updateAdCampaign(id, { status: requestedStatus });
     res.json(updated);
   });
 
@@ -5292,6 +5349,56 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       await db.execute(sql`INSERT INTO admin_activity_log (admin_id, action, target, details) VALUES (${adminId}, ${action}, ${target}, ${details})`);
     } catch {}
     res.json({ success: true });
+  });
+
+  // Metadata-only integration vault. It never serializes encrypted material,
+  // decrypted values, or environment values to an HTTP response.
+  app.get("/api/admin/secret-vault", isAuthenticated, requireAdmin, async (_req: any, res) => {
+    try {
+      res.json(await listVaultSecretMetadata());
+    } catch {
+      res.status(500).json({ message: "Unable to load integration status" });
+    }
+  });
+
+  app.put("/api/admin/secret-vault/:name", isAuthenticated, requireAdmin, requireSameOrigin, async (req: any, res) => {
+    const name = String(req.params.name || "");
+    if (!isVaultSecretName(name)) {
+      return res.status(400).json({ message: "Unknown or environment-managed integration" });
+    }
+    // Environment configuration has explicit operational precedence and cannot
+    // be shadowed by a stale value in the administrative vault.
+    if (hasEnvironmentSecret(name)) {
+      return res.status(409).json({ message: "This integration is managed by environment configuration" });
+    }
+    const value = validateVaultSecret(req.body?.value);
+    if (!value) return res.status(400).json({ message: "Secret must be 10–4096 characters and contain no line breaks" });
+    try {
+      await setVaultSecret(name, value, String(req.user.claims.sub));
+      // Audit metadata only. In particular, never put a value, suffix, or
+      // provider response in the activity log.
+      await db.execute(sql`INSERT INTO admin_activity_log (admin_id, action, target, details) VALUES (${req.user.claims.sub}, 'secret_vault_set', ${name}, 'integration secret updated')`);
+      res.json({ success: true, validation: "format_only" });
+    } catch {
+      res.status(503).json({ message: "Secret vault is unavailable; verify SECRET_VAULT_MASTER_KEY" });
+    }
+  });
+
+  app.delete("/api/admin/secret-vault/:name", isAuthenticated, requireAdmin, requireSameOrigin, async (req: any, res) => {
+    const name = String(req.params.name || "");
+    if (!isVaultSecretName(name)) {
+      return res.status(400).json({ message: "Unknown or environment-managed integration" });
+    }
+    if (hasEnvironmentSecret(name)) {
+      return res.status(409).json({ message: "This integration is managed by environment configuration" });
+    }
+    try {
+      await deleteVaultSecret(name);
+      await db.execute(sql`INSERT INTO admin_activity_log (admin_id, action, target, details) VALUES (${req.user.claims.sub}, 'secret_vault_delete', ${name}, 'integration secret deleted')`);
+      res.json({ success: true });
+    } catch {
+      res.status(500).json({ message: "Unable to delete integration secret" });
+    }
   });
 
   // ================================================================
@@ -6629,7 +6736,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       );
       // Alert admin
       await createNotification(
-        "54219806", "fraud_alert",
+        ADMIN_USER_ID, "fraud_alert",
         "🚨 بلاغ احتيال جديد",
         `بلاغ على ${targetType} #${targetId}: ${String(reason).slice(0, 80)}`,
         `/admin`
@@ -7764,22 +7871,9 @@ ${reelTags}
   // ── Admins management (for admins tab) ────────────────────────
   app.get("/api/admin/admins", isAuthenticated, requireAdmin, async (req: any, res) => {
     if (!isSuperAdmin(req)) return res.status(403).json({ message: "superadmin only" });
-    try {
-      if (!_extraAdminLoaded) await loadExtraAdminIds();
-      const extraIds = Array.from(_extraAdminIds);
-      let extraUsers: any[] = [];
-      if (extraIds.length > 0) {
-        const idsLiteral = extraIds.map(id => `'${id.replace(/'/g,"''")}'`).join(",");
-        const rows = await db.execute(sql.raw(`
-          SELECT id, email, first_name, last_name, profile_image_url, phone, created_at
-          FROM users WHERE id IN (${idsLiteral})`));
-        extraUsers = rows.rows as any[];
-      }
-      const hardcoded = [
-        { id: ADMIN_USER_ID, email: ADMIN_EMAIL, superAdmin: true },
-      ];
-      res.json({ hardcoded, extra: extraUsers });
-    } catch (e: any) { res.status(500).json({ message: e.message }); }
+    // Extra administrator IDs were never part of the authorization policy.
+    // Returning them here made the UI imply privileges that routes would deny.
+    res.json({ hardcoded: [{ id: ADMIN_USER_ID, email: ADMIN_EMAIL, superAdmin: true }], extra: [] });
   });
 
   app.post("/api/admin/admins/add", isAuthenticated, requireAdmin, async (_req: any, res) => {
@@ -7789,11 +7883,7 @@ ${reelTags}
 
   app.post("/api/admin/admins/remove", isAuthenticated, requireAdmin, async (req: any, res) => {
     if (!isSuperAdmin(req)) return res.status(403).json({ message: "superadmin only" });
-    const { userId } = req.body;
-    if (!userId) return res.status(400).json({ message: "userId مطلوب" });
-    _extraAdminIds.delete(String(userId));
-    await saveExtraAdminIds();
-    res.json({ success: true });
+    res.status(403).json({ message: "إدارة الأدمنات الإضافية معطّلة — النظام يعمل بأدمن واحد فقط" });
   });
 
   // ── Wallet balance endpoint (used by ticker UI + others) ──
@@ -7813,8 +7903,7 @@ ${reelTags}
 
   // Helper: check if a userId is admin (super-admins + extra admins from settings)
   function isAdminUserId(userId: string): boolean {
-    if (!userId) return false;
-    return userId === ADMIN_USER_ID;
+    return isAdminIdentity({ id: userId });
   }
 
   // Helper: stop billing for a ticker ad
@@ -7946,7 +8035,6 @@ ${reelTags}
     const userId = req.user.claims.sub;
     const { text, budgetEGP } = req.body || {};
     const txt = String(text || "").trim();
-    if (!_extraAdminLoaded) await loadExtraAdminIds();
     const isAdmin = isAdminUserId(userId);
     // Price is ALWAYS taken from server settings (admin-controlled), never trusted from client
     const price = isAdmin ? 0 : await getCurrentTickerPrice();
