@@ -14,9 +14,13 @@ const GENERIC_RESET_MESSAGE = "إذا كان الحساب مسجلاً، فسن�
 const ipResetRequests = new Map<string, number[]>();
 
 function resetSecret(): string {
-  const value = process.env.PASSWORD_RESET_HMAC_SECRET;
-  if (!value || value.length < 32) throw new Error("PASSWORD_RESET_HMAC_SECRET must contain at least 32 characters");
-  return value;
+  const dedicated = process.env.PASSWORD_RESET_HMAC_SECRET?.trim();
+  const sessionSecret = process.env.SESSION_SECRET?.trim();
+  const keyMaterial = dedicated && dedicated.length >= 32 ? dedicated : sessionSecret;
+  if (!keyMaterial || keyMaterial.length < 32) {
+    throw new Error("Password reset protection is not configured");
+  }
+  return createHmac("sha256", keyMaterial).update("password-reset-hmac-v1").digest("hex");
 }
 
 function keyedHash(kind: string, challengeId: string, value: string): string {
@@ -106,6 +110,12 @@ function regenerateSession(req: Request): Promise<void> {
   });
 }
 
+function saveSession(req: Request): Promise<void> {
+  return new Promise((resolve, reject) => {
+    req.session.save((error) => error ? reject(error) : resolve());
+  });
+}
+
 // ── Extend session ────────────────────────────────────────────────
 declare module "express-session" {
   interface SessionData {
@@ -191,15 +201,16 @@ export function registerCustomAuthRoutes(app: Express) {
             LIMIT 1`
       );
       const user: any = result.rows[0];
-      if (!user) return res.status(401).json({ message: "البريد الإلكتروني أو رقم الهاتف أو الـ ID غير موجود" });
+      if (!user) return res.status(401).json({ message: "بيانات تسجيل الدخول غير صحيحة" });
 
       // First-time login for Replit-imported accounts (no password set)
       if (!user.password_hash)
         return res.status(403).json({ message: "يلزم التحقق من وسيلة الاتصال لتعيين كلمة مرور" });
 
       const match = await bcrypt.compare(password, user.password_hash);
-      if (!match) return res.status(401).json({ message: "كلمة المرور غير صحيحة" });
+      if (!match) return res.status(401).json({ message: "بيانات تسجيل الدخول غير صحيحة" });
 
+      await regenerateSession(req);
       (req.session as any).customUser = {
         id:              user.id,
         email:           user.email,
@@ -208,6 +219,7 @@ export function registerCustomAuthRoutes(app: Express) {
         lastName:        user.last_name,
         profileImageUrl: user.profile_image_url,
       };
+      await saveSession(req);
 
       res.json({ success: true, user: { id: user.id, email: user.email, firstName: user.first_name, lastName: user.last_name } });
     } catch (e: any) {
@@ -240,6 +252,7 @@ export function registerCustomAuthRoutes(app: Express) {
             VALUES (${newId}, ${email || null}, ${phone || null}, ${firstName || null}, ${lastName || null}, ${hash})`
       );
 
+      await regenerateSession(req);
       (req.session as any).customUser = {
         id:              newId,
         email:           email || null,
@@ -248,6 +261,7 @@ export function registerCustomAuthRoutes(app: Express) {
         lastName:        lastName || null,
         profileImageUrl: null,
       };
+      await saveSession(req);
 
       res.status(201).json({ success: true, user: { id: newId, email, firstName, lastName } });
     } catch (e: any) {
@@ -294,6 +308,8 @@ export function registerCustomAuthRoutes(app: Express) {
       await db.execute(sql`
         DELETE FROM sessions
         WHERE sess->'customUser'->>'id' = ${user.id}
+           OR sess->'passport'->'user'->'claims'->>'sub' = ${user.id}
+           OR sess->'passport'->'user'->>'id' = ${user.id}
       `);
       await regenerateSession(req);
       (req.session as any).customUser = {
@@ -335,43 +351,22 @@ export function registerCustomAuthRoutes(app: Express) {
       );
       const user: any = result.rows[0];
       const fallbackChannel: "email" | "sms" = lookup.includes("@") ? "email" : "sms";
-      if (!user) {
-        return res.status(202).json({
-          message: GENERIC_RESET_MESSAGE,
-          challengeId: randomBytes(24).toString("hex"),
-          channel: fallbackChannel,
-          destination: fallbackChannel === "email" ? maskEmail(lookup) : maskPhone(lookup),
-          expiresInSeconds: 600,
-          resendAfterSeconds: 60,
-        });
-      }
-
-      const destinations = [
-        ...(user.email ? [{ channel: "email" as const, destination: maskEmail(user.email) }] : []),
-        ...(user.phone ? [{ channel: "sms" as const, destination: maskPhone(user.phone) }] : []),
-      ];
-      if (destinations.length > 1 && !channel) {
-        return res.status(202).json({ message: GENERIC_RESET_MESSAGE, requiresChannel: true, destinations });
-      }
-      const selectedChannel = (channel || destinations[0]?.channel) as "email" | "sms" | undefined;
-      const destination = selectedChannel === "email" ? user.email : user.phone;
-      if (!selectedChannel || !destination) {
-        return res.status(202).json({
-          message: GENERIC_RESET_MESSAGE,
-          challengeId: randomBytes(24).toString("hex"),
-          channel: fallbackChannel,
-          destination: fallbackChannel === "email" ? maskEmail(lookup) : maskPhone(lookup),
-          expiresInSeconds: 600,
-          resendAfterSeconds: 60,
-        });
-      }
+      const selectedChannel: "email" | "sms" = fallbackChannel;
+      const destination = user
+        ? (selectedChannel === "email" ? user.email : user.phone)
+        : null;
+      const deliverable = !!destination && (!channel || channel === selectedChannel);
+      const masked = destination
+        ? (selectedChannel === "email" ? maskEmail(destination) : maskPhone(destination))
+        : (selectedChannel === "email" ? maskEmail(lookup) : maskPhone(lookup));
+      const identifierHash = keyedHash("identifier", "global", lookup.toLowerCase());
 
       const rateResult = await db.execute(sql`
         SELECT
           COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour')::int AS hourly_count,
           MAX(last_sent_at) AS last_sent_at,
           (ARRAY_AGG(id ORDER BY last_sent_at DESC))[1] AS latest_id
-        FROM password_reset_challenges WHERE user_id = ${user.id}
+        FROM password_reset_challenges WHERE identifier_hash = ${identifierHash}
       `);
       const rate: any = rateResult.rows[0];
       const lastSent = rate?.last_sent_at ? new Date(rate.last_sent_at).getTime() : 0;
@@ -379,9 +374,9 @@ export function registerCustomAuthRoutes(app: Express) {
       if ((rate?.hourly_count || 0) >= 5 || coolingDown) {
         return res.status(202).json({
           message: GENERIC_RESET_MESSAGE,
-          challengeId: coolingDown && rate.latest_id ? rate.latest_id : randomBytes(24).toString("hex"),
+          challengeId: rate.latest_id || randomBytes(24).toString("hex"),
           channel: selectedChannel,
-          destination: selectedChannel === "email" ? maskEmail(destination) : maskPhone(destination),
+          destination: masked,
           expiresInSeconds: 600,
           resendAfterSeconds: 60,
         });
@@ -389,30 +384,21 @@ export function registerCustomAuthRoutes(app: Express) {
 
       const challengeId = randomBytes(24).toString("hex");
       const otp = randomInt(0, 1_000_000).toString().padStart(6, "0");
-      const masked = selectedChannel === "email" ? maskEmail(destination) : maskPhone(destination);
       await db.execute(sql`
         INSERT INTO password_reset_challenges
-          (id, user_id, channel, destination_masked, otp_hash, expires_at, request_ip_hash)
+          (id, user_id, identifier_hash, channel, destination_masked, otp_hash, expires_at, request_ip_hash)
         VALUES (
-          ${challengeId}, ${user.id}, ${selectedChannel}, ${masked},
+          ${challengeId}, ${user?.id || null}, ${identifierHash}, ${selectedChannel}, ${masked},
           ${keyedHash("otp", challengeId, otp)}, ${new Date(Date.now() + RESET_TTL_MS)},
           ${keyedHash("ip", challengeId, ip)}
         )
       `);
-      try {
-        await sendResetOtp(selectedChannel, destination, otp);
-      } catch (deliveryError: any) {
-        await db.execute(sql`UPDATE password_reset_challenges SET used_at = NOW() WHERE id = ${challengeId}`);
-        console.error("[Password reset] OTP delivery failed:", deliveryError?.message);
-        // Preserve the same external response as a successful request so a
-        // connector outage cannot become an account-existence oracle.
-        return res.status(202).json({
-          message: GENERIC_RESET_MESSAGE,
-          challengeId,
-          channel: selectedChannel,
-          destination: masked,
-          expiresInSeconds: 600,
-          resendAfterSeconds: 60,
+      // Respond before external delivery so provider latency cannot reveal
+      // whether the identifier matched an account.
+      if (deliverable) {
+        void sendResetOtp(selectedChannel, destination, otp).catch(async (deliveryError: any) => {
+          await db.execute(sql`UPDATE password_reset_challenges SET used_at = NOW() WHERE id = ${challengeId}`).catch(() => undefined);
+          console.error("[Password reset] OTP delivery failed:", deliveryError?.message);
         });
       }
       return res.status(202).json({

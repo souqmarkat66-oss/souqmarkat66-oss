@@ -9,3 +9,5 @@
 - [Production release and migration boundary](production-release-migrations.md) — app rollback is atomic; database migrations are separate, versioned, backed up, and expand/contract.
 - [Publish and NOT VALID checks](publish-not-valid-checks.md) — validate dev CHECK constraints and declare them in Drizzle; NOT VALID can produce malformed Publish DDL.
 - [GitHub sync authentication](github-sync-authentication.md) — connector API access and Git CLI auth are separate; bulk history pushes require working Git credentials.
+- [Password recovery security](password-recovery-security.md) — recovery uses indistinguishable persisted OTP challenges, hashed secrets, short proofs, rate limits, and session revocation.
+- [Admin provider secret vault](admin-provider-secret-vault.md) — external provider keys may be admin-managed only as AES-GCM ciphertext; environment values always win and plaintext never returns.

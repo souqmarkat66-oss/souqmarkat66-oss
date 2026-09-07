@@ -36,7 +36,8 @@ export const passwordResetChallenges = pgTable(
   "password_reset_challenges",
   {
     id: varchar("id", { length: 64 }).primaryKey(),
-    userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+    userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }),
+    identifierHash: varchar("identifier_hash", { length: 64 }).notNull(),
     channel: varchar("channel", { length: 10 }).notNull(),
     destinationMasked: varchar("destination_masked", { length: 255 }).notNull(),
     otpHash: varchar("otp_hash", { length: 64 }).notNull(),

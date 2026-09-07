@@ -18,12 +18,18 @@ const definitions = new Map<string, (typeof VAULT_SECRET_DEFINITIONS)[number]>(
 
 function masterKey(): Buffer {
   const raw = process.env.SECRET_VAULT_MASTER_KEY?.trim();
-  if (!raw) throw new Error("Secret vault is not configured");
-  const decoded = /^[0-9a-f]{64}$/i.test(raw)
-    ? Buffer.from(raw, "hex")
-    : Buffer.from(raw, "base64");
-  if (decoded.length !== 32) throw new Error("Secret vault is not configured");
-  return decoded;
+  if (raw) {
+    const decoded = /^[0-9a-f]{64}$/i.test(raw)
+      ? Buffer.from(raw, "hex")
+      : Buffer.from(raw, "base64");
+    if (decoded.length === 32) return decoded;
+    if (raw.length >= 32) return crypto.createHash("sha256").update(raw).digest();
+  }
+  const sessionSecret = process.env.SESSION_SECRET?.trim();
+  if (sessionSecret && sessionSecret.length >= 32) {
+    return crypto.createHmac("sha256", sessionSecret).update("secret-vault-master-v1").digest();
+  }
+  throw new Error("Secret vault is not configured");
 }
 
 function encrypt(value: string): { encrypted: string; iv: string; tag: string } {
