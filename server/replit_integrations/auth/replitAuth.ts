@@ -9,6 +9,8 @@ import type { Express, RequestHandler } from "express";
 import connectPg from "connect-pg-simple";
 import { randomBytes } from "crypto";
 import { authStorage } from "./storage";
+import { db } from "../../db";
+import { sql } from "drizzle-orm";
 
 // Type-only imports keep compile-time safety without loading the modules
 // at runtime. The actual modules are loaded via dynamic import below.
@@ -72,6 +74,7 @@ interface SessionUser {
   access_token?: string;
   refresh_token?: string;
   expires_at?: number;
+  authGeneration?: number;
 }
 
 function updateUserSession(user: SessionUser, tokens: OidcTokens) {
@@ -81,7 +84,7 @@ function updateUserSession(user: SessionUser, tokens: OidcTokens) {
   user.expires_at = user.claims?.exp;
 }
 
-async function upsertUser(claims: Record<string, unknown>) {
+async function upsertUser(claims: Record<string, unknown>): Promise<number> {
   await authStorage.upsertUser({
     id: claims["sub"] as string,
     email: claims["email"] as string | undefined,
@@ -89,6 +92,12 @@ async function upsertUser(claims: Record<string, unknown>) {
     lastName: claims["last_name"] as string | undefined,
     profileImageUrl: claims["profile_image_url"] as string | undefined,
   });
+  const result = await db.execute(sql`
+    SELECT auth_generation FROM users WHERE id = ${claims["sub"] as string} LIMIT 1
+  `);
+  const generation = Number((result.rows[0] as any)?.auth_generation);
+  if (!Number.isInteger(generation)) throw new Error("User authentication generation is unavailable");
+  return generation;
 }
 
 function registerNoopAuthRoutes(app: Express) {
@@ -136,7 +145,7 @@ export async function setupAuth(app: Express) {
   ) => {
     const user: SessionUser = {};
     updateUserSession(user, tokens);
-    await upsertUser(tokens.claims() as Record<string, unknown>);
+    user.authGeneration = await upsertUser(tokens.claims() as Record<string, unknown>);
     verified(null, user);
   };
 

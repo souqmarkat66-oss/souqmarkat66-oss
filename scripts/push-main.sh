@@ -8,7 +8,7 @@ IFS=$'\n\t'
   exit 1
 }
 
-git diff --quiet && git diff --cached --quiet || {
+[ -z "$(git status --porcelain --untracked-files=normal)" ] || {
   echo "Refusing push: commit or discard all working-tree changes first." >&2
   exit 1
 }
@@ -32,7 +32,7 @@ chmod 700 "$askpass"
 
 export GIT_ASKPASS="$askpass"
 export GIT_TERMINAL_PROMPT=0
-git fetch --quiet origin main
+git -c credential.helper= fetch --quiet origin main
 
 local_head="$(git rev-parse HEAD)"
 remote_head="$(git rev-parse origin/main)"
@@ -48,5 +48,5 @@ if [ "$local_head" = "$remote_head" ]; then
   exit 0
 fi
 
-git push origin HEAD:main
+git -c credential.helper= push origin HEAD:main
 echo "Pushed reviewed commits to origin/main."

@@ -93,24 +93,13 @@ export function log(message: string, source = "express") {
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
 
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      const containsPublisherCredential = /^\/api\/streams\/\d+\/key$/.test(path);
-      if (capturedJsonResponse && !containsPublisherCredential) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      log(logLine);
+      // Never log API response bodies. They can contain emails, password-reset
+      // challenge data, payment details, hashes, or administrative secrets.
+      log(`${req.method} ${path} ${res.statusCode} in ${duration}ms`);
     }
   });
 
@@ -172,6 +161,7 @@ async function runMigrations() {
     await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS image_url TEXT`);
     await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_payment_proof BOOLEAN DEFAULT FALSE`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS governorate TEXT`);
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_generation INTEGER NOT NULL DEFAULT 0`);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_interests TEXT`);
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS interests TEXT`);
     await db.execute(sql`ALTER TABLE ads ADD COLUMN IF NOT EXISTS target_ages TEXT`);

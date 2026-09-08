@@ -23,6 +23,7 @@ export const users = pgTable("users", {
   profileImageUrl: varchar("profile_image_url"),
   phone: varchar("phone", { length: 20 }),
   passwordHash: text("password_hash"),
+  authGeneration: integer("auth_generation").notNull().default(0),
   isBanned: boolean("is_banned").default(false),
   role: text("role").default("user"),
   createdAt: timestamp("created_at").defaultNow(),

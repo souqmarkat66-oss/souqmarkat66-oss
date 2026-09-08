@@ -6,7 +6,8 @@ import { Server as SocketServer } from "socket.io";
 import { storage } from "./storage";
 import { z } from "zod";
 import { setupAuth, getSession } from "./replit_integrations/auth";
-import { isAuthenticated, registerCustomAuthRoutes } from "./customAuth";
+import { isAuthenticated, registerCustomAuthRoutes, validatedAuthUserId } from "./customAuth";
+import { registerSocketServer } from "./socketRegistry";
 import { registerImageRoutes, openai } from "./replit_integrations/image";
 import { registerAiAgentRoutes } from "./aiAgentRoutes";
 import { textToSpeech } from "./replit_integrations/audio";
@@ -247,18 +248,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   const io = new SocketServer(httpServer, {
     cors: { origin: "*", methods: ["GET", "POST"] },
   });
+  registerSocketServer(io);
 
   // ── Socket.IO authentication: derive identity from the same express-session
   //    cookie the HTTP routes use. Never trust user IDs sent in event payloads.
   io.engine.use(getSession() as any);
-  io.use((socket, next) => {
-    const sess: any = (socket.request as any).session;
-    const uid =
-      sess?.customUser?.id ??
-      sess?.passport?.user?.claims?.sub ??
-      null;
-    (socket.data as any).authUserId = uid != null ? String(uid) : null;
-    next();
+  io.use(async (socket, next) => {
+    try {
+      const sess: any = (socket.request as any).session;
+      const uid = sess?.customUser?.id ?? sess?.passport?.user?.claims?.sub ?? null;
+      if (uid == null) {
+        (socket.data as any).authUserId = null;
+        (socket.data as any).authGeneration = null;
+        return next();
+      }
+      const capturedGeneration = Number(
+        sess?.customUser?.authGeneration ?? sess?.passport?.user?.authGeneration,
+      );
+      if (!Number.isInteger(capturedGeneration)) return next(new Error("Unauthorized"));
+      const result = await db.execute(sql`SELECT auth_generation FROM users WHERE id = ${String(uid)} LIMIT 1`);
+      const currentGeneration = Number((result.rows[0] as any)?.auth_generation);
+      if (!Number.isInteger(currentGeneration) || currentGeneration !== capturedGeneration) {
+        return next(new Error("Unauthorized"));
+      }
+      (socket.data as any).authUserId = String(uid);
+      (socket.data as any).authGeneration = capturedGeneration;
+      next();
+    } catch {
+      next(new Error("Unauthorized"));
+    }
   });
 
   // ── ربط المحفظة بالـ Socket.IO — تحديث لحظي عند أي خصم ────────
@@ -543,6 +561,27 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   }
 
   io.on("connection", (socket) => {
+    // Re-check the generation before every event so a socket that was connected
+    // before a password reset cannot perform or keep receiving authenticated work.
+    socket.use(async (_event, next) => {
+      const authUserId = (socket.data as any).authUserId;
+      const authGeneration = Number((socket.data as any).authGeneration);
+      if (!authUserId) return next();
+      try {
+        const result = await db.execute(sql`SELECT auth_generation FROM users WHERE id = ${authUserId} LIMIT 1`);
+        const currentGeneration = Number((result.rows[0] as any)?.auth_generation);
+        if (!Number.isInteger(currentGeneration) || currentGeneration !== authGeneration) {
+          next(new Error("Session revoked"));
+          socket.disconnect(true);
+          return;
+        }
+        next();
+      } catch {
+        next(new Error("Authentication check failed"));
+        socket.disconnect(true);
+      }
+    });
+
     // ── انضمام تلقائي لغرفة المستخدم (حالة الاتصال + دعوات التحدي + المحفظة) ──
     {
       const authUid = (socket.data as any).authUserId;
@@ -2033,9 +2072,8 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  app.post("/api/push/subscribe", async (req: any, res) => {
-    const userId: string | undefined = req.session?.customUser?.id || req.user?.claims?.sub;
-    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+  app.post("/api/push/subscribe", isAuthenticated, async (req: any, res) => {
+    const userId = String(req.user.claims.sub);
     const { endpoint, keys } = req.body;
     if (!endpoint || !keys?.p256dh || !keys?.auth) return res.status(400).json({ message: "Invalid subscription" });
     try {
@@ -2048,9 +2086,8 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  app.delete("/api/push/subscribe", async (req: any, res) => {
-    const userId: string | undefined = req.session?.customUser?.id || req.user?.claims?.sub;
-    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+  app.delete("/api/push/subscribe", isAuthenticated, async (req: any, res) => {
+    const userId = String(req.user.claims.sub);
     const { endpoint } = req.body;
     if (endpoint) {
       await db.execute(sql`DELETE FROM push_subscriptions WHERE endpoint = ${endpoint} AND user_id = ${userId}`);
@@ -6431,6 +6468,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           firstName:       updated.first_name || req.user?.claims?.first_name || null,
           lastName:        updated.last_name  || req.user?.claims?.last_name  || null,
           profileImageUrl: updated.profile_image_url || null,
+          authGeneration:  Number(req.user?.authGeneration),
         };
       }
       await new Promise<void>((resolve) => {
@@ -6900,7 +6938,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     try {
       await db.execute(sql`UPDATE ads SET views_count = COALESCE(views_count, 0) + 1 WHERE id = ${id}`);
       // If viewer is authenticated and ad has targetInterests, learn their interests
-      const viewerId: string | undefined = req.session?.customUser?.id || req.user?.claims?.sub;
+      const viewerId = await validatedAuthUserId(req);
       if (viewerId) {
         const adRow = await db.execute(
           sql`SELECT target_interests FROM ads WHERE id = ${id} AND target_interests IS NOT NULL AND target_interests <> '' LIMIT 1`

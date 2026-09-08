@@ -1,7 +1,6 @@
 CREATE TABLE IF NOT EXISTS "password_reset_challenges" (
   "id" varchar(64) PRIMARY KEY NOT NULL,
-  "user_id" varchar REFERENCES "users"("id") ON DELETE CASCADE,
-  "identifier_hash" varchar(64) NOT NULL,
+  "user_id" varchar NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
   "channel" varchar(10) NOT NULL,
   "destination_masked" varchar(255) NOT NULL,
   "otp_hash" varchar(64) NOT NULL,
@@ -19,5 +18,3 @@ CREATE INDEX IF NOT EXISTS "password_reset_user_created_idx"
   ON "password_reset_challenges" ("user_id", "created_at");
 CREATE INDEX IF NOT EXISTS "password_reset_expiry_idx"
   ON "password_reset_challenges" ("expires_at");
-CREATE INDEX IF NOT EXISTS "password_reset_identifier_created_idx"
-  ON "password_reset_challenges" ("identifier_hash", "created_at");
