@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import {
   Megaphone, CheckCircle2, Eye, EyeOff,
   LogIn, Sparkles, Shield, Star, Tv, ShoppingBag,
-  Mail, Phone, Lock, UserPlus, ChevronLeft, KeyRound
+  Mail, Lock, UserPlus, ChevronLeft, KeyRound
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -56,10 +56,8 @@ export default function Login() {
   const [regFirstName, setRegFirstName] = useState("");
   const [regLastName, setRegLastName] = useState("");
   const [regEmail, setRegEmail] = useState("");
-  const [regPhone, setRegPhone] = useState("");
   const [regPassword, setRegPassword] = useState("");
   const [regShowPw, setRegShowPw] = useState(false);
-  const [regIdentifierType, setRegIdentifierType] = useState<"email" | "phone">("email");
 
   // Verified password recovery
   const [resetChallengeId, setResetChallengeId] = useState("");
@@ -72,7 +70,6 @@ export default function Login() {
   const [forgotIdentifier, setForgotIdentifier] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
   const [resetDestination, setResetDestination] = useState("");
-  const [channelChoices, setChannelChoices] = useState<Array<{ channel: "email" | "sms"; destination: string }>>([]);
   const [otp, setOtp] = useState("");
   const [otpLoading, setOtpLoading] = useState(false);
 
@@ -103,16 +100,14 @@ export default function Login() {
 
   const handleRegister = async () => {
     if (!regFirstName) return toast({ variant: "destructive", title: "الاسم مطلوب" });
-    if (regIdentifierType === "email" && !regEmail) return toast({ variant: "destructive", title: "البريد الإلكتروني مطلوب" });
-    if (regIdentifierType === "phone" && !regPhone) return toast({ variant: "destructive", title: "رقم الهاتف مطلوب" });
+    if (!regEmail) return toast({ variant: "destructive", title: "البريد الإلكتروني مطلوب" });
     if (regPassword.length < 6) return toast({ variant: "destructive", title: "كلمة المرور 6 أحرف على الأقل" });
     try {
       if (selectedRole) localStorage.setItem("souq_role", selectedRole);
       await register.mutateAsync({
         firstName: regFirstName,
         lastName: regLastName,
-        email: regIdentifierType === "email" ? regEmail : undefined,
-        phone: regIdentifierType === "phone" ? regPhone : undefined,
+        email: regEmail,
         password: regPassword,
       });
     } catch (err: any) {
@@ -130,23 +125,18 @@ export default function Login() {
     }
   };
 
-  const handleForgotPassword = async (channel?: "email" | "sms") => {
-    if (!forgotIdentifier.trim()) return toast({ variant: "destructive", title: "أدخل البريد الإلكتروني أو رقم الهاتف" });
+  const handleForgotPassword = async () => {
+    if (!forgotIdentifier.trim()) return toast({ variant: "destructive", title: "أدخل البريد الإلكتروني" });
     setForgotLoading(true);
     try {
       const res = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ identifier: forgotIdentifier.trim(), channel }),
+        body: JSON.stringify({ identifier: forgotIdentifier.trim() }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "تعذر إرسال الرمز");
-      if (json.requiresChannel) {
-        setChannelChoices(json.destinations || []);
-        return;
-      }
-      setChannelChoices([]);
       setResetChallengeId(json.challengeId || "");
       setResetDestination(json.destination || "وسيلة الاتصال المسجلة");
       setOtp("");
@@ -392,39 +382,16 @@ export default function Login() {
                 </div>
               </div>
 
-              {/* Identifier type toggle */}
+              {/* Recovery-ready email */}
               <div>
-                <label className="text-xs font-semibold mb-1.5 block">طريقة التسجيل</label>
-                <div className="flex rounded-xl border overflow-hidden mb-2">
-                  <button
-                    onClick={() => setRegIdentifierType("email")}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors
-                      ${regIdentifierType === "email" ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground"}`}
-                  >
-                    <Mail className="w-3.5 h-3.5" /> بريد إلكتروني
-                  </button>
-                  <button
-                    onClick={() => setRegIdentifierType("phone")}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors
-                      ${regIdentifierType === "phone" ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground"}`}
-                  >
-                    <Phone className="w-3.5 h-3.5" /> رقم الهاتف
-                  </button>
+                <label className="text-xs font-semibold mb-1.5 block">البريد الإلكتروني *</label>
+                <div className="relative">
+                  <Mail className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input value={regEmail} onChange={e => setRegEmail(e.target.value)}
+                    type="email" autoComplete="email" placeholder="example@gmail.com"
+                    className="pr-9 h-10" dir="ltr" data-testid="input-reg-email" />
                 </div>
-
-                {regIdentifierType === "email" ? (
-                  <div className="relative">
-                    <Mail className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <Input value={regEmail} onChange={e => setRegEmail(e.target.value)}
-                      placeholder="example@email.com" className="pr-9 h-10" dir="ltr" data-testid="input-reg-email" />
-                  </div>
-                ) : (
-                  <div className="relative">
-                    <Phone className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <Input value={regPhone} onChange={e => setRegPhone(e.target.value)}
-                      placeholder="01XXXXXXXXX" className="pr-9 h-10" dir="ltr" data-testid="input-reg-phone" />
-                  </div>
-                )}
+                <p className="text-[11px] text-muted-foreground mt-1">سيُستخدم لاسترجاع الحساب برمز OTP عند الحاجة.</p>
               </div>
 
               {/* Password */}
@@ -543,19 +510,19 @@ export default function Login() {
               </button>
               <div>
                 <h2 className="text-xl font-bold">إعادة تعيين كلمة المرور</h2>
-                 <p className="text-xs text-muted-foreground mt-0.5">أدخل البريد الإلكتروني أو رقم الهاتف المسجّل</p>
+                 <p className="text-xs text-muted-foreground mt-0.5">أدخل البريد الإلكتروني المسجّل</p>
               </div>
             </div>
 
             <div className="space-y-4">
               <div>
-                 <label className="text-sm font-semibold mb-1.5 block">البريد الإلكتروني أو رقم الهاتف</label>
+                 <label className="text-sm font-semibold mb-1.5 block">البريد الإلكتروني</label>
                 <div className="relative">
                   <Mail className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     value={forgotIdentifier}
                     onChange={e => setForgotIdentifier(e.target.value)}
-                     placeholder="example@email.com أو 01XXXXXXXXX"
+                     placeholder="example@gmail.com"
                     className="pr-9 h-11"
                     dir="ltr"
                     data-testid="input-forgot-identifier"
@@ -576,19 +543,6 @@ export default function Login() {
                 }
                  إرسال رمز التحقق
               </Button>
-
-              {channelChoices.length > 1 && (
-                <div className="space-y-2 rounded-xl border p-3">
-                  <p className="text-xs font-semibold">اختر طريقة استلام الرمز:</p>
-                  {channelChoices.map(choice => (
-                    <Button key={choice.channel} variant="outline" className="w-full justify-start gap-2"
-                      onClick={() => handleForgotPassword(choice.channel)} disabled={forgotLoading}>
-                      {choice.channel === "email" ? <Mail className="w-4 h-4" /> : <Phone className="w-4 h-4" />}
-                      {choice.destination}
-                    </Button>
-                  ))}
-                </div>
-              )}
 
               <p className="text-center text-sm text-muted-foreground">
                 تذكرت كلمة المرور؟{" "}

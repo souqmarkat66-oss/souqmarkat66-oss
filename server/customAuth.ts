@@ -10,7 +10,7 @@ import { ReplitConnectors } from "@replit/connectors-sdk";
 const RESET_TTL_MS = 10 * 60 * 1000;
 const PROOF_TTL_MS = 5 * 60 * 1000;
 const RESEND_COOLDOWN_MS = 60 * 1000;
-const GENERIC_RESET_MESSAGE = "إذا كان الحساب مسجلاً، فسنرسل رمز تحقق إلى وسيلة الاتصال المختارة";
+const GENERIC_RESET_MESSAGE = "إذا كان البريد مسجلاً، فسنرسل إليه رمز تحقق";
 const ipResetRequests = new Map<string, number[]>();
 
 function resetSecret(): string {
@@ -58,7 +58,7 @@ function hashesEqual(left: string, right: string): boolean {
 function validIdentifier(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 254) return false;
   const input = value.trim();
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input) || /^\+?[0-9]{8,15}$/.test(input);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input);
 }
 
 function maskEmail(email: string): string {
@@ -66,42 +66,20 @@ function maskEmail(email: string): string {
   return `${local.slice(0, 2)}${"*".repeat(Math.max(2, local.length - 2))}@${domain}`;
 }
 
-function maskPhone(phone: string): string {
-  return `${phone.slice(0, Math.min(3, phone.length))}${"*".repeat(Math.max(3, phone.length - 5))}${phone.slice(-2)}`;
-}
-
-async function sendResetOtp(channel: "email" | "sms", destination: string, otp: string) {
+async function sendResetOtp(destination: string, otp: string) {
   const connectors = new ReplitConnectors();
-  if (channel === "email") {
-    const from = process.env.PASSWORD_RESET_EMAIL_FROM;
-    if (!from) throw new Error("PASSWORD_RESET_EMAIL_FROM is not configured");
-    const response = await connectors.proxy("resend", "/emails", {
-      method: "POST",
-      body: {
-        from,
-        to: [destination],
-        subject: "رمز إعادة تعيين كلمة المرور",
-        html: `<p dir="rtl">رمز التحقق الخاص بك هو <strong>${otp}</strong>. تنتهي صلاحيته خلال 10 دقائق. لا تشاركه مع أحد.</p>`,
-      },
-    });
-    if (!response.ok) throw new Error(`Resend delivery failed (${response.status})`);
-    return;
-  }
-
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const from = process.env.TWILIO_FROM_NUMBER;
-  if (!accountSid || !from) throw new Error("Twilio sender configuration is missing");
-  const body = new URLSearchParams({
-    To: destination,
-    From: from,
-    Body: `رمز إعادة تعيين كلمة المرور: ${otp}. صالح لمدة 10 دقائق.`,
+  const emailFrom = process.env.PASSWORD_RESET_EMAIL_FROM;
+  if (!emailFrom) throw new Error("PASSWORD_RESET_EMAIL_FROM is not configured");
+  const response = await connectors.proxy("resend", "/emails", {
+    method: "POST",
+    body: {
+      from: emailFrom,
+      to: [destination],
+      subject: "رمز إعادة تعيين كلمة المرور",
+      html: `<p dir="rtl">رمز التحقق الخاص بك هو <strong>${otp}</strong>. تنتهي صلاحيته خلال 10 دقائق. لا تشاركه مع أحد.</p>`,
+    },
   });
-  const response = await connectors.proxy(
-    "twilio",
-    `/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`,
-    { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded" } },
-  );
-  if (!response.ok) throw new Error(`Twilio delivery failed (${response.status})`);
+  if (!response.ok) throw new Error(`Resend delivery failed (${response.status})`);
 }
 
 function regenerateSession(req: Request): Promise<void> {
@@ -229,34 +207,33 @@ export function registerCustomAuthRoutes(app: Express) {
 
   // ── POST /api/auth/register ─────────────────────────────────────
   app.post("/api/auth/register", async (req: Request, res: Response) => {
-    const { firstName, lastName, email, phone, password } = req.body;
+    const { firstName, lastName, email, password } = req.body;
     if (!password || password.length < 6)
       return res.status(400).json({ message: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
-    if (!email && !phone)
-      return res.status(400).json({ message: "البريد الإلكتروني أو رقم الهاتف مطلوب" });
+    if (!validIdentifier(email))
+      return res.status(400).json({ message: "بريد إلكتروني صالح مطلوب لاسترجاع الحساب" });
 
     try {
       // Check duplicate
       const existing = await db.execute(
-        sql`SELECT id FROM users WHERE (email IS NOT NULL AND LOWER(email) = LOWER(${email || ""}))
-            OR (phone IS NOT NULL AND phone = ${phone || ""}) LIMIT 1`
+        sql`SELECT id FROM users WHERE email IS NOT NULL AND LOWER(email) = LOWER(${email}) LIMIT 1`
       );
       if (existing.rows[0])
-        return res.status(409).json({ message: "البريد الإلكتروني أو رقم الهاتف مسجل بالفعل" });
+        return res.status(409).json({ message: "البريد الإلكتروني مسجل بالفعل" });
 
       const hash = await bcrypt.hash(password, 10);
       const newId = uuidv4();
 
       await db.execute(
         sql`INSERT INTO users (id, email, phone, first_name, last_name, password_hash)
-            VALUES (${newId}, ${email || null}, ${phone || null}, ${firstName || null}, ${lastName || null}, ${hash})`
+            VALUES (${newId}, ${email}, NULL, ${firstName || null}, ${lastName || null}, ${hash})`
       );
 
       await regenerateSession(req);
       (req.session as any).customUser = {
         id:              newId,
         email:           email || null,
-        phone:           phone || null,
+        phone:           null,
         firstName:       firstName || null,
         lastName:        lastName || null,
         profileImageUrl: null,
@@ -332,11 +309,9 @@ export function registerCustomAuthRoutes(app: Express) {
 
   // ── POST /api/auth/forgot-password ─────────────────────────────
   app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
-    const { identifier, channel } = req.body;
+    const { identifier } = req.body;
     if (!validIdentifier(identifier))
-      return res.status(400).json({ message: "أدخل بريداً إلكترونياً أو رقم هاتف صالحاً" });
-    if (channel !== undefined && channel !== "email" && channel !== "sms")
-      return res.status(400).json({ message: "قناة الإرسال غير صالحة" });
+      return res.status(400).json({ message: "أدخل بريداً إلكترونياً صالحاً" });
     const ip = requestIp(req);
     if (!consumeIpLimit(ip))
       return res.status(429).json({ message: GENERIC_RESET_MESSAGE, retryAfterSeconds: 60 });
@@ -346,19 +321,14 @@ export function registerCustomAuthRoutes(app: Express) {
       const lookup = identifier.trim();
       const result = await db.execute(
         sql`SELECT id, email, phone FROM users
-            WHERE LOWER(email) = LOWER(${lookup}) OR phone = ${lookup}
+            WHERE LOWER(email) = LOWER(${lookup})
             LIMIT 1`
       );
       const user: any = result.rows[0];
-      const fallbackChannel: "email" | "sms" = lookup.includes("@") ? "email" : "sms";
-      const selectedChannel: "email" | "sms" = fallbackChannel;
-      const destination = user
-        ? (selectedChannel === "email" ? user.email : user.phone)
-        : null;
-      const deliverable = !!destination && (!channel || channel === selectedChannel);
-      const masked = destination
-        ? (selectedChannel === "email" ? maskEmail(destination) : maskPhone(destination))
-        : (selectedChannel === "email" ? maskEmail(lookup) : maskPhone(lookup));
+      const selectedChannel = "email";
+      const destination = user?.email || null;
+      const deliverable = !!destination;
+      const masked = maskEmail(destination || lookup);
       const identifierHash = keyedHash("identifier", "global", lookup.toLowerCase());
 
       const rateResult = await db.execute(sql`
@@ -396,7 +366,7 @@ export function registerCustomAuthRoutes(app: Express) {
       // Respond before external delivery so provider latency cannot reveal
       // whether the identifier matched an account.
       if (deliverable) {
-        void sendResetOtp(selectedChannel, destination, otp).catch(async (deliveryError: any) => {
+        void sendResetOtp(destination, otp).catch(async (deliveryError: any) => {
           await db.execute(sql`UPDATE password_reset_challenges SET used_at = NOW() WHERE id = ${challengeId}`).catch(() => undefined);
           console.error("[Password reset] OTP delivery failed:", deliveryError?.message);
         });

@@ -14,7 +14,7 @@ import { spawn } from "child_process";
 import { writeFile, unlink, readFile, mkdir } from "fs/promises";
 import { randomUUID } from "crypto";
 import { tmpdir } from "os";
-import { upload } from "./upload";
+import { secureUpload } from "./upload";
 import path from "path";
 import fs from "fs";
 import { db, pool } from "./db";
@@ -231,7 +231,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Serve uploads directory
   const uploadsDir = path.join(process.cwd(), "uploads");
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-  app.use("/uploads", express.static(uploadsDir));
+  app.use("/uploads", express.static(uploadsDir, {
+    dotfiles: "deny",
+    fallthrough: false,
+    setHeaders: (res) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; media-src 'self'; sandbox");
+      res.setHeader("Cross-Origin-Resource-Policy", "same-site");
+    },
+  }));
 
   // ================================================================
   // SOCKET.IO - Live Streaming & Real-time Chat
@@ -1644,7 +1652,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ================================================================
   // FILE UPLOAD ROUTES
   // ================================================================
-  app.post("/api/upload", isAuthenticated, upload.single("file"), async (req: any, res) => {
+  app.post("/api/upload", isAuthenticated, secureUpload("file", "media"), async (req: any, res) => {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
     const userId = req.user.claims.sub;
     const url = `/uploads/${req.file.filename}`;
@@ -6392,7 +6400,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   // USER PROFILE ROUTES
   // ================================================================
   // PATCH /api/auth/me/profile — update name, bio, profile photo
-  app.patch("/api/auth/me/profile", isAuthenticated, upload.single("photo"), async (req: any, res) => {
+  app.patch("/api/auth/me/profile", isAuthenticated, secureUpload("photo", "image"), async (req: any, res) => {
     const userId = req.user.claims.sub;
     try {
       const firstName = (req.body.firstName && req.body.firstName.trim()) ? req.body.firstName.trim() : null;
