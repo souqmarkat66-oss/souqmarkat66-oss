@@ -52,4 +52,4 @@ timeoutMs = 600000
 [userenv]
 
 [userenv.shared]
-PASSWORD_RESET_EMAIL_FROM = "Souq Ads <noreply@ads-as.com>"
+PASSWORD_RESET_EMAIL_FROM = "noreply@ads-as.com"
