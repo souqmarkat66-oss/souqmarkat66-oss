@@ -124,6 +124,7 @@ export default function Payments() {
     queryKey: ["/api/ads/mine"],
     queryFn: () => fetch("/api/ads/mine", { credentials: "include" }).then(r => r.json()),
   });
+  const userAds = ads.filter((a: any) => a.userId === (user as any)?.id);
 
   const { data: pricing = {} } = useQuery<Record<string, string>>({
     queryKey: ["/api/pricing"],
@@ -142,6 +143,15 @@ export default function Payments() {
   useEffect(() => {
     afsIntentKey.current = null;
   }, [afsPurpose, afsAmount, afsPackageId, afsServiceType, afsAdId, afsRenewalDays]);
+  const afsPrerequisiteError = afsPurpose === "wallet_top_up"
+    ? (!Number.isFinite(Number(afsAmount)) || Number(afsAmount) < 10 || Number(afsAmount) > 1_000_000
+        ? "أدخل مبلغ شحن بين 10 و1,000,000 جنيه"
+        : "")
+    : afsPurpose === "coin_purchase"
+      ? (!afsPackageId ? "اختر باقة العملات أولاً" : "")
+      : afsServiceType !== "subscription" && !afsAdId
+        ? (userAds.length === 0 ? "لا يوجد إعلان في حسابك يمكن ربطه بهذه الخدمة" : "اختر الإعلان المطلوب أولاً")
+        : "";
   const afsCheckout = useMutation({
     mutationFn: async () => {
       const idempotencyKey = afsIntentKey.current || crypto.randomUUID();
@@ -340,8 +350,6 @@ export default function Payments() {
   );
 
   const selectedMethod = PAYMENT_METHODS.find(m => m.value === formData.method);
-  const userAds = ads.filter((a: any) => a.userId === (user as any)?.id);
-
   // Breakdown of selected services with prices
   const selectedWithPrices = serviceList.filter(s => selectedServices.has(s.value) && s.amount > 0);
   const hasZeroPriceSelected = serviceList.some(s => selectedServices.has(s.value) && s.amount === 0);
@@ -413,11 +421,12 @@ export default function Payments() {
             )}
           </div>
         )}
-        <Button className="w-full mt-3" disabled={afsCheckout.isPending || (
-          afsPurpose === "wallet_top_up" ? Number(afsAmount) < 10
-            : afsPurpose === "coin_purchase" ? !afsPackageId
-              : afsServiceType !== "subscription" && !afsAdId
-        )} onClick={() => afsCheckout.mutate()}>
+        {afsPrerequisiteError && (
+          <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800" data-testid="afs-prerequisite-error">
+            {afsPrerequisiteError}
+          </p>
+        )}
+        <Button className="w-full mt-3" disabled={afsCheckout.isPending || !!afsPrerequisiteError} onClick={() => afsCheckout.mutate()}>
           {afsCheckout.isPending ? "جارٍ التحويل..." : "المتابعة للدفع بالبطاقة"}
         </Button>
       </section>

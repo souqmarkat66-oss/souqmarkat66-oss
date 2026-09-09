@@ -25,11 +25,7 @@ function masterKey(): Buffer {
     if (decoded.length === 32) return decoded;
     if (raw.length >= 32) return crypto.createHash("sha256").update(raw).digest();
   }
-  const sessionSecret = process.env.SESSION_SECRET?.trim();
-  if (sessionSecret && sessionSecret.length >= 32) {
-    return crypto.createHmac("sha256", sessionSecret).update("secret-vault-master-v1").digest();
-  }
-  throw new Error("Secret vault is not configured");
+  throw new Error("SECRET_VAULT_MASTER_KEY must be configured with at least 32 characters or exactly 32 encoded bytes");
 }
 
 function encrypt(value: string): { encrypted: string; iv: string; tag: string } {

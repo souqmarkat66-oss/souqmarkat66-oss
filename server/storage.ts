@@ -847,14 +847,17 @@ export class DatabaseStorage implements IStorage {
         });
         fulfillmentStatus = 'fulfilled';
       } else if (locked.type === 'top_up') {
-        const services = String(locked.serviceType || "")
+        const rawServiceType = String(locked.serviceType || "");
+        const services = rawServiceType
           .split(",")
           .map((service) => service.trim())
           .filter(Boolean);
-        // A paid service must not also become spendable wallet credit. Legacy
-        // requests without a service marker remain wallet top-ups.
-        const isWalletRecharge = services.length === 0
-          || (services.length === 1 && services[0] === "wallet_recharge");
+        // Wallet credit must always be explicit. A malformed or legacy request
+        // without a service marker must not silently mint spendable balance.
+        if (services.length === 0) {
+          throw new Error("طلب الدفع لا يحدد شحن محفظة أو خدمة");
+        }
+        const isWalletRecharge = rawServiceType === "wallet_recharge";
         if (services.includes("wallet_recharge") && !isWalletRecharge) {
           throw new Error("لا يمكن جمع شحن المحفظة مع شراء خدمة في طلب واحد");
         }

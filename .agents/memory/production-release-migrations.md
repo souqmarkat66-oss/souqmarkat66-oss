@@ -14,3 +14,9 @@ External VPS releases must install dependencies in staging before touching the l
 **Why:** Installing against the VPS's older package files left a native image dependency unavailable and produced a 502; the corrected lockfile then exposed Replit-only registry hosts. Both failures are preventable before the runtime swap.
 
 **How to apply:** Build locally, rewrite only Replit-internal resolved registry hosts in the temporary deployment lockfile, run the production install and native-module smoke checks in staging, then swap files and check the JSON `/api/health` endpoint internally and publicly.
+
+VPS deployment must stop before upload when the live SSH host fingerprint differs from the configured fingerprint. Do not accept the newly scanned host key automatically, and do not treat an unparseable private key or `known_hosts` secret as permission to fall back to insecure host checking.
+
+**Why:** A release attempt encountered all three trust failures while the existing production service remained healthy. Bypassing them would remove the only protection against connecting to the wrong server.
+
+**How to apply:** Ask the VPS owner to verify the current host key through the provider console, then refresh the SSH fingerprint or provide a valid PEM private key plus OpenSSH `known_hosts` entry. Retry only with strict host checking enabled.

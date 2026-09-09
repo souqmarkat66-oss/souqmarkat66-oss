@@ -293,6 +293,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   const pendingUserChallenges = new Map<string, { challengerSocketId: string; streamId: string; targetUserId: string; expiresAt: number }>();
   /* بعد قبول دعوة التحدي: أول ما المدعو ينضم كضيف للغرفة دي، المعركة تبدأ تلقائياً 1v1 */
   const pendingAutoBattles = new Map<string, { targetUserId: string; expiresAt: number }>();
+  const battleFinishPromises = new WeakMap<object, Promise<void>>();
 
   const streamRooms: Map<string, {
     broadcasterId: string | null;
@@ -416,16 +417,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   }
 
   async function finishBattle(streamId: string, battle: NonNullable<ReturnType<typeof getOrCreateRoom>["battle"]>) {
-    if (!battle.active) return;
-    battle.active = false;
-    if (battle.timer) clearTimeout(battle.timer);
-    battle.winner = battle.scoreA === battle.scoreB ? "draw" : battle.scoreA > battle.scoreB ? "A" : "B";
-    try {
-      await saveBattleResult(streamId, battle);
-    } catch (error) {
-      console.error("PK battle result persistence error:", error);
+    const inFlight = battleFinishPromises.get(battle);
+    if (inFlight) {
+      await inFlight;
+      return;
     }
-    io.to(`stream:${streamId}`).emit("battle-ended", publicBattleState(battle, streamRooms.get(streamId)));
+    if (!battle.active) return;
+    try {
+      const completion = (async () => {
+        battle.active = false;
+        if (battle.timer) clearTimeout(battle.timer);
+        battle.winner = battle.scoreA === battle.scoreB ? "draw" : battle.scoreA > battle.scoreB ? "A" : "B";
+        try {
+          await saveBattleResult(streamId, battle);
+        } catch (error) {
+          console.error("PK battle result persistence error:", error);
+        }
+        io.to(`stream:${streamId}`).emit("battle-ended", publicBattleState(battle, streamRooms.get(streamId)));
+      })();
+      battleFinishPromises.set(battle, completion);
+      await completion;
+    } finally {
+      battleFinishPromises.delete(battle);
+    }
   }
 
   /* بدء معركة لغرفة معينة — يُستخدم من handler اليدوي ومن البدء التلقائي بعد قبول دعوة تحدي */
@@ -434,6 +448,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!room?.broadcasterId) return false;
     const broadcasterSocket = io.sockets.sockets.get(room.broadcasterId);
     if (!broadcasterSocket) return false;
+    if (room.battle?.active) {
+      broadcasterSocket.emit("battle-rejected", { reason: "battle_already_active" });
+      return false;
+    }
     if (room.battle?.timer) clearTimeout(room.battle.timer);
     const startedAt = Date.now();
     const rosterEntry = (sid: string) => ({
@@ -944,9 +962,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socket.on("send-gift", async (data: { eventId?: string; streamId: string; giftType: string; giftEmoji?: string; giftName?: string; giftCoins?: number; userName: string; userId: string; broadcasterUserId?: string; battleTeam?: "A" | "B"; recipientSocketId?: string }) => {
       // Never trust price/name/emoji from the browser.
       const gift = GIFT_CATALOG[data.giftType];
-      if (!gift || !data.streamId) return;
+      if (!gift || !data.streamId) {
+        socket.emit("gift-rejected", { reason: "invalid_gift", eventId: data.eventId });
+        return;
+      }
       if (typeof data.eventId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(data.eventId)) {
-        socket.emit("gift-rejected", { reason: "invalid_event_id" });
+        socket.emit("gift-rejected", { reason: "invalid_event_id", eventId: data.eventId });
         return;
       }
       const originalGiftCoins = gift.coins;
@@ -956,7 +977,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Identity comes from the authenticated session, never from the payload.
       const authUid = (socket.data as any).authUserId;
       if (!authUid) {
-        socket.emit("gift-rejected", { reason: "not_authenticated" });
+        socket.emit("gift-rejected", { reason: "not_authenticated", eventId: data.eventId });
         return;
       }
       data.userId = authUid;
@@ -966,7 +987,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // verified session identity. Client user IDs are never trusted.
       const numericStreamId = Number(data.streamId);
       if (!Number.isInteger(numericStreamId) || numericStreamId <= 0) {
-        socket.emit("gift-rejected", { reason: "invalid_stream" });
+        socket.emit("gift-rejected", { reason: "invalid_stream", eventId: data.eventId });
         return;
       }
       const roomForTarget = streamRooms.get(data.streamId);
@@ -976,7 +997,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // A gift can only be sent into a live server-owned room. This prevents a
       // stale stream id or browser-supplied recipient from becoming a payout.
       if (!roomForTarget?.broadcasterId || !(broadcasterSocket?.data as any)?.authUserId) {
-        socket.emit("gift-rejected", { reason: "recipient_unavailable" });
+        socket.emit("gift-rejected", { reason: "recipient_unavailable", eventId: data.eventId });
         return;
       }
       let recipientUserId: string | undefined;
@@ -984,12 +1005,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const streamRow = await storage.getLiveStream(numericStreamId);
         const broadcasterUserId = String((broadcasterSocket!.data as any).authUserId);
         if (!streamRow || String(streamRow.userId) !== broadcasterUserId) {
-          socket.emit("gift-rejected", { reason: "recipient_unavailable" });
+          socket.emit("gift-rejected", { reason: "recipient_unavailable", eventId: data.eventId });
           return;
         }
         recipientUserId = broadcasterUserId;
       } catch {
-        socket.emit("gift-rejected", { reason: "recipient_unavailable" });
+        socket.emit("gift-rejected", { reason: "recipient_unavailable", eventId: data.eventId });
         return;
       }
       if (data.recipientSocketId && data.recipientSocketId !== roomForTarget?.broadcasterId) {
@@ -999,7 +1020,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const isCurrentCohost = roomForTarget?.cohostIds.includes(data.recipientSocketId) ?? false;
         const target = isCurrentCohost ? roomForTarget!.socketToUser.get(data.recipientSocketId) : undefined;
         if (!target?.userId) {
-          socket.emit("gift-rejected", { reason: "target_left" });
+          socket.emit("gift-rejected", { reason: "target_left", eventId: data.eventId });
           return;
         }
         // During a battle, the recipient must belong to the roster snapshot.
@@ -1007,18 +1028,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (activeTeams &&
             !activeTeams.A.some(m => m.socketId === data.recipientSocketId) &&
             !activeTeams.B.some(m => m.socketId === data.recipientSocketId)) {
-          socket.emit("gift-rejected", { reason: "not_in_battle" });
+          socket.emit("gift-rejected", { reason: "not_in_battle", eventId: data.eventId });
           return;
         }
         recipientUserId = target.userId;
       }
       if (recipientUserId === authUid) {
         // ممنوع إهداء النفس تماماً — reject before any wallet debit.
-        socket.emit("gift-rejected", { reason: "self_gift" });
+        socket.emit("gift-rejected", { reason: "self_gift", eventId: data.eventId });
         return;
       }
       if (!recipientUserId) {
-        socket.emit("gift-rejected", { reason: "recipient_unavailable" });
+        socket.emit("gift-rejected", { reason: "recipient_unavailable", eventId: data.eventId });
         return;
       }
       data.broadcasterUserId = recipientUserId;
@@ -1054,7 +1075,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               && Number(existing.rows[0].gross_coins) === originalGiftCoins;
             if (!sameEvent) {
               await client.query("ROLLBACK");
-              socket.emit("gift-rejected", { reason: "duplicate_event_mismatch" });
+              socket.emit("gift-rejected", { reason: "duplicate_event_mismatch", eventId: data.eventId });
               return;
             }
             const duplicateWallet = await client.query(`SELECT balance FROM coin_wallets WHERE user_id = $1`, [authUid]);
@@ -1074,7 +1095,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const balance = Number(wallet.rows[0]?.balance || 0);
           if (balance < originalGiftCoins) {
             await client.query("ROLLBACK");
-            socket.emit("gift-rejected", { reason: "insufficient_balance", balance, required: originalGiftCoins });
+            socket.emit("gift-rejected", { reason: "insufficient_balance", balance, required: originalGiftCoins, eventId: data.eventId });
             return;
           }
           const debitRes = await client.query(
@@ -1125,7 +1146,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
       } catch (err) {
         console.error("Gift coin transaction error:", err);
-        socket.emit("gift-rejected", { reason: "server_error" });
+        socket.emit("gift-rejected", { reason: "server_error", eventId: data.eventId });
         return;
       }
       if (!accepted) return;
@@ -1158,16 +1179,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             // القفاز: 5x لمدة 30 ثانية — متاح في أي وقت من الجولة.
             battle.multiplier = 5;
             battle.multiplierEndsAt = now + 30_000;
-          } else {
-            const scoreMultiplier = battle.multiplierEndsAt && battle.multiplierEndsAt > now ? battle.multiplier : 1;
-            const scoreDelta = originalGiftCoins * scoreMultiplier;
-            // العداد الفردي أولاً: كل خانة (Slot) لها رقمها المستقل، ونقاط الفريق مجرد مجموع
-            if (effectiveTargetUserId) {
-              battle.playerScores[effectiveTargetUserId] = (battle.playerScores[effectiveTargetUserId] || 0) + scoreDelta;
-            }
-            if (effectiveTeam === "A") battle.scoreA += scoreDelta;
-            else battle.scoreB += scoreDelta;
           }
+          // Every paid gift contributes to the score, including the glove
+          // that activates 5x. The multiplier changes score only; the wallet
+          // debit and 60/40 payout above always use originalGiftCoins.
+          const scoreMultiplier = battle.multiplierEndsAt && battle.multiplierEndsAt > now ? battle.multiplier : 1;
+          const scoreDelta = originalGiftCoins * scoreMultiplier;
+          if (effectiveTargetUserId) {
+            battle.playerScores[effectiveTargetUserId] = (battle.playerScores[effectiveTargetUserId] || 0) + scoreDelta;
+          }
+          if (effectiveTeam === "A") battle.scoreA += scoreDelta;
+          else battle.scoreB += scoreDelta;
           if (data.giftType === "rose") {
             battle.roseCount += 1;
             // الدبل/التريبل: لا يتفعلان إلا بعد أول دقيقة من الجولة (بهدية وردة).
@@ -2784,6 +2806,12 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   app.post("/api/streams/:id/end", isAuthenticated, async (req: any, res) => {
     const stream = await storage.getLiveStream(Number(req.params.id));
     if (!stream || stream.userId !== req.user.claims.sub) return res.status(403).json({ message: "Forbidden" });
+    const room = streamRooms.get(String(stream.id));
+    if (room?.battle) {
+      // Persist and broadcast the authoritative winner before the stream is
+      // marked ended so clients do not lose the final result during teardown.
+      await finishBattle(String(stream.id), room.battle);
+    }
     const { recordingUrl } = (req.body || {});
     const updateData: any = { status: 'ended', endedAt: new Date() };
     if (recordingUrl) updateData.recordingUrl = recordingUrl;
@@ -4772,7 +4800,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       }
       if (p && !alreadyProcessed) {
         const services = String(p.serviceType || "").split(",").map((s: string) => s.trim()).filter(Boolean);
-        const isWalletRecharge = services.length === 0 || (services.length === 1 && services[0] === "wallet_recharge");
+        const isWalletRecharge = p.serviceType === "wallet_recharge";
         const needsManualFulfillment = p.fulfillmentStatus === "manual_required";
         await createNotification(
           p.userId,
@@ -5008,7 +5036,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       }
       if (p && !alreadyProcessed) {
         const services = String(p.serviceType || "").split(",").map((s: string) => s.trim()).filter(Boolean);
-        const isWalletRecharge = services.length === 0 || (services.length === 1 && services[0] === "wallet_recharge");
+        const isWalletRecharge = p.serviceType === "wallet_recharge";
         const needsManualFulfillment = p.fulfillmentStatus === "manual_required";
         await createNotification(
           p.userId,
@@ -6065,20 +6093,50 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   });
 
   // ─── PAYMENT NOTIFICATIONS (from ad buyers) ──────────────────
-  app.post("/api/payment-notifications", async (req, res) => {
+  app.post("/api/payment-notifications", isAuthenticated, async (req: any, res) => {
     try {
       const { adId, payerName, payerPhone, paidAmount, paymentMethod, screenshotUrl } = req.body;
-      if (!adId || !payerName || !payerPhone || !paidAmount || !paymentMethod)
-        return res.status(400).json({ message: "بيانات ناقصة" });
-      const payerUserId = (req as any).session?.customUser?.id || (req as any).user?.claims?.sub || null;
+      const numericAdId = Number(adId);
+      const numericAmount = Number(paidAmount);
+      const cleanName = typeof payerName === "string" ? payerName.trim().slice(0, 100) : "";
+      const cleanPhone = typeof payerPhone === "string" ? payerPhone.trim() : "";
+      const allowedMethods = new Set(["فودافون كاش", "اتصالات e& كاش", "InstaPay"]);
+      if (!Number.isSafeInteger(numericAdId) || numericAdId < 1 || !cleanName
+          || !/^01[0125]\d{8}$/.test(cleanPhone)
+          || !Number.isFinite(numericAmount) || numericAmount <= 0 || numericAmount > 1_000_000
+          || !allowedMethods.has(paymentMethod)) {
+        return res.status(400).json({ message: "بيانات إشعار الدفع غير صحيحة" });
+      }
+      if (typeof screenshotUrl !== "string" || !screenshotUrl.startsWith("/uploads/")) {
+        return res.status(400).json({ message: "ارفع صورة الإيصال من حسابك أولاً" });
+      }
+      const payerUserId = req.user.claims.sub;
+      const filename = screenshotUrl.replace(/^\/uploads\//, "");
+      const { uploadedFiles } = await import("@shared/schema");
+      const { eq, and } = await import("drizzle-orm");
+      const [ownedFile, adRow] = await Promise.all([
+        db.select({ id: uploadedFiles.id, mimeType: uploadedFiles.mimeType })
+          .from(uploadedFiles)
+          .where(and(eq(uploadedFiles.userId, payerUserId), eq(uploadedFiles.filename, filename)))
+          .limit(1),
+        pool.query(`SELECT user_id FROM ads WHERE id = $1`, [numericAdId]),
+      ]);
+      if (!adRow.rows[0]) return res.status(404).json({ message: "الإعلان غير موجود" });
+      if (adRow.rows[0].user_id === payerUserId) {
+        return res.status(400).json({ message: "لا يمكنك إرسال إيصال دفع لإعلانك" });
+      }
+      if (!ownedFile[0] || !ownedFile[0].mimeType?.startsWith("image/")) {
+        return res.status(400).json({ message: "صورة الإيصال لا تخص حسابك أو ليست صورة صالحة" });
+      }
       const result = await db.execute(
         sql`INSERT INTO payment_notifications (ad_id, payer_name, payer_phone, paid_amount, payment_method, status, screenshot_url, payer_user_id)
-            VALUES (${adId}, ${payerName}, ${payerPhone}, ${paidAmount}, ${paymentMethod}, 'pending', ${screenshotUrl || null}, ${payerUserId})
+            VALUES (${numericAdId}, ${cleanName}, ${cleanPhone}, ${numericAmount}, ${paymentMethod}, 'pending', ${screenshotUrl}, ${payerUserId})
             RETURNING *`
       );
       res.json(result.rows[0]);
-    } catch (e: any) {
-      res.status(500).json({ message: e.message });
+    } catch (error) {
+      console.error("[payment-notifications] create failed:", error instanceof Error ? error.message : "unknown error");
+      res.status(500).json({ message: "تعذر إرسال إشعار الدفع حالياً" });
     }
   });
 
@@ -6102,12 +6160,31 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   app.put("/api/payment-notifications/:id", isAuthenticated, async (req: any, res) => {
     if (!isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
     const { status } = req.body;
-    if (!["pending", "confirmed", "rejected"].includes(status))
+    if (!["confirmed", "rejected"].includes(status))
       return res.status(400).json({ message: "حالة غير صالحة" });
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ message: "رقم الإشعار غير صالح" });
+    const client = await pool.connect();
     try {
-      const result = await db.execute(
-        sql`UPDATE payment_notifications SET status = ${status} WHERE id = ${req.params.id} RETURNING *`
+      await client.query("BEGIN");
+      const locked = await client.query(`SELECT * FROM payment_notifications WHERE id = $1 FOR UPDATE`, [id]);
+      const current = locked.rows[0];
+      if (!current) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "إشعار الدفع غير موجود" });
+      }
+      if (current.status !== "pending") {
+        await client.query("COMMIT");
+        if (current.status !== status) {
+          return res.status(409).json({ message: "تمت مراجعة هذا الإشعار بالفعل ولا يمكن تغيير نتيجته" });
+        }
+        return res.json(current);
+      }
+      const result = await client.query(
+        `UPDATE payment_notifications SET status = $1 WHERE id = $2 RETURNING *`,
+        [status, id],
       );
+      await client.query("COMMIT");
       const row = result.rows[0] as any;
       // Send platform notification to buyer on confirmation
       if (status === "confirmed" && row) {
@@ -6127,8 +6204,12 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         } catch (_) {}
       }
       res.json(row);
-    } catch (e: any) {
-      res.status(500).json({ message: e.message });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      console.error("[payment-notifications] review failed:", error instanceof Error ? error.message : "unknown error");
+      res.status(500).json({ message: "تعذر تحديث إشعار الدفع حالياً" });
+    } finally {
+      client.release();
     }
   });
 

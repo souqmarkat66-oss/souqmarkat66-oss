@@ -136,6 +136,9 @@ export default function LiveStream() {
   const battleScoreARef   = useRef(0);
   const battleScoreBRef   = useRef(0);
   const battleTimerRef    = useRef<ReturnType<typeof setInterval>|null>(null);
+  const battleEndsAtRef   = useRef(0);
+  const battleCleanupTimerRef = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const giftAckWaitersRef = useRef<Map<string, (accepted: boolean) => void>>(new Map());
 
   // Share & Gift state
   const [showShare,       setShowShare]       = useState(false);
@@ -256,8 +259,7 @@ export default function LiveStream() {
   const battleActiveRef   = useRef(false);
   const [battleAudioReady, setBattleAudioReady] = useState(false);
   // Rapid-fire gift (نظام التكبيث)
-  const rapidFireTimer   = useRef<ReturnType<typeof setInterval> | null>(null);
-  const rapidFireCount   = useRef(0);
+  const rapidFireRunRef  = useRef(0);
   // Spam banner — visible to all viewers when someone spams gifts
   interface SpamBanner { id: number; userId: string; userName: string; emoji: string; glow: string; count: number; }
   const [spamBanners,    setSpamBanners]    = useState<SpamBanner[]>([]);
@@ -450,6 +452,11 @@ export default function LiveStream() {
     socket.on("stream-like",   () => setLikesCount(p => p + 1));
     socket.on("chat-message",  (msg: ChatMsg) => setMessages(prev => [...prev.slice(-60), msg]));
     socket.on("connect",       () => socket.emit("join-stream", id));
+    socket.on("disconnect", () => {
+      giftAckWaitersRef.current.forEach(settle => settle(false));
+      giftAckWaitersRef.current.clear();
+      rapidFireRunRef.current += 1;
+    });
 
     type BattleState = {
       active: boolean;
@@ -465,6 +472,10 @@ export default function LiveStream() {
       teams?: { A: { socketId: string; userId: string; name: string; audienceCount: number }[]; B: { socketId: string; userId: string; name: string; audienceCount: number }[] };
     };
     const applyBattleState = (state: BattleState) => {
+      if (state.active && battleCleanupTimerRef.current) {
+        clearTimeout(battleCleanupTimerRef.current);
+        battleCleanupTimerRef.current = null;
+      }
       if (state.teams) setBattleTeams(state.teams);
       setBattlePlayerScores(state.playerScores || {});
       setBattleMode(state.mode);
@@ -477,6 +488,7 @@ export default function LiveStream() {
       setBattleWinner(state.winner);
       setBattleActive(state.active || !!state.winner);
       setBattleRunning(state.active);
+      battleEndsAtRef.current = state.endsAt;
       setBattleSecs(Math.max(0, Math.ceil((state.endsAt - Date.now()) / 1000)));
     };
     socket.on("battle-state", applyBattleState);
@@ -487,6 +499,14 @@ export default function LiveStream() {
         title: state.winner === "draw" ? "🤝 انتهت المعركة بالتعادل" : `🏆 الفريق ${state.winner === "A" ? "أ" : "ب"} فاز!`,
         description: `النتيجة ${state.scoreA.toLocaleString()} مقابل ${state.scoreB.toLocaleString()}`,
       });
+      if (battleCleanupTimerRef.current) clearTimeout(battleCleanupTimerRef.current);
+      battleCleanupTimerRef.current = setTimeout(() => {
+        setBattleActive(false);
+        setBattleWinner(null);
+        setBattleTeams(null);
+        setBattlePlayerScores({});
+        battleCleanupTimerRef.current = null;
+      }, 8_000);
     });
     socket.on("battle-rejected", (data: { reason: string }) => {
       setBattleActive(false); setBattleRunning(false);
@@ -497,7 +517,11 @@ export default function LiveStream() {
       setBattleMultiplierEndsAt(Date.now() + data.durationSeconds * 1000);
       toast({ title: `${data.multiplier}x! ⚡`, description: `مضاعف السكور — ${data.reason}` });
     });
-    socket.on("gift-rejected", (data: { reason: string; balance?: number; required?: number }) => {
+    socket.on("gift-rejected", (data: { reason: string; balance?: number; required?: number; eventId?: string }) => {
+      if (data.eventId) {
+        giftAckWaitersRef.current.get(data.eventId)?.(false);
+        giftAckWaitersRef.current.delete(data.eventId);
+      }
       if (data.reason === "insufficient_balance") {
         if (typeof data.balance === "number") setMyCoins(data.balance);
         toast({ title: "رصيدك غير كافٍ", description: `تحتاج ${data.required} عملة`, variant: "destructive" });
@@ -515,7 +539,11 @@ export default function LiveStream() {
         toast({ title: "تعذّر إرسال الهدية", description: "حدث خطأ — لم يُخصم أي رصيد، حاول مجدداً", variant: "destructive" });
       }
     });
-    socket.on("gift-accepted", (data: { balance: number }) => {
+    socket.on("gift-accepted", (data: { balance: number; eventId?: string }) => {
+      if (data.eventId) {
+        giftAckWaitersRef.current.get(data.eventId)?.(true);
+        giftAckWaitersRef.current.delete(data.eventId);
+      }
       if (typeof data.balance === "number") setMyCoins(data.balance);
       refetchWallet();
     });
@@ -879,6 +907,10 @@ export default function LiveStream() {
     });
 
     return () => {
+      if (battleCleanupTimerRef.current) {
+        clearTimeout(battleCleanupTimerRef.current);
+        battleCleanupTimerRef.current = null;
+      }
       socket.emit("leave-stream", id);
       if (!isBroadcast && coHostStatus === "accepted") socket.emit("cohost-leave", id);
       socket.disconnect();
@@ -1283,6 +1315,9 @@ export default function LiveStream() {
   };
 
   const endStream = async () => {
+    if (battleRunning) {
+      socketRef.current?.emit("battle-end", { streamId: id });
+    }
     await fetch(`/api/streams/${id}/end`, { method: "POST", credentials: "include" }).catch(() => {});
     localStream.current?.getTracks().forEach(t => t.stop());
     queryClient.invalidateQueries({ queryKey: ["/api/streams"] });
@@ -1599,11 +1634,14 @@ export default function LiveStream() {
   // Battle countdown timer
   useEffect(() => {
     if (!battleRunning) return;
+    const refreshFromServerDeadline = () => {
+      setBattleSecs(Math.max(0, Math.ceil((battleEndsAtRef.current - Date.now()) / 1000)));
+    };
+    refreshFromServerDeadline();
     battleTimerRef.current = setInterval(() => {
-      setBattleSecs(s => Math.max(0, s - 1));
-    }, 1000);
+      refreshFromServerDeadline();
+    }, 250);
     return () => { if (battleTimerRef.current) clearInterval(battleTimerRef.current); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [battleRunning]);
 
   const fmtTimer = (s: number) => `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
@@ -1635,41 +1673,82 @@ export default function LiveStream() {
   const selectedGift = GIFTS.find(g => g.type === selectedGiftType) || GIFTS[1];
   const giftTabGifts = GIFTS.filter(g => g.cat === giftTab);
 
-  const sendGift = (gift: typeof GIFTS[0]) => {
-    if (!user) return;
+  const sendGift = (gift: typeof GIFTS[0]): Promise<boolean> => {
+    if (!user) return Promise.resolve(false);
+    const giftSocket = socketRef.current;
+    if (!giftSocket?.connected) {
+      toast({ title: "الاتصال بالبث غير متاح", description: "لم تُرسل الهدية ولم يُخصم أي رصيد", variant: "destructive" });
+      return Promise.resolve(false);
+    }
     if (myCoins < gift.coins) {
       toast({ title: "عملاتك غير كافية", description: `تحتاج ${gift.coins} عملة — رصيدك ${myCoins}`, variant: "destructive" });
-      return;
+      return Promise.resolve(false);
     }
     const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مستخدم";
-    // A stale target (co-host left) falls back to the broadcaster.
     // Viewers know participants from the server battle roster, not activeCoHosts.
     const knownTarget =
       activeCoHosts.some(c => c.socketId === giftTargetSocketId) ||
       !!(battleTeams && [...battleTeams.A, ...battleTeams.B].some(m => m.socketId === giftTargetSocketId));
-    const validTargetSocketId = giftTargetSocketId && knownTarget ? giftTargetSocketId : undefined;
-    socketRef.current?.emit("send-gift", {
-      eventId: crypto.randomUUID(),
-      streamId: id, giftType: gift.type, giftEmoji: gift.emoji,
-      giftName: gift.name, giftCoins: gift.coins, userName, userId: (user as any).id,
-      broadcasterUserId: stream?.userId,
-      recipientSocketId: validTargetSocketId,
-      battleTeam: battleActive ? giftTeamChoice : undefined,
-      glow: gift.glow,
+    if (giftTargetSocketId && !knownTarget) {
+      setGiftTargetSocketId(null);
+      toast({ title: "المستلم غادر البث", description: "لم يُخصم أي رصيد — اختر مستلماً آخر", variant: "destructive" });
+      return Promise.resolve(false);
+    }
+    const eventId = crypto.randomUUID();
+    return new Promise<boolean>((resolve) => {
+      const timeout = window.setTimeout(() => {
+        giftAckWaitersRef.current.delete(eventId);
+        resolve(false);
+        toast({ title: "تعذّر تأكيد الهدية", description: "لم يصل تأكيد من الخادم؛ تم إيقاف الكومبو", variant: "destructive" });
+      }, 8_000);
+      giftAckWaitersRef.current.set(eventId, (accepted) => {
+        window.clearTimeout(timeout);
+        resolve(accepted);
+      });
+      // Volatile delivery prevents Socket.IO from queueing a failed gift while
+      // offline and charging it later after a reconnect.
+      giftSocket.volatile.emit("send-gift", {
+        eventId,
+        streamId: id, giftType: gift.type, giftEmoji: gift.emoji,
+        giftName: gift.name, giftCoins: gift.coins, userName, userId: (user as any).id,
+        broadcasterUserId: stream?.userId,
+        recipientSocketId: giftTargetSocketId || undefined,
+        battleTeam: battleActive ? giftTeamChoice : undefined,
+        glow: gift.glow,
+      });
     });
-    // Sync wallet from server after a short delay
-    setTimeout(() => refetchWallet(), 1500);
   };
 
   /* إرسال كومبو — تكرار الإرسال حسب المضاعف المختار (x1/x2/x3) */
-  const sendGiftCombo = (gift: typeof GIFTS[0], times: number) => {
-    if (!user) return;
+  const sendGiftCombo = async (gift: typeof GIFTS[0], times: number): Promise<boolean> => {
+    if (!user) return false;
     if (myCoins < gift.coins * times) {
       toast({ title: "رصيدك غير كافٍ للكومبو", description: `تحتاج ${gift.coins * times} عملة — رصيدك ${myCoins}`, variant: "destructive" });
-      return;
+      return false;
     }
     for (let i = 0; i < times; i++) {
-      setTimeout(() => sendGift(gift), i * 280);
+      const accepted = await sendGift(gift);
+      if (!accepted) return false;
+    }
+    return true;
+  };
+
+  const stopRapidFire = () => {
+    rapidFireRunRef.current += 1;
+  };
+
+  const startGiftHold = async (gift: typeof GIFTS[0], times: number) => {
+    const runId = ++rapidFireRunRef.current;
+    const comboAccepted = await sendGiftCombo(gift, times);
+    if (!comboAccepted || rapidFireRunRef.current !== runId) return;
+    while (rapidFireRunRef.current === runId) {
+      await new Promise(resolve => window.setTimeout(resolve, 380));
+      if (rapidFireRunRef.current !== runId) return;
+      const accepted = await sendGift(gift);
+      if (!accepted) {
+        stopRapidFire();
+        return;
+      }
     }
   };
 
@@ -1940,7 +2019,7 @@ export default function LiveStream() {
           playsInline
           muted={isBroadcast}
           data-testid="video-stream"
-          className={`absolute inset-0 w-full h-full object-cover ${(isBroadcast && (salonMode || (battleActive && activeCoHosts.length > 0) || (!!swappedCohostId && activeCoHosts.length > 0))) || (!isBroadcast && battleActive && coHostStatus === "accepted") ? "opacity-0 pointer-events-none" : ""}`}
+          className={`absolute inset-0 w-full h-full object-cover ${isBroadcast && (salonMode || (battleActive && activeCoHosts.length > 0) || (!!swappedCohostId && activeCoHosts.length > 0)) ? "opacity-0 pointer-events-none" : ""}`}
           style={{ backgroundColor: "#000", transform: (isBroadcast && camFacing === "user") ? "scaleX(-1)" : "none" }}
         />
 
@@ -2595,138 +2674,6 @@ export default function LiveStream() {
                   </p>
                 </div>
               </div>
-            )}
-
-            {/* Battle split-screen — Team A (broadcaster) left | Team B (guests) right.
-                يُعرض على جهاز المذيع فقط؛ المشاهد يرى بث المذيع الرئيسي مع شريط السكور والمؤقت */}
-            {isBroadcast && activeCoHosts.length > 0 && (
-            <div className="absolute inset-0 flex z-5 mt-12">
-              {/* Team A — broadcaster */}
-              <div className="w-1/2 h-full relative border-r border-white/30">
-                <video
-                  autoPlay playsInline muted
-                  ref={el => { if (el && localStream.current && !el.srcObject) { el.srcObject = localStream.current; el.play().catch(()=>{}); }}}
-                  className="w-full h-full object-cover"
-                  style={{ transform: camFacing === "user" ? "scaleX(-1)" : "none" }}
-                />
-                {/* شارة مستقلة: اسم صاحب الخانة + عداده الخاص فقط */}
-                <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-black/60 backdrop-blur rounded-full px-2 py-0.5" data-testid="badge-slot-a0">
-                  <span className="text-[10px] font-black text-cyan-300">💎 {((battleTeams?.A?.[0] && battlePlayerScores[battleTeams.A[0].userId]) || 0).toLocaleString()}</span>
-                </div>
-                <div className="absolute bottom-2 inset-x-0 flex justify-center">
-                  <span className="text-[10px] text-white bg-red-600 rounded-full px-2 py-0.5 font-bold">🔴 {battleTeams?.A?.[0]?.name || "الفريق أ"}</span>
-                </div>
-                {battleMode === "2v2" && activeCoHosts[1] && (
-                  <div className="absolute bottom-16 inset-x-0 flex justify-center">
-                    <div className="w-20 h-28 rounded-xl overflow-hidden border border-red-400 relative">
-                      <video autoPlay playsInline ref={el => bindCohostVideo(activeCoHosts[1].socketId, el)} className="w-full h-full object-cover" />
-                      <div className="absolute top-0.5 right-0.5 bg-black/60 rounded-full px-1 py-px" data-testid="badge-slot-a1">
-                        <span className="text-[8px] font-black text-cyan-300">💎 {(battlePlayerScores[battleTeams?.A?.[1]?.userId || ""] || 0).toLocaleString()}</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-              {/* Team B — first co-host */}
-              <div className="w-1/2 h-full relative">
-                {activeCoHosts[0] && (
-                  <>
-                    {activeCoHosts[0].hasCamera !== false ? (
-                      <video
-                        autoPlay playsInline
-                        ref={el => bindCohostVideo(activeCoHosts[0].socketId, el)}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
-                        <Mic className="w-10 h-10 text-blue-300" />
-                      </div>
-                    )}
-                    <div className="absolute top-2 left-2 z-10 flex items-center gap-1 bg-black/60 backdrop-blur rounded-full px-2 py-0.5" data-testid="badge-slot-b0">
-                      <span className="text-[10px] font-black text-cyan-300">💎 {(battlePlayerScores[battleTeams?.B?.[0]?.userId || ""] || 0).toLocaleString()}</span>
-                    </div>
-                    <div className="absolute bottom-2 inset-x-0 flex justify-center">
-                      <span className="text-[10px] text-white bg-blue-600 rounded-full px-2 py-0.5 font-bold">🔵 {battleTeams?.B?.find(m => m.socketId === activeCoHosts[0].socketId)?.name || "الفريق ب"}</span>
-                    </div>
-                    {battleMode === "2v2" && activeCoHosts[2] && (
-                      <div className="absolute bottom-16 inset-x-0 flex justify-center">
-                        <div className="w-20 h-28 rounded-xl overflow-hidden border border-blue-400 relative">
-                          <video autoPlay playsInline ref={el => bindCohostVideo(activeCoHosts[2].socketId, el)} className="w-full h-full object-cover" />
-                          <div className="absolute top-0.5 left-0.5 bg-black/60 rounded-full px-1 py-px" data-testid="badge-slot-b1">
-                            <span className="text-[8px] font-black text-cyan-300">💎 {(battlePlayerScores[battleTeams?.B?.[1]?.userId || ""] || 0).toLocaleString()}</span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-            )}
-
-            {/* Battle split-screen — جهاز الضيف المتحدي: المذيع (أ) شمال | كاميرته هو (ب) يمين */}
-            {!isBroadcast && coHostStatus === "accepted" && (
-            <div className="absolute inset-0 flex z-5 mt-12">
-              {/* Team A — broadcaster feed */}
-              <div className="w-1/2 h-full relative border-r border-white/30">
-                <video
-                  autoPlay playsInline muted
-                  ref={el => {
-                    if (!el) return;
-                    const mainEl = (hlsVideoRef.current || videoRef.current) as any;
-                    let src = (videoRef.current?.srcObject || hlsVideoRef.current?.srcObject) as MediaStream | null;
-                    // بث RTMP/HLS: مفيش srcObject — ناخد نسخة من الفيديو الشغال نفسه
-                    if (!src && mainEl && typeof mainEl.captureStream === "function") {
-                      try { src = mainEl.captureStream(); } catch { src = null; }
-                    }
-                    if (src && el.srcObject !== src) { el.srcObject = src; el.play().catch(() => {}); }
-                  }}
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute top-2 right-2 z-10 bg-black/60 backdrop-blur rounded-full px-2 py-0.5" data-testid="badge-guest-slot-a">
-                  <span className="text-[10px] font-black text-cyan-300">💎 {((battleTeams?.A?.[0] && battlePlayerScores[battleTeams.A[0].userId]) || 0).toLocaleString()}</span>
-                </div>
-                <div className="absolute bottom-2 inset-x-0 flex justify-center">
-                  <span className="text-[10px] text-white bg-red-600 rounded-full px-2 py-0.5 font-bold">🔴 {battleTeams?.A?.[0]?.name || "الفريق أ"}</span>
-                </div>
-              </div>
-              {/* Team B — my own camera */}
-              <div className="w-1/2 h-full relative">
-                {guestHasCamera ? (
-                  <video
-                    autoPlay playsInline muted
-                    ref={el => {
-                      const ms = coHostStream.current;
-                      if (el && ms && el.srcObject !== ms) { el.srcObject = ms; el.play().catch(() => {}); }
-                    }}
-                    className="w-full h-full object-cover"
-                    style={{ transform: "scaleX(-1)" }}
-                  />
-                ) : (
-                  <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
-                    <Mic className="w-10 h-10 text-blue-300" />
-                  </div>
-                )}
-                {(() => {
-                  // هوية الضيف من القائمة الرسمية (قد يكون في الفريق أ في الرباعي) — بدون افتراض الفريق ب
-                  const myId = socketRef.current?.id;
-                  const inA = battleTeams?.A?.find(m => m.socketId === myId);
-                  const inB = battleTeams?.B?.find(m => m.socketId === myId);
-                  const me = inA || inB;
-                  const myTeamLabel = inA ? "🔴 الفريق أ (أنت)" : "🔵 الفريق ب (أنت)";
-                  return (
-                    <>
-                      <div className="absolute top-2 left-2 z-10 bg-black/60 backdrop-blur rounded-full px-2 py-0.5" data-testid="badge-guest-slot-b">
-                        <span className="text-[10px] font-black text-cyan-300">💎 {(me ? battlePlayerScores[me.userId] || 0 : 0).toLocaleString()}</span>
-                      </div>
-                      <div className="absolute bottom-2 inset-x-0 flex justify-center">
-                        <span className={`text-[10px] text-white rounded-full px-2 py-0.5 font-bold ${inA ? "bg-red-600" : "bg-blue-600"}`}>{myTeamLabel}</span>
-                      </div>
-                    </>
-                  );
-                })()}
-              </div>
-            </div>
             )}
 
             {/* Battle end button (broadcaster) */}
@@ -3693,7 +3640,7 @@ export default function LiveStream() {
 
       {/* GIFT PANEL — تبويبات + مستهدف + كومبو */}
       {showGiftPanel && !isBroadcast && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => { setShowGiftPanel(false); if(rapidFireTimer.current){clearInterval(rapidFireTimer.current);rapidFireTimer.current=null;} }}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => { setShowGiftPanel(false); stopRapidFire(); }}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div className="relative w-full max-w-lg bg-zinc-950 border-t border-orange-500/20 rounded-t-3xl p-4 pb-safe max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()} dir="rtl">
 
@@ -3879,8 +3826,10 @@ export default function LiveStream() {
                   <div className="flex items-center justify-between">
                     <span className="text-white/50 text-[11px]">نقاط السكور:</span>
                     <span className="text-orange-400 font-black text-sm" data-testid="text-gift-score">
-                      +{(selectedGift.coins * comboMult * (battleActive ? battleMultiplier : 1)).toLocaleString()}
-                      {battleActive && battleMultiplier > 1 ? ` (${battleMultiplier}x)` : ""}
+                      +{(selectedGift.coins * comboMult * (battleActive ? (selectedGift.type === "glove" ? 5 : battleMultiplier) : 1)).toLocaleString()}
+                      {battleActive && (selectedGift.type === "glove" || battleMultiplier > 1)
+                        ? ` (${selectedGift.type === "glove" ? 5 : battleMultiplier}x)`
+                        : ""}
                     </span>
                   </div>
                 </div>
@@ -3888,15 +3837,11 @@ export default function LiveStream() {
                 {/* Send button — ضغطة واحدة ترسل الكومبو، الضغط المستمر = تكبيث */}
                 <button
                   onPointerDown={() => {
-                    sendGiftCombo(selectedGift, comboMult);
-                    rapidFireCount.current = 1;
-                    rapidFireTimer.current = setInterval(() => {
-                      rapidFireCount.current += 1;
-                      sendGift(selectedGift);
-                    }, 380);
+                    void startGiftHold(selectedGift, comboMult);
                   }}
-                  onPointerUp={() => { if(rapidFireTimer.current){clearInterval(rapidFireTimer.current);rapidFireTimer.current=null;} }}
-                  onPointerLeave={() => { if(rapidFireTimer.current){clearInterval(rapidFireTimer.current);rapidFireTimer.current=null;} }}
+                  onPointerUp={stopRapidFire}
+                  onPointerCancel={stopRapidFire}
+                  onPointerLeave={stopRapidFire}
                   disabled={myCoins < selectedGift.coins * comboMult}
                   className="w-full py-3.5 rounded-2xl souq-glow-btn text-white font-black text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:animate-none"
                   data-testid="btn-send-gift"

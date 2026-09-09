@@ -6,6 +6,7 @@ import { Loader2, ShieldCheck } from "lucide-react";
 export default function AfsCheckout() {
   const { orderId } = useParams<{ orderId: string }>();
   const [paymentTargetActive, setPaymentTargetActive] = useState(false);
+  const [widgetState, setWidgetState] = useState<"loading" | "ready" | "error">("loading");
   const { data: order, isLoading, error } = useQuery<any>({
     queryKey: ["/api/payments/afs", orderId],
     queryFn: async () => {
@@ -17,7 +18,23 @@ export default function AfsCheckout() {
   });
 
   useEffect(() => {
-    if (!order?.widgetUrl || !/^https:\/\//.test(order.widgetUrl)) return;
+    if (!order) return;
+    if (!order.widgetUrl || !/^https:\/\//.test(order.widgetUrl)) {
+      setWidgetState("error");
+      return;
+    }
+    setWidgetState("loading");
+    let settled = false;
+    const markReady = () => {
+      if (settled) return;
+      settled = true;
+      setWidgetState("ready");
+    };
+    const markError = () => {
+      if (settled) return;
+      settled = true;
+      setWidgetState("error");
+    };
     (window as any).wpwlOptions = {
       locale: "ar",
       style: "card",
@@ -25,6 +42,8 @@ export default function AfsCheckout() {
       shopperResultTarget: "afs-payment-target",
       brandDetection: true,
       showCVVHint: true,
+      onReady: markReady,
+      onError: markError,
       labels: {
         cardHolder: "اسم حامل البطاقة",
         cardNumber: "رقم البطاقة",
@@ -38,8 +57,26 @@ export default function AfsCheckout() {
     script.async = true;
     script.crossOrigin = "anonymous";
     if (order.integrity) script.integrity = order.integrity;
+    const widgetForm = document.querySelector<HTMLFormElement>("form.paymentWidgets");
+    const observer = new MutationObserver(() => {
+      if (widgetForm?.querySelector(".wpwl-form, .wpwl-container") || widgetForm?.children.length) markReady();
+    });
+    if (widgetForm) observer.observe(widgetForm, { childList: true, subtree: true });
+    const loadingTimeout = window.setTimeout(markError, 12_000);
+    script.onload = () => {
+      if (widgetForm?.querySelector(".wpwl-form, .wpwl-container") || widgetForm?.children.length) markReady();
+    };
+    script.onerror = markError;
     document.body.appendChild(script);
-    return () => script.remove();
+    return () => {
+      settled = true;
+      window.clearTimeout(loadingTimeout);
+      observer.disconnect();
+      script.onload = null;
+      script.onerror = null;
+      script.remove();
+      delete (window as any).wpwlOptions;
+    };
   }, [order?.widgetUrl, order?.integrity]);
 
   if (isLoading) return <div className="flex h-[50vh] items-center justify-center"><Loader2 className="animate-spin" /></div>;
@@ -70,6 +107,17 @@ export default function AfsCheckout() {
         </div>
         {order.serviceType && <p className="mb-2 text-sm">الخدمة: <b>{order.serviceType === "ad_boost" ? "تعزيز إعلان" : order.serviceType === "ad_renewal" ? "تجديد إعلان" : order.serviceType === "subscription" ? "اشتراك المنصة" : "خدمة مدفوعة"}</b></p>}
         <p className="mb-5 text-sm">المبلغ: <b>{Number(order.amountEGP).toLocaleString("ar-EG")} ج.م</b></p>
+        {widgetState === "loading" && (
+          <div className="mb-3 flex items-center justify-center gap-2 rounded-xl border bg-muted/20 p-3 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            جارٍ تحميل نموذج البطاقة الآمن...
+          </div>
+        )}
+        {widgetState === "error" && (
+          <div className="mb-3 rounded-xl border border-red-300 bg-red-50 p-3 text-sm font-bold text-red-700">
+            تعذر تحميل نموذج AFS. لم يتم سحب أي مبلغ. ارجع لصفحة المدفوعات وحاول مرة أخرى أو استخدم طريقة دفع أخرى.
+          </div>
+        )}
         <form action={action} className="paymentWidgets" data-brands="VISA MASTER MEEZA"></form>
         <iframe
           name="afs-payment-target"

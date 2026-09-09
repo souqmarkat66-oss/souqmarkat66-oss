@@ -85,17 +85,29 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
       setScreenshotUrl("");
       toast({ title: "✅ تم إرسال إشعار الدفع لصاحب الإعلان. سيتواصل معك قريباً." });
     },
-    onError: () => toast({ variant: "destructive", title: "خطأ في إرسال إشعار الدفع" }),
+    onError: (error: Error) => toast({
+      variant: "destructive",
+      title: "تعذر إرسال إشعار الدفع",
+      description: error.message,
+    }),
   });
 
   const handleScreenshotUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ variant: "destructive", title: "الإيصال يجب أن يكون صورة" });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ variant: "destructive", title: "حجم الصورة أكبر من 5 ميجابايت" });
+      return;
+    }
     setScreenshotUploading(true);
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const r = await fetch("/api/upload", { method: "POST", body: formData });
+      const r = await fetch("/api/upload", { method: "POST", body: formData, credentials: "include" });
       if (!r.ok) throw new Error("فشل الرفع");
       const data = await r.json();
       setScreenshotUrl(data.url);
@@ -317,7 +329,7 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
             </div>
             {/* Screenshot upload */}
             <div>
-              <label className="text-sm font-medium">صورة الإيصال / لقطة الشاشة <span className="text-muted-foreground text-xs">(اختياري)</span></label>
+              <label className="text-sm font-medium">صورة الإيصال / لقطة الشاشة <span className="text-red-500 text-xs">(مطلوب)</span></label>
               {screenshotUrl ? (
                 <div className="mt-2 relative w-fit">
                   <ReceiptImg src={screenshotUrl} />
@@ -347,7 +359,7 @@ function PaymentSection({ ad, user }: { ad: any; user: any }) {
             </div>
             <Button
               className="w-full gap-2" onClick={() => confirmMutation.mutate()}
-              disabled={!payerName || !payerPhone || !paidAmount || confirmMutation.isPending || screenshotUploading}
+              disabled={!payerName || !/^01[0125]\d{8}$/.test(payerPhone.trim()) || !paidAmount || !screenshotUrl || confirmMutation.isPending || screenshotUploading}
               data-testid="btn-confirm-payment"
             >
               <CheckCircle className="w-4 h-4" /> أرسل تأكيد الدفع
