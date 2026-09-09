@@ -5,6 +5,7 @@ IFS=$'\n\t'
 
 : "${DEPLOY_HOST:?set DEPLOY_HOST}"
 : "${DEPLOY_USER:?set DEPLOY_USER}"
+: "${DEPLOY_SSH_PORT:?set DEPLOY_SSH_PORT}"
 : "${DEPLOY_ROOT:?set DEPLOY_ROOT (for example /var/www/ads-as)}"
 : "${DEPLOY_SSH_KEY:?set DEPLOY_SSH_KEY}"
 : "${DEPLOY_KNOWN_HOSTS:?set DEPLOY_KNOWN_HOSTS with the VPS host key}"
@@ -26,6 +27,7 @@ trap cleanup_local EXIT
 
 [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || { echo "Invalid DEPLOY_HOST" >&2; exit 1; }
 [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || { echo "Invalid DEPLOY_USER" >&2; exit 1; }
+[[ "$DEPLOY_SSH_PORT" =~ ^[1-9][0-9]{0,4}$ && "$DEPLOY_SSH_PORT" -le 65535 ]] || { echo "DEPLOY_SSH_PORT must be a valid TCP port" >&2; exit 1; }
 [[ "$DEPLOY_PM2_APP" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "Invalid DEPLOY_PM2_APP" >&2; exit 1; }
 [[ "$DEPLOY_ROOT" =~ ^/[A-Za-z0-9._/-]+$ && "$DEPLOY_ROOT" != "/" && "$DEPLOY_ROOT" != *"//"* && "$DEPLOY_ROOT" != *"/../"* && "$DEPLOY_ROOT" != */.. ]] || { echo "Invalid DEPLOY_ROOT" >&2; exit 1; }
 [[ "$DEPLOY_KEEP_RELEASES" =~ ^[2-9][0-9]*$ ]] || { echo "DEPLOY_KEEP_RELEASES must be an integer of at least 2" >&2; exit 1; }
@@ -34,8 +36,8 @@ health_url_pattern='^https?://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?(/[^[:space
 [[ -r "$DEPLOY_SSH_KEY" && -r "$DEPLOY_KNOWN_HOSTS" ]] || { echo "SSH key or known_hosts file is unreadable" >&2; exit 1; }
 chmod 600 "$DEPLOY_SSH_KEY"
 
-SSH=(ssh -i "$DEPLOY_SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$DEPLOY_KNOWN_HOSTS")
-SCP=(scp -i "$DEPLOY_SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$DEPLOY_KNOWN_HOSTS")
+SSH=(ssh -p "$DEPLOY_SSH_PORT" -i "$DEPLOY_SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$DEPLOY_KNOWN_HOSTS")
+SCP=(scp -P "$DEPLOY_SSH_PORT" -i "$DEPLOY_SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$DEPLOY_KNOWN_HOSTS")
 
 echo "Building release $RELEASE_ID..."
 npm run build
