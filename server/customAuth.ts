@@ -1,5 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
+import nodemailer from "nodemailer";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
@@ -86,10 +87,52 @@ function maskEmail(email: string): string {
 }
 
 async function sendResetOtp(destination: string, otp: string) {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
   const emailFrom = process.env.PASSWORD_RESET_EMAIL_FROM?.trim();
-  if (!apiKey) throw new Error("RESEND_API_KEY is not configured");
   if (!emailFrom) throw new Error("PASSWORD_RESET_EMAIL_FROM is not configured");
+
+  const smtpHost = process.env.EMAIL_HOST?.trim();
+  const smtpPortValue = process.env.EMAIL_PORT?.trim();
+  const smtpUser = process.env.EMAIL_USER?.trim();
+  const smtpPass = process.env.EMAIL_PASS?.trim();
+  const hasAnySmtpSetting = !!(smtpHost || smtpPortValue || smtpUser || smtpPass);
+
+  if (hasAnySmtpSetting) {
+    if (!smtpHost || !smtpUser || !smtpPass) {
+      throw new Error("Hostinger SMTP configuration is incomplete");
+    }
+    const smtpPort = smtpPortValue ? Number(smtpPortValue) : 465;
+    if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65_535) {
+      throw new Error("EMAIL_PORT is invalid");
+    }
+    const transport = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      requireTLS: smtpPort !== 465,
+      auth: { user: smtpUser, pass: smtpPass },
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
+      tls: {
+        minVersion: "TLSv1.2",
+        servername: smtpHost,
+      },
+    });
+    try {
+      await transport.sendMail({
+        from: emailFrom,
+        to: destination,
+        subject: "رمز إعادة تعيين كلمة المرور",
+        html: `<p dir="rtl">رمز التحقق الخاص بك هو <strong>${otp}</strong>. تنتهي صلاحيته خلال 10 دقائق. لا تشاركه مع أحد.</p>`,
+      });
+    } finally {
+      transport.close();
+    }
+    return;
+  }
+
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  if (!apiKey) throw new Error("Email delivery is not configured");
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -105,6 +148,12 @@ async function sendResetOtp(destination: string, otp: string) {
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`Resend delivery failed (${response.status})`);
+}
+
+function deliveryErrorSummary(error: any): string {
+  const code = typeof error?.code === "string" ? error.code : "DELIVERY_FAILED";
+  const responseCode = Number.isInteger(error?.responseCode) ? ` (${error.responseCode})` : "";
+  return `${code}${responseCode}`;
 }
 
 function regenerateSession(req: Request): Promise<void> {
@@ -472,7 +521,7 @@ export function registerCustomAuthRoutes(app: Express) {
       if (issuance.shouldSend) {
         void sendResetOtp(destination, otp).catch(async (deliveryError: any) => {
           await db.execute(sql`UPDATE password_reset_challenges SET used_at = NOW() WHERE id = ${issuance.challengeId}`).catch(() => undefined);
-          console.error("[Password reset] OTP delivery failed:", deliveryError?.message);
+          console.error("[Password reset] OTP delivery failed:", deliveryErrorSummary(deliveryError));
         });
       }
       return res.status(202).json({

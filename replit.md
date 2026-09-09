@@ -8,6 +8,11 @@ A comprehensive bilingual (Arabic/English) advertising and live streaming platfo
 
 Preferred communication style: Arabic/bilingual, everyday language.
 
+## Production Deployment Boundary
+
+- This project and its deployment tooling target the advertising platform only: `/var/www/ads-as`.
+- The same VPS also hosts a separate development platform named `iDeliver`. Never inspect, modify, restart, deploy, migrate, or clean up the `iDeliver` path or its processes while working on this project.
+
 ## System Architecture
 
 ### Frontend Architecture
