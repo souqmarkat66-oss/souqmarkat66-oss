@@ -34,12 +34,13 @@ MIGRATE_PRODUCTION_CONFIRM=YES MIGRATE_BASELINE_EXISTING=YES \
 ```
 
 This exceptional mode works only when `0000_schema_baseline.sql` is first, the
-ledger has no rows, baseline table parsing is complete and unambiguous, and
-every table declared by the baseline already exists in `public`. The checks and
-baseline ledger insert run under the same advisory lock. A fresh or partial
-database is rejected; omit this mode on a fresh database so the baseline is
-executed normally. Once the baseline ledger row exists, never use adoption mode
-again.
+ledger has no rows, and baseline table parsing is complete and unambiguous.
+The reviewed, idempotent `0001_existing_schema_reconciliation.sql` runs inside
+the adoption transaction before the runner proves that every baseline table
+exists. The checks and baseline ledger insert run under the same advisory lock.
+A fresh or structurally unrelated database is still rejected; omit this mode on
+a fresh database so the baseline is executed normally. Once the baseline ledger
+row exists, never use adoption mode again.
 
 The runner creates and prints a `pg_dump` backup path first. It never
 automatically restores a backup because doing so could erase writes made after

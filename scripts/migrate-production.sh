@@ -36,7 +36,7 @@ for file in "${migration_files[@]}"; do
     echo "Invalid migration filename: $name (expected NNNN_description.sql)" >&2
     exit 1
   }
-  if grep -Eiq '^[[:space:]]*(BEGIN|START[[:space:]]+TRANSACTION|COMMIT|ROLLBACK|END)([[:space:];]|$)' "$file"; then
+  if grep -Eiq '^[[:space:]]*(BEGIN([[:space:]]+TRANSACTION)?|START[[:space:]]+TRANSACTION|COMMIT|ROLLBACK)[[:space:]]*;' "$file"; then
     echo "Migration $name contains transaction control; remove it because the runner owns the transaction." >&2
     exit 1
   fi
@@ -48,10 +48,16 @@ done
 
 baseline_name="0000_schema_baseline.sql"
 baseline_file="${migration_files[0]}"
+reconciliation_name="0001_existing_schema_reconciliation.sql"
+reconciliation_file="$MIGRATIONS_DIR/$reconciliation_name"
 expected_tables=()
 if [[ "$MIGRATE_BASELINE_EXISTING" = "YES" ]]; then
   [[ "$(basename "$baseline_file")" = "$baseline_name" ]] || {
     echo "Baseline adoption requires $baseline_name to be the first migration." >&2
+    exit 1
+  }
+  [[ -f "$reconciliation_file" ]] || {
+    echo "Baseline adoption requires reviewed reconciliation migration $reconciliation_name." >&2
     exit 1
   }
   create_count="$(grep -Eic '^[[:space:]]*CREATE[[:space:]]+TABLE([[:space:]]|$)' "$baseline_file")"
@@ -90,6 +96,13 @@ CREATE TABLE IF NOT EXISTS public.schema_migrations (
   checksum_sha256 text NOT NULL,
   applied_at timestamptz NOT NULL DEFAULT now()
 );
+SQL
+    # Existing VPS installs may predate a few runtime-provisioned tables or
+    # columns. Reconcile them transactionally before proving that the baseline
+    # is complete. The normal migration loop re-runs this idempotent file and
+    # records its checksum immediately after the baseline adoption commits.
+    cat "$reconciliation_file"
+    cat <<'SQL'
 DO $adopt$
 DECLARE
   missing_tables text;
@@ -136,15 +149,16 @@ for file in "${migration_files[@]}"; do
   name="$(basename "$file")"
   checksum="$(sha256sum "$file" | awk '{print $1}')"
   {
-    printf "\\echo Checking %s\n" "$name"
+    printf '\\echo Checking %s\n' "$name"
     printf 'DO $guard$ BEGIN IF EXISTS (SELECT 1 FROM public.schema_migrations WHERE name = '\''%s'\'' AND checksum_sha256 <> '\''%s'\'') THEN RAISE EXCEPTION '\''checksum mismatch for applied migration %s'\''; END IF; END $guard$;\n' "$name" "$checksum" "$name"
-    printf "SELECT EXISTS (SELECT 1 FROM public.schema_migrations WHERE name = '%s') AS migration_applied \\gset\n" "$name"
-    printf "\\if :migration_applied\n"
-    printf "\\echo Already applied: %s\n" "$name"
-    printf "\\else\nBEGIN;\n"
+    printf '%s\n' "SELECT EXISTS (SELECT 1 FROM public.schema_migrations WHERE name = '$name') AS migration_applied \\gset"
+    printf '%s\n' "\\if :migration_applied"
+    printf '\\echo Already applied: %s\n' "$name"
+    printf '%s\n' "\\else" "BEGIN;"
     cat "$file"
     printf "\nINSERT INTO public.schema_migrations (name, checksum_sha256) VALUES ('%s', '%s');\nCOMMIT;\n" "$name" "$checksum"
-    printf "\\echo Applied: %s\n\\endif\n" "$name"
+    printf '\\echo Applied: %s\n' "$name"
+    printf '%s\n' "\\endif"
   } >> "$control_file"
 done
 

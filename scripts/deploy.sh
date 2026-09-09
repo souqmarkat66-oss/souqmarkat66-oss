@@ -1,163 +1,316 @@
 #!/usr/bin/env bash
-# Trusted-operator deployment only. All connection and target values are explicit.
-set -euo pipefail
+# Deploy the current build to the in-place PM2 runtime used by the Hostinger VPS.
+# Database migrations are intentionally separate; run migrate-production.sh first.
+set -Eeuo pipefail
 IFS=$'\n\t'
+umask 077
 
 : "${DEPLOY_HOST:?set DEPLOY_HOST}"
 : "${DEPLOY_USER:?set DEPLOY_USER}"
 : "${DEPLOY_SSH_PORT:?set DEPLOY_SSH_PORT}"
 : "${DEPLOY_ROOT:?set DEPLOY_ROOT (for example /var/www/ads-as)}"
-: "${DEPLOY_SSH_KEY:?set DEPLOY_SSH_KEY}"
-: "${DEPLOY_KNOWN_HOSTS:?set DEPLOY_KNOWN_HOSTS with the VPS host key}"
-: "${DEPLOY_HEALTH_URL:?set DEPLOY_HEALTH_URL}"
+: "${DEPLOY_HEALTH_URL:?set DEPLOY_HEALTH_URL to the public /api/health URL}"
 
 DEPLOY_PM2_APP="${DEPLOY_PM2_APP:-ads-as}"
-DEPLOY_KEEP_RELEASES="${DEPLOY_KEEP_RELEASES:-5}"
+DEPLOY_KEEP_BACKUPS="${DEPLOY_KEEP_BACKUPS:-5}"
+DEPLOY_INTERNAL_HEALTH_URL="${DEPLOY_INTERNAL_HEALTH_URL:-http://127.0.0.1:5000/api/health}"
+DEPLOY_HEALTH_URL="${DEPLOY_HEALTH_URL%/}"
+health_origin_pattern='^https?://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?$'
+if [[ "$DEPLOY_HEALTH_URL" =~ $health_origin_pattern ]]; then
+  DEPLOY_HEALTH_URL="$DEPLOY_HEALTH_URL/api/health"
+fi
 REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
 RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
-ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/ads-as-${RELEASE_ID}.XXXXXX.tgz")"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ads-as-deploy.XXXXXX")"
+ARCHIVE="$WORK_DIR/runtime.tgz"
+CHECKSUM="$WORK_DIR/runtime.sha256"
+KNOWN_HOSTS_TMP=""
+ASKPASS_TMP=""
+REMOTE_ARCHIVE="/tmp/ads-as-$RELEASE_ID.tgz"
+REMOTE_CHECKSUM="/tmp/ads-as-$RELEASE_ID.sha256"
 uploaded=0
-cleanup_local() {
-  rm -f "$ARCHIVE"
-  if [[ "$uploaded" = "1" ]]; then
-    "${SSH[@]}" "$REMOTE" "rm -f '$DEPLOY_ROOT/releases/$RELEASE_ID.tgz'" >/dev/null 2>&1 || true
-  fi
-}
-trap cleanup_local EXIT
 
 [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || { echo "Invalid DEPLOY_HOST" >&2; exit 1; }
 [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || { echo "Invalid DEPLOY_USER" >&2; exit 1; }
-[[ "$DEPLOY_SSH_PORT" =~ ^[1-9][0-9]{0,4}$ && "$DEPLOY_SSH_PORT" -le 65535 ]] || { echo "DEPLOY_SSH_PORT must be a valid TCP port" >&2; exit 1; }
+[[ "$DEPLOY_SSH_PORT" =~ ^[1-9][0-9]{0,4}$ && "$DEPLOY_SSH_PORT" -le 65535 ]] || {
+  echo "DEPLOY_SSH_PORT must be a valid TCP port" >&2
+  exit 1
+}
 [[ "$DEPLOY_PM2_APP" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "Invalid DEPLOY_PM2_APP" >&2; exit 1; }
-[[ "$DEPLOY_ROOT" =~ ^/[A-Za-z0-9._/-]+$ && "$DEPLOY_ROOT" != "/" && "$DEPLOY_ROOT" != *"//"* && "$DEPLOY_ROOT" != *"/../"* && "$DEPLOY_ROOT" != */.. ]] || { echo "Invalid DEPLOY_ROOT" >&2; exit 1; }
-[[ "$DEPLOY_KEEP_RELEASES" =~ ^[2-9][0-9]*$ ]] || { echo "DEPLOY_KEEP_RELEASES must be an integer of at least 2" >&2; exit 1; }
+[[ "$DEPLOY_ROOT" =~ ^/[A-Za-z0-9._/-]+$ && "$DEPLOY_ROOT" != "/" && "$DEPLOY_ROOT" != *"//"* && "$DEPLOY_ROOT" != *"/../"* && "$DEPLOY_ROOT" != */.. ]] || {
+  echo "Invalid DEPLOY_ROOT" >&2
+  exit 1
+}
+[[ "$DEPLOY_KEEP_BACKUPS" =~ ^[2-9][0-9]*$ ]] || {
+  echo "DEPLOY_KEEP_BACKUPS must be an integer of at least 2" >&2
+  exit 1
+}
 health_url_pattern='^https?://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?(/[^[:space:]]*)?$'
-[[ "$DEPLOY_HEALTH_URL" =~ $health_url_pattern ]] || { echo "Invalid DEPLOY_HEALTH_URL" >&2; exit 1; }
-[[ -r "$DEPLOY_SSH_KEY" && -r "$DEPLOY_KNOWN_HOSTS" ]] || { echo "SSH key or known_hosts file is unreadable" >&2; exit 1; }
-chmod 600 "$DEPLOY_SSH_KEY"
+[[ "$DEPLOY_HEALTH_URL" =~ $health_url_pattern && "$DEPLOY_INTERNAL_HEALTH_URL" =~ $health_url_pattern ]] || {
+  echo "Health URLs are invalid" >&2
+  exit 1
+}
+[[ "$DEPLOY_HEALTH_URL" = */api/health ]] || {
+  echo "DEPLOY_HEALTH_URL must be an origin or end with /api/health" >&2
+  exit 1
+}
 
-SSH=(ssh -p "$DEPLOY_SSH_PORT" -i "$DEPLOY_SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$DEPLOY_KNOWN_HOSTS")
-SCP=(scp -P "$DEPLOY_SSH_PORT" -i "$DEPLOY_SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$DEPLOY_KNOWN_HOSTS")
+SSH_OPTIONS=(-p "$DEPLOY_SSH_PORT" -o ConnectTimeout=15 -o StrictHostKeyChecking=yes)
+SCP_OPTIONS=(-P "$DEPLOY_SSH_PORT" -o ConnectTimeout=15 -o StrictHostKeyChecking=yes)
+AUTH_MODE=""
+
+if [[ -n "${DEPLOY_SSH_KEY:-}" && -n "${DEPLOY_KNOWN_HOSTS:-}" ]]; then
+  [[ -r "$DEPLOY_SSH_KEY" && -r "$DEPLOY_KNOWN_HOSTS" ]] || {
+    echo "DEPLOY_SSH_KEY or DEPLOY_KNOWN_HOSTS is unreadable" >&2
+    exit 1
+  }
+  chmod 600 "$DEPLOY_SSH_KEY"
+  SSH_OPTIONS+=(-i "$DEPLOY_SSH_KEY" -o BatchMode=yes -o UserKnownHostsFile="$DEPLOY_KNOWN_HOSTS")
+  SCP_OPTIONS+=(-i "$DEPLOY_SSH_KEY" -o BatchMode=yes -o UserKnownHostsFile="$DEPLOY_KNOWN_HOSTS")
+  AUTH_MODE="key"
+elif [[ -n "${VPS_SSH_PASSWORD:-}" && -n "${VPS_SSH_HOST_FINGERPRINT:-}" ]]; then
+  KNOWN_HOSTS_TMP="$(mktemp "${TMPDIR:-/tmp}/ads-as-known-hosts.XXXXXX")"
+  ASKPASS_TMP="$(mktemp "${TMPDIR:-/tmp}/ads-as-askpass.XXXXXX")"
+  ssh-keyscan -p "$DEPLOY_SSH_PORT" -T 10 -t ed25519 "$DEPLOY_HOST" 2>/dev/null > "$KNOWN_HOSTS_TMP"
+  [[ -s "$KNOWN_HOSTS_TMP" ]] || { echo "Could not obtain the VPS host key" >&2; exit 1; }
+  actual_fingerprint="$(ssh-keygen -lf "$KNOWN_HOSTS_TMP" | awk 'NR == 1 { print $2 }')"
+  [[ "$actual_fingerprint" = "$VPS_SSH_HOST_FINGERPRINT" ]] || {
+    echo "VPS host fingerprint mismatch" >&2
+    exit 1
+  }
+  cat > "$ASKPASS_TMP" <<'ASKPASS'
+#!/bin/sh
+printf '%s\n' "$VPS_SSH_PASSWORD"
+ASKPASS
+  chmod 700 "$ASKPASS_TMP"
+  export SSH_ASKPASS="$ASKPASS_TMP" SSH_ASKPASS_REQUIRE=force DISPLAY=:0
+  SSH_OPTIONS+=(
+    -o BatchMode=no
+    -o PreferredAuthentications=password,keyboard-interactive
+    -o PubkeyAuthentication=no
+    -o NumberOfPasswordPrompts=1
+    -o UserKnownHostsFile="$KNOWN_HOSTS_TMP"
+  )
+  SCP_OPTIONS+=(
+    -o BatchMode=no
+    -o PreferredAuthentications=password,keyboard-interactive
+    -o PubkeyAuthentication=no
+    -o NumberOfPasswordPrompts=1
+    -o UserKnownHostsFile="$KNOWN_HOSTS_TMP"
+  )
+  AUTH_MODE="password"
+else
+  echo "Configure key authentication or VPS_SSH_PASSWORD with VPS_SSH_HOST_FINGERPRINT" >&2
+  exit 1
+fi
+
+run_ssh() {
+  if [[ "$AUTH_MODE" = "password" ]]; then
+    setsid -w ssh "${SSH_OPTIONS[@]}" "$@"
+  else
+    ssh "${SSH_OPTIONS[@]}" "$@"
+  fi
+}
+
+run_scp() {
+  if [[ "$AUTH_MODE" = "password" ]]; then
+    setsid -w scp "${SCP_OPTIONS[@]}" "$@"
+  else
+    scp "${SCP_OPTIONS[@]}" "$@"
+  fi
+}
+
+cleanup_local() {
+  local status=$?
+  if [[ "$uploaded" = "1" ]]; then
+    run_ssh "$REMOTE" "rm -f '$REMOTE_ARCHIVE' '$REMOTE_CHECKSUM'" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$WORK_DIR"
+  [[ -z "$KNOWN_HOSTS_TMP" ]] || rm -f "$KNOWN_HOSTS_TMP"
+  [[ -z "$ASKPASS_TMP" ]] || rm -f "$ASKPASS_TMP"
+  return "$status"
+}
+trap cleanup_local EXIT
 
 echo "Building release $RELEASE_ID..."
+npm run check
 npm run build
 [[ -f dist/index.cjs && -d dist/public ]] || { echo "Build output is incomplete" >&2; exit 1; }
-archive_files=(dist package.json package-lock.json ecosystem.config.cjs)
-tar -czf "$ARCHIVE" "${archive_files[@]}"
 
-echo "Uploading staged release..."
-"${SSH[@]}" "$REMOTE" "mkdir -p '$DEPLOY_ROOT/releases' '$DEPLOY_ROOT/shared/uploads' '$DEPLOY_ROOT/shared/backups' && test -f '$DEPLOY_ROOT/shared/.env'"
-"${SCP[@]}" "$ARCHIVE" "$REMOTE:$DEPLOY_ROOT/releases/$RELEASE_ID.tgz"
+mkdir -p "$WORK_DIR/payload"
+cp -a dist "$WORK_DIR/payload/dist"
+cp package.json ecosystem.config.cjs "$WORK_DIR/payload/"
+node - "$WORK_DIR/payload/package-lock.json" <<'NODE'
+const fs = require("node:fs");
+const source = fs.readFileSync("package-lock.json", "utf8");
+const converted = source.replace(
+  /http:\/\/package-firewall\.replit\.(?:internal|local)\/npm\//g,
+  "https://registry.npmjs.org/",
+);
+if (/package-firewall\.replit\.(?:internal|local)/.test(converted)) {
+  throw new Error("Unconverted Replit-internal package registry URL");
+}
+fs.writeFileSync(process.argv[2], converted, { mode: 0o600 });
+NODE
+tar -C "$WORK_DIR/payload" -czf "$ARCHIVE" .
+sha256sum "$ARCHIVE" | awk '{ print $1 }' > "$CHECKSUM"
+
+echo "Uploading staged runtime..."
+run_scp "$ARCHIVE" "$REMOTE:$REMOTE_ARCHIVE" >/dev/null
+run_scp "$CHECKSUM" "$REMOTE:$REMOTE_CHECKSUM" >/dev/null
 uploaded=1
 
-echo "Activating release atomically..."
-"${SSH[@]}" "$REMOTE" bash -s -- "$DEPLOY_ROOT" "$RELEASE_ID" "$DEPLOY_PM2_APP" <<'REMOTE_SCRIPT'
-set -euo pipefail
-root=$1 release_id=$2 app_name=$3
-releases="$root/releases"; release="$releases/$release_id"; previous="$(readlink -f "$root/current" || true)"
-rollback_release() {
-  local current
-  current="$(readlink -f "$root/current" || true)"
-  if [ -n "$previous" ] && [ -d "$previous" ]; then
-    ln -sfn "$previous" "$root/current" || return 1
-    APP_CURRENT_DIR="$root/current" PM2_APP_NAME="$app_name" \
-      pm2 reload "$root/current/ecosystem.config.cjs" --only "$app_name" --update-env || return 1
-    [ "$(readlink -f "$root/current" || true)" = "$previous" ] || return 1
-  elif [ "$current" = "$release" ]; then
-    if pm2 describe "$app_name" >/dev/null 2>&1; then
-      pm2 delete "$app_name" || return 1
-    fi
-    ! pm2 describe "$app_name" >/dev/null 2>&1 || return 1
-    rm -f "$root/current" || return 1
-    [ ! -e "$root/current" ] && [ ! -L "$root/current" ] || return 1
-  elif [ -n "$current" ]; then
-    echo "Refusing rollback: current points to unexpected release $current" >&2
-    return 1
-  fi
-  rm -rf "$release" || return 1
-  rm -f "$releases/$release_id.tgz" || return 1
+echo "Installing and activating runtime..."
+run_ssh "$REMOTE" bash -s -- \
+  "$DEPLOY_ROOT" "$RELEASE_ID" "$DEPLOY_PM2_APP" \
+  "$REMOTE_ARCHIVE" "$REMOTE_CHECKSUM" \
+  "$DEPLOY_INTERNAL_HEALTH_URL" "$DEPLOY_HEALTH_URL" \
+  "$DEPLOY_KEEP_BACKUPS" <<'REMOTE_SCRIPT'
+set -Eeuo pipefail
+IFS=$'\n\t'
+umask 077
+
+root=$1
+release_id=$2
+app_name=$3
+archive=$4
+checksum_file=$5
+internal_health_url=$6
+public_health_url=$7
+keep_backups=$8
+stage="$root/.deploy-stage-$release_id"
+backup="$root/runtime-backups/$release_id"
+switch_started=0
+was_running=0
+
+cleanup_remote() {
+  rm -rf "$stage"
+  rm -f "$archive" "$checksum_file"
+  rmdir "$backup" 2>/dev/null || true
 }
+
+health_ok() {
+  local url=$1
+  local output=$2
+  local code
+  code="$(curl --silent --show-error --max-time 10 -o "$output" -w '%{http_code}' "$url" 2>/dev/null || true)"
+  [[ "$code" = "200" ]] &&
+    node -e '
+      const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      if (value.status !== "ok") process.exit(1);
+    ' "$output" 2>/dev/null
+}
+
+wait_for_health() {
+  local attempt
+  for attempt in $(seq 1 15); do
+    if health_ok "$internal_health_url" "/tmp/ads-as-internal-health.$$" &&
+       health_ok "$public_health_url" "/tmp/ads-as-public-health.$$"; then
+      rm -f "/tmp/ads-as-internal-health.$$" "/tmp/ads-as-public-health.$$"
+      return 0
+    fi
+    sleep 5
+  done
+  rm -f "/tmp/ads-as-internal-health.$$" "/tmp/ads-as-public-health.$$"
+  return 1
+}
+
+restore_previous_runtime() {
+  local rollback_failed=0
+  trap - ERR
+  set +e
+  echo "Activation failed; restoring the previous runtime." >&2
+  pm2 stop "$app_name" >/dev/null 2>&1 || true
+  if [[ -d "$backup/dist" ]]; then
+    rm -rf "$root/dist"
+    mv "$backup/dist" "$root/dist"
+  fi
+  if [[ -d "$backup/node_modules" ]]; then
+    rm -rf "$root/node_modules"
+    mv "$backup/node_modules" "$root/node_modules"
+  fi
+  for file in package.json package-lock.json ecosystem.config.cjs .env; do
+    [[ ! -f "$backup/$file" ]] || cp "$backup/$file" "$root/$file"
+  done
+  chmod 600 "$root/.env" 2>/dev/null || true
+  cd "$root" || rollback_failed=1
+  if [[ "$was_running" = "1" ]]; then
+    pm2 reload "$app_name" --update-env >/dev/null 2>&1 || rollback_failed=1
+    wait_for_health || rollback_failed=1
+  else
+    pm2 delete "$app_name" >/dev/null 2>&1 || true
+  fi
+  cleanup_remote
+  if [[ "$rollback_failed" = "0" ]]; then
+    echo "Previous runtime restored." >&2
+  else
+    echo "CRITICAL: runtime rollback did not become healthy." >&2
+  fi
+  return "$rollback_failed"
+}
+
 activation_error() {
   local status=$?
   trap - ERR
-  if ! rollback_release; then
-    echo "CRITICAL: activation rollback failed; manual intervention is required" >&2
+  if [[ "$switch_started" = "1" ]]; then
+    restore_previous_runtime || true
+  else
+    cleanup_remote
   fi
   exit "$status"
 }
 trap activation_error ERR
-mkdir "$release"
-tar -xzf "$releases/$release_id.tgz" -C "$release"
-rm -f "$releases/$release_id.tgz"
-ln -sfn "$root/shared/.env" "$release/.env"
-rm -rf "$release/uploads"; ln -s "$root/shared/uploads" "$release/uploads"
-(
-  cd "$release"
-  npm ci --omit=dev --no-audit --no-fund
-)
-if [ -n "$previous" ] && [ -d "$previous" ]; then
-  ln -sfn "$previous" "$root/previous"
-else
-  rm -f "$root/previous"
-fi
-ln -sfn "$release" "$root/current"
-if pm2 describe "$app_name" >/dev/null 2>&1; then
-  APP_CURRENT_DIR="$root/current" PM2_APP_NAME="$app_name" pm2 reload "$root/current/ecosystem.config.cjs" --only "$app_name" --update-env
-else
-  APP_CURRENT_DIR="$root/current" PM2_APP_NAME="$app_name" pm2 start "$root/current/ecosystem.config.cjs" --only "$app_name"
-fi
-pm2 save
-trap - ERR
-REMOTE_SCRIPT
-uploaded=0
 
-echo "Checking public health endpoint..."
-if ! curl --fail --silent --show-error --retry 8 --retry-delay 2 "$DEPLOY_HEALTH_URL" | grep -q '"status":"ok"'; then
-  echo "Health check failed; rolling back application files." >&2
-  if ! "${SSH[@]}" "$REMOTE" bash -s -- "$DEPLOY_ROOT" "$RELEASE_ID" "$DEPLOY_PM2_APP" <<'ROLLBACK_SCRIPT'
-set -euo pipefail
-root=$1 release_id=$2 app_name=$3
-release="$root/releases/$release_id"
-previous="$(readlink -f "$root/previous" || true)"
-if [ -n "$previous" ] && [ -d "$previous" ]; then
-  ln -sfn "$previous" "$root/current" || exit 1
-  APP_CURRENT_DIR="$root/current" PM2_APP_NAME="$app_name" \
-    pm2 reload "$root/current/ecosystem.config.cjs" --only "$app_name" --update-env || exit 1
-  [ "$(readlink -f "$root/current" || true)" = "$previous" ] || exit 1
-else
-  current="$(readlink -f "$root/current" || true)"
-  [ "$current" = "$release" ] || { echo "Refusing rollback from unexpected current target" >&2; exit 1; }
-  if pm2 describe "$app_name" >/dev/null 2>&1; then
-    pm2 delete "$app_name" || exit 1
-  fi
-  ! pm2 describe "$app_name" >/dev/null 2>&1 || exit 1
-  rm -f "$root/current" || exit 1
-  [ ! -e "$root/current" ] && [ ! -L "$root/current" ] || exit 1
-fi
-rm -rf "$release" || exit 1
-ROLLBACK_SCRIPT
-  then
-    echo "CRITICAL: application rollback did not complete; manual intervention is required." >&2
-  else
-    echo "Application rollback completed." >&2
-  fi
+[[ -f "$root/.env" && -d "$root/dist" && -d "$root/node_modules" ]] || {
+  echo "The in-place runtime is incomplete below $root" >&2
   exit 1
+}
+[[ "$(sha256sum "$archive" | awk '{ print $1 }')" = "$(cat "$checksum_file")" ]]
+mkdir -p "$stage" "$backup"
+tar -C "$stage" -xzf "$archive"
+
+(
+  cd "$stage"
+  npm ci --omit=dev --no-audit --no-fund --registry=https://registry.npmjs.org
+  node -e '
+    const pkg = require("./package.json");
+    if (pkg.dependencies?.sharp) require("sharp");
+  '
+)
+
+pm2 describe "$app_name" >/dev/null 2>&1 && was_running=1
+cp "$root/.env" "$backup/.env"
+for file in package.json package-lock.json ecosystem.config.cjs; do
+  [[ ! -f "$root/$file" ]] || cp "$root/$file" "$backup/$file"
+done
+
+switch_started=1
+mv "$root/dist" "$backup/dist"
+mv "$root/node_modules" "$backup/node_modules"
+mv "$stage/dist" "$root/dist"
+mv "$stage/node_modules" "$root/node_modules"
+cp "$stage/package.json" "$root/package.json"
+cp "$stage/package-lock.json" "$root/package-lock.json"
+cp "$stage/ecosystem.config.cjs" "$root/ecosystem.config.cjs"
+
+cd "$root"
+if [[ "$was_running" = "1" ]]; then
+  pm2 reload "$app_name" --update-env
+else
+  pm2 start ecosystem.config.cjs --only "$app_name" --update-env
 fi
-echo "Cleaning up old successful releases..."
-"${SSH[@]}" "$REMOTE" bash -s -- "$DEPLOY_ROOT" "$DEPLOY_KEEP_RELEASES" <<'CLEANUP_SCRIPT'
-set -euo pipefail
-root=$1 keep=$2 releases="$1/releases"
-active="$(readlink -f "$root/current")"
-previous="$(readlink -f "$root/previous" || true)"
-find "$releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn |
-  awk -v keep="$keep" -v active="$active" -v previous="$previous" '
-    BEGIN { protected = 1 + (previous != "" && previous != active ? 1 : 0) }
-    $2 != active && $2 != previous { eligible[++count] = $2 }
-    END {
-      retain_eligible = keep - protected
-      if (retain_eligible < 0) retain_eligible = 0
-      for (i = retain_eligible + 1; i <= count; i++) print eligible[i]
-    }
-  ' | xargs -r rm -rf
-CLEANUP_SCRIPT
+wait_for_health
+pm2 save >/dev/null
+
+switch_started=0
+cleanup_remote
+find "$root/runtime-backups" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' |
+  sort -rn |
+  awk -v keep="$keep_backups" 'NR > keep { print $2 }' |
+  xargs -r rm -rf
+echo "Runtime activated: $release_id"
+echo "Rollback backup: $backup"
+REMOTE_SCRIPT
+
+uploaded=0
 echo "Deployment complete: $RELEASE_ID"

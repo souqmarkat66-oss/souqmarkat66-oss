@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Idempotent host preparation. It does not clone, install application code, or deploy.
+# Idempotent host preparation for the in-place PM2 runtime.
+# It does not clone, install application code, or deploy.
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -37,8 +38,11 @@ if ! id "$DEPLOY_USER" >/dev/null 2>&1; then
 fi
 DEPLOY_HOME="$(getent passwd "$DEPLOY_USER" | cut -d: -f6)"
 [[ -n "$DEPLOY_HOME" && -d "$DEPLOY_HOME" ]] || { echo "DEPLOY_USER must have a real home directory" >&2; exit 1; }
-install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0755 "$APP_ROOT/releases" "$APP_ROOT/shared/uploads" "$APP_ROOT/shared/backups"
-touch "$APP_ROOT/shared/.env"; chmod 600 "$APP_ROOT/shared/.env"; chown "$DEPLOY_USER:$DEPLOY_USER" "$APP_ROOT/shared/.env"
+install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0755 \
+  "$APP_ROOT" "$APP_ROOT/uploads" "$APP_ROOT/runtime-backups" "$APP_ROOT/backups"
+touch "$APP_ROOT/.env"
+chmod 600 "$APP_ROOT/.env"
+chown "$DEPLOY_USER:$DEPLOY_USER" "$APP_ROOT/.env"
 
 cat > "/etc/nginx/sites-available/$PM2_APP_NAME" <<EOF
 server {
@@ -80,4 +84,4 @@ if [[ "$ENABLE_SSL" = 1 ]]; then
 fi
 pm2 startup systemd -u "$DEPLOY_USER" --hp "$DEPLOY_HOME"
 runuser -u "$DEPLOY_USER" -- env HOME="$DEPLOY_HOME" pm2 save
-echo "Host ready for deploy user $DEPLOY_USER. Put production secrets in $APP_ROOT/shared/.env, then run scripts/deploy.sh from trusted CI/operator tooling."
+echo "Host ready for deploy user $DEPLOY_USER. Put production secrets in $APP_ROOT/.env, run reviewed migrations separately, then run scripts/deploy.sh."

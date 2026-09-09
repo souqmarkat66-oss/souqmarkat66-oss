@@ -28,6 +28,111 @@ ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS reply_to_text text;
 ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS image_url text;
 ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_payment_proof boolean DEFAULT false;
 
+CREATE TABLE IF NOT EXISTS afs_payment_orders (
+  id serial PRIMARY KEY,
+  user_id varchar NOT NULL REFERENCES users(id),
+  purpose text NOT NULL,
+  service_type text,
+  service_reference jsonb,
+  idempotency_key text,
+  package_id integer,
+  amount_egp numeric(12,2) NOT NULL,
+  coins integer,
+  checkout_id text NOT NULL UNIQUE,
+  payment_id text UNIQUE,
+  integrity text,
+  status text NOT NULL DEFAULT 'pending',
+  result_code text,
+  result_description text,
+  payment_brand text,
+  last4 text,
+  coin_transaction_id integer,
+  revenue_transaction_id integer,
+  created_at timestamp DEFAULT now(),
+  paid_at timestamp,
+  fulfilled_at timestamp,
+  CONSTRAINT afs_payment_orders_purpose_check
+    CHECK (purpose IN ('wallet_top_up', 'coin_purchase', 'service_payment')),
+  CONSTRAINT afs_payment_orders_status_check
+    CHECK (status IN ('pending', 'paid', 'failed'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS afs_payment_orders_user_idempotency_idx
+  ON afs_payment_orders(user_id, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS gift_events (
+  id serial PRIMARY KEY,
+  event_id text NOT NULL UNIQUE,
+  sender_user_id varchar NOT NULL REFERENCES users(id),
+  recipient_user_id varchar NOT NULL REFERENCES users(id),
+  stream_id integer NOT NULL,
+  gift_type text NOT NULL,
+  gross_coins integer NOT NULL,
+  broadcaster_coins integer NOT NULL,
+  platform_coins integer NOT NULL,
+  egp_rate numeric(8,4) NOT NULL DEFAULT 0.0500,
+  created_at timestamp DEFAULT now(),
+  CONSTRAINT gift_events_gross_coins_check CHECK (gross_coins > 0),
+  CONSTRAINT gift_events_broadcaster_coins_check CHECK (broadcaster_coins >= 0),
+  CONSTRAINT gift_events_platform_coins_check CHECK (platform_coins >= 0),
+  CONSTRAINT gift_events_split_check CHECK (gross_coins = broadcaster_coins + platform_coins),
+  CONSTRAINT gift_events_broadcaster_sixty_percent_check CHECK (broadcaster_coins * 5 = gross_coins * 3),
+  CONSTRAINT gift_events_platform_forty_percent_check CHECK (platform_coins * 5 = gross_coins * 2)
+);
+CREATE INDEX IF NOT EXISTS gift_events_sender_created_idx
+  ON gift_events(sender_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS gift_events_recipient_created_idx
+  ON gift_events(recipient_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS gift_events_stream_created_idx
+  ON gift_events(stream_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS payment_failures (
+  id serial PRIMARY KEY,
+  dedupe_key text NOT NULL UNIQUE,
+  user_id varchar NOT NULL REFERENCES users(id),
+  method text NOT NULL,
+  service_type text,
+  amount_egp numeric(12,2) NOT NULL DEFAULT 0,
+  reason_code text NOT NULL,
+  reason_message text NOT NULL,
+  reference text,
+  created_at timestamp DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS payment_failures_created_at_idx
+  ON payment_failures(created_at DESC);
+CREATE INDEX IF NOT EXISTS payment_failures_method_idx
+  ON payment_failures(method);
+
+-- Some early VPS installs used ticker_ads as a generic key/value table. Keep
+-- those legacy columns for rollback compatibility while adding the live-ad
+-- columns expected by current and immediately previous releases.
+ALTER TABLE ticker_ads ADD COLUMN IF NOT EXISTS advertiser_id varchar;
+ALTER TABLE ticker_ads ADD COLUMN IF NOT EXISTS text text;
+ALTER TABLE ticker_ads ADD COLUMN IF NOT EXISTS budget_egp real;
+ALTER TABLE ticker_ads ADD COLUMN IF NOT EXISTS price_per_second_egp real;
+ALTER TABLE ticker_ads ADD COLUMN IF NOT EXISTS spent_egp real DEFAULT 0 NOT NULL;
+ALTER TABLE ticker_ads ADD COLUMN IF NOT EXISTS seconds_shown integer DEFAULT 0 NOT NULL;
+ALTER TABLE ticker_ads ADD COLUMN IF NOT EXISTS status text DEFAULT 'pending' NOT NULL;
+ALTER TABLE ticker_ads ADD COLUMN IF NOT EXISTS approved_by varchar;
+ALTER TABLE ticker_ads ADD COLUMN IF NOT EXISTS approved_at timestamp;
+ALTER TABLE ticker_ads ADD COLUMN IF NOT EXISTS started_at timestamp;
+ALTER TABLE ticker_ads ADD COLUMN IF NOT EXISTS stopped_at timestamp;
+ALTER TABLE ticker_ads ADD COLUMN IF NOT EXISTS rejection_reason text;
+ALTER TABLE ticker_ads ADD COLUMN IF NOT EXISTS created_at timestamp DEFAULT now();
+DO $ticker_ads_fk$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.ticker_ads'::regclass
+      AND conname = 'ticker_ads_advertiser_id_users_id_fk'
+  ) THEN
+    ALTER TABLE ticker_ads
+      ADD CONSTRAINT ticker_ads_advertiser_id_users_id_fk
+      FOREIGN KEY (advertiser_id) REFERENCES users(id);
+  END IF;
+END
+$ticker_ads_fk$;
+
 CREATE TABLE IF NOT EXISTS coupons (
   id serial PRIMARY KEY,
   user_id varchar REFERENCES users(id) NOT NULL,
