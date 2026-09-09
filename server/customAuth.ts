@@ -5,7 +5,6 @@ import { sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { checkIsAdmin } from "./adminCheck";
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { ReplitConnectors } from "@replit/connectors-sdk";
 import { disconnectUserSockets } from "./socketRegistry";
 
 const RESET_TTL_MS = 10 * 60 * 1000;
@@ -87,17 +86,23 @@ function maskEmail(email: string): string {
 }
 
 async function sendResetOtp(destination: string, otp: string) {
-  const connectors = new ReplitConnectors();
-  const emailFrom = process.env.PASSWORD_RESET_EMAIL_FROM;
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  const emailFrom = process.env.PASSWORD_RESET_EMAIL_FROM?.trim();
+  if (!apiKey) throw new Error("RESEND_API_KEY is not configured");
   if (!emailFrom) throw new Error("PASSWORD_RESET_EMAIL_FROM is not configured");
-  const response = await connectors.proxy("resend", "/emails", {
+  const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
-    body: {
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
       from: emailFrom,
       to: [destination],
       subject: "رمز إعادة تعيين كلمة المرور",
       html: `<p dir="rtl">رمز التحقق الخاص بك هو <strong>${otp}</strong>. تنتهي صلاحيته خلال 10 دقائق. لا تشاركه مع أحد.</p>`,
-    },
+    }),
+    signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`Resend delivery failed (${response.status})`);
 }
