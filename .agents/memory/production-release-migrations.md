@@ -32,3 +32,9 @@ New release health requirements must not make rollback to an older compatible re
 **Why:** Adding a dedicated live-readiness route would reject a healthy older runtime that predates that route, despite successful file restoration.
 
 **How to apply:** Gate activation on the new capabilities, but verify rollback using the health contract supported by the previous release. A passing media-readiness check is not proof of public firewall reachability or completed financial transactions.
+
+The VPS network-change authorization is limited to the application's RTMP TCP port 1935. Port 8080 belongs to the separate iDeliver platform and must remain untouched.
+
+**Why:** The owner explicitly narrowed the network authorization to the streaming port only, despite the broader request to improve live video.
+
+**How to apply:** Preserve other firewall rules, listeners, and project paths. Do not treat this permission as approval to add TURN relay port ranges or reconfigure shared services; obtain separate authorization for those changes.
