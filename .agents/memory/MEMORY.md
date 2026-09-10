@@ -12,3 +12,4 @@
 - [GitHub sync authentication](github-sync-authentication.md) — connector API access and Git CLI auth are separate; bulk history pushes require working Git credentials.
 - [Password recovery security](password-recovery-security.md) — recovery uses indistinguishable persisted OTP challenges, hashed secrets, short proofs, rate limits, and session revocation.
 - [Admin provider secret vault](admin-provider-secret-vault.md) — external provider keys may be admin-managed only as AES-GCM ciphertext; environment values always win and plaintext never returns.
+- [Frontend module recovery](frontend-recovery.md) — retry code downloads only; require explicit reloads so recovery cannot silently disrupt financial forms.
