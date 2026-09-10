@@ -14,3 +14,9 @@ A read-only probe for a nonexistent checkout is a connectivity check, not proof 
 **Why:** The production endpoint can return a structured parameter error without proving successful merchant authorization or checkout creation.
 
 **How to apply:** Report configuration, connectivity, checkout creation, and completed payment verification separately. Never describe a missing-checkout probe as a successful payment test, or create a real charge merely to validate deployment.
+
+AFS result code `200.300.404` is not enough to diagnose authentication: inspect sanitized `parameterErrors` field names before changing credentials or environments.
+
+**Why:** A valid merchant identifier embedded in extra copied text produced this generic error on checkout creation. Using only the intended identifier allowed checkout creation and widget-integrity verification without submitting a card.
+
+**How to apply:** Validate the configured entity identifier's format and configuration-source precedence. Never log parameter values or raw provider responses, and do not silently extract arbitrary credential fragments in application code.
