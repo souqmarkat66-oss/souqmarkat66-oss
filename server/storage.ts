@@ -110,7 +110,6 @@ export interface IStorage {
   // Payment Requests
   getPaymentRequests(userId?: string): Promise<PaymentRequest[]>;
   createPaymentRequest(req: InsertPaymentRequest): Promise<PaymentRequest>;
-  updatePaymentRequest(id: number, status: string, adminNote?: string): Promise<PaymentRequest | undefined>;
   approvePaymentRequestAtomic(id: number, adminNote?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean; insufficientBalance?: boolean; currentBalanceEGP?: number }>;
   rejectPaymentRequestAtomic(id: number, adminNote?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean }>;
 
@@ -793,11 +792,6 @@ export class DatabaseStorage implements IStorage {
     return r;
   }
 
-  async updatePaymentRequest(id: number, status: string, adminNote?: string): Promise<PaymentRequest | undefined> {
-    const [r] = await db.update(paymentRequests).set({ status: status as any, adminNote }).where(eq(paymentRequests.id, id)).returning();
-    return r;
-  }
-
   /**
    * Approve a payment request and write the matching revenue transaction
    * in a single DB transaction so the wallet ledger never drifts.
@@ -820,7 +814,7 @@ export class DatabaseStorage implements IStorage {
         // Serialize concurrent withdrawal approvals for the same user
         // by acquiring a transaction-scoped advisory lock keyed by userId.
         // Uses hashtextextended to map the userId string to a bigint key.
-        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${'withdrawal:' + locked.userId}, 0))`);
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${'wallet:' + locked.userId}, 0))`);
 
         const [balRow] = await tx
           .select({
@@ -907,6 +901,11 @@ export class DatabaseStorage implements IStorage {
           adminNote,
           fulfillmentStatus,
           fulfilledAt: fulfillmentStatus === 'fulfilled' ? new Date() : null,
+          ...(locked.type === 'withdrawal' ? {
+            payoutDestinationEncrypted: null,
+            payoutDestinationIv: null,
+            payoutDestinationAuthTag: null,
+          } : {}),
         })
         .where(eq(paymentRequests.id, id))
         .returning();
@@ -930,7 +929,15 @@ export class DatabaseStorage implements IStorage {
         return { payment: locked, alreadyProcessed: true };
       }
       const [updated] = await tx.update(paymentRequests)
-        .set({ status: 'rejected', adminNote })
+        .set({
+          status: 'rejected',
+          adminNote,
+          ...(locked.type === 'withdrawal' ? {
+            payoutDestinationEncrypted: null,
+            payoutDestinationIv: null,
+            payoutDestinationAuthTag: null,
+          } : {}),
+        })
         .where(eq(paymentRequests.id, id))
         .returning();
       return { payment: updated, alreadyProcessed: false };

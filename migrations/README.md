@@ -23,6 +23,20 @@ MIGRATE_PRODUCTION_CONFIRM=YES DATABASE_URL='...' \
   bash scripts/migrate-production.sh
 ```
 
+## Encrypted payout destination cutover
+
+For the payout-destination migration, stop application instances that can still
+write plaintext withdrawal destinations before the cutover. Then:
+
+1. Create the backup and apply the reviewed SQL migrations with the command
+   above.
+2. Run `BACKFILL_PAYOUT_CONFIRM=YES npx tsx scripts/backfill-payout-destinations.ts`
+   in the trusted operator environment. It encrypts pending legacy destinations
+   and irreversibly replaces terminal legacy destinations with masked values.
+3. Start the new application release and verify its health.
+
+The backfill prints counts only. It must never print destination values.
+
 ## Adopting the existing VPS database
 
 The VPS schema predates the migration ledger. After reviewing the generated

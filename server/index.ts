@@ -156,6 +156,11 @@ async function runMigrations() {
     await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS notifications_dedupe_key_idx ON notifications(dedupe_key)`);
     await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS fulfillment_status TEXT`);
     await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS fulfilled_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS payout_name TEXT`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS payout_destination_encrypted TEXT`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS payout_destination_iv TEXT`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS payout_destination_auth_tag TEXT`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS payout_destination_last4 TEXT`);
     await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_voice BOOLEAN DEFAULT FALSE`);
     await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS voice_url TEXT`);
     await db.execute(sql`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS image_url TEXT`);

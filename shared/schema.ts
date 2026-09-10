@@ -412,8 +412,13 @@ export const paymentRequests = pgTable("payment_requests", {
   adId: integer("ad_id"),
   type: text("type", { enum: ["withdrawal", "top_up"] }).notNull(),
   amountEGP: real("amount_egp").notNull(),
-  method: text("method", { enum: ["vodafone", "etisalat", "instapay", "souq", "visa_bank"] }).notNull(),
+  method: text("method", { enum: ["vodafone", "etisalat", "mobile_wallet", "instapay", "souq", "visa_bank"] }).notNull(),
   phoneNumber: text("phone_number"),
+  payoutName: text("payout_name"),
+  payoutDestinationEncrypted: text("payout_destination_encrypted"),
+  payoutDestinationIv: text("payout_destination_iv"),
+  payoutDestinationAuthTag: text("payout_destination_auth_tag"),
+  payoutDestinationLast4: text("payout_destination_last4"),
   serviceType: text("service_type"),
   screenshotUrl: text("screenshot_url"),
   status: text("status", { enum: ["pending", "approved", "rejected"] }).default("pending"),
@@ -427,7 +432,18 @@ export const paymentRequests = pgTable("payment_requests", {
 const EG_PHONE_REGEX = /^01[0125]\d{8}$/;
 
 export const insertPaymentRequestSchema = createInsertSchema(paymentRequests)
-  .omit({ id: true, createdAt: true, status: true, adminNote: true, fulfillmentStatus: true, fulfilledAt: true })
+  .omit({
+    id: true,
+    createdAt: true,
+    status: true,
+    adminNote: true,
+    fulfillmentStatus: true,
+    fulfilledAt: true,
+    payoutDestinationEncrypted: true,
+    payoutDestinationIv: true,
+    payoutDestinationAuthTag: true,
+    payoutDestinationLast4: true,
+  })
   .extend({
     amountEGP: z.coerce.number()
       .positive("المبلغ لازم يكون أكبر من صفر")
@@ -436,10 +452,12 @@ export const insertPaymentRequestSchema = createInsertSchema(paymentRequests)
     phoneNumber: z.string().trim().optional().nullable(),
     screenshotUrl: z.string().trim().optional().nullable(),
     serviceType: z.string().trim().optional().nullable(),
+    payoutName: z.string().trim().max(120).optional().nullable(),
+    payoutDestination: z.string().trim().max(120).optional().nullable(),
   })
   .superRefine((data, ctx) => {
-    // Payout destination is required except for an in-app balance transfer.
-    if (data.method !== "souq") {
+    // Legacy incoming payments continue to use the phone number field.
+    if (data.type === "top_up" && data.method !== "souq") {
       if (!data.phoneNumber || data.phoneNumber.length === 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -452,6 +470,65 @@ export const insertPaymentRequestSchema = createInsertSchema(paymentRequests)
           path: ["phoneNumber"],
           message: "رقم المحفظة غير صحيح — لازم يبدأ بـ 010/011/012/015 ويكون 11 رقم",
         });
+      }
+    }
+    if (data.type === "withdrawal") {
+      const allowedWithdrawalMethods = new Set(["vodafone", "etisalat", "mobile_wallet", "instapay", "visa_bank"]);
+      if (!allowedWithdrawalMethods.has(data.method)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["method"],
+          message: "اختر محفظة إلكترونية أو InstaPay أو بطاقة بنكية",
+        });
+      }
+      if (!data.payoutName || !/^[A-Za-z\u0600-\u06FF][A-Za-z\u0600-\u06FF\s.'’-]{2,119}$/.test(data.payoutName)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["payoutName"],
+          message: "اكتب الاسم الكامل لصاحب وسيلة الاستلام",
+        });
+      }
+      const destination = data.payoutDestination?.trim() || "";
+      if (["vodafone", "etisalat", "mobile_wallet"].includes(data.method)) {
+        const normalizedPhone = destination.replace(/[\s-]/g, "");
+        if (!/^[\d\s-]+$/.test(destination) || !EG_PHONE_REGEX.test(normalizedPhone)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["payoutDestination"],
+            message: "رقم المحفظة غير صحيح — يجب أن يكون رقم موبايل مصري من 11 رقماً",
+          });
+        }
+      } else if (data.method === "instapay") {
+        const normalizedPhone = destination.replace(/[\s-]/g, "");
+        const isPhone = /^[\d\s-]+$/.test(destination) && EG_PHONE_REGEX.test(normalizedPhone);
+        const isIpa = /^[A-Za-z0-9._-]{3,64}@instapay$/i.test(destination);
+        if (!isPhone && !isIpa) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["payoutDestination"],
+            message: "اكتب رقم الموبايل المسجل في InstaPay أو عنوان IPA صحيح",
+          });
+        }
+      } else if (data.method === "visa_bank") {
+        const digits = destination.replace(/[\s-]/g, "");
+        const luhnValid = /^[\d\s-]+$/.test(destination) && digits.length === 16 && digits
+          .split("")
+          .reverse()
+          .reduce((sum, digit, index) => {
+            let value = Number(digit);
+            if (index % 2 === 1) {
+              value *= 2;
+              if (value > 9) value -= 9;
+            }
+            return sum + value;
+          }, 0) % 10 === 0;
+        if (!luhnValid) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["payoutDestination"],
+            message: "رقم البطاقة غير صحيح — اكتب 16 رقماً كما هو ظاهر على البطاقة",
+          });
+        }
       }
     }
     // Only incoming legacy payments need an uploaded receipt. Withdrawals are

@@ -33,6 +33,11 @@ import {
   setVaultSecret,
   validateVaultSecret,
 } from "./secretVault";
+import {
+  decryptPayoutDestination,
+  encryptPayoutDestination,
+  maskPayoutDestination,
+} from "./payoutEncryption";
 const webpush: typeof webpushModule = (webpushModule as any).default || webpushModule;
 
 // Deep-convert snake_case keys to camelCase recursively
@@ -47,6 +52,27 @@ function deepToCamel(obj: any): any {
     );
   }
   return obj;
+}
+
+function safePaymentRequest(payment: any) {
+  if (!payment) return payment;
+  const {
+    payoutDestinationEncrypted: _encrypted,
+    payoutDestinationIv: _iv,
+    payoutDestinationAuthTag: _authTag,
+    ...safe
+  } = payment;
+  if (safe.type === "withdrawal") {
+    const legacyDestination = typeof safe.phoneNumber === "string" ? safe.phoneNumber : "";
+    const masked = safe.payoutDestinationLast4
+      ? maskPayoutDestination(safe.method, safe.payoutDestinationLast4)
+      : legacyDestination
+        ? maskPayoutDestination(safe.method, legacyDestination)
+        : null;
+    safe.phoneNumber = masked;
+    safe.payoutDestinationMasked = masked;
+  }
+  return safe;
 }
 
 // These aliases are used only for system-authored messages and ledger rows.
@@ -4063,10 +4089,10 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   app.get("/api/payments", isAuthenticated, async (req: any, res) => {
     if (isAdminUser(req)) {
       const all = await storage.getPaymentRequests();
-      return res.json(all);
+      return res.json(all.map(safePaymentRequest));
     }
     const mine = await storage.getPaymentRequests(req.user.claims.sub);
-    res.json(mine);
+    res.json(mine.map(safePaymentRequest));
   });
 
   // A user-facing activity feed. Keep the underlying ledgers independent: each
@@ -4761,16 +4787,37 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
               availableBalanceEGP: available,
             });
           }
+          const rawDestination = String(input.payoutDestination || "").trim();
+          const normalizedDestination = input.method === "instapay"
+            ? /^[\d\s-]+$/.test(rawDestination)
+              ? rawDestination.replace(/[\s-]/g, "")
+              : rawDestination.toLowerCase()
+            : rawDestination.replace(/[\s-]/g, "");
+          const securedDestination = encryptPayoutDestination(normalizedDestination);
           const inserted = await client.query(
             `INSERT INTO payment_requests
               (order_number, user_id, ad_id, type, amount_egp, method, phone_number,
+               payout_name, payout_destination_encrypted, payout_destination_iv,
+               payout_destination_auth_tag, payout_destination_last4,
                service_type, screenshot_url, status)
-             VALUES ($1, $2, NULL, 'withdrawal', $3, $4, $5, 'withdrawal', NULL, 'pending')
+             VALUES ($1, $2, NULL, 'withdrawal', $3, $4, $5, $6, $7, $8, $9, $10,
+               'withdrawal', NULL, 'pending')
              RETURNING *`,
-            [orderNumber, userId, input.amountEGP, input.method, input.phoneNumber || null]
+            [
+              orderNumber,
+              userId,
+              input.amountEGP,
+              input.method,
+              maskPayoutDestination(input.method, normalizedDestination),
+              input.payoutName,
+              securedDestination.encrypted,
+              securedDestination.iv,
+              securedDestination.authTag,
+              normalizedDestination.replace(/\D/g, "").slice(-4) || normalizedDestination.slice(-4),
+            ]
           );
           await client.query("COMMIT");
-          return res.status(201).json(inserted.rows[0]);
+          return res.status(201).json(safePaymentRequest(deepToCamel(inserted.rows[0])));
         } catch (error) {
           await client.query("ROLLBACK").catch(() => undefined);
           throw error;
@@ -4779,8 +4826,9 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         }
       }
 
-      const payment = await storage.createPaymentRequest(input);
-      res.status(201).json(payment);
+      const { payoutDestination: _payoutDestination, ...storedInput } = input;
+      const payment = await storage.createPaymentRequest(storedInput);
+      res.status(201).json(safePaymentRequest(payment));
     } catch (err: any) {
       res.status(400).json({ message: err.message || "فشل إنشاء الطلب" });
     }
@@ -4791,6 +4839,10 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     const id = Number(req.params.id);
     if (status === 'approved') {
       const { payment: p, alreadyProcessed, insufficientBalance, currentBalanceEGP } = await storage.approvePaymentRequestAtomic(id, adminNote);
+      if (!p) return res.status(404).json({ message: "الطلب غير موجود" });
+      if (alreadyProcessed) {
+        return res.status(409).json({ message: `تمت معالجة الطلب مسبقاً وحالته الحالية: ${p.status}`, status: p.status });
+      }
       if (insufficientBalance) {
         return res.status(400).json({
           message: `الرصيد غير كافٍ — رصيد المستخدم الحالي ${currentBalanceEGP} ج.م والمبلغ المطلوب ${p?.amountEGP} ج.م`,
@@ -4801,14 +4853,19 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       if (p && !alreadyProcessed) {
         const services = String(p.serviceType || "").split(",").map((s: string) => s.trim()).filter(Boolean);
         const isWalletRecharge = p.serviceType === "wallet_recharge";
+        const isWithdrawal = p.type === "withdrawal";
         const needsManualFulfillment = p.fulfillmentStatus === "manual_required";
         await createNotification(
           p.userId,
           'payment',
-          isWalletRecharge
+          isWithdrawal
+            ? '✅ تم تحويل أرباحك'
+            : isWalletRecharge
             ? '✅ تم قبول الدفع وشحن المحفظة'
             : needsManualFulfillment ? '✅ تم قبول الدفع' : '✅ تم الدفع وتشغيل الخدمة',
-          isWalletRecharge
+          isWithdrawal
+            ? `رقم الطلب ${p.orderNumber} — تم تحويل ${Number(p.amountEGP || 0).toFixed(2)} ج.م إلى وسيلة الاستلام التي اخترتها`
+            : isWalletRecharge
             ? `رقم الطلب ${p.orderNumber} — تمت إضافة ${Number(p.amountEGP || 0).toFixed(2)} ج.م إلى محفظتك`
             : needsManualFulfillment
               ? `رقم الطلب ${p.orderNumber} — تم اعتماد الدفع والخدمة قيد التنفيذ بواسطة الإدارة`
@@ -4831,10 +4888,14 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           );
         }
       }
-      return res.json(p);
+      return res.json(safePaymentRequest(p));
     }
     if (status === 'rejected') {
       const { payment: p, alreadyProcessed } = await storage.rejectPaymentRequestAtomic(id, adminNote);
+      if (!p) return res.status(404).json({ message: "الطلب غير موجود" });
+      if (alreadyProcessed) {
+        return res.status(409).json({ message: `تمت معالجة الطلب مسبقاً وحالته الحالية: ${p.status}`, status: p.status });
+      }
       if (p && !alreadyProcessed) {
         await recordPaymentFailure({
           dedupeKey: `manual:${p.id}:rejected`,
@@ -4847,10 +4908,9 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           reference: p.orderNumber || p.id,
         });
       }
-      return res.json(p);
+      return res.json(safePaymentRequest(p));
     }
-    const payment = await storage.updatePaymentRequest(id, status, adminNote);
-    res.json(payment);
+    res.status(400).json({ message: "الحالة غير صالحة؛ الطلب المعلق يمكن اعتماده أو رفضه فقط" });
   });
 
   // ================================================================
@@ -4957,7 +5017,70 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       }
       return p;
     });
-    res.json(enriched);
+    res.json(enriched.map(safePaymentRequest));
+  });
+
+  app.post("/api/admin/payments/:id/reveal-payout", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return res.status(400).json({ message: "رقم الطلب غير صالح" });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `SELECT id, type, status, method, amount_egp, payout_name,
+                payout_destination_encrypted, payout_destination_iv, payout_destination_auth_tag
+         FROM payment_requests
+         WHERE id = $1
+         FOR UPDATE`,
+        [id],
+      );
+      const row = result.rows[0];
+      if (!row || row.type !== "withdrawal") {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "طلب السحب غير موجود" });
+      }
+      if (row.status !== "pending") {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ message: "يمكن كشف بيانات طلبات السحب المعلقة فقط" });
+      }
+      if (!row.payout_destination_encrypted || !row.payout_destination_iv || !row.payout_destination_auth_tag) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ message: "هذا طلب قديم ويجب تأمين بياناته قبل كشفه" });
+      }
+      let destination: string;
+      try {
+        destination = decryptPayoutDestination({
+          payoutDestinationEncrypted: row.payout_destination_encrypted,
+          payoutDestinationIv: row.payout_destination_iv,
+          payoutDestinationAuthTag: row.payout_destination_auth_tag,
+        });
+      } catch {
+        await client.query("ROLLBACK");
+        return res.status(500).json({ message: "تعذر فك بيانات التحويل. راجع مفتاح حماية البيانات." });
+      }
+      const adminId = validatedAuthUserId(req) || req.user?.claims?.sub;
+      await client.query(
+        `INSERT INTO admin_activity_log (admin_id, action, target, details)
+         VALUES ($1, 'withdrawal_destination_revealed', $2, 'pending payout destination revealed for manual transfer')`,
+        [adminId, `payment#${id}`],
+      );
+      await client.query("COMMIT");
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({
+        id,
+        method: row.method,
+        payoutName: row.payout_name,
+        amountEGP: Number(row.amount_egp),
+        destination,
+      });
+    } catch {
+      await client.query("ROLLBACK").catch(() => undefined);
+      return res.status(500).json({ message: "تعذر كشف بيانات التحويل" });
+    } finally {
+      client.release();
+    }
   });
 
   app.get("/api/admin/payment-report", isAuthenticated, requireAdmin, async (_req: any, res) => {
@@ -5027,6 +5150,10 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     const id = Number(req.params.id);
     if (status === 'approved') {
       const { payment: p, alreadyProcessed, insufficientBalance, currentBalanceEGP } = await storage.approvePaymentRequestAtomic(id, adminNote);
+      if (!p) return res.status(404).json({ message: "الطلب غير موجود" });
+      if (alreadyProcessed) {
+        return res.status(409).json({ message: `تمت معالجة الطلب مسبقاً وحالته الحالية: ${p.status}`, status: p.status });
+      }
       if (insufficientBalance) {
         return res.status(400).json({
           message: `الرصيد غير كافٍ — رصيد المستخدم الحالي ${currentBalanceEGP} ج.م والمبلغ المطلوب ${p?.amountEGP} ج.م`,
@@ -5037,14 +5164,19 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       if (p && !alreadyProcessed) {
         const services = String(p.serviceType || "").split(",").map((s: string) => s.trim()).filter(Boolean);
         const isWalletRecharge = p.serviceType === "wallet_recharge";
+        const isWithdrawal = p.type === "withdrawal";
         const needsManualFulfillment = p.fulfillmentStatus === "manual_required";
         await createNotification(
           p.userId,
           'payment',
-          isWalletRecharge
+          isWithdrawal
+            ? '✅ تم تحويل أرباحك'
+            : isWalletRecharge
             ? '✅ تم قبول الدفع وشحن المحفظة'
             : needsManualFulfillment ? '✅ تم قبول الدفع' : '✅ تم الدفع وتشغيل الخدمة',
-          isWalletRecharge
+          isWithdrawal
+            ? `رقم الطلب ${p.orderNumber} — تم تحويل ${Number(p.amountEGP || 0).toFixed(2)} ج.م إلى وسيلة الاستلام التي اخترتها`
+            : isWalletRecharge
             ? `رقم الطلب ${p.orderNumber} — تمت إضافة ${Number(p.amountEGP || 0).toFixed(2)} ج.م إلى محفظتك`
             : needsManualFulfillment
               ? `رقم الطلب ${p.orderNumber} — تم اعتماد الدفع والخدمة قيد التنفيذ بواسطة الإدارة`
@@ -5067,10 +5199,14 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           );
         }
       }
-      return res.json(p);
+      return res.json(safePaymentRequest(p));
     }
     if (status === 'rejected') {
       const { payment: p, alreadyProcessed } = await storage.rejectPaymentRequestAtomic(id, adminNote);
+      if (!p) return res.status(404).json({ message: "الطلب غير موجود" });
+      if (alreadyProcessed) {
+        return res.status(409).json({ message: `تمت معالجة الطلب مسبقاً وحالته الحالية: ${p.status}`, status: p.status });
+      }
       if (p && !alreadyProcessed) {
         await recordPaymentFailure({
           dedupeKey: `manual:${p.id}:rejected`,
@@ -5083,10 +5219,9 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           reference: p.orderNumber || p.id,
         });
       }
-      return res.json(p);
+      return res.json(safePaymentRequest(p));
     }
-    const payment = await storage.updatePaymentRequest(id, status, adminNote);
-    res.json(payment);
+    res.status(400).json({ message: "الحالة غير صالحة؛ الطلب المعلق يمكن اعتماده أو رفضه فقط" });
   });
 
   // ── Admin: إيرادات المنصة الكاملة ─────────────────────────────

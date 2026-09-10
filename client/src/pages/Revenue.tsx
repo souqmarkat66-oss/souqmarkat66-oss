@@ -19,31 +19,37 @@ import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 
 const PAYMENT_METHODS = [
-  { value: "vodafone", label: "فودافون كاش", number: "01098553911", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
-  { value: "etisalat", label: "اتصالات e& كاش", number: "01126665741", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" },
-  { value: "instapay", label: "InstaPay", number: "01285558567", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
-  { value: "visa_bank", label: "فيزا / بنك (عبر سوق ماركات)", number: "", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
-  { value: "souq", label: "رصيد تطبيق سوق ماركات", number: "", color: "bg-primary/10 text-primary" },
+  { value: "mobile_wallet", label: "محفظة إلكترونية", hint: "010 / 011 / 012 / 015" },
+  { value: "instapay", label: "InstaPay", hint: "رقم الموبايل أو عنوان IPA" },
+  { value: "visa_bank", label: "بطاقة بنكية 16 رقماً", hint: "التحويل إلى البطاقة عبر InstaPay" },
+  // Labels retained for existing requests created before the unified wallet option.
+  { value: "vodafone", label: "فودافون كاش", hint: "" },
+  { value: "etisalat", label: "اتصالات كاش", hint: "" },
 ];
+const NEW_WITHDRAWAL_METHODS = new Set(["mobile_wallet", "instapay", "visa_bank"]);
 
 function WithdrawDialog({ balanceEGP, label, minWithdrawalEGP = 100 }: { balanceEGP: number; label: string; minWithdrawalEGP?: number }) {
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("");
-  const [phone, setPhone] = useState("");
-  const [cardNote, setCardNote] = useState("");
+  const [payoutName, setPayoutName] = useState("");
+  const [payoutDestination, setPayoutDestination] = useState("");
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
   const mutation = useMutation({
     mutationFn: () => apiRequest('POST', '/api/payments', {
       type: 'withdrawal', amountEGP: parseFloat(amount),
-      method, phoneNumber: method === 'visa_bank' ? cardNote : phone,
+      method, payoutName, payoutDestination,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/publisher/report'] });
       queryClient.invalidateQueries({ queryKey: ['/api/advertiser/report'] });
       queryClient.invalidateQueries({ queryKey: ['/api/payments'] });
+      setAmount("");
+      setMethod("");
+      setPayoutName("");
+      setPayoutDestination("");
       setOpen(false);
       toast({ title: "✅ تم إرسال طلب السحب، سيتم المراجعة خلال 24 ساعة" });
     },
@@ -51,9 +57,26 @@ function WithdrawDialog({ balanceEGP, label, minWithdrawalEGP = 100 }: { balance
   });
 
   const selectedMethod = PAYMENT_METHODS.find(m => m.value === method);
+  const clearForm = () => {
+    setAmount("");
+    setMethod("");
+    setPayoutName("");
+    setPayoutDestination("");
+  };
+  const updateDestination = (value: string) => {
+    if (method === "visa_bank") {
+      const digits = value.replace(/\D/g, "").slice(0, 16);
+      setPayoutDestination(digits.replace(/(\d{4})(?=\d)/g, "$1 "));
+      return;
+    }
+    setPayoutDestination(value);
+  };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(nextOpen) => {
+      setOpen(nextOpen);
+      if (!nextOpen) clearForm();
+    }}>
       <DialogTrigger asChild>
         <Button className="gap-2" data-testid="btn-withdraw">
           <Banknote className="w-4 h-4" /> سحب {label}
@@ -73,36 +96,52 @@ function WithdrawDialog({ balanceEGP, label, minWithdrawalEGP = 100 }: { balance
           </div>
           <div>
             <label className="text-sm font-medium">طريقة الاستلام</label>
-            <Select value={method} onValueChange={setMethod}>
+            <Select value={method} onValueChange={(value) => { setMethod(value); setPayoutDestination(""); }}>
               <SelectTrigger className="mt-1" data-testid="select-payment-method"><SelectValue placeholder="اختر طريقة" /></SelectTrigger>
               <SelectContent>
-                {PAYMENT_METHODS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                {PAYMENT_METHODS.filter(m => NEW_WITHDRAWAL_METHODS.has(m.value)).map(m => (
+                  <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
-          {method && !['souq', 'visa_bank'].includes(method) && (
+          {method && (
             <div>
-              <label className="text-sm font-medium">رقم المحفظة / الهاتف</label>
-              <Input value={phone} onChange={e => setPhone(e.target.value)}
-                placeholder={selectedMethod?.number || "01xxxxxxxxx"} className="mt-1 font-mono"
-                data-testid="input-wallet-number" />
+              <label className="text-sm font-medium">
+                {method === "visa_bank" ? "اسم صاحب البطاقة بالكامل" : "اسم صاحب وسيلة الاستلام بالكامل"}
+              </label>
+              <Input
+                value={payoutName}
+                onChange={e => setPayoutName(e.target.value)}
+                placeholder="الاسم كما هو مسجل لدى جهة التحويل"
+                className="mt-1"
+                autoComplete="name"
+                data-testid="input-payout-name"
+              />
             </div>
           )}
-          {method === 'visa_bank' && (
-            <div className="bg-emerald-50 dark:bg-emerald-950/20 rounded-xl p-3 space-y-2">
-              <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400">💳 فيزا / بنك عبر تطبيق سوق ماركات</p>
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-emerald-600 dark:text-emerald-500">✅ بدون رسوم تحويل</span>
-                <span className="text-xs text-emerald-600 dark:text-emerald-500">🎁 تكسب نقاط مشتريات على كل عملية سحب تُضاف لرصيد نقاطك في التطبيق</span>
-              </div>
-              <Input value={cardNote} onChange={e => setCardNote(e.target.value)}
-                placeholder="رقم الحساب البنكي أو ملاحظة" className="font-mono text-xs"
-                data-testid="input-bank-note" />
-            </div>
-          )}
-          {method === 'souq' && (
-            <div className="bg-primary/5 rounded-xl p-3">
-              <p className="text-xs text-primary font-bold">🏪 سيُضاف لرصيد تطبيق سوق ماركات فوراً بدون رسوم</p>
+          {method && (
+            <div className="rounded-xl border bg-muted/30 p-3 space-y-2">
+              <label className="text-sm font-medium">
+                {method === "visa_bank" ? "رقم البطاقة" : method === "instapay" ? "بيانات InstaPay" : "رقم المحفظة"}
+              </label>
+              <Input
+                value={payoutDestination}
+                onChange={e => updateDestination(e.target.value)}
+                placeholder={selectedMethod?.hint}
+                className="font-mono"
+                inputMode={method === "instapay" ? "text" : "numeric"}
+                autoComplete="off"
+                maxLength={method === "visa_bank" ? 19 : 100}
+                data-testid={method === "visa_bank" ? "input-card-number" : method === "instapay" ? "input-instapay-destination" : "input-wallet-number"}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {method === "visa_bank"
+                  ? "يُشفّر الرقم ولا يظهر كاملاً إلا للأدمن عند تنفيذ التحويل عبر InstaPay."
+                  : method === "instapay"
+                    ? "اكتب رقم الموبايل المسجل أو عنوان IPA."
+                    : "اكتب رقم الموبايل المصري المرتبط بالمحفظة."}
+              </p>
             </div>
           )}
           <div className="flex items-start gap-2 bg-yellow-50 dark:bg-yellow-950/20 rounded-xl p-3">
@@ -112,7 +151,7 @@ function WithdrawDialog({ balanceEGP, label, minWithdrawalEGP = 100 }: { balance
             </p>
           </div>
           <Button className="w-full" onClick={() => mutation.mutate()}
-            disabled={!amount || !method || parseFloat(amount) < minWithdrawalEGP || parseFloat(amount) > balanceEGP || mutation.isPending}
+            disabled={!amount || !method || payoutName.trim().length < 3 || !payoutDestination.trim() || parseFloat(amount) < minWithdrawalEGP || parseFloat(amount) > balanceEGP || mutation.isPending}
             data-testid="btn-confirm-withdraw">
             {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin me-2" /> : null}
             تأكيد طلب السحب
@@ -392,7 +431,7 @@ function PublisherTab() {
                   <PhoneCall className="w-4 h-4 text-muted-foreground" />
                   <div>
                     <div className="text-sm font-medium">{PAYMENT_METHODS.find(m => m.value === p.method)?.label || p.method}</div>
-                    <div className="text-xs text-muted-foreground">{p.orderNumber} · {p.phoneNumber || p.adminNote}</div>
+                    <div className="text-xs text-muted-foreground">{p.payoutName || "طلب قديم"} · {p.payoutDestinationMasked || p.phoneNumber || p.adminNote}</div>
                   </div>
                 </div>
                 <div className="text-right">

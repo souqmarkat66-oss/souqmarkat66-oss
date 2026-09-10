@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
@@ -1287,14 +1287,47 @@ const SERVICE_TYPE_LABELS: Record<string, string> = {
 function PaymentsSection({ logAction }: { logAction: any }) {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [revealedPayouts, setRevealedPayouts] = useState<Record<number, { destination: string; payoutName?: string; amountEGP: number }>>({});
+  const [revealingPayoutId, setRevealingPayoutId] = useState<number | null>(null);
+  const revealAttempts = useRef<Record<number, number>>({});
 
   const { data: payments = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/admin/payments"],
     queryFn: () => fetch("/api/admin/payments", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 15_000,
   });
+
+  const clearRevealedPayout = useCallback((id: number) => {
+    revealAttempts.current[id] = (revealAttempts.current[id] || 0) + 1;
+    setRevealedPayouts(prev => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const pendingIds = new Set(payments.filter((payment: any) => payment.status === "pending").map((payment: any) => payment.id));
+    for (const id of Object.keys(revealAttempts.current).map(Number)) {
+      if (!pendingIds.has(id)) revealAttempts.current[id] += 1;
+    }
+    setRevealedPayouts(prev => {
+      const next = { ...prev };
+      let changed = false;
+      for (const id of Object.keys(next).map(Number)) {
+        if (!pendingIds.has(id)) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [payments]);
 
   const updatePayment = useMutation({
     mutationFn: async ({ id, status }: any) => {
+      clearRevealedPayout(id);
       const r = await fetch(`/api/admin/payments/${id}`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
       const data = await r.json().catch(() => ({} as any));
       if (!r.ok) {
@@ -1322,8 +1355,38 @@ function PaymentsSection({ logAction }: { logAction: any }) {
     },
   });
 
+  const handleRevealPayout = async (id: number) => {
+    const attempt = (revealAttempts.current[id] || 0) + 1;
+    revealAttempts.current[id] = attempt;
+    setRevealingPayoutId(id);
+    try {
+      const r = await fetch(`/api/admin/payments/${id}/reveal-payout`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data: any = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.message || "تعذر كشف بيانات التحويل");
+      if (revealAttempts.current[id] !== attempt) return;
+      setRevealedPayouts(prev => ({ ...prev, [data.id]: data }));
+      toast({ title: "تم كشف بيانات التحويل للأدمن", description: "تم تسجيل عملية الكشف في سجل الإدارة." });
+    } catch (error) {
+      toast({ title: "تعذر كشف البيانات", description: error instanceof Error ? error.message : "حدث خطأ", variant: "destructive" });
+    } finally {
+      setRevealingPayoutId(null);
+    }
+  };
+
   const handleApprove = (p: any) => {
     if (p.type === 'withdrawal') {
+      if (p.payoutDestinationLast4 && !revealedPayouts[p.id]) {
+        toast({
+          title: "اكشف بيانات التحويل أولاً",
+          description: "نفّذ التحويل للمستفيد ثم اضغط الموافقة لتسجيل الخصم.",
+          variant: "destructive",
+        });
+        return;
+      }
       if (p.insufficientBalance === true) {
         const ok = confirm(
           `⚠️ تحذير: رصيد المستخدم الحالي ${Number(p.currentBalanceEGP || 0).toFixed(2)} ج.م، لكن المبلغ المطلوب ${Number(p.amountEGP).toFixed(2)} ج.م.\n\nالموافقة على الأرجح سيتم رفضها من السيرفر. هل تريد المتابعة؟`
@@ -1335,6 +1398,10 @@ function PaymentsSection({ logAction }: { logAction: any }) {
         );
         if (!ok) return;
       }
+      const transferred = confirm(
+        `هل تم تحويل ${Number(p.amountEGP).toFixed(2)} ج.م فعلياً إلى ${p.payoutName || "المستفيد"}؟\n\nالموافقة ستخصم المبلغ من أرباح المستخدم ولا يمكن تكرارها.`
+      );
+      if (!transferred) return;
     }
     updatePayment.mutate({ id: p.id, status: "approved" });
   };
@@ -1342,7 +1409,14 @@ function PaymentsSection({ logAction }: { logAction: any }) {
   const pending = payments.filter((p: any) => p.status === "pending");
   const done = payments.filter((p: any) => p.status !== "pending");
 
-  const methodLabel: Record<string, string> = { vodafone: "فودافون كاش", etisalat: "اتصالات كاش", instapay: "إنستاباي", souq: "محفظة سوق" };
+  const methodLabel: Record<string, string> = {
+    vodafone: "فودافون كاش",
+    etisalat: "اتصالات كاش",
+    mobile_wallet: "محفظة إلكترونية",
+    instapay: "InstaPay",
+    souq: "محفظة سوق",
+    visa_bank: "بطاقة بنكية",
+  };
 
   return (
     <div className="space-y-5">
@@ -1361,8 +1435,31 @@ function PaymentsSection({ logAction }: { logAction: any }) {
                         <span className="text-xs bg-muted px-2 py-0.5 rounded font-mono">{p.type === 'top_up' ? '💰 شحن' : '🏧 سحب'}</span>
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {methodLabel[p.method] || p.method} · {p.phoneNumber} · {p.createdAt ? format(new Date(p.createdAt), "dd MMM yyyy", { locale: ar }) : ""}
+                        {methodLabel[p.method] || p.method} · {p.payoutDestinationMasked || p.phoneNumber} · {p.createdAt ? format(new Date(p.createdAt), "dd MMM yyyy", { locale: ar }) : ""}
                       </div>
+                      {p.type === "withdrawal" && (
+                        <div className="mt-2 rounded-lg border bg-background/70 p-2 space-y-1" data-testid={`payout-destination-${p.id}`}>
+                          <div className="text-xs"><span className="text-muted-foreground">اسم المستفيد:</span> <strong>{p.payoutName || "طلب قديم بدون اسم محفوظ"}</strong></div>
+                          <div className="text-xs"><span className="text-muted-foreground">المبلغ المطلوب:</span> <strong>{Number(p.amountEGP).toFixed(2)} ج.م</strong></div>
+                          {revealedPayouts[p.id] ? (
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <code className="rounded bg-muted px-2 py-1 text-sm select-all" dir="ltr">{revealedPayouts[p.id].destination}</code>
+                              <Button size="sm" variant="ghost" onClick={() => clearRevealedPayout(p.id)}>إخفاء</Button>
+                            </div>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleRevealPayout(p.id)}
+                              disabled={revealingPayoutId === p.id}
+                              data-testid={`button-reveal-payout-${p.id}`}
+                            >
+                              <Eye className="w-3 h-3 me-1" />
+                              كشف بيانات التحويل
+                            </Button>
+                          )}
+                        </div>
+                      )}
                       {p.serviceType && (
                         <span className="inline-block mt-1 text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold">
                           🎯 {SERVICE_TYPE_LABELS[p.serviceType] || p.serviceType}
