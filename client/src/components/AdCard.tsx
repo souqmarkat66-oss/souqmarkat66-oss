@@ -137,6 +137,9 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
   const [boostPayDialog, setBoostPayDialog] = useState(false);
   const [boostPrice, setBoostPrice] = useState(0);
   const [payRef, setPayRef]         = useState("");
+  const couponCode = (ad as any).couponCode ?? (ad as any).coupon_code;
+  const couponDiscountType = (ad as any).couponDiscountType ?? (ad as any).coupon_discount_type;
+  const couponDiscountValue = (ad as any).couponDiscountValue ?? (ad as any).coupon_discount_value;
 
   const { data: favData } = useQuery<{ favorited: boolean }>({
     queryKey: ["/api/favorites", ad.id, "check"],
@@ -412,29 +415,29 @@ export function AdCard({ ad, index }: { ad: Ad; index: number }) {
           <QuickRating adId={ad.id} ratingData={ratingData} userId={user?.id} onRated={() => qc.invalidateQueries({ queryKey: ["/api/ratings/ad", ad.id] })} />
 
           {/* 🏷️ Coupon Badge */}
-          {(ad as any).coupon_code && (
+          {couponCode && (
             <div className="flex items-center gap-2 bg-gradient-to-l from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/20 border border-orange-200 dark:border-orange-800/50 rounded-xl p-2 mt-1">
               <div className="w-6 h-6 rounded-lg bg-orange-500 flex items-center justify-center flex-shrink-0">
                 <Tag className="w-3 h-3 text-white" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] text-orange-600 dark:text-orange-400 font-semibold">كوبون خصم</p>
-                <p className="font-mono font-extrabold text-xs text-orange-800 dark:text-orange-300 truncate">{(ad as any).coupon_code}</p>
+                <p className="font-mono font-extrabold text-xs text-orange-800 dark:text-orange-300 truncate">{couponCode}</p>
               </div>
-              {(ad as any).coupon_discount_value && (
+              {couponDiscountValue && (
                 <Badge className="bg-orange-500 text-white text-[10px] px-2 border-none flex-shrink-0">
-                  {(ad as any).coupon_discount_type === "percentage"
-                    ? `${(ad as any).coupon_discount_value}%`
-                    : (ad as any).coupon_discount_type === "fixed"
-                    ? `${(ad as any).coupon_discount_value} ج.م`
-                    : (ad as any).coupon_discount_type === "free_shipping"
+                  {couponDiscountType === "percentage"
+                    ? `${couponDiscountValue}%`
+                    : couponDiscountType === "fixed"
+                    ? `${couponDiscountValue} ج.م`
+                    : couponDiscountType === "free_shipping"
                     ? "شحن مجاني"
                     : "عرض"}
                 </Badge>
               )}
               <button
                 type="button"
-                onClick={e => { e.preventDefault(); e.stopPropagation(); navigator.clipboard.writeText((ad as any).coupon_code); }}
+                onClick={e => { e.preventDefault(); e.stopPropagation(); navigator.clipboard.writeText(couponCode); }}
                 className="p-1 rounded-lg hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors flex-shrink-0"
                 data-testid={`btn-copy-coupon-${ad.id}`}
                 title="نسخ الكود"

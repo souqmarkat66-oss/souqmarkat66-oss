@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, varchar, real, numeric, jsonb, index, check } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, varchar, real, numeric, jsonb, index, uniqueIndex, check } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations, sql } from "drizzle-orm";
@@ -348,6 +348,25 @@ export const afsPaymentOrders = pgTable("afs_payment_orders", {
   fulfilledAt: timestamp("fulfilled_at"),
 });
 export type AfsPaymentOrder = typeof afsPaymentOrders.$inferSelect;
+
+// EGP-wallet coin purchases are separate from card/manual payment orders.
+// The per-user idempotency key makes a retry unable to mint coins twice.
+export const walletCoinPurchases = pgTable("wallet_coin_purchases", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  packageId: integer("package_id").notNull(),
+  coins: integer("coins").notNull(),
+  amountEGP: numeric("amount_egp", { precision: 12, scale: 2 }).notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  revenueTransactionId: integer("revenue_transaction_id").notNull(),
+  coinTransactionId: integer("coin_transaction_id").notNull(),
+  coinBalance: integer("coin_balance").notNull(),
+  walletBalanceEGP: numeric("wallet_balance_egp", { precision: 12, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  userKeyIdx: uniqueIndex("wallet_coin_purchases_user_key_idx").on(table.userId, table.idempotencyKey),
+}));
+export type WalletCoinPurchase = typeof walletCoinPurchases.$inferSelect;
 
 // Rejected payment attempts are kept outside the wallet/revenue ledger. They
 // are audit records only and never change balances or earnings.

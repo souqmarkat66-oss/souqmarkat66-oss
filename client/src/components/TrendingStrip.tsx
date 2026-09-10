@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Flame, CheckCircle, TrendingUp, Eye, Heart, Radio, Users } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRef, useState } from "react";
+import { projectPublicChannels, projectPublicStreams } from "@/lib/public-projections";
 
 /* ────────────────────────────────────────────────────────────────
    Trending Ads Strip
@@ -181,18 +182,18 @@ function ChannelTrendCard({ ch, rank, index, liveIds }: { ch: any; rank: number;
 }
 
 export function TrendingChannelsStrip({ className = "" }: { className?: string }) {
-  const { data: channels, isLoading } = useQuery<any[]>({
+  const { data: rawChannels, isLoading } = useQuery<unknown>({
     queryKey: ["/api/trending/channels"],
     queryFn: () => fetch("/api/trending/channels?limit=8").then(r => r.json()),
     staleTime: 60_000,
   });
 
-  const { data: streams } = useQuery<any[]>({
+  const { data: rawStreams } = useQuery<unknown>({
     queryKey: ["/api/streams"],
     staleTime: 30_000,
   });
 
-  const safeStreams = Array.isArray(streams) ? streams : [];
+  const safeStreams = projectPublicStreams(rawStreams);
   const liveIds = new Set<number>(safeStreams.map((s: any) => s.channelId));
 
   if (isLoading) {
@@ -209,7 +210,7 @@ export function TrendingChannelsStrip({ className = "" }: { className?: string }
     );
   }
 
-  const safeChannels = Array.isArray(channels) ? channels : [];
+  const safeChannels = projectPublicChannels(rawChannels);
   if (safeChannels.length === 0) return null;
 
   return (

@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Link, useSearch } from "wouter";
 import { queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, Clock, XCircle, Loader2 } from "lucide-react";
+import { CheckCircle2, Clock, XCircle, Loader2, CreditCard } from "lucide-react";
 
 export default function AfsPaymentResult() {
   const search = useSearch();
@@ -30,14 +30,17 @@ export default function AfsPaymentResult() {
   const result = verify.data;
   const pending = result?.status === "pending";
   const paid = result?.status === "paid";
+  const testComplete = result?.status === "test";
   const paidService = paid && result?.serviceActivated;
-  const Icon = paid ? CheckCircle2 : pending ? Clock : verify.isPending ? Loader2 : XCircle;
+  const Icon = testComplete ? CreditCard : paid ? CheckCircle2 : pending ? Clock : verify.isPending ? Loader2 : XCircle;
   return <div dir="rtl" className="max-w-md mx-auto px-4 py-12 text-center">
-    <div className={`border rounded-2xl p-7 ${paid ? "border-green-300" : pending ? "border-amber-300" : "border-red-300"}`}>
-      <Icon className={`w-14 h-14 mx-auto mb-4 ${verify.isPending ? "animate-spin" : paid ? "text-green-600" : pending ? "text-amber-600" : "text-red-600"}`} />
+    <div className={`border rounded-2xl p-7 ${paid ? "border-green-300" : pending || testComplete ? "border-amber-300" : "border-red-300"}`}>
+      <Icon className={`w-14 h-14 mx-auto mb-4 ${verify.isPending ? "animate-spin" : paid ? "text-green-600" : pending || testComplete ? "text-amber-600" : "text-red-600"}`} />
       <h1 className="font-extrabold text-xl mb-2">
         {verify.isPending
           ? "جارٍ التحقق من الدفع"
+          : testComplete
+            ? "نتيجة اختبار AFS — ليس دفعاً حقيقياً"
           : paidService
             ? "تم الدفع وتشغيل الخدمة"
             : paid

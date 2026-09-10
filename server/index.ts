@@ -341,6 +341,20 @@ async function runMigrations() {
       ON afs_payment_orders(user_id, idempotency_key)
       WHERE idempotency_key IS NOT NULL
     `);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS wallet_coin_purchases (
+      id SERIAL PRIMARY KEY,
+      user_id VARCHAR NOT NULL REFERENCES users(id),
+      package_id INTEGER NOT NULL,
+      coins INTEGER NOT NULL CHECK (coins > 0),
+      amount_egp NUMERIC(12,2) NOT NULL CHECK (amount_egp > 0),
+      idempotency_key TEXT NOT NULL,
+      revenue_transaction_id INTEGER NOT NULL,
+      coin_transaction_id INTEGER NOT NULL,
+      coin_balance INTEGER NOT NULL CHECK (coin_balance >= 0),
+      wallet_balance_egp NUMERIC(12,2) NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      CONSTRAINT wallet_coin_purchases_user_key UNIQUE (user_id, idempotency_key)
+    )`);
     await db.execute(sql`
       DO $$
       DECLARE constraint_name TEXT;

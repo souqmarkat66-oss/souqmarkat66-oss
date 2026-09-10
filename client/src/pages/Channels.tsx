@@ -15,6 +15,7 @@ import { TrendingChannelsStrip } from "@/components/TrendingStrip";
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Channel } from "@shared/schema";
+import { projectPublicChannels, projectPublicStreams, type PublicChannel } from "@/lib/public-projections";
 
 const CATEGORIES = [
   { value: "all", label: "الكل" },
@@ -43,9 +44,11 @@ export default function Channels() {
   const [sortBy,      setSortBy]      = useState("subscribers");
   const [filters,     setFilters]     = useState<Filter>({ live: false, verified: false, monetized: false });
 
-  const { data: channels, isLoading } = useQuery<Channel[]>({ queryKey: ["/api/channels"] });
+  const { data: rawChannels, isLoading } = useQuery<unknown>({ queryKey: ["/api/channels"] });
   const { data: myChannel }           = useQuery<Channel | null>({ queryKey: ["/api/channels/mine"], enabled: !!user });
-  const { data: streams }             = useQuery<any[]>({ queryKey: ["/api/streams"] });
+  const { data: rawStreams }          = useQuery<unknown>({ queryKey: ["/api/streams"] });
+  const channels = useMemo<PublicChannel[]>(() => projectPublicChannels(rawChannels), [rawChannels]);
+  const streams = useMemo(() => projectPublicStreams(rawStreams), [rawStreams]);
 
   const liveChannelIds = useMemo(() =>
     new Set((streams || []).map((s: any) => s.channelId)),

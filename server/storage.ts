@@ -14,6 +14,7 @@ import {
 import { eq, desc, and, sql, ne, gte, lte } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { walletEmitter } from "./wallet-events";
+import { parseLedgerAmount } from "./wallet-ledger";
 
 export interface IStorage {
   // Ads
@@ -165,22 +166,23 @@ export class DatabaseStorage implements IStorage {
     description: string,
     expiresAt: Date,
   ): Promise<{ ad?: Ad; success: boolean; balance: number }> {
-    const amount = Number(amountEGP);
+    const amount = parseLedgerAmount(amountEGP, "debit amount");
+    if (amount <= 0) throw new Error("createAdWithWalletDebitAtomic: المبلغ يجب أن يكون أكبر من صفر");
     return await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${'wallet:' + insertAd.userId}, 0))`);
       const [row] = await tx
         .select({
-          balance: sql<number>`COALESCE(SUM(
+          balance: sql<string>`COALESCE(SUM(
             CASE
               WHEN ${revenueTransactions.type} IN ('earning', 'wallet_recharge') THEN ${revenueTransactions.amountEGP}
               WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
               ELSE 0
             END
-          ), 0)`,
+          ), 0)::numeric`,
         })
         .from(revenueTransactions)
         .where(eq(revenueTransactions.userId, insertAd.userId));
-      const balance = Number(row?.balance ?? 0);
+      const balance = parseLedgerAmount(row?.balance ?? 0, "wallet balance");
       if (balance < amount) return { success: false, balance };
       await tx.insert(revenueTransactions).values({
         userId: insertAd.userId,
@@ -444,12 +446,12 @@ export class DatabaseStorage implements IStorage {
         return {};
       }
       const [wallet] = await tx.select({
-        balance: sql<number>`COALESCE(SUM(CASE
+        balance: sql<string>`COALESCE(SUM(CASE
           WHEN ${revenueTransactions.type} IN ('earning', 'wallet_recharge') THEN ${revenueTransactions.amountEGP}
           WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
-          ELSE 0 END), 0)`,
+        ELSE 0 END), 0)::numeric`,
       }).from(revenueTransactions).where(eq(revenueTransactions.userId, locked.advertiserId));
-      if (Number(wallet?.balance ?? 0) < revenueEGP) {
+      if (parseLedgerAmount(wallet?.balance ?? 0, "wallet balance") < revenueEGP) {
         await tx.update(adCampaigns).set({ status: 'paused' }).where(eq(adCampaigns.id, campaignId));
         return {};
       }
@@ -466,12 +468,24 @@ export class DatabaseStorage implements IStorage {
           await tx.update(channels).set({
             earningsEGP: sql`${channels.earningsEGP} + ${publisherShareEGP}`,
           }).where(eq(channels.id, channelId));
-          await tx.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id, channel_id)
-            VALUES (${ch.userId}, 'earning', ${publisherShareEGP}, ${publisherShareEGP}, ${'إيراد إعلان - حملة #' + campaignId + ' (CPM=' + cpmRate + ' ج.م)'}, ${campaignId}, ${channelId})`);
+          await tx.insert(revenueTransactions).values({
+            userId: ch.userId,
+            type: "earning",
+            amountEGP: publisherShareEGP,
+            description: `إيراد إعلان - حملة #${campaignId} (CPM=${cpmRate} ج.م)`,
+            campaignId,
+            channelId,
+          });
         }
       }
-      await tx.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id)
-        VALUES (${locked.advertiserId}, 'spending', ${revenueEGP}, ${revenueEGP}, ${'تكلفة مشاهدة - حملة ' + locked.name + ' (CPM=' + cpmRate + ' ج.م)'}, ${campaignId})`);
+      await tx.insert(revenueTransactions).values({
+        userId: locked.advertiserId,
+        type: "spending",
+        amountEGP: revenueEGP,
+        description: `تكلفة مشاهدة - حملة ${locked.name} (CPM=${cpmRate} ج.م)`,
+        campaignId,
+        channelId: null,
+      });
 
       if (budget > 0) {
         const ratio = newSpent / budget;
@@ -504,12 +518,12 @@ export class DatabaseStorage implements IStorage {
         return {};
       }
       const [wallet] = await tx.select({
-        balance: sql<number>`COALESCE(SUM(CASE
+        balance: sql<string>`COALESCE(SUM(CASE
           WHEN ${revenueTransactions.type} IN ('earning', 'wallet_recharge') THEN ${revenueTransactions.amountEGP}
           WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
-          ELSE 0 END), 0)`,
+        ELSE 0 END), 0)::numeric`,
       }).from(revenueTransactions).where(eq(revenueTransactions.userId, locked.advertiserId));
-      if (Number(wallet?.balance ?? 0) < cpcRate) {
+      if (parseLedgerAmount(wallet?.balance ?? 0, "wallet balance") < cpcRate) {
         await tx.update(adCampaigns).set({ status: 'paused' }).where(eq(adCampaigns.id, campaignId));
         return {};
       }
@@ -526,12 +540,24 @@ export class DatabaseStorage implements IStorage {
           await tx.update(channels).set({
             earningsEGP: sql`${channels.earningsEGP} + ${publisherShareEGP}`,
           }).where(eq(channels.id, channelId));
-          await tx.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id, channel_id)
-            VALUES (${ch.userId}, 'earning', ${publisherShareEGP}, ${publisherShareEGP}, ${'إيراد نقرة - حملة #' + campaignId + ' (CPC=' + cpcRate + ' ج.م)'}, ${campaignId}, ${channelId})`);
+          await tx.insert(revenueTransactions).values({
+            userId: ch.userId,
+            type: "earning",
+            amountEGP: publisherShareEGP,
+            description: `إيراد نقرة - حملة #${campaignId} (CPC=${cpcRate} ج.م)`,
+            campaignId,
+            channelId,
+          });
         }
       }
-      await tx.execute(sql`INSERT INTO revenue_transactions (user_id, type, amount, amount_egp, description, campaign_id)
-        VALUES (${locked.advertiserId}, 'spending', ${cpcRate}, ${cpcRate}, ${'تكلفة نقرة - حملة ' + locked.name + ' (CPC=' + cpcRate + ' ج.م)'}, ${campaignId})`);
+      await tx.insert(revenueTransactions).values({
+        userId: locked.advertiserId,
+        type: "spending",
+        amountEGP: cpcRate,
+        description: `تكلفة نقرة - حملة ${locked.name} (CPC=${cpcRate} ج.م)`,
+        campaignId,
+        channelId: null,
+      });
 
       if (budget > 0 && newSpent / budget >= 0.8) {
         return { budgetWarning: true, budgetRatio: newSpent / budget, advertiserId: locked.advertiserId, campaignName: locked.name };
@@ -576,11 +602,11 @@ export class DatabaseStorage implements IStorage {
       .from(revenueTransactions)
       .where(and(...conds));
     return {
-      earning: Number(row?.earning) || 0,
-      spending: Number(row?.spending) || 0,
-      withdrawal: Number(row?.withdrawal) || 0,
-      ai_charge: Number(row?.ai_charge) || 0,
-      wallet_recharge: Number(row?.wallet_recharge) || 0,
+      earning: parseLedgerAmount(row?.earning ?? 0, "earning total"),
+      spending: parseLedgerAmount(row?.spending ?? 0, "spending total"),
+      withdrawal: parseLedgerAmount(row?.withdrawal ?? 0, "withdrawal total"),
+      ai_charge: parseLedgerAmount(row?.ai_charge ?? 0, "AI charge total"),
+      wallet_recharge: parseLedgerAmount(row?.wallet_recharge ?? 0, "wallet recharge total"),
     };
   }
 
@@ -588,17 +614,17 @@ export class DatabaseStorage implements IStorage {
     const [row] = await db
       .select({
         // wallet_recharge = إيداع (موجب) مثل earning
-        balance: sql<number>`COALESCE(SUM(
+        balance: sql<string>`COALESCE(SUM(
           CASE
             WHEN ${revenueTransactions.type} IN ('earning', 'wallet_recharge') THEN ${revenueTransactions.amountEGP}
             WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
             ELSE 0
           END
-        ), 0)`,
+        ), 0)::numeric`,
       })
       .from(revenueTransactions)
       .where(eq(revenueTransactions.userId, userId));
-    return Number(row?.balance ?? 0);
+    return parseLedgerAmount(row?.balance ?? 0, "wallet balance");
   }
 
   async debitWalletAtomic(
@@ -607,25 +633,25 @@ export class DatabaseStorage implements IStorage {
     type: 'spending' | 'ai_charge',
     description: string,
   ): Promise<{ success: boolean; balance: number }> {
-    const amount = Number(amountEGP);
-    if (!Number.isFinite(amount) || amount <= 0) {
+    const amount = parseLedgerAmount(amountEGP, "debit amount");
+    if (amount <= 0) {
       throw new Error("debitWalletAtomic: المبلغ يجب أن يكون أكبر من صفر");
     }
     const result = await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${'wallet:' + userId}, 0))`);
       const [row] = await tx
         .select({
-          balance: sql<number>`COALESCE(SUM(
+          balance: sql<string>`COALESCE(SUM(
             CASE
               WHEN ${revenueTransactions.type} IN ('earning', 'wallet_recharge') THEN ${revenueTransactions.amountEGP}
               WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
               ELSE 0
             END
-          ), 0)`,
+          ), 0)::numeric`,
         })
         .from(revenueTransactions)
         .where(eq(revenueTransactions.userId, userId));
-      const balance = Number(row?.balance ?? 0);
+      const balance = parseLedgerAmount(row?.balance ?? 0, "wallet balance");
       if (balance < amount) return { success: false, balance };
       await tx.insert(revenueTransactions).values({
         userId,
@@ -652,17 +678,17 @@ export class DatabaseStorage implements IStorage {
   async getWithdrawableBalanceEGP(userId: string): Promise<number> {
     const [row] = await db
       .select({
-        balance: sql<number>`COALESCE(SUM(
+        balance: sql<string>`COALESCE(SUM(
           CASE
             WHEN ${revenueTransactions.type} = 'earning' THEN ${revenueTransactions.amountEGP}
             WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
             ELSE 0
           END
-        ), 0)`,
+        ), 0)::numeric`,
       })
       .from(revenueTransactions)
       .where(eq(revenueTransactions.userId, userId));
-    return Math.max(0, Number(row?.balance ?? 0));
+    return Math.max(0, parseLedgerAmount(row?.balance ?? 0, "withdrawable balance"));
   }
 
   async createTransaction(tx: Omit<RevenueTransaction, 'id' | 'createdAt'>): Promise<RevenueTransaction> {
@@ -670,7 +696,8 @@ export class DatabaseStorage implements IStorage {
     if (tx.amountEGP === undefined || tx.amountEGP === null) {
       throw new Error("createTransaction: amountEGP مطلوب");
     }
-    if (Number(tx.amountEGP) <= 0) {
+    const amount = parseLedgerAmount(tx.amountEGP, "transaction amount");
+    if (amount <= 0) {
       throw new Error("createTransaction: المبلغ يجب أن يكون أكبر من صفر");
     }
 
@@ -682,7 +709,7 @@ export class DatabaseStorage implements IStorage {
       const newBalance = await this.getUserBalanceEGP(tx.userId);
       walletEmitter.emit("wallet:update", {
         userId: tx.userId,
-        amountEGP: Number(tx.amountEGP),
+        amountEGP: amount,
         type: tx.type,
         description: tx.description ?? null,
         newBalance,
@@ -818,12 +845,12 @@ export class DatabaseStorage implements IStorage {
 
         const [balRow] = await tx
           .select({
-            balance: sql<number>`COALESCE(SUM(CASE WHEN ${revenueTransactions.type} = 'earning' THEN ${revenueTransactions.amountEGP} WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP} ELSE 0 END), 0)`,
+            balance: sql<string>`COALESCE(SUM(CASE WHEN ${revenueTransactions.type} = 'earning' THEN ${revenueTransactions.amountEGP} WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP} ELSE 0 END), 0)::numeric`,
           })
           .from(revenueTransactions)
           .where(eq(revenueTransactions.userId, locked.userId));
-        const currentBalanceEGP = Number(balRow?.balance ?? 0);
-        const requested = Number(locked.amountEGP ?? 0);
+        const currentBalanceEGP = parseLedgerAmount(balRow?.balance ?? 0, "wallet balance");
+        const requested = parseLedgerAmount(locked.amountEGP ?? 0, "withdrawal amount");
         if (requested > currentBalanceEGP) {
           return { payment: locked, alreadyProcessed: false, insufficientBalance: true, currentBalanceEGP };
         }
@@ -1024,17 +1051,17 @@ export class DatabaseStorage implements IStorage {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${'wallet:' + advertiserId}, 0))`);
         const [balanceRow] = await tx
           .select({
-            balance: sql<number>`COALESCE(SUM(
+            balance: sql<string>`COALESCE(SUM(
               CASE
                 WHEN ${revenueTransactions.type} IN ('earning', 'wallet_recharge') THEN ${revenueTransactions.amountEGP}
                 WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
                 ELSE 0
               END
-            ), 0)`,
+            ), 0)::numeric`,
           })
           .from(revenueTransactions)
           .where(eq(revenueTransactions.userId, advertiserId));
-        if (Number(balanceRow?.balance ?? 0) < amountEGP) return undefined;
+        if (parseLedgerAmount(balanceRow?.balance ?? 0, "wallet balance") < amountEGP) return undefined;
       }
       const [updated] = await tx.update(tickerAds).set({
         spentEGP: sql`${tickerAds.spentEGP} + ${amountEGP}`,

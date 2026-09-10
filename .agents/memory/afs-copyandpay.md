@@ -26,3 +26,9 @@ Checkout creation plus an HTTP-200 widget download with matching SRI is still no
 **Why:** The provider can return correctly signed JavaScript that renders “invalid or missing entity type” instead of card fields. This was reproduced in a minimal isolated browser page with VISA/MASTER, independent of the application's React lifecycle.
 
 **How to apply:** Verify actual card-field rendering in a browser without submitting card details. If the minimal Live widget reproduces a provider entity-type error, require AFS to verify the Live COPYandPAY channel/entity and matching credentials; do not assume another build, brand removal, or disabling SRI will repair merchant provisioning.
+
+An explicitly owner-authorized sandbox on the published VPS is acceptable only as a non-financial test. Never grant real wallet balance, gift coins, subscriptions, or other services from a sandbox result.
+
+**Why:** A production-hosted integration test shares the application's real accounts and ledger. Successful test card transactions must not become spendable, including after the endpoint is switched back to Live.
+
+**How to apply:** Require explicit production sandbox opt-in, bind each new order to its server-selected environment, label checkout/history/results as test-only, reject cross-environment reuse, and keep sandbox verification outside every financial fulfillment path. Switching back to Live requires a fresh checkout; old test results remain non-financial.

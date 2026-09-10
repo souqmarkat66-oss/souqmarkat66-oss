@@ -21,6 +21,8 @@ import { Badge } from "@/components/ui/badge";
 import GlobalTicker from "@/components/GlobalTicker";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { projectPublicStream, type PublicLiveStream } from "@/lib/public-projections";
+import { battleGridFor, reserveBattleSeats } from "@/lib/live-layout";
 
 /* ─── ICE servers ─────────────────────────────────────── */
 const ICE: RTCIceServer[] = [
@@ -385,14 +387,24 @@ export default function LiveStream() {
   }, [closeHostOverlays, id]);
 
   /* ── stream data ── */
-  const { data: stream } = useQuery<any>({
+  const { data: stream } = useQuery<PublicLiveStream | null>({
     queryKey: ["/api/streams", id],
-    queryFn: () => fetch(`/api/streams/${id}`, { credentials: "include" }).then(r => r.json()),
+    queryFn: async () => {
+      const response = await fetch(`/api/streams/${id}`, { credentials: "include" });
+      if (!response.ok) return null;
+      return projectPublicStream(await response.json());
+    },
     enabled: !!id,
     refetchInterval: 5000,
   });
+  // `mode=broadcast` is a UI hint and can be typed into a URL.  Treat the
+  // server-provided stream owner as the authority before rendering or
+  // fetching broadcaster earnings.
+  const isStreamOwner = !!user && !!stream?.userId && String(stream.userId) === String(user.id);
+  const isStreamOwnerRef = useRef(false);
+  isStreamOwnerRef.current = isStreamOwner;
 
-  /* ── coin wallet ── */
+  /* ── coin wallet (the signed-in sender's own balance; needed for gifts) ── */
   const {
     data: coinWallet,
     isLoading: coinWalletLoading,
@@ -421,7 +433,8 @@ export default function LiveStream() {
       if (!response.ok) throw new Error("تعذر تحميل ملخص الأرباح");
       return response.json();
     },
-    enabled: !!user,
+    // Revenue is broadcaster-private, unlike the sender's coin balance.
+    enabled: isStreamOwner,
   });
   const { data: coinPackages } = useQuery<any[]>({
     queryKey: ["/api/coins/packages"],
@@ -665,7 +678,7 @@ export default function LiveStream() {
       }
       if (typeof data.balance === "number") setMyCoins(data.balance);
       void refetchWallet();
-      void refetchRevenue();
+      if (isStreamOwnerRef.current) void refetchRevenue();
     });
 
     if (isBroadcast) {
@@ -1232,7 +1245,10 @@ export default function LiveStream() {
           { socketId: socketRef.current?.id || "host", name: stream?.channelName || "المذيع" },
           ...activeCoHosts.slice(0, battleMode === "2v2" ? 3 : 1),
         ];
-    const orderedRoster = roster.slice(0, battleMode === "2v2" ? 4 : 2);
+    // Reserve the complete 1v1/2v2 geometry.  A missing or settling camera
+    // gets a deterministic placeholder instead of changing the split ratio.
+    const orderedRoster = reserveBattleSeats(battleMode, roster);
+    const { columns, rows } = battleGridFor(battleMode);
     const sourceVideos = new Map<string, HTMLVideoElement>();
     const audioSources = new Map<string, MediaStreamAudioSourceNode>();
     let audioContext: AudioContext | null = null;
@@ -1307,9 +1323,6 @@ export default function LiveStream() {
     };
 
     const draw = () => {
-      const count = orderedRoster.length || 2;
-      const columns = count === 4 ? 2 : count;
-      const rows = count === 4 ? 2 : 1;
       const tileWidth = canvas.width / columns;
       const tileHeight = canvas.height / rows;
       ctx.fillStyle = "#101a2a";
@@ -2308,10 +2321,10 @@ export default function LiveStream() {
           </div>
         </div>
 
-        {/* Private wallet data belongs to the signed-in viewer only. The
-            battle roster below intentionally contains public gift/score data,
-            never balances or earnings for any participant. */}
-        {user && (
+        {/* Only the authenticated broadcaster may see this earnings summary.
+            Viewers may still see their own coin balance in the gift composer;
+            the battle roster contains public gift/score data only. */}
+        {isStreamOwner && (
           <div className="absolute start-3 top-16 z-20 max-w-[calc(100%-1.5rem)]">
             <LiveWalletSummary
               coinWallet={coinWallet}
@@ -2712,86 +2725,90 @@ export default function LiveStream() {
 
             {/* Roster keyed battle seats. The server roster is the source of
                 truth; socket ids are never inferred from array positions. */}
-            <div className={`absolute inset-x-2 z-30 ${battleMode === "2v2" ? "top-[108px] bottom-[116px]" : "top-[108px] bottom-[150px]"} pointer-events-none`}>
-              <div className={`grid h-full gap-2 ${battleMode === "2v2" ? "grid-cols-2 grid-rows-2" : "grid-cols-2"}`}>
-                {(() => {
-                  const teams = battleTeams || {
-                    A: [{ socketId: socketRef.current?.id || "host", userId: String((user as any)?.id || "host"), name: stream?.channelName || "المذيع", audienceCount: Number(stream?.subscriberCount || 0) }],
-                    B: activeCoHosts.slice(0, battleMode === "2v2" ? 2 : 1).map(c => ({ socketId: c.socketId, userId: c.socketId, name: c.name, audienceCount: 0 })),
-                  };
-                  const members = [
-                    ...teams.A.map(member => ({ ...member, team: "A" as const })),
-                    ...teams.B.map(member => ({ ...member, team: "B" as const })),
-                  ];
-                  return members.map(member => {
-                    const isSelf = member.socketId === socketRef.current?.id;
-                    const hostSeat = member.socketId === socketRef.current?.id ||
-                      (isBroadcast && member.team === "A" && member === teams.A[0]);
-                    const cohost = activeCoHosts.find(c => c.socketId === member.socketId);
-                    const score = battlePlayerScores[member.userId];
-                    return (
-                      <div key={`${member.team}-${member.userId}`} className={`relative min-h-0 overflow-hidden rounded-2xl border ${member.team === "A" ? "border-orange-300/55" : "border-cyan-300/55"} ${isBroadcast ? "bg-[#101a2a]/90 shadow-2xl" : "bg-transparent"}`}>
-                        {isBroadcast && (
+            {/* The broadcaster publishes the composed two/four-seat canvas.
+                Viewers must keep seeing that single feed plus this score bar;
+                rendering empty transparent tiles here used to look like a
+                broken TikTok clone and could cover the real video. */}
+            {isBroadcast && (
+              <div className={`absolute inset-x-2 z-30 ${battleMode === "2v2" ? "top-[108px] bottom-[116px]" : "top-[108px] bottom-[150px]"} pointer-events-none`}>
+                <div className={`grid h-full gap-2 ${battleMode === "2v2" ? "grid-cols-2 grid-rows-2" : "grid-cols-2"}`}>
+                  {(() => {
+                    const teams = battleTeams || {
+                      A: [{ socketId: socketRef.current?.id || "host", userId: String((user as any)?.id || "host"), name: stream?.channelName || "المذيع", audienceCount: Number(stream?.subscriberCount || 0) }],
+                      B: activeCoHosts.slice(0, battleMode === "2v2" ? 2 : 1).map(c => ({ socketId: c.socketId, userId: c.socketId, name: c.name, audienceCount: 0 })),
+                    };
+                    const members = [
+                      ...teams.A.map(member => ({ ...member, team: "A" as const })),
+                      ...teams.B.map(member => ({ ...member, team: "B" as const })),
+                    ];
+                    return members.map(member => {
+                      const isSelf = member.socketId === socketRef.current?.id;
+                      const hostSeat = member.socketId === socketRef.current?.id ||
+                        (isBroadcast && member.team === "A" && member === teams.A[0]);
+                      const cohost = activeCoHosts.find(c => c.socketId === member.socketId);
+                      const score = battlePlayerScores[member.userId];
+                      return (
+                        <div key={`${member.team}-${member.userId}`} className={`relative min-h-0 overflow-hidden rounded-2xl border ${member.team === "A" ? "border-orange-300/55" : "border-cyan-300/55"} bg-[#101a2a]/90 shadow-2xl`}>
                           <div className={`absolute inset-0 flex items-center justify-center ${member.team === "A" ? "bg-[#241b24]" : "bg-[#12252d]"}`}>
                             <div className={`flex h-16 w-16 items-center justify-center rounded-full text-2xl font-black ${member.team === "A" ? "bg-orange-400/20 text-orange-100" : "bg-cyan-400/20 text-cyan-50"}`}>
                               {(member.name || "?").trim().slice(0, 1)}
                             </div>
                           </div>
-                        )}
-                        {isBroadcast && (hostSeat ? (
-                          <video autoPlay playsInline muted={isBroadcast}
-                            ref={el => {
-                              if (!el) return;
-                              const source = localStream.current;
-                              if (source && el.srcObject !== source) { el.srcObject = source; el.play().catch(() => {}); }
-                            }}
-                            onError={e => { e.currentTarget.style.display = "none"; }}
-                            className="relative z-10 h-full w-full object-cover"
-                            style={{ transform: isBroadcast && camFacing === "user" ? "scaleX(-1)" : "none" }} />
-                        ) : cohost?.hasCamera !== false ? (
-                          <video autoPlay playsInline
-                            ref={el => bindCohostVideo(member.socketId, el)}
-                            onError={e => { e.currentTarget.style.display = "none"; }}
-                            className="relative z-10 h-full w-full object-cover" />
-                        ) : (
-                          <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-[#152238]">
-                            <div className={`flex h-14 w-14 items-center justify-center rounded-full text-xl font-black ${member.team === "A" ? "bg-orange-400/20 text-orange-200" : "bg-cyan-400/20 text-cyan-100"}`}>
-                              {(member.name || "?").trim().slice(0, 1)}
+                          {hostSeat ? (
+                            <video autoPlay playsInline muted
+                              ref={el => {
+                                if (!el) return;
+                                const source = localStream.current;
+                                if (source && el.srcObject !== source) { el.srcObject = source; el.play().catch(() => {}); }
+                              }}
+                              onError={e => { e.currentTarget.style.display = "none"; }}
+                              className="relative z-10 h-full w-full object-cover"
+                              style={{ transform: camFacing === "user" ? "scaleX(-1)" : "none" }} />
+                          ) : cohost?.hasCamera !== false ? (
+                            <video autoPlay playsInline
+                              ref={el => bindCohostVideo(member.socketId, el)}
+                              onError={e => { e.currentTarget.style.display = "none"; }}
+                              className="relative z-10 h-full w-full object-cover" />
+                          ) : (
+                            <div className="relative z-10 flex h-full w-full flex-col items-center justify-center gap-2 bg-[#152238]">
+                              <div className={`flex h-14 w-14 items-center justify-center rounded-full text-xl font-black ${member.team === "A" ? "bg-orange-400/20 text-orange-200" : "bg-cyan-400/20 text-cyan-100"}`}>
+                                {(member.name || "?").trim().slice(0, 1)}
+                              </div>
+                              <MicOff className="h-4 w-4 text-white/45" />
                             </div>
-                            <MicOff className="h-4 w-4 text-white/45" />
+                          )}
+                          <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-[#07101e] via-[#07101e]/85 to-transparent px-2 pb-2 pt-8">
+                            <div className="flex items-end justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-xs font-black text-white">{member.name || "مشارك"}</p>
+                                <p className={`text-[10px] font-bold ${member.team === "A" ? "text-orange-200" : "text-cyan-200"}`}>
+                                  {member.team === "A" ? "فريق أ" : "فريق ب"}{isSelf ? " · أنت" : ""}
+                                </p>
+                                <p className="text-[9px] font-semibold text-white/65">
+                                  {Number(member.audienceCount || 0).toLocaleString()} متابع
+                                </p>
+                              </div>
+                              <div className="shrink-0 rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-amber-200">
+                                {typeof score === "number" ? `${score.toLocaleString()} نقطة` : "—"}
+                              </div>
+                            </div>
                           </div>
-                        ))}
-                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#07101e] via-[#07101e]/85 to-transparent px-2 pb-2 pt-8">
-                          <div className="flex items-end justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="truncate text-xs font-black text-white">{member.name || "مشارك"}</p>
-                              <p className={`text-[10px] font-bold ${member.team === "A" ? "text-orange-200" : "text-cyan-200"}`}>
-                                {member.team === "A" ? "فريق أ" : "فريق ب"}{isSelf ? " · أنت" : ""}
-                              </p>
-                              <p className="text-[9px] font-semibold text-white/65">
-                                {Number(member.audienceCount || 0).toLocaleString()} متابع
-                              </p>
+                          {flyingGifts.some(g => g.recipientSocketId === member.socketId) && (
+                            <div className="absolute end-2 top-2 z-20 rounded-full border border-amber-200/40 bg-amber-500/20 px-2 py-1 text-[10px] font-black text-amber-100">
+                              هدية الآن
                             </div>
-                            <div className="shrink-0 rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-amber-200">
-                              {typeof score === "number" ? `${score.toLocaleString()} نقطة` : "—"}
-                            </div>
-                          </div>
+                          )}
                         </div>
-                        {flyingGifts.some(g => g.recipientSocketId === member.socketId) && (
-                          <div className="absolute end-2 top-2 rounded-full border border-amber-200/40 bg-amber-500/20 px-2 py-1 text-[10px] font-black text-amber-100">
-                            هدية الآن
-                          </div>
-                        )}
-                      </div>
-                    );
-                  });
-                })()}
+                      );
+                    });
+                  })()}
+                </div>
+                <div className="pointer-events-auto absolute bottom-2 start-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-[#07101e]/90 px-3 py-1.5 text-[10px] font-bold text-white/70 backdrop-blur">
+                  <Users className="h-3.5 w-3.5 text-cyan-200" />
+                  {viewerCount.toLocaleString()} مشاهد
+                </div>
               </div>
-              <div className="pointer-events-auto absolute bottom-2 start-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-[#07101e]/90 px-3 py-1.5 text-[10px] font-bold text-white/70 backdrop-blur">
-                <Users className="h-3.5 w-3.5 text-cyan-200" />
-                {viewerCount.toLocaleString()} مشاهد
-              </div>
-            </div>
+            )}
 
             {/* ── هدايا وشحن — تحت الجولة مباشرة ── */}
             {!isBroadcast && user && (

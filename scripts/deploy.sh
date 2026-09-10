@@ -413,6 +413,11 @@ cd "$root"
 if [[ -n "$pm2_env_afs_base_url" ]]; then
   export AFS_BASE_URL="$pm2_env_afs_base_url"
 fi
+# An intentionally enabled sandbox must survive subsequent releases without
+# silently changing mode. Only export this non-secret boolean from the VPS file.
+export AFS_ALLOW_TEST_MODE="$(
+  node --env-file="$root/.env" -p 'process.env.AFS_ALLOW_TEST_MODE === "true" ? "true" : "false"'
+)"
 if [[ "$was_running" = "1" ]]; then
   pm2 reload "$app_name" --update-env
 else

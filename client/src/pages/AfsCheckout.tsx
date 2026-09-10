@@ -106,7 +106,13 @@ export default function AfsCheckout() {
           </div>
         </div>
         {order.serviceType && <p className="mb-2 text-sm">الخدمة: <b>{order.serviceType === "ad_boost" ? "تعزيز إعلان" : order.serviceType === "ad_renewal" ? "تجديد إعلان" : order.serviceType === "subscription" ? "اشتراك المنصة" : "خدمة مدفوعة"}</b></p>}
-        <p className="mb-5 text-sm">المبلغ: <b>{Number(order.amountEGP).toLocaleString("ar-EG")} ج.م</b></p>
+        {order.isTestMode && (
+          <div role="alert" className="mb-4 rounded-xl border border-amber-400 bg-amber-50 p-4 text-amber-950">
+            <b>AFS — وضع اختبار فقط</b>
+            <p className="mt-1 text-sm">استخدم بطاقات الاختبار المصرح بها فقط، وليس بطاقتك الحقيقية. نجاح الاختبار لا يشحن المحفظة ولا يضيف عملات هدايا أو يفعّل خدمات.</p>
+          </div>
+        )}
+        <p className="mb-5 text-sm">{order.isTestMode ? "مبلغ الاختبار" : "المبلغ"}: <b>{Number(order.amountEGP).toLocaleString("ar-EG")} ج.م</b></p>
         {widgetState === "loading" && (
           <div className="mb-3 flex items-center justify-center gap-2 rounded-xl border bg-muted/20 p-3 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -115,7 +121,9 @@ export default function AfsCheckout() {
         )}
         {widgetState === "error" && (
           <div className="mb-3 rounded-xl border border-red-300 bg-red-50 p-3 text-sm font-bold text-red-700">
-            تعذر تحميل نموذج AFS. لم يتم سحب أي مبلغ. ارجع لصفحة المدفوعات وحاول مرة أخرى أو استخدم طريقة دفع أخرى.
+            {order.isTestMode
+              ? "تعذر تحميل نموذج اختبار AFS. لم يتغير رصيدك الحقيقي. ارجع لصفحة المدفوعات لبدء اختبار جديد."
+              : "تعذر تحميل نموذج AFS. إذا كنت قد أرسلت بيانات الدفع، تحقق من حالة العملية في صفحة المدفوعات قبل محاولة الدفع مرة أخرى."}
           </div>
         )}
         <form action={action} className="paymentWidgets" data-brands="VISA MASTER MEEZA"></form>

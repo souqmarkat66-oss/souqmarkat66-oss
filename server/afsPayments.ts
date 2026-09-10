@@ -1,47 +1,17 @@
 import { getProviderSecret } from "./secretVault";
+import { resolveAfsEnvironment, type AfsMode } from "./afsEnvironment";
 /**
  * Small, deliberately isolated COPYandPAY client. Provider responses are only
  * consumed server-side; callers should expose their own safe status messages.
  */
-const DEFAULT_BASE_URL = "https://eu-test.oppwa.com";
-const PRODUCTION_BASE_URL = "https://eu-prod.oppwa.com";
-const ALLOWED_BASE_URLS = new Set([
-  "https://eu-test.oppwa.com",
-  PRODUCTION_BASE_URL,
-]);
-
 async function config() {
-  const configuredBaseUrl = process.env.AFS_BASE_URL?.trim();
-  // Development may deliberately use the provider sandbox, but a published
-  // build must never silently fall back to test mode. Production checkout
-  // stays disabled until production AFS credentials and URL are configured.
-  if (process.env.NODE_ENV === "production" && !configuredBaseUrl) {
-    throw new Error("بوابة الدفع الإنتاجية غير مهيأة");
-  }
-  const baseUrl = (configuredBaseUrl || DEFAULT_BASE_URL).replace(/\/+$/, "");
-  let parsed: URL;
-  try {
-    parsed = new URL(baseUrl);
-  } catch {
-    throw new Error("AFS payment configuration is invalid");
-  }
-  if (parsed.username || parsed.password || parsed.search || parsed.hash
-      || (parsed.pathname !== "/" && parsed.pathname !== "")
-      || !ALLOWED_BASE_URLS.has(parsed.origin)) {
-    throw new Error("AFS payment configuration is invalid");
-  }
-  if (process.env.NODE_ENV === "production" && parsed.origin !== PRODUCTION_BASE_URL) {
-    throw new Error("بوابة الدفع الإنتاجية غير مهيأة");
-  }
-  if (process.env.NODE_ENV !== "production" && parsed.origin !== DEFAULT_BASE_URL) {
-    throw new Error("يُمنع استخدام بوابة الدفع الحقيقية خارج بيئة الإنتاج");
-  }
+  const { baseUrl } = resolveAfsEnvironment(process.env);
   const entityId = await getProviderSecret("afs_entity_id");
   // Accept either the raw token or the exact "Bearer <token>" value commonly
   // copied from AFS examples, while always sending one Authorization prefix.
   const accessToken = (await getProviderSecret("afs_access_token"))?.replace(/^Bearer\s+/i, "");
   if (!entityId || !accessToken) throw new Error("AFS payment service is not configured");
-  return { baseUrl: parsed.origin, entityId, accessToken };
+  return { baseUrl, entityId, accessToken };
 }
 
 async function providerRequest(url: string, init: RequestInit) {
@@ -63,8 +33,8 @@ export async function prepareAfsCheckout(amountEGP: number) {
   }
   const form = new URLSearchParams({
     entityId,
-    // AFS must charge exactly the amount the server later credits. Test mode
-    // never weakens this accounting invariant.
+    // Live settlement validates this amount exactly. Sandbox results never
+    // reach real wallet, coin or service fulfillment.
     amount: amountEGP.toFixed(2),
     currency: "EGP",
     paymentType: "DB",
@@ -100,7 +70,10 @@ export async function getAfsEntityId() {
   return (await config()).entityId;
 }
 
-export async function getAfsWidget(checkoutId: string) {
+export async function getAfsWidget(checkoutId: string, orderMode?: AfsMode) {
+  if (orderMode && orderMode !== resolveAfsEnvironment(process.env).mode) {
+    throw new Error("هذه العملية تخص بيئة دفع مختلفة. ابدأ عملية جديدة من صفحة المدفوعات.");
+  }
   const { baseUrl } = await config();
   return {
     widgetUrl: `${baseUrl}/v1/paymentWidgets.js?checkoutId=${encodeURIComponent(checkoutId)}`,

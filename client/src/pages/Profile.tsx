@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
+import { projectPublicProfile } from "@/lib/public-projections";
 
 const ALL_INTERESTS = [
   { id: "tech", label: "تقنية وإلكترونيات", emoji: "📱" },
@@ -61,6 +62,10 @@ export default function Profile() {
     queryFn: () => fetch(`/api/profile/${targetUserId}`, { credentials: "include" }).then(r => r.json()),
     enabled: !!targetUserId,
   });
+  // Keep the public page resilient if an older server or cache still returns
+  // a broad profile row. Owner-only editing/referral data stays available
+  // only on the owner's own profile.
+  const visibleProfile = isOwn ? profile : projectPublicProfile(profile);
 
   useEffect(() => {
     if (profile?.user?.interests && isOwn) {
@@ -205,14 +210,14 @@ export default function Profile() {
     </div>
   );
 
-  if (!profile || profile.message) return (
+  if (!visibleProfile || (visibleProfile as any).message) return (
     <div className="container px-4 py-20 text-center" dir="rtl">
       <p className="text-muted-foreground">المستخدم غير موجود</p>
       <Button variant="ghost" onClick={() => setLocation("/")}>الرئيسية</Button>
     </div>
   );
 
-  const { user: profileUser, stats, channel } = profile;
+  const { user: profileUser, stats, channel } = visibleProfile as any;
   const fullName = `${profileUser.first_name || ""} ${profileUser.last_name || ""}`.trim() || "مستخدم";
   const avatarSrc = editPhotoPreview || profileUser.profile_image_url;
 

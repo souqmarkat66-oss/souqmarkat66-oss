@@ -11,7 +11,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
 import { AdCard } from "@/components/AdCard";
 import { AdWidget } from "@/components/AdWidget";
-import type { Channel, LiveStream, Ad } from "@shared/schema";
+import type { Channel, Ad } from "@shared/schema";
+import { projectPublicChannel, projectPublicStreams } from "@/lib/public-projections";
 
 export default function ChannelPage() {
   const { id } = useParams<{ id: string }>();
@@ -22,17 +23,32 @@ export default function ChannelPage() {
   const numericId = Number(id);
   const isValidId = !isNaN(numericId) && numericId > 0;
 
-  const { data: channel, isLoading } = useQuery<Channel>({
+  const { data: rawChannel, isLoading } = useQuery<unknown>({
     queryKey: ["/api/channels", numericId],
     queryFn: () => fetch(`/api/channels/${id}`).then(r => r.json()),
     enabled: isValidId
   });
 
-  const { data: streams } = useQuery<LiveStream[]>({
+  const { data: rawStreams } = useQuery<unknown>({
     queryKey: ["/api/channels", numericId, "streams"],
     queryFn: () => fetch(`/api/channels/${id}/streams`).then(r => r.json()),
     enabled: isValidId
   });
+
+  // The public channel response is allow-listed.  The owner route remains
+  // separately authenticated so owner-only publisher/account controls do not
+  // depend on hiding fields from a public response.
+  const { data: ownerChannel } = useQuery<Channel | null>({
+    queryKey: ["/api/channels/mine"],
+    queryFn: () => fetch("/api/channels/mine", { credentials: "include" }).then(r => r.json()),
+    enabled: !!user,
+  });
+  const publicChannel = projectPublicChannel(rawChannel);
+  const isOwner = !!user && ownerChannel?.id === numericId;
+  const channel = publicChannel
+    ? { ...publicChannel, ...(isOwner && ownerChannel ? ownerChannel : {}) }
+    : null;
+  const streams = projectPublicStreams(rawStreams);
 
   const { data: followData } = useQuery<{ following: boolean }>({
     queryKey: ["/api/channels", numericId, "follow"],
@@ -81,7 +97,6 @@ export default function ChannelPage() {
     return () => { document.title = "شبكة سوق للإعلانات"; };
   }, [channel]);
 
-  const isOwner = user && channel?.userId === user.id;
   const [codeCopied, setCodeCopied] = useState(false);
   const [showEmbed, setShowEmbed] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);

@@ -21,6 +21,8 @@ import fs from "fs";
 import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
 import { getAfsEntityId, getAfsPaymentStatus, getAfsWidget, prepareAfsCheckout } from "./afsPayments";
+import { afsOrderMode, assertAfsLiveSettlement, bindAfsEnvironment, resolveAfsEnvironment, sameAfsReference } from "./afsEnvironment";
+import { verifyAfsSandboxOrder } from "./afsSandbox";
 import express from "express";
 import type { PoolClient } from "pg";
 import * as webpushModule from "web-push";
@@ -46,6 +48,23 @@ import {
   pendingBattleChallengeMatches,
   type PendingBattleChallenge,
 } from "./liveSafety";
+import {
+  assertSingleRowResult,
+  parseCoinAmount,
+  parseLedgerAmount,
+  sameGiftEventIdentity,
+} from "./wallet-ledger";
+import { purchaseCoinsWithWallet } from "./walletCoinPurchase";
+import {
+  buildExpiredRechargeCodeResponse,
+  buildRechargeRedemptionResponse,
+} from "./recharge-code";
+import {
+  ownerChannelProjection,
+  publicAdProjection,
+  publicChannelProjection,
+  publicLiveStreamProjection,
+} from "./public-projections";
 const webpush: typeof webpushModule = (webpushModule as any).default || webpushModule;
 
 // Deep-convert snake_case keys to camelCase recursively
@@ -60,6 +79,14 @@ function deepToCamel(obj: any): any {
     );
   }
   return obj;
+}
+
+function mayViewChannelOwnerFields(req: any, channel: any): boolean {
+  const requesterId = req.user?.claims?.sub;
+  return !!requesterId && (
+    String(requesterId) === String(channel?.userId ?? channel?.user_id) ||
+    isAdminUser(req)
+  );
 }
 
 function safePaymentRequest(payment: any) {
@@ -1165,21 +1192,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
                FROM gift_events WHERE event_id = $1`,
               [data.eventId]
             );
-            const sameEvent = existing.rows[0]
-              && existing.rows[0].sender_user_id === authUid
-              && existing.rows[0].recipient_user_id === recipientUserId
-              && Number(existing.rows[0].stream_id) === Number(data.streamId)
-              && existing.rows[0].gift_type === data.giftType
-              && Number(existing.rows[0].gross_coins) === originalGiftCoins;
+            const sameEvent = sameGiftEventIdentity(existing.rows[0], {
+              senderUserId: authUid,
+              recipientUserId,
+              streamId: Number(data.streamId),
+              giftType: data.giftType,
+              grossCoins: originalGiftCoins,
+            });
             if (!sameEvent) {
               await client.query("ROLLBACK");
               socket.emit("gift-rejected", { reason: "duplicate_event_mismatch", eventId: data.eventId });
               return;
             }
-            const duplicateWallet = await client.query(`SELECT balance FROM coin_wallets WHERE user_id = $1`, [authUid]);
+            const duplicateWallet = await client.query(
+              `SELECT balance FROM coin_wallets WHERE user_id = $1 FOR SHARE`,
+              [authUid],
+            );
+            const duplicateWalletRow = assertSingleRowResult(duplicateWallet, "duplicate gift wallet");
             await client.query("COMMIT");
             socket.emit("gift-accepted", {
-              balance: Number(duplicateWallet.rows[0]?.balance || 0),
+              balance: parseLedgerAmount(duplicateWalletRow.balance ?? 0, "coin wallet balance"),
               giftType: data.giftType,
               eventId: data.eventId,
               duplicate: true,
@@ -1188,7 +1220,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           }
           const wallet = await client.query(
             `SELECT balance FROM coin_wallets WHERE user_id = $1 FOR UPDATE`,
-            [data.userId]
+            [authUid]
           );
           // The room/recipient can change while the sender wallet is waiting
           // on its row lock.  Never debit a gift resolved against an old
@@ -1214,7 +1246,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             socket.emit("gift-rejected", { reason: "recipient_unavailable", eventId: data.eventId });
             return;
           }
-          const balance = Number(wallet.rows[0]?.balance || 0);
+          const balance = parseLedgerAmount(wallet.rows[0]?.balance ?? 0, "coin wallet balance");
           if (balance < originalGiftCoins) {
             await client.query("ROLLBACK");
             socket.emit("gift-rejected", { reason: "insufficient_balance", balance, required: originalGiftCoins, eventId: data.eventId });
@@ -1225,34 +1257,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
              SET balance = balance - $2::int, total_spent = total_spent + $2::int, updated_at = NOW()
              WHERE user_id = $1
              RETURNING balance`,
-            [data.userId, originalGiftCoins]
+             [authUid, originalGiftCoins]
           );
-          if (debitRes.rowCount !== 1 || debitRes.rows.length !== 1) {
-            throw new Error("Gift debit affected an unexpected wallet row count");
-          }
-          newSenderBalance = Number(debitRes.rows[0]?.balance ?? 0);
-          await client.query(
+          const debitRow = assertSingleRowResult(debitRes, "gift debit");
+          newSenderBalance = parseLedgerAmount(debitRow.balance ?? 0, "coin wallet balance");
+          const senderTransaction = await client.query(
             `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id, related_user_id)
              VALUES ($1, 'gift_sent', $2, $3, $4, $5)`,
              [authUid, -originalGiftCoins, `هدية ${gift.name} في البث`, numericStreamId, recipientUserId]
           );
+          if (senderTransaction.rowCount !== 1) throw new Error("Gift sender transaction failed");
           // 60/40 is always calculated from the original gift value.
           if (data.broadcasterUserId) {
-            await client.query(
+            const recipientWallet = await client.query(
               `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
-               VALUES ($1, $2::int, 0, $2::int)
+               VALUES ($1, 0, 0, $2::int)
                ON CONFLICT (user_id) DO UPDATE
-               SET balance = coin_wallets.balance + $2::int,
-                   total_earned = coin_wallets.total_earned + $2::int,
-                   updated_at = NOW()`,
+               SET total_earned = coin_wallets.total_earned + $2::int,
+                   updated_at = NOW()
+               RETURNING balance`,
                [data.broadcasterUserId, broadcasterCoins]
             );
+            assertSingleRowResult(recipientWallet, "gift recipient wallet credit");
             // Log broadcaster transaction
-            await client.query(
+            const recipientTransaction = await client.query(
               `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id, related_user_id)
                VALUES ($1, 'gift_received', $2, $3, $4, $5)`,
                 [recipientUserId, broadcasterCoins, `استلام هدية ${gift.name} من مستخدم`, numericStreamId, authUid]
             );
+            if (recipientTransaction.rowCount !== 1) throw new Error("Gift recipient transaction failed");
             // Also credit revenue_transactions in EGP (1 coin = 0.05 EGP)
              const egpAmount = parseFloat((broadcasterCoins * 0.05).toFixed(2));
             const revenueCredit = await client.query(
@@ -1261,7 +1294,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
                RETURNING id`,
                 [recipientUserId, egpAmount, `هدايا من بث مباشر - ${gift.name}`]
             );
-            if (revenueCredit.rowCount !== 1) throw new Error("Gift earnings credit failed");
+             assertSingleRowResult(revenueCredit, "gift earnings credit");
           }
           // This is deliberately the last room/identity check before commit.
           // A disconnect or seat replacement rolls back every ledger write.
@@ -1714,15 +1747,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Get my coin wallet
   app.get("/api/coins/wallet", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
+    // The no-op upsert avoids a unique-key race when two live-stream views
+    // request the wallet for a new account at the same time.
+    const ins = await pool.query(
+      `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
+       VALUES ($1, 0, 0, 0)
+       ON CONFLICT (user_id) DO NOTHING
+       RETURNING *`,
+      [userId]
+    );
+    if (ins.rows.length === 1) return res.json(ins.rows[0]);
     const r = await pool.query(`SELECT * FROM coin_wallets WHERE user_id = $1`, [userId]);
-    if (r.rows.length === 0) {
-      // Create wallet with 0 coins
-      const ins = await pool.query(
-        `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned) VALUES ($1, 0, 0, 0) RETURNING *`,
-        [userId]
-      );
-      return res.json(ins.rows[0]);
-    }
+    if (r.rows.length === 0) return res.status(503).json({ message: "تعذر إنشاء محفظة العملات" });
     res.json(r.rows[0]);
   });
 
@@ -1756,6 +1792,71 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(r.rows);
   });
 
+  // Buy a coin package from the authenticated user's EGP wallet. Card/manual
+  // purchase orders are separate payment methods and must never be mixed with
+  // this ledger-backed path.
+  app.post("/api/coins/purchase-with-wallet", isAuthenticated, async (req: any, res) => {
+    const userId = String(req.user.claims.sub);
+    const packageId = Number(req.body?.packageId);
+    const idempotencyKey = String(
+      req.get("Idempotency-Key") || req.body?.idempotencyKey || "",
+    ).trim();
+    if (!Number.isInteger(packageId) || packageId <= 0) {
+      return res.status(400).json({ message: "باقة العملات غير صالحة" });
+    }
+    if (!/^[A-Za-z0-9:_-]{8,128}$/.test(idempotencyKey)) {
+      return res.status(400).json({ message: "مفتاح العملية غير صالح" });
+    }
+
+    let client: PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      const result = await purchaseCoinsWithWallet(client, {
+        userId,
+        packageId,
+        idempotencyKey,
+      });
+      if (result.status === "package_not_found") {
+        return res.status(404).json({ message: "باقة العملات غير متاحة" });
+      }
+      if (result.status === "insufficient_balance") {
+        return res.status(402).json({
+          message: "رصيد المحفظة غير كافٍ",
+          required: result.requiredEGP,
+          balance: result.walletBalanceEGP,
+        });
+      }
+      if (result.status === "purchased") {
+        walletEmitter.emit("wallet:update", {
+          userId,
+          amountEGP: result.amountEGP,
+          type: "spending",
+          description: `شراء ${result.coins} عملة من رصيد المحفظة`,
+          newBalance: result.walletBalanceEGP,
+        });
+      }
+      return res.json({
+        success: true,
+        duplicate: result.status === "already_processed",
+        purchaseId: result.purchaseId,
+        packageId: result.packageId,
+        packageName: result.packageName,
+        coins: result.coins,
+        amountEGP: result.amountEGP,
+        coinBalance: result.coinBalance,
+        walletBalanceEGP: result.walletBalanceEGP,
+        message: result.status === "already_processed"
+          ? "تم تأكيد عملية شراء العملات السابقة"
+          : `تم إضافة ${result.coins} عملة وخصم ${result.amountEGP.toFixed(2)} ج.م من المحفظة`,
+      });
+    } catch (error) {
+      console.error("Wallet coin purchase error:", error);
+      return res.status(500).json({ message: "تعذر تنفيذ شراء العملات من المحفظة" });
+    } finally {
+      client?.release();
+    }
+  });
+
   const makeRechargeCode = () => {
     const token = randomUUID().replace(/-/g, "").toUpperCase();
     return `SOUQ-${token.slice(0, 8)}-${token.slice(8, 16)}-${token.slice(16, 24)}`;
@@ -1774,7 +1875,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
          ON CONFLICT (code) DO NOTHING RETURNING code`,
         [code, coins, priceEGP]
       );
-      if (inserted.rows[0]?.code) return inserted.rows[0].code as string;
+      if (inserted.rowCount === 1 && inserted.rows.length === 1 && inserted.rows[0]?.code) {
+        return inserted.rows[0].code as string;
+      }
     }
     throw new Error("Could not allocate a unique recharge code");
   };
@@ -1802,45 +1905,51 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         await client.query("ROLLBACK");
         return res.status(400).json({ message: "هذا الكود مستخدم بالفعل" });
       }
+      const coinAmount = parseCoinAmount(row.coins, "recharge coin amount");
+      const rechargePrice = parseLedgerAmount(row.price_egp, "recharge price");
       if (row.expires_at && new Date(row.expires_at) < new Date()) {
         // Keep the inventory replenished when an unused code expires.
         // Consume the expired code in the same transaction so retrying it
         // cannot mint unlimited replacement codes.
-        await client.query(
-          `UPDATE coin_recharge_codes SET used_by_user_id = $1, used_at = NOW() WHERE id = $2`,
+        const consumed = await client.query(
+          `UPDATE coin_recharge_codes SET used_by_user_id = $1, used_at = NOW() WHERE id = $2 RETURNING id`,
           [userId, row.id]
         );
-        const replacementCode = await insertReplacementRechargeCode(client, Number(row.coins), Number(row.price_egp));
+        assertSingleRowResult(consumed, "expired recharge code");
+        // Rotation replenishes the admin inventory, but the generated code is
+        // never disclosed to the redeemer.
+        await insertReplacementRechargeCode(client, coinAmount, rechargePrice);
         await client.query("COMMIT");
-        return res.status(400).json({ message: "الكود منتهي الصلاحية", replacementCode });
+        return res.status(400).json(buildExpiredRechargeCodeResponse());
       }
 
-      await client.query(
-        `UPDATE coin_recharge_codes SET used_by_user_id = $1, used_at = NOW() WHERE id = $2`,
+      const consumed = await client.query(
+        `UPDATE coin_recharge_codes SET used_by_user_id = $1, used_at = NOW() WHERE id = $2 RETURNING id`,
         [userId, row.id]
       );
-      const replacementCode = await insertReplacementRechargeCode(client, Number(row.coins), Number(row.price_egp));
-      await client.query(
+      assertSingleRowResult(consumed, "recharge code");
+      // Rotation replenishes the admin inventory, but the generated code is
+      // never disclosed to the redeemer.
+      await insertReplacementRechargeCode(client, coinAmount, rechargePrice);
+      const wallet = await client.query(
         `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
          VALUES ($1, $2::int, 0, $2::int)
          ON CONFLICT (user_id) DO UPDATE
          SET balance = coin_wallets.balance + $2::int,
              total_earned = coin_wallets.total_earned + $2::int,
-             updated_at = NOW()`,
-        [userId, row.coins]
+             updated_at = NOW()
+         RETURNING balance`,
+         [userId, coinAmount]
       );
-      await client.query(
+      assertSingleRowResult(wallet, "coin wallet credit");
+      const coinTransaction = await client.query(
         `INSERT INTO coin_transactions (user_id, type, coins, description, recharge_code_id)
          VALUES ($1, 'recharge', $2, $3, $4)`,
-        [userId, row.coins, `شحن بكود - ${row.coins} عملة`, row.id]
+         [userId, coinAmount, `شحن بكود - ${coinAmount} عملة`, row.id]
       );
+      if (coinTransaction.rowCount !== 1) throw new Error("Coin transaction was not recorded");
       await client.query("COMMIT");
-      return res.json({
-        success: true,
-        coins: row.coins,
-        replacementCode,
-        message: `تم إضافة ${row.coins} عملة لمحفظتك — تم إصدار كود جديد تلقائياً`,
-      });
+      return res.json(buildRechargeRedemptionResponse(coinAmount));
     } catch (error) {
       if (client) await client.query("ROLLBACK").catch(() => {});
       console.error("Recharge code redemption error:", error);
@@ -1900,49 +2009,90 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const { action, adminNote } = req.body || {};
     const orderId = req.params.id;
 
-    const orderR = await pool.query(`SELECT * FROM coin_purchase_orders WHERE id = $1`, [orderId]);
-    if (orderR.rows.length === 0) return res.status(404).json({ message: "الطلب غير موجود" });
-    const order = orderR.rows[0];
-
-    if (order.status !== "pending") return res.status(400).json({ message: "الطلب تمت مراجعته بالفعل" });
-
-    if (action === "approve") {
-      // Add coins to user wallet
-      await pool.query(
-        `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
-         VALUES ($1, $2::int, 0, $2::int)
-         ON CONFLICT (user_id) DO UPDATE
-         SET balance = coin_wallets.balance + $2::int,
-             total_earned = coin_wallets.total_earned + $2::int,
-             updated_at = NOW()`,
-        [order.user_id, order.coins]
-      );
-      // Log coin transaction
-      await pool.query(
-        `INSERT INTO coin_transactions (user_id, type, coins, description)
-         VALUES ($1, 'purchase', $2, $3)`,
-        [order.user_id, order.coins, `شراء ${order.coins} عملة — ${order.payment_method} — ${order.amount_egp} ج.م`]
-      );
-      // Update order
-      await pool.query(
-        `UPDATE coin_purchase_orders SET status = 'approved', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
-        [adminNote || null, adminId, orderId]
-      );
-      // Notify user
-      try {
-        await pool.query(
-          `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coins_approved', $2, $3)`,
-          [order.user_id, `✅ تم قبول طلب شحن ${order.coins} عملة وإضافتها لمحفظتك`, JSON.stringify({ orderId, coins: order.coins })]
-        );
-      } catch (_) {}
-      return res.json({ success: true, message: `تم قبول الطلب وإضافة ${order.coins} عملة` });
+    if (action !== "approve" && action !== "reject") {
+      return res.status(400).json({ message: "إجراء غير صالح" });
     }
 
-    if (action === "reject") {
-      await pool.query(
-        `UPDATE coin_purchase_orders SET status = 'rejected', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
-        [adminNote || null, adminId, orderId]
+    let client: PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      await client.query("BEGIN");
+      // Lock the order before inspecting its status.  This makes two
+      // concurrent admin clicks idempotent instead of minting the coins twice.
+      const orderR = await client.query(
+        `SELECT * FROM coin_purchase_orders WHERE id = $1 FOR UPDATE`,
+        [orderId],
       );
+      if (orderR.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "الطلب غير موجود" });
+      }
+      const order = orderR.rows[0];
+      if (order.status !== "pending") {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ message: "الطلب تمت مراجعته بالفعل" });
+      }
+
+      if (action === "approve") {
+        let coins: number;
+        try {
+          coins = parseCoinAmount(order.coins, "coin purchase amount");
+        } catch {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ message: "عدد العملات في الطلب غير صالح" });
+        }
+        if (!Number.isInteger(coins) || coins <= 0) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ message: "عدد العملات في الطلب غير صالح" });
+        }
+        const wallet = await client.query(
+          `INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
+           VALUES ($1, $2::int, 0, $2::int)
+           ON CONFLICT (user_id) DO UPDATE
+           SET balance = coin_wallets.balance + $2::int,
+               total_earned = coin_wallets.total_earned + $2::int,
+               updated_at = NOW()
+           RETURNING balance`,
+          [order.user_id, coins],
+        );
+        assertSingleRowResult(wallet, "coin purchase wallet credit");
+        const coinTransaction = await client.query(
+          `INSERT INTO coin_transactions (user_id, type, coins, description)
+           VALUES ($1, 'purchase', $2, $3)
+           RETURNING id`,
+          [order.user_id, coins, `شراء ${coins} عملة — ${order.payment_method} — ${order.amount_egp} ج.م`],
+        );
+        assertSingleRowResult(coinTransaction, "coin purchase transaction");
+        const updated = await client.query(
+          `UPDATE coin_purchase_orders
+           SET status = 'approved', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2
+           WHERE id = $3 AND status = 'pending'
+           RETURNING id`,
+          [adminNote || null, adminId, orderId],
+        );
+        assertSingleRowResult(updated, "coin purchase order approval");
+        await client.query("COMMIT");
+
+        // Notifications are intentionally outside the ledger transaction:
+        // a notification outage must never roll back a successful payment.
+        try {
+          await pool.query(
+            `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coins_approved', $2, $3)`,
+            [order.user_id, `✅ تم قبول طلب شحن ${coins} عملة وإضافتها لمحفظتك`, JSON.stringify({ orderId, coins })],
+          );
+        } catch (_) {}
+        return res.json({ success: true, message: `تم قبول الطلب وإضافة ${coins} عملة` });
+      }
+
+      const updated = await client.query(
+        `UPDATE coin_purchase_orders
+         SET status = 'rejected', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2
+         WHERE id = $3 AND status = 'pending'
+         RETURNING id`,
+        [adminNote || null, adminId, orderId],
+      );
+      assertSingleRowResult(updated, "coin purchase order rejection");
+      await client.query("COMMIT");
       await recordPaymentFailure({
         dedupeKey: `coins:${orderId}:rejected`,
         userId: order.user_id,
@@ -1954,9 +2104,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         reference: orderId,
       });
       return res.json({ success: true, message: "تم رفض الطلب" });
+    } catch (error) {
+      if (client) await client.query("ROLLBACK").catch(() => {});
+      console.error("Coin purchase order review error:", error);
+      return res.status(500).json({ message: "تعذر تحديث طلب العملات" });
+    } finally {
+      client?.release();
     }
-
-    return res.status(400).json({ message: "إجراء غير صالح" });
   });
 
   // ADMIN: Generate recharge codes
@@ -2307,7 +2461,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         ORDER BY trending_score DESC
         LIMIT $1
       `, [limit]);
-      res.json(rows.rows);
+      res.json(rows.rows.map(publicAdProjection).filter(Boolean));
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -2357,7 +2511,10 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           LIMIT $1
         `, [limit]);
       }
-      res.json(rows.rows);
+      // Keep this discovery endpoint on the same channel allow-list as
+      // /api/channels; the ranking query must not become a backdoor when its
+      // SELECT is changed later.
+      res.json(rows.rows.map(publicChannelProjection).filter(Boolean));
     } catch (e: any) {
       console.error("[trending/channels] all queries failed, returning empty:", e?.message);
       res.json([]);
@@ -2408,7 +2565,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
               ORDER BY created_at DESC LIMIT 50`
         );
       }
-      res.json(result.rows);
+      res.json(result.rows.map(publicAdProjection).filter(Boolean));
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -2464,7 +2621,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     }
     if (filterUserId) {
       const adsList = await storage.getAds(undefined, filterUserId);
-      return res.json(adsList);
+      return res.json(adsList.map(publicAdProjection).filter(Boolean));
     }
 
     try {
@@ -2520,7 +2677,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       );
 
       res.json({
-        ads:   dataRes.rows,
+        ads:   dataRes.rows.map(publicAdProjection).filter(Boolean),
         total,
         page,
         limit,
@@ -2530,7 +2687,8 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     } catch (e: any) {
       // Fallback: return simple list
       const adsList = await storage.getAds(language);
-      res.json({ ads: adsList, total: adsList.length, page: 1, limit: adsList.length, pages: 1, hasMore: false });
+      const publicAds = adsList.map(publicAdProjection).filter(Boolean);
+      res.json({ ads: publicAds, total: publicAds.length, page: 1, limit: publicAds.length, pages: 1, hasMore: false });
     }
   });
 
@@ -2542,7 +2700,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   app.get("/api/ads/:id", async (req, res) => {
     const ad = await storage.getAd(Number(req.params.id));
     if (!ad) return res.status(404).json({ message: "Ad not found" });
-    res.json(ad);
+    res.json(publicAdProjection(ad));
   });
 
   app.post("/api/ads", isAuthenticated, async (req: any, res) => {
@@ -2950,12 +3108,15 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   // ================================================================
   app.get("/api/channels", async (req, res) => {
     const channels = await storage.getChannels(req.query.language as string);
-    res.json(channels);
+    // Discovery is public even when the requester has a session. Never
+    // include one owner's balances/payout destination in a list containing
+    // everyone else's channels.
+    res.json(channels.map(publicChannelProjection).filter(Boolean));
   });
 
   app.get("/api/channels/mine", isAuthenticated, async (req: any, res) => {
     const channel = await storage.getChannelByUserId(req.user.claims.sub);
-    res.json(channel || null);
+    res.json(ownerChannelProjection(channel));
   });
 
   app.get("/api/channels/:id", async (req, res) => {
@@ -2963,7 +3124,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     if (isNaN(channelId)) return res.status(400).json({ message: "Invalid channel id" });
     const ch = await storage.getChannel(channelId);
     if (!ch) return res.status(404).json({ message: "Channel not found" });
-    res.json(ch);
+    res.json(mayViewChannelOwnerFields(req, ch) ? ownerChannelProjection(ch) : publicChannelProjection(ch));
   });
 
   app.post("/api/channels", isAuthenticated, async (req: any, res) => {
@@ -3023,12 +3184,11 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     // Enrich with live room state so the lobby can classify solo / salon / PK
     const enriched = streams.map((s: any) => {
       const room = streamRooms.get(String(s.id));
-      return {
-        ...s,
+      return publicLiveStreamProjection(s, {
         coHostCount: room ? room.cohostIds.length : 0,
         battleActive: !!(room as any)?.battle?.active,
         battleMode: (room as any)?.battle?.mode ?? null,
-      };
+      });
     });
     res.json(enriched);
   });
@@ -3036,14 +3196,14 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   app.get("/api/streams/:id", async (req, res) => {
     const stream = await storage.getLiveStream(Number(req.params.id));
     if (!stream) return res.status(404).json({ message: "Stream not found" });
-    res.json(stream);
+    res.json(publicLiveStreamProjection(stream));
   });
 
   app.get("/api/channels/:channelId/streams", async (req, res) => {
     const channelId = Number(req.params.channelId);
     if (isNaN(channelId)) return res.json([]);
     const streams = await storage.getLiveStreamsByChannel(channelId);
-    res.json(streams);
+    res.json(streams.map(stream => publicLiveStreamProjection(stream)).filter(Boolean));
   });
 
   app.post("/api/streams", isAuthenticated, async (req: any, res) => {
@@ -4174,11 +4334,11 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         `SELECT COALESCE(SUM(CASE
            WHEN type IN ('earning', 'wallet_recharge') THEN amount_egp
            WHEN type IN ('spending', 'withdrawal', 'ai_charge') THEN -amount_egp
-           ELSE 0 END), 0)::float AS balance
+           ELSE 0 END), 0)::numeric AS balance
          FROM revenue_transactions WHERE user_id = $1`,
         [userId],
       );
-      const balance = Number(balanceRow.rows[0]?.balance || 0);
+       const balance = parseLedgerAmount(balanceRow.rows[0]?.balance ?? 0, "wallet balance");
       if (balance < SUB_PRICE_EGP) {
         await client.query("ROLLBACK");
         await recordPaymentFailure({
@@ -4192,11 +4352,12 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         });
         return res.status(402).json({ message: "رصيد المحفظة غير كافٍ", balance, required: SUB_PRICE_EGP });
       }
-      await client.query(
+       const debit = await client.query(
         `INSERT INTO revenue_transactions (user_id, type, amount_egp, description)
          VALUES ($1, 'spending', $2, $3)`,
         [userId, SUB_PRICE_EGP, `اشتراك أسبوعي — ${SUB_DURATION_DAYS} أيام`],
       );
+       if (debit.rowCount !== 1) throw new Error("Subscription debit was not recorded");
       const subscription = await client.query(
         `UPDATE users
          SET subscription_ends_at =
@@ -4205,7 +4366,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
          RETURNING subscription_ends_at`,
         [userId, SUB_DURATION_DAYS],
       );
-      if (!subscription.rows[0]) throw new Error("تعذر العثور على حساب المستخدم");
+       assertSingleRowResult(subscription, "subscription activation");
       const newEndsAt = new Date(subscription.rows[0].subscription_ends_at);
       await client.query("COMMIT");
       walletEmitter.emit("wallet:update", {
@@ -4506,7 +4667,10 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
                    WHEN purpose = 'service_payment' THEN -ABS(amount_egp)::numeric
                    ELSE ABS(amount_egp)::numeric END
               ELSE 0::numeric END,
-            amount_egp::numeric, status, 'afs_card'::text,
+            amount_egp::numeric,
+            CASE WHEN service_reference->>'_afsEnvironment' = 'test' THEN 'test' ELSE status END,
+            'afs_card'::text,
+            CASE WHEN service_reference->>'_afsEnvironment' = 'test' THEN 'اختبار فقط — ' ELSE '' END ||
             CASE
               WHEN purpose = 'coin_purchase' THEN 'شراء عملات بالبطاقة'
               WHEN service_type = 'ad_boost' THEN 'تعزيز إعلان بالبطاقة'
@@ -4535,6 +4699,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   // ================================================================
   const afsSafeOrder = (order: any, includeWidget = false) => ({
     id: order.id,
+    isTestMode: afsOrderMode(order) === "test",
     purpose: order.purpose,
     serviceType: order.service_type,
     serviceReference: order.service_reference,
@@ -4651,6 +4816,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         return res.status(400).json({ message: "نوع عملية الدفع غير صالح" });
       }
 
+      serviceReference = bindAfsEnvironment(serviceReference, resolveAfsEnvironment(process.env).mode);
       const existingResult = await pool.query(
         `SELECT * FROM afs_payment_orders WHERE user_id = $1 AND idempotency_key = $2 LIMIT 1`,
         [userId, idempotencyKey],
@@ -4661,13 +4827,13 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           && Number(existing.amount_egp) === amount
           && Number(existing.package_id || 0) === Number(packageId || 0)
           && String(existing.service_type || "") === String(serviceType || "")
-          && JSON.stringify(existing.service_reference || null) === JSON.stringify(serviceReference || null);
+          && sameAfsReference(existing.service_reference, serviceReference);
         if (!sameIntent) {
           return res.status(409).json({ message: "مفتاح محاولة الدفع مستخدم لعملية مختلفة" });
         }
         return res.status(200).json({
           ...afsSafeOrder(existing, true),
-          ...(await getAfsWidget(existing.checkout_id)),
+          ...(await getAfsWidget(existing.checkout_id, afsOrderMode(existing))),
         });
       }
 
@@ -4689,9 +4855,16 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           [userId, idempotencyKey],
         );
         if (!winner.rows[0]) throw insertError;
+        if (winner.rows[0].purpose !== purpose
+            || Number(winner.rows[0].amount_egp) !== amount
+            || Number(winner.rows[0].package_id || 0) !== Number(packageId || 0)
+            || String(winner.rows[0].service_type || "") !== String(serviceType || "")
+            || !sameAfsReference(winner.rows[0].service_reference, serviceReference)) {
+          return res.status(409).json({ message: "مفتاح محاولة الدفع مستخدم لعملية مختلفة" });
+        }
         return res.status(200).json({
           ...afsSafeOrder(winner.rows[0], true),
-          ...(await getAfsWidget(winner.rows[0].checkout_id)),
+          ...(await getAfsWidget(winner.rows[0].checkout_id, afsOrderMode(winner.rows[0]))),
         });
       }
       res.status(201).json({
@@ -4722,7 +4895,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       }
       // Widget values are only supplied to the owner, never to an inspecting admin.
       const own = order.user_id === req.user.claims.sub;
-      res.json({ ...afsSafeOrder(order, own), ...(own ? await getAfsWidget(order.checkout_id) : {}) });
+      res.json({ ...afsSafeOrder(order, own), ...(own ? await getAfsWidget(order.checkout_id, afsOrderMode(order)) : {}) });
     } catch (err) {
       console.error("[payments/afs] order lookup failed:", err instanceof Error ? err.message : "unknown error");
       res.status(503).json({ message: "تعذر تحميل عملية الدفع حالياً" });
@@ -4742,6 +4915,20 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     }
     // Verifying is intentionally owner-only: admin inspection cannot cause credit.
     if (!initial || initial.user_id !== req.user.claims.sub) return res.status(404).json({ message: "عملية الدفع غير موجودة" });
+    try {
+      const { mode } = resolveAfsEnvironment(process.env);
+      if (afsOrderMode(initial) !== mode) {
+        return res.status(409).json({ message: "هذه العملية تخص بيئة دفع مختلفة. ابدأ عملية جديدة من صفحة المدفوعات." });
+      }
+      if (mode === "test") {
+        return res.json(await verifyAfsSandboxOrder(
+          initial, (sql, values) => pool.query(sql, values), getAfsPaymentStatus,
+        ));
+      }
+      assertAfsLiveSettlement(initial, mode);
+    } catch {
+      return res.status(503).json({ status: "pending", message: "تعذر التحقق من إعدادات أو نتيجة الدفع الآن." });
+    }
     if (initial.status === "paid") {
       await notifyAfsPaid(initial);
       if (initial.purpose === "wallet_top_up") {
@@ -4820,6 +5007,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       await client.query("BEGIN");
       const locked = await client.query(`SELECT * FROM afs_payment_orders WHERE id = $1 FOR UPDATE`, [id]);
       const order = locked.rows[0];
+      assertAfsLiveSettlement(order, resolveAfsEnvironment(process.env).mode);
       if (order.status === "paid") {
         await client.query("COMMIT");
         await notifyAfsPaid(order);
@@ -7241,10 +7429,22 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   app.get("/api/profile/:userId", async (req, res) => {
     const { userId } = req.params;
     try {
+      // Profiles are public by default.  Only the profile owner (or an admin)
+      // may receive account-targeting fields and channel payout/accounting
+      // fields.  Keep the public query explicit so adding a users column
+      // cannot silently turn it into a data leak.
+      const requesterId = (req as any).user?.claims?.sub;
+      const canViewOwnerFields = !!requesterId && (
+        String(requesterId) === String(userId) || isAdminUser(req)
+      );
       const [userRow, adsRow, channelRow] = await Promise.all([
-        db.execute(sql`SELECT id, first_name, last_name, profile_image_url, bio, governorate, referral_code, created_at, interests, birthday, job_title, company, city, relationship_status FROM users WHERE id = ${userId}`),
+        canViewOwnerFields
+          ? db.execute(sql`SELECT id, first_name, last_name, profile_image_url, bio, governorate, referral_code, created_at, interests, birthday, job_title, company, city, relationship_status FROM users WHERE id = ${userId}`)
+          : db.execute(sql`SELECT id, first_name, last_name, profile_image_url, bio, created_at FROM users WHERE id = ${userId}`),
         db.execute(sql`SELECT COUNT(*) as count, SUM(views_count) as views, SUM(likes_count) as likes FROM ads WHERE user_id = ${userId} AND status = 'active'`),
-        db.execute(sql`SELECT * FROM channels WHERE user_id = ${userId} LIMIT 1`),
+        canViewOwnerFields
+          ? db.execute(sql`SELECT id, user_id, name, description, avatar_url, banner_url, language, category, subscriber_count, views_count, is_verified, is_monetized, status, earnings, earnings_egp, wallet_number, wallet_type, publisher_code, created_at FROM channels WHERE user_id = ${userId} LIMIT 1`)
+          : db.execute(sql`SELECT id, user_id, name, description, avatar_url, banner_url, language, category, subscriber_count, views_count, is_verified, is_monetized, status, created_at FROM channels WHERE user_id = ${userId} LIMIT 1`),
       ]);
       const user = userRow.rows[0];
       if (!user) return res.status(404).json({ message: "User not found" });
@@ -7258,9 +7458,20 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     const { userId } = req.params;
     try {
       const result = await db.execute(
-        sql`SELECT * FROM ads WHERE user_id = ${userId} AND status = 'active' ORDER BY created_at DESC LIMIT 20`
+        // Public ad creative and customer-facing offer fields only. Campaign
+        // targeting (location/interests/ages), internal boost metadata, and
+        // any future owner columns must not escape through a profile page.
+        sql`SELECT id, title, description, media_url, media_type, language, status,
+                   user_id, likes_count, comments_count, views_count, price_egp,
+                   whatsapp_number, payment_link, app_store_url, google_play_url,
+                   app_gallery_url, installment_months, installment_monthly_egp,
+                   coupon_code, coupon_discount_type, coupon_discount_value,
+                   created_at, expires_at
+            FROM ads
+            WHERE user_id = ${userId} AND status = 'active'
+            ORDER BY created_at DESC LIMIT 20`
       );
-      res.json(result.rows);
+      res.json(result.rows.map(publicAdProjection).filter(Boolean));
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -7519,7 +7730,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
             )
             ORDER BY created_at DESC LIMIT 6`
       );
-      res.json(similar.rows);
+      res.json(similar.rows.map(publicAdProjection).filter(Boolean));
     } catch { res.json([]); }
   });
 
@@ -8125,11 +8336,11 @@ ${reelTags}
           `SELECT COALESCE(SUM(CASE
              WHEN type IN ('earning', 'wallet_recharge') THEN amount_egp
              WHEN type IN ('spending', 'withdrawal', 'ai_charge') THEN -amount_egp
-             ELSE 0 END), 0)::float AS balance
+             ELSE 0 END), 0)::numeric AS balance
            FROM revenue_transactions WHERE user_id = $1`,
           [userId],
         );
-        const balance = Number(balanceRow.rows[0]?.balance || 0);
+         const balance = parseLedgerAmount(balanceRow.rows[0]?.balance ?? 0, "wallet balance");
         if (balance < priceEGP) {
           await couponClient.query("ROLLBACK");
           await recordPaymentFailure({
@@ -8143,12 +8354,13 @@ ${reelTags}
           });
           return res.status(402).json({ message: "insufficient_balance", required: priceEGP, balance });
         }
-        await couponClient.query(
+         const debit = await couponClient.query(
           `INSERT INTO revenue_transactions (user_id, type, amount_egp, description)
            VALUES ($1, 'ai_charge', $2, 'توليد كوبون ذكي')`,
           [userId, priceEGP],
         );
-        result = await couponClient.query(
+         if (debit.rowCount !== 1) throw new Error("Coupon debit was not recorded");
+         result = await couponClient.query(
           `INSERT INTO coupons
             (user_id, business_name, title, code, discount_type, discount_value, image_url, description, terms_ar, expires_at, usage_limit, amount_paid_egp)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
@@ -8156,6 +8368,7 @@ ${reelTags}
           [userId, businessName, title, rawCode, discountType || "percentage", discountValue || null,
            imageUrl || null, description, termsAr, expires, usageLimit || null, priceEGP],
         );
+         assertSingleRowResult(result, "coupon creation");
         await couponClient.query("COMMIT");
         walletEmitter.emit("wallet:update", {
           userId,
