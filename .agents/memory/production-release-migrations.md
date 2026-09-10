@@ -20,3 +20,9 @@ VPS deployment must stop before upload when the live SSH host fingerprint differ
 **Why:** A release attempt encountered all three trust failures while the existing production service remained healthy. Bypassing them would remove the only protection against connecting to the wrong server.
 
 **How to apply:** Ask the VPS owner to verify the current host key through the provider console, then refresh the SSH fingerprint or provide a valid PEM private key plus OpenSSH `known_hosts` entry. Retry only with strict host checking enabled.
+
+PM2 environment metadata alone is not proof that a provider secret is missing from the running app.
+
+**Why:** The VPS application also loads its local environment file internally, so PM2 metadata can omit credentials that the application receives at startup.
+
+**How to apply:** Diagnose both configuration sources using presence-only checks. Never print environment files or PM2's complete environment, and do not replace existing keys based only on PM2 metadata.
