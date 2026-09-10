@@ -20,3 +20,9 @@ AFS result code `200.300.404` is not enough to diagnose authentication: inspect 
 **Why:** A valid merchant identifier embedded in extra copied text produced this generic error on checkout creation. Using only the intended identifier allowed checkout creation and widget-integrity verification without submitting a card.
 
 **How to apply:** Validate the configured entity identifier's format and configuration-source precedence. Never log parameter values or raw provider responses, and do not silently extract arbitrary credential fragments in application code.
+
+Checkout creation plus an HTTP-200 widget download with matching SRI is still not proof that COPYandPAY renders a usable card form.
+
+**Why:** The provider can return correctly signed JavaScript that renders “invalid or missing entity type” instead of card fields. This was reproduced in a minimal isolated browser page with VISA/MASTER, independent of the application's React lifecycle.
+
+**How to apply:** Verify actual card-field rendering in a browser without submitting card details. If the minimal Live widget reproduces a provider entity-type error, require AFS to verify the Live COPYandPAY channel/entity and matching credentials; do not assume another build, brand removal, or disabling SRI will repair merchant provisioning.
