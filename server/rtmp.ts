@@ -1,5 +1,5 @@
 import NodeMediaServer from "node-media-server";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { createHash } from "crypto";
 import path from "path";
 import fs from "fs";
@@ -43,6 +43,13 @@ export function registerRtmpStreamKey(streamKey: string, previousKey?: string | 
 
 export async function startRtmpServer() {
   if (!rtmpAuthSecret) throw new Error("RTMP authentication secret is not configured");
+  const ffmpegCheck = spawnSync(process.env.FFMPEG_PATH || "ffmpeg", ["-version"], {
+    stdio: "ignore",
+    timeout: 10000,
+  });
+  if (ffmpegCheck.error || ffmpegCheck.status !== 0) {
+    throw new Error("FFmpeg is unavailable");
+  }
   const keys: any = await db.execute(sql`
     SELECT stream_key
     FROM live_streams
@@ -284,9 +291,33 @@ export async function startRtmpServer() {
   rtmpServer?.on("error", (error: any) => {
     console.error("[RTMP] Server error:", error?.message || error);
   });
-  nms.run();
+  await new Promise<void>((resolve, reject) => {
+    if (!rtmpServer) return reject(new Error("RTMP listener is unavailable"));
+    const timer = setTimeout(() => {
+      rtmpServer.close();
+      reject(new Error("RTMP listener startup timed out"));
+    }, 10000);
+    const onError = () => {
+      clearTimeout(timer);
+      rtmpServer.removeListener("listening", onListening);
+      reject(new Error("RTMP listener could not start"));
+    };
+    const onListening = () => {
+      clearTimeout(timer);
+      rtmpServer.removeListener("error", onError);
+      resolve();
+    };
+    rtmpServer.once("error", onError);
+    rtmpServer.once("listening", onListening);
+    try {
+      nms.run();
+    } catch {
+      onError();
+    }
+  });
   console.log(`[RTMP] Server started on port ${rtmpPort}; HLS is served by the application`);
   return {
+    isReady: () => !stopping && Boolean(rtmpServer?.listening),
     stop: async () => {
       stopping = true;
       rejectedSessions.clear();

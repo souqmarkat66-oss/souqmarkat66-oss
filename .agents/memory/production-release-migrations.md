@@ -13,7 +13,7 @@ External VPS releases must install dependencies in staging before touching the l
 
 **Why:** Installing against the VPS's older package files left a native image dependency unavailable and produced a 502; the corrected lockfile then exposed Replit-only registry hosts. Both failures are preventable before the runtime swap.
 
-**How to apply:** Build locally, rewrite only Replit-internal resolved registry hosts in the temporary deployment lockfile, run the production install and native-module smoke checks in staging, then swap files and check the JSON `/api/health` endpoint internally and publicly.
+**How to apply:** Build locally or in isolated VPS staging when an on-server build is requested; never build over the live runtime. Rewrite only Replit-internal registry hosts in the staging lockfile, verify native dependencies, then activate and check health internally and publicly. Include new working-tree source files, not just files already tracked by Git.
 
 VPS deployment must stop before upload when the live SSH host fingerprint differs from the configured fingerprint. Do not accept the newly scanned host key automatically, and do not treat an unparseable private key or `known_hosts` secret as permission to fall back to insecure host checking.
 
@@ -26,3 +26,9 @@ PM2 environment metadata alone is not proof that a provider secret is missing fr
 **Why:** The VPS application also loads its local environment file internally, so PM2 metadata can omit credentials that the application receives at startup.
 
 **How to apply:** Diagnose both configuration sources using presence-only checks. Never print environment files or PM2's complete environment, and do not replace existing keys based only on PM2 metadata.
+
+New release health requirements must not make rollback to an older compatible release falsely fail.
+
+**Why:** Adding a dedicated live-readiness route would reject a healthy older runtime that predates that route, despite successful file restoration.
+
+**How to apply:** Gate activation on the new capabilities, but verify rollback using the health contract supported by the previous release. A passing media-readiness check is not proof of public firewall reachability or completed financial transactions.

@@ -14,7 +14,13 @@ umask 077
 DEPLOY_PM2_APP="${DEPLOY_PM2_APP:-ads-as}"
 DEPLOY_KEEP_BACKUPS="${DEPLOY_KEEP_BACKUPS:-5}"
 DEPLOY_INTERNAL_HEALTH_URL="${DEPLOY_INTERNAL_HEALTH_URL:-http://127.0.0.1:5000/api/health}"
+DEPLOY_BUILD_ON_VPS="${DEPLOY_BUILD_ON_VPS:-0}"
+DEPLOY_INTERNAL_LIVE_HEALTH_URL="${DEPLOY_INTERNAL_LIVE_HEALTH_URL:-}"
+DEPLOY_PUBLIC_LIVE_HEALTH_URL="${DEPLOY_PUBLIC_LIVE_HEALTH_URL:-}"
 DEPLOY_HEALTH_URL="${DEPLOY_HEALTH_URL%/}"
+DEPLOY_INTERNAL_HEALTH_URL="${DEPLOY_INTERNAL_HEALTH_URL%/}"
+DEPLOY_INTERNAL_LIVE_HEALTH_URL="${DEPLOY_INTERNAL_LIVE_HEALTH_URL%/}"
+DEPLOY_PUBLIC_LIVE_HEALTH_URL="${DEPLOY_PUBLIC_LIVE_HEALTH_URL%/}"
 health_origin_pattern='^https?://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?$'
 if [[ "$DEPLOY_HEALTH_URL" =~ $health_origin_pattern ]]; then
   DEPLOY_HEALTH_URL="$DEPLOY_HEALTH_URL/api/health"
@@ -45,6 +51,10 @@ uploaded=0
   echo "DEPLOY_KEEP_BACKUPS must be an integer of at least 2" >&2
   exit 1
 }
+[[ "$DEPLOY_BUILD_ON_VPS" = "0" || "$DEPLOY_BUILD_ON_VPS" = "1" ]] || {
+  echo "DEPLOY_BUILD_ON_VPS must be 0 or 1" >&2
+  exit 1
+}
 health_url_pattern='^https?://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?(/[^[:space:]]*)?$'
 [[ "$DEPLOY_HEALTH_URL" =~ $health_url_pattern && "$DEPLOY_INTERNAL_HEALTH_URL" =~ $health_url_pattern ]] || {
   echo "Health URLs are invalid" >&2
@@ -52,6 +62,28 @@ health_url_pattern='^https?://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?(/[^[:space
 }
 [[ "$DEPLOY_HEALTH_URL" = */api/health ]] || {
   echo "DEPLOY_HEALTH_URL must be an origin or end with /api/health" >&2
+  exit 1
+}
+[[ "$DEPLOY_INTERNAL_HEALTH_URL" = */api/health ]] || {
+  echo "DEPLOY_INTERNAL_HEALTH_URL must end with /api/health" >&2
+  exit 1
+}
+
+for live_health_url in "$DEPLOY_INTERNAL_LIVE_HEALTH_URL" "$DEPLOY_PUBLIC_LIVE_HEALTH_URL"; do
+  [[ -z "$live_health_url" || "$live_health_url" =~ $health_url_pattern ]] || {
+    echo "Live health URL is invalid" >&2
+    exit 1
+  }
+done
+if [[ -z "$DEPLOY_INTERNAL_LIVE_HEALTH_URL" ]]; then
+  DEPLOY_INTERNAL_LIVE_HEALTH_URL="${DEPLOY_INTERNAL_HEALTH_URL%/api/health}/api/health/live"
+fi
+if [[ -z "$DEPLOY_PUBLIC_LIVE_HEALTH_URL" ]]; then
+  DEPLOY_PUBLIC_LIVE_HEALTH_URL="${DEPLOY_HEALTH_URL%/api/health}/api/health/live"
+fi
+[[ "$DEPLOY_INTERNAL_LIVE_HEALTH_URL" = */api/health/live &&
+  "$DEPLOY_PUBLIC_LIVE_HEALTH_URL" = */api/health/live ]] || {
+  echo "Live health URLs must end with /api/health/live" >&2
   exit 1
 }
 
@@ -133,14 +165,29 @@ cleanup_local() {
 trap cleanup_local EXIT
 
 echo "Building release $RELEASE_ID..."
-npm run check
-npm run build
-[[ -f dist/index.cjs && -d dist/public ]] || { echo "Build output is incomplete" >&2; exit 1; }
+if [[ "$DEPLOY_BUILD_ON_VPS" = "1" ]]; then
+  # Send working-tree build inputs, including new source files. Never send .env,
+  # uploads, generated output, node_modules, .git, or unrelated workspace data.
+  tracked_source_pattern='^(client/|server/|shared/|script/build\.ts$|package\.json$|package-lock\.json$|tsconfig\.json$|vite\.config\.ts$|postcss\.config\.js$|tailwind\.config\.ts$|components\.json$|drizzle\.config\.ts$|ecosystem\.config\.cjs$)'
+  forbidden_source_pattern='(^|/)(\.env($|\.)|uploads(/|$)|attached_assets(/|$)|dist(/|$)|node_modules(/|$)|\.git(/|$))'
+  git ls-files -z --cached --others --exclude-standard |
+    grep -zE "$tracked_source_pattern" |
+    grep -zEv "$forbidden_source_pattern" |
+    tar --null --files-from=- --ignore-failed-read -czf "$ARCHIVE"
+  if tar -tzf "$ARCHIVE" | grep -Eq '(^|/)(\.env($|\.)|uploads(/|$)|attached_assets(/|$)|dist(/|$)|node_modules(/|$)|\.git(/|$))'; then
+    echo "Source archive contains a prohibited deployment input" >&2
+    exit 1
+  fi
+  echo "VPS build mode enabled; source will be built in remote staging."
+else
+  npm run check
+  npm run build
+  [[ -f dist/index.cjs && -d dist/public ]] || { echo "Build output is incomplete" >&2; exit 1; }
 
-mkdir -p "$WORK_DIR/payload"
-cp -a dist "$WORK_DIR/payload/dist"
-cp package.json ecosystem.config.cjs "$WORK_DIR/payload/"
-node - "$WORK_DIR/payload/package-lock.json" <<'NODE'
+  mkdir -p "$WORK_DIR/payload"
+  cp -a dist "$WORK_DIR/payload/dist"
+  cp package.json ecosystem.config.cjs "$WORK_DIR/payload/"
+  node - "$WORK_DIR/payload/package-lock.json" <<'NODE'
 const fs = require("node:fs");
 const source = fs.readFileSync("package-lock.json", "utf8");
 const converted = source.replace(
@@ -152,7 +199,8 @@ if (/package-firewall\.replit\.(?:internal|local)/.test(converted)) {
 }
 fs.writeFileSync(process.argv[2], converted, { mode: 0o600 });
 NODE
-tar -C "$WORK_DIR/payload" -czf "$ARCHIVE" .
+  tar -C "$WORK_DIR/payload" -czf "$ARCHIVE" .
+fi
 sha256sum "$ARCHIVE" | awk '{ print $1 }' > "$CHECKSUM"
 
 echo "Uploading staged runtime..."
@@ -164,8 +212,9 @@ echo "Installing and activating runtime..."
 run_ssh "$REMOTE" bash -s -- \
   "$DEPLOY_ROOT" "$RELEASE_ID" "$DEPLOY_PM2_APP" \
   "$REMOTE_ARCHIVE" "$REMOTE_CHECKSUM" \
-  "$DEPLOY_INTERNAL_HEALTH_URL" "$DEPLOY_HEALTH_URL" \
-  "$DEPLOY_KEEP_BACKUPS" <<'REMOTE_SCRIPT'
+  "$DEPLOY_BUILD_ON_VPS" "$DEPLOY_INTERNAL_HEALTH_URL" "$DEPLOY_HEALTH_URL" \
+  "$DEPLOY_KEEP_BACKUPS" "$DEPLOY_INTERNAL_LIVE_HEALTH_URL" \
+  "$DEPLOY_PUBLIC_LIVE_HEALTH_URL" <<'REMOTE_SCRIPT'
 set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
@@ -175,9 +224,12 @@ release_id=$2
 app_name=$3
 archive=$4
 checksum_file=$5
-internal_health_url=$6
-public_health_url=$7
-keep_backups=$8
+build_on_vps=$6
+internal_health_url=$7
+public_health_url=$8
+keep_backups=$9
+internal_live_health_url=${10}
+public_live_health_url=${11}
 stage="$root/.deploy-stage-$release_id"
 backup="$root/runtime-backups/$release_id"
 switch_started=0
@@ -203,15 +255,27 @@ health_ok() {
 
 wait_for_health() {
   local attempt
+  local require_live="${1:-1}"
   for attempt in $(seq 1 15); do
     if health_ok "$internal_health_url" "/tmp/ads-as-internal-health.$$" &&
-       health_ok "$public_health_url" "/tmp/ads-as-public-health.$$"; then
-      rm -f "/tmp/ads-as-internal-health.$$" "/tmp/ads-as-public-health.$$"
+       health_ok "$public_health_url" "/tmp/ads-as-public-health.$$" &&
+       { [[ "$require_live" = "0" ]] ||
+         { health_ok "$internal_live_health_url" "/tmp/ads-as-internal-live-health.$$" &&
+           health_ok "$public_live_health_url" "/tmp/ads-as-public-live-health.$$"; }; }; then
+      rm -f \
+        "/tmp/ads-as-internal-health.$$" \
+        "/tmp/ads-as-public-health.$$" \
+        "/tmp/ads-as-internal-live-health.$$" \
+        "/tmp/ads-as-public-live-health.$$"
       return 0
     fi
     sleep 5
   done
-  rm -f "/tmp/ads-as-internal-health.$$" "/tmp/ads-as-public-health.$$"
+  rm -f \
+    "/tmp/ads-as-internal-health.$$" \
+    "/tmp/ads-as-public-health.$$" \
+    "/tmp/ads-as-internal-live-health.$$" \
+    "/tmp/ads-as-public-live-health.$$"
   return 1
 }
 
@@ -236,7 +300,8 @@ restore_previous_runtime() {
   cd "$root" || rollback_failed=1
   if [[ "$was_running" = "1" ]]; then
     pm2 reload "$app_name" --update-env >/dev/null 2>&1 || rollback_failed=1
-    wait_for_health || rollback_failed=1
+    # The previous release may predate the dedicated live health endpoint.
+    wait_for_health 0 || rollback_failed=1
   else
     pm2 delete "$app_name" >/dev/null 2>&1 || true
   fi
@@ -269,16 +334,67 @@ trap activation_error ERR
 mkdir -p "$stage" "$backup"
 tar -C "$stage" -xzf "$archive"
 
-(
-  cd "$stage"
-  npm ci --omit=dev --no-audit --no-fund --registry=https://registry.npmjs.org
-  node -e '
-    const pkg = require("./package.json");
-    if (pkg.dependencies?.sharp) require("sharp");
-  '
-)
+if [[ "$build_on_vps" = "1" ]]; then
+  (
+    cd "$stage"
+    node - package-lock.json <<'NODE'
+const fs = require("node:fs");
+const source = fs.readFileSync("package-lock.json", "utf8");
+const converted = source.replace(
+  /http:\/\/package-firewall\.replit\.(?:internal|local)\/npm\//g,
+  "https://registry.npmjs.org/",
+);
+if (/package-firewall\.replit\.(?:internal|local)/.test(converted)) {
+  throw new Error("Unconverted Replit-internal package registry URL");
+}
+fs.writeFileSync("package-lock.json", converted, { mode: 0o600 });
+NODE
+    npm ci --no-audit --no-fund --registry=https://registry.npmjs.org
+    npm run check && npm run build
+    [[ -f dist/index.cjs && -d dist/public ]] || {
+      echo "Remote build output is incomplete" >&2
+      exit 1
+    }
+    npm prune --omit=dev --no-audit --no-fund --registry=https://registry.npmjs.org
+    node -e '
+      const pkg = require("./package.json");
+      if (pkg.dependencies?.sharp) require("sharp");
+    '
+  )
+else
+  (
+    cd "$stage"
+    npm ci --omit=dev --no-audit --no-fund --registry=https://registry.npmjs.org
+    node -e '
+      const pkg = require("./package.json");
+      if (pkg.dependencies?.sharp) require("sharp");
+    '
+  )
+fi
 
-pm2 describe "$app_name" >/dev/null 2>&1 && was_running=1
+pm2_env_afs_base_url=""
+if pm2 describe "$app_name" >/dev/null 2>&1; then
+  was_running=1
+  # --update-env must not discard a value PM2 already carries for the
+  # provider's AFS endpoint. Read only this variable and never print PM2 env.
+  pm2_env_afs_base_url="$(
+    pm2 jlist 2>/dev/null |
+      node -e '
+        let input = "";
+        process.stdin.setEncoding("utf8");
+        process.stdin.on("data", (chunk) => { input += chunk; });
+        process.stdin.on("end", () => {
+          try {
+            const list = JSON.parse(input);
+            const app = list.find((entry) => entry.name === process.argv[1]);
+            const value =
+              app?.pm2_env?.env?.AFS_BASE_URL ?? app?.pm2_env?.AFS_BASE_URL;
+            if (typeof value === "string") process.stdout.write(value);
+          } catch {}
+        });
+      ' "$app_name" || true
+  )"
+fi
 cp "$root/.env" "$backup/.env"
 for file in package.json package-lock.json ecosystem.config.cjs; do
   [[ ! -f "$root/$file" ]] || cp "$root/$file" "$backup/$file"
@@ -294,6 +410,9 @@ cp "$stage/package-lock.json" "$root/package-lock.json"
 cp "$stage/ecosystem.config.cjs" "$root/ecosystem.config.cjs"
 
 cd "$root"
+if [[ -n "$pm2_env_afs_base_url" ]]; then
+  export AFS_BASE_URL="$pm2_env_afs_base_url"
+fi
 if [[ "$was_running" = "1" ]]; then
   pm2 reload "$app_name" --update-env
 else

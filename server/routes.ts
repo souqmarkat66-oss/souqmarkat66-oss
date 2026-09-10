@@ -38,6 +38,14 @@ import {
   encryptPayoutDestination,
   maskPayoutDestination,
 } from "./payoutEncryption";
+import {
+  LIVE_BATTLE_CHALLENGE_TTL_MS,
+  giftTargetStillAvailable,
+  isAuthenticatedBroadcaster,
+  isAuthenticatedRoomMember,
+  pendingBattleChallengeMatches,
+  type PendingBattleChallenge,
+} from "./liveSafety";
 const webpush: typeof webpushModule = (webpushModule as any).default || webpushModule;
 
 // Deep-convert snake_case keys to camelCase recursively
@@ -317,6 +325,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // دعوات التحدي الشخصية المعلّقة — inviteId → بيانات الدعوة (تنتهي بعد 90 ثانية)
   const pendingUserChallenges = new Map<string, { challengerSocketId: string; streamId: string; targetUserId: string; expiresAt: number }>();
+  // Cross-stream PK challenges are also server-owned records.  The legacy
+  // client response does not echo an invite token, so the response handler
+  // matches the record by the server-forwarded socket/stream tuple as well.
+  const pendingBattleChallenges = new Map<string, PendingBattleChallenge>();
   /* بعد قبول دعوة التحدي: أول ما المدعو ينضم كضيف للغرفة دي، المعركة تبدأ تلقائياً 1v1 */
   const pendingAutoBattles = new Map<string, { targetUserId: string; expiresAt: number }>();
   const battleFinishPromises = new WeakMap<object, Promise<void>>();
@@ -335,6 +347,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     totalGiftCoins: number;
     socketToUser: Map<string, { userId: string; userName: string; cameraEnabled?: boolean }>;
     pendingCohostRequests: Map<string, { userId: string; userName: string; withCamera: boolean }>;
+    poll?: { id: number; optionCount: number };
     autoAccept: boolean;
     raisedHands?: Map<string, { userId: string; userName: string; raisedAt: number }>;
     battle?: {
@@ -1026,11 +1039,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         socket.emit("gift-rejected", { reason: "recipient_unavailable", eventId: data.eventId });
         return;
       }
+      if (!isAuthenticatedRoomMember(roomForTarget, {
+        socketId: socket.id,
+        authUserId: authUid,
+        authGeneration: (socket.data as any).authGeneration,
+      })) {
+        socket.emit("gift-rejected", { reason: "not_in_room", eventId: data.eventId });
+        return;
+      }
+      const broadcasterAuthGeneration = Number((broadcasterSocket!.data as any).authGeneration);
+      if (!Number.isInteger(broadcasterAuthGeneration)) {
+        socket.emit("gift-rejected", { reason: "recipient_unavailable", eventId: data.eventId });
+        return;
+      }
       let recipientUserId: string | undefined;
+      let recipientSocketId = roomForTarget.broadcasterId;
+      let recipientAuthGeneration = broadcasterAuthGeneration;
       try {
         const streamRow = await storage.getLiveStream(numericStreamId);
         const broadcasterUserId = String((broadcasterSocket!.data as any).authUserId);
-        if (!streamRow || String(streamRow.userId) !== broadcasterUserId) {
+        if (!streamRow || streamRow.status !== "live" || String(streamRow.userId) !== broadcasterUserId) {
           socket.emit("gift-rejected", { reason: "recipient_unavailable", eventId: data.eventId });
           return;
         }
@@ -1045,7 +1073,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // crediting the broadcaster with someone else's gift.
         const isCurrentCohost = roomForTarget?.cohostIds.includes(data.recipientSocketId) ?? false;
         const target = isCurrentCohost ? roomForTarget!.socketToUser.get(data.recipientSocketId) : undefined;
-        if (!target?.userId) {
+        const targetSocket = isCurrentCohost ? io.sockets.sockets.get(data.recipientSocketId) : undefined;
+        const targetAuthUid = (targetSocket?.data as any)?.authUserId;
+        const targetGeneration = Number((targetSocket?.data as any)?.authGeneration);
+        if (!target?.userId || !targetSocket || String(targetAuthUid) !== String(target.userId)
+          || !Number.isInteger(targetGeneration)) {
           socket.emit("gift-rejected", { reason: "target_left", eventId: data.eventId });
           return;
         }
@@ -1058,6 +1090,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           return;
         }
         recipientUserId = target.userId;
+        recipientSocketId = data.recipientSocketId;
+        recipientAuthGeneration = targetGeneration;
       }
       if (recipientUserId === authUid) {
         // ممنوع إهداء النفس تماماً — reject before any wallet debit.
@@ -1069,6 +1103,44 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return;
       }
       data.broadcasterUserId = recipientUserId;
+      const giftTargetSnapshot = {
+        room: roomForTarget,
+        broadcasterSocketId: roomForTarget.broadcasterId,
+        broadcasterUserId: String((broadcasterSocket!.data as any).authUserId),
+        broadcasterAuthGeneration,
+        recipientSocketId,
+        recipientUserId,
+        recipientAuthGeneration,
+      };
+      const currentGiftTargetState = () => {
+        const currentRoom = streamRooms.get(data.streamId);
+        const currentBroadcaster = currentRoom?.broadcasterId
+          ? io.sockets.sockets.get(currentRoom.broadcasterId)
+          : undefined;
+        const currentBroadcasterUserId = (currentBroadcaster?.data as any)?.authUserId;
+        const currentBroadcasterGeneration = (currentBroadcaster?.data as any)?.authGeneration;
+        const currentRecipient = currentRoom && recipientSocketId === currentRoom.broadcasterId
+          ? currentBroadcaster
+          : currentRoom?.cohostIds.includes(recipientSocketId)
+            ? io.sockets.sockets.get(recipientSocketId)
+            : undefined;
+        const mappedRecipient = currentRoom?.socketToUser.get(recipientSocketId);
+        const currentRecipientUserId = recipientSocketId === currentRoom?.broadcasterId
+          ? currentBroadcasterUserId
+          : mappedRecipient?.userId;
+        return {
+          room: currentRoom,
+          broadcasterSocketId: currentRoom?.broadcasterId ?? null,
+          broadcasterUserId: currentBroadcasterUserId,
+          broadcasterAuthGeneration: currentBroadcasterGeneration,
+          recipientSocketId,
+          recipientUserId: currentRecipientUserId,
+          recipientAuthGeneration: (currentRecipient?.data as any)?.authGeneration,
+          recipientAdmitted: !!currentRecipient
+            && (recipientSocketId === currentRoom?.broadcasterId
+              || !!currentRoom?.cohostIds.includes(recipientSocketId)),
+        };
+      };
       try {
         const client = await pool.connect();
         try {
@@ -1118,6 +1190,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             `SELECT balance FROM coin_wallets WHERE user_id = $1 FOR UPDATE`,
             [data.userId]
           );
+          // The room/recipient can change while the sender wallet is waiting
+          // on its row lock.  Never debit a gift resolved against an old
+          // broadcaster, co-host seat, or authenticated socket generation.
+          if (!giftTargetStillAvailable(giftTargetSnapshot, currentGiftTargetState())) {
+            await client.query("ROLLBACK");
+            socket.emit("gift-rejected", { reason: "recipient_unavailable", eventId: data.eventId });
+            return;
+          }
+          const liveStream = await client.query(
+            `SELECT user_id, status FROM live_streams WHERE id = $1 FOR SHARE`,
+            [numericStreamId],
+          );
+          if (liveStream.rowCount !== 1
+            || liveStream.rows[0].status !== "live"
+            || String(liveStream.rows[0].user_id) !== giftTargetSnapshot.broadcasterUserId) {
+            await client.query("ROLLBACK");
+            socket.emit("gift-rejected", { reason: "recipient_unavailable", eventId: data.eventId });
+            return;
+          }
+          if (!giftTargetStillAvailable(giftTargetSnapshot, currentGiftTargetState())) {
+            await client.query("ROLLBACK");
+            socket.emit("gift-rejected", { reason: "recipient_unavailable", eventId: data.eventId });
+            return;
+          }
           const balance = Number(wallet.rows[0]?.balance || 0);
           if (balance < originalGiftCoins) {
             await client.query("ROLLBACK");
@@ -1131,6 +1227,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
              RETURNING balance`,
             [data.userId, originalGiftCoins]
           );
+          if (debitRes.rowCount !== 1 || debitRes.rows.length !== 1) {
+            throw new Error("Gift debit affected an unexpected wallet row count");
+          }
           newSenderBalance = Number(debitRes.rows[0]?.balance ?? 0);
           await client.query(
             `INSERT INTO coin_transactions (user_id, type, coins, description, related_stream_id, related_user_id)
@@ -1156,11 +1255,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             );
             // Also credit revenue_transactions in EGP (1 coin = 0.05 EGP)
              const egpAmount = parseFloat((broadcasterCoins * 0.05).toFixed(2));
-            await client.query(
+            const revenueCredit = await client.query(
               `INSERT INTO revenue_transactions (user_id, type, amount_egp, description, channel_id)
-               SELECT $1, 'earning', $2, $3, id FROM channels WHERE user_id = $1 LIMIT 1`,
+               VALUES ($1, 'earning', $2, $3, (SELECT id FROM channels WHERE user_id = $1 LIMIT 1))
+               RETURNING id`,
                 [recipientUserId, egpAmount, `هدايا من بث مباشر - ${gift.name}`]
             );
+            if (revenueCredit.rowCount !== 1) throw new Error("Gift earnings credit failed");
+          }
+          // This is deliberately the last room/identity check before commit.
+          // A disconnect or seat replacement rolls back every ledger write.
+          if (!giftTargetStillAvailable(giftTargetSnapshot, currentGiftTargetState())) {
+            await client.query("ROLLBACK");
+            socket.emit("gift-rejected", { reason: "recipient_unavailable", eventId: data.eventId });
+            return;
           }
           await client.query("COMMIT");
           accepted = true;
@@ -1272,23 +1380,69 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
 
     socket.on("pin-comment", (data: { streamId: string; message: string; userName: string }) => {
+      const room = streamRooms.get(data?.streamId);
+      if (!room || !isAuthenticatedBroadcaster(room, {
+        socketId: socket.id,
+        authUserId: (socket.data as any).authUserId,
+        authGeneration: (socket.data as any).authGeneration,
+      })) return;
       io.to(`stream:${data.streamId}`).emit("comment-pinned", { message: data.message, userName: data.userName });
     });
 
     socket.on("unpin-comment", (streamId: string) => {
+      const room = streamRooms.get(streamId);
+      if (!room || !isAuthenticatedBroadcaster(room, {
+        socketId: socket.id,
+        authUserId: (socket.data as any).authUserId,
+        authGeneration: (socket.data as any).authGeneration,
+      })) return;
       io.to(`stream:${streamId}`).emit("comment-unpinned");
     });
 
     socket.on("create-poll", (data: { streamId: string; question: string; options: string[] }) => {
-      const poll = { id: Date.now(), question: data.question, options: data.options.map((o: string) => ({ text: o, votes: 0 })), totalVotes: 0 };
+      const room = streamRooms.get(data?.streamId);
+      if (!room || !isAuthenticatedBroadcaster(room, {
+        socketId: socket.id,
+        authUserId: (socket.data as any).authUserId,
+        authGeneration: (socket.data as any).authGeneration,
+      })) return;
+      if (typeof data.question !== "string" || !data.question.trim()
+        || !Array.isArray(data.options) || data.options.length < 2 || data.options.length > 10
+        || data.options.some(option => typeof option !== "string" || !option.trim())) return;
+      const poll = {
+        id: Date.now(),
+        question: data.question.trim().slice(0, 500),
+        options: data.options.map((o: string) => ({ text: o.trim().slice(0, 200), votes: 0 })),
+        totalVotes: 0,
+      };
+      room.poll = { id: poll.id, optionCount: poll.options.length };
       io.to(`stream:${data.streamId}`).emit("poll-created", poll);
     });
 
     socket.on("end-poll", (streamId: string) => {
+      const room = streamRooms.get(streamId);
+      if (!room || !isAuthenticatedBroadcaster(room, {
+        socketId: socket.id,
+        authUserId: (socket.data as any).authUserId,
+        authGeneration: (socket.data as any).authGeneration,
+      })) return;
+      room.poll = undefined;
       io.to(`stream:${streamId}`).emit("poll-ended");
     });
 
     socket.on("vote-poll", (data: { streamId: string; pollId: number; optionIndex: number }) => {
+      const room = streamRooms.get(data?.streamId);
+      const authUid = (socket.data as any).authUserId;
+      if (!room || !authUid || !room.poll
+        || !isAuthenticatedRoomMember(room, {
+          socketId: socket.id,
+          authUserId: authUid,
+          authGeneration: (socket.data as any).authGeneration,
+        })
+        || data.pollId !== room.poll.id
+        || !Number.isInteger(data.optionIndex)
+        || data.optionIndex < 0
+        || data.optionIndex >= room.poll.optionCount) return;
       io.to(`stream:${data.streamId}`).emit("poll-updated", { pollId: data.pollId, optionIndex: data.optionIndex });
     });
 
@@ -1302,16 +1456,89 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
      * targetStreamId     : the room we want to challenge
      * challengerName     : display name of challenger
      */
-    socket.on("battle-challenge", (data: { challengerStreamId: string; targetStreamId: string; challengerName: string }) => {
-      const targetRoom = streamRooms.get(data.targetStreamId);
-      if (!targetRoom?.broadcasterId) return;
-      // Forward to target broadcaster only
-      io.to(targetRoom.broadcasterId).emit("battle-challenge-incoming", {
-        challengerStreamId: data.challengerStreamId,
-        challengerSocketId: socket.id,
-        challengerName: data.challengerName,
-      });
-    });
+     socket.on("battle-challenge", async (data: { challengerStreamId: string; targetStreamId: string; challengerName?: string }) => {
+       const authUid = (socket.data as any).authUserId;
+       if (!authUid || !data || typeof data.challengerStreamId !== "string"
+         || typeof data.targetStreamId !== "string" || data.challengerStreamId === data.targetStreamId) return;
+       const challengerStreamId = String(data.challengerStreamId);
+       const targetStreamId = String(data.targetStreamId);
+       const challengerRoom = streamRooms.get(challengerStreamId);
+       const targetRoom = streamRooms.get(targetStreamId);
+       const targetSocket = targetRoom?.broadcasterId
+         ? io.sockets.sockets.get(targetRoom.broadcasterId)
+         : undefined;
+       if (!challengerRoom || !targetRoom || !targetSocket
+         || !isAuthenticatedBroadcaster(challengerRoom, {
+           socketId: socket.id,
+           authUserId: authUid,
+           authGeneration: (socket.data as any).authGeneration,
+         })
+         || !isAuthenticatedBroadcaster(targetRoom, {
+           socketId: targetSocket.id,
+           authUserId: (targetSocket.data as any).authUserId,
+           authGeneration: (targetSocket.data as any).authGeneration,
+         })) return;
+       const challengerUserId = String(authUid);
+       const targetUserId = String((targetSocket.data as any).authUserId);
+       if (challengerUserId === targetUserId) return;
+       const challengerAuthGeneration = Number((socket.data as any).authGeneration);
+       const targetAuthGeneration = Number((targetSocket.data as any).authGeneration);
+       if (!Number.isInteger(challengerAuthGeneration) || !Number.isInteger(targetAuthGeneration)) return;
+       const challengerNumericStreamId = Number(challengerStreamId);
+       const targetNumericStreamId = Number(targetStreamId);
+       if (!Number.isInteger(challengerNumericStreamId) || challengerNumericStreamId <= 0
+         || !Number.isInteger(targetNumericStreamId) || targetNumericStreamId <= 0) return;
+       try {
+         const [challengerStream, targetStream] = await Promise.all([
+           storage.getLiveStream(challengerNumericStreamId),
+           storage.getLiveStream(targetNumericStreamId),
+         ]);
+         // A room/socket pair is not enough: both records must still be
+         // server-owned live streams for the authenticated broadcasters.
+         if (!challengerStream || challengerStream.status !== "live"
+           || String(challengerStream.userId) !== challengerUserId
+           || !targetStream || targetStream.status !== "live"
+           || String(targetStream.userId) !== targetUserId) return;
+         if (streamRooms.get(challengerStreamId) !== challengerRoom
+           || streamRooms.get(targetStreamId) !== targetRoom
+           || challengerRoom.broadcasterId !== socket.id
+           || targetRoom.broadcasterId !== targetSocket.id) return;
+       } catch {
+         return;
+       }
+       const challengeId = randomUUID();
+       const record: PendingBattleChallenge = {
+         challengeId,
+         challengerSocketId: socket.id,
+         challengerStreamId,
+         challengerUserId,
+         challengerAuthGeneration,
+         targetSocketId: targetSocket.id,
+         targetStreamId,
+         targetUserId,
+         targetAuthGeneration,
+         expiresAt: Date.now() + LIVE_BATTLE_CHALLENGE_TTL_MS,
+       };
+       pendingBattleChallenges.set(challengeId, record);
+       setTimeout(() => {
+         const pending = pendingBattleChallenges.get(challengeId);
+         if (pending?.expiresAt === record.expiresAt) pendingBattleChallenges.delete(challengeId);
+       }, LIVE_BATTLE_CHALLENGE_TTL_MS + 5_000);
+       let challengerName = "مذيع";
+       try {
+         const rows = await db.execute(sql`SELECT first_name, last_name FROM users WHERE id = ${challengerUserId} LIMIT 1`);
+         const u: any = rows.rows?.[0];
+         if (u) challengerName = `${u.first_name || ""} ${u.last_name || ""}`.trim() || "مذيع";
+       } catch {}
+       // The display name is deliberately server-authored.  The legacy client
+       // still receives the same fields and ignores the additional token.
+       targetSocket.emit("battle-challenge-incoming", {
+         challengeId,
+         challengerStreamId,
+         challengerSocketId: socket.id,
+         challengerName,
+       });
+     });
 
     /* ── دعوة تحدي لمستخدم محدد (من قائمة البحث) ──
      * المذيع يبعت دعوة لمستخدم بالـ userId؛ توصل لغرفته الخاصة user:{id}
@@ -1374,15 +1601,90 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
 
     /* challenger is notified of accept/reject */
-    socket.on("battle-challenge-response", (data: { accepted: boolean; challengerSocketId: string; responderStreamId: string; responderName: string }) => {
-      io.to(data.challengerSocketId).emit("battle-challenge-result", {
-        accepted: data.accepted,
-        responderStreamId: data.responderStreamId,
-        responderName: data.responderName,
-      });
-    });
+     socket.on("battle-challenge-response", async (data: {
+       accepted: boolean;
+       challengeId?: string;
+       challengerSocketId?: string;
+       responderStreamId?: string;
+       responderName?: string;
+     }) => {
+       const authUid = (socket.data as any).authUserId;
+       if (!authUid || !data || typeof data.accepted !== "boolean") return;
+       const pendingEntry = Array.from(pendingBattleChallenges.entries()).reverse().find(([, record]) =>
+         pendingBattleChallengeMatches(record, data, socket.id),
+       );
+       if (!pendingEntry) return;
+       const [challengeId, challenge] = pendingEntry;
+       // Consume the record before any notification to make duplicate
+       // responses/replays harmless.
+       pendingBattleChallenges.delete(challengeId);
+       const challengerRoom = streamRooms.get(challenge.challengerStreamId);
+       const targetRoom = streamRooms.get(challenge.targetStreamId);
+       const challengerSocket = io.sockets.sockets.get(challenge.challengerSocketId);
+       const targetSocket = io.sockets.sockets.get(socket.id);
+       const targetIdentityMatches = !!targetRoom && !!targetSocket
+         && isAuthenticatedBroadcaster(targetRoom!, {
+           socketId: socket.id,
+           authUserId: authUid,
+           authGeneration: (socket.data as any).authGeneration,
+         })
+         && String(authUid) === challenge.targetUserId
+         && Number((socket.data as any).authGeneration) === challenge.targetAuthGeneration;
+       const challengerIdentityMatches = !!challengerRoom && !!challengerSocket
+         && isAuthenticatedBroadcaster(challengerRoom!, {
+           socketId: challenge.challengerSocketId,
+           authUserId: (challengerSocket.data as any).authUserId,
+           authGeneration: (challengerSocket.data as any).authGeneration,
+         })
+         && String((challengerSocket.data as any).authUserId) === challenge.challengerUserId
+         && Number((challengerSocket.data as any).authGeneration) === challenge.challengerAuthGeneration;
+       if (!targetIdentityMatches || !challengerIdentityMatches) return;
+       try {
+         const [challengerStream, targetStream] = await Promise.all([
+           storage.getLiveStream(Number(challenge.challengerStreamId)),
+           storage.getLiveStream(Number(challenge.targetStreamId)),
+         ]);
+         if (!challengerStream || challengerStream.status !== "live"
+           || String(challengerStream.userId) !== challenge.challengerUserId
+           || !targetStream || targetStream.status !== "live"
+           || String(targetStream.userId) !== challenge.targetUserId
+           || streamRooms.get(challenge.challengerStreamId) !== challengerRoom
+           || streamRooms.get(challenge.targetStreamId) !== targetRoom
+           || challengerRoom?.broadcasterId !== challenge.challengerSocketId
+           || targetRoom?.broadcasterId !== socket.id) return;
+       } catch {
+         return;
+       }
+       if (data.accepted) {
+         // عند انضمام المدعو كضيف للغرفة دي خلال 3 دقايق، المعركة تبدأ تلقائياً
+         pendingAutoBattles.set(challenge.challengerStreamId, {
+           targetUserId: challenge.targetUserId,
+           expiresAt: Date.now() + 180_000,
+         });
+         setTimeout(() => {
+           const pending = pendingAutoBattles.get(challenge.challengerStreamId);
+           if (pending && pending.expiresAt <= Date.now()) pendingAutoBattles.delete(challenge.challengerStreamId);
+         }, 185_000);
+       }
+       let responderName = "مستخدم";
+       try {
+         const rows = await db.execute(sql`SELECT first_name, last_name FROM users WHERE id = ${challenge.targetUserId} LIMIT 1`);
+         const u: any = rows.rows?.[0];
+         if (u) responderName = `${u.first_name || ""} ${u.last_name || ""}`.trim() || "مستخدم";
+       } catch {}
+       io.to(challenge.challengerSocketId).emit("battle-challenge-result", {
+         accepted: data.accepted,
+         responderStreamId: challenge.targetStreamId,
+         responderName,
+       });
+     });
 
     socket.on("disconnect", () => {
+       pendingBattleChallenges.forEach((challenge, challengeId) => {
+         if (challenge.challengerSocketId === socket.id || challenge.targetSocketId === socket.id) {
+           pendingBattleChallenges.delete(challengeId);
+         }
+       });
       streamRooms.forEach((room, streamId) => {
         if (room.battle?.active && room.battle.teams
           && [...room.battle.teams.A, ...room.battle.teams.B].some(member => member.socketId === socket.id)) {
@@ -1390,6 +1692,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
         if (room.broadcasterId === socket.id) {
           room.broadcasterId = null;
+           room.poll = undefined;
           io.to(`stream:${streamId}`).emit("broadcaster-disconnected");
         }
         if (room.cohostIds.includes(socket.id)) {
