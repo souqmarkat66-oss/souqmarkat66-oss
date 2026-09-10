@@ -5,6 +5,7 @@
 - [Follow & Friends system](pk-battle-flow.md) — user_follows table (mutual = friend); presence via global user:<id> room join on socket auth; battle friend-invite reuses challenge-user-invite flow
 - [AFS COPYandPAY credential format](afs-copyandpay.md) — AFS test access tokens may be supplied with a Bearer prefix; normalize it once before authorization.
 - [Wallet ledger and payment retry safety](wallet-ledger-and-afs-retries.md) — one EGP ledger; wallet debits lock per user and commit with fulfillment; card intents keep one retry key.
+- [Manual payout destination security](manual-payout-destinations.md) — encrypt destinations only while pending; admin reveal is audited; terminal requests retain masked details only.
 - [RTMP on Node-Media-Server v4](rtmp-hls-nms-v4.md) — signed publishers, generation-owned lifecycle, and external FFmpeg HLS avoid v4 port and reconnect traps.
 - [Production release and migration boundary](production-release-migrations.md) — app rollback is atomic; database migrations are separate, versioned, backed up, and expand/contract.
 - [Publish and NOT VALID checks](publish-not-valid-checks.md) — validate dev CHECK constraints and declare them in Drizzle; NOT VALID can produce malformed Publish DDL.
