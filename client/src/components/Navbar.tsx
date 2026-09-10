@@ -308,6 +308,11 @@ export function Navbar() {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
+                  <Link href="/follows" className="gap-2 cursor-pointer flex items-center">
+                    <Users className="w-4 h-4 text-pink-500" /> المتابعات والأصدقاء
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
                   <Link href="/my-content" className="gap-2 cursor-pointer flex items-center">
                     <LayoutGrid className="w-4 h-4 text-blue-500" /> محتواي وإعلاناتي
                   </Link>
@@ -398,6 +403,11 @@ export function Navbar() {
                 <Link href={`/profile/${user.id}`} onClick={() => setMobileOpen(false)}>
                   <Button variant="ghost" className="w-full justify-start gap-2">
                     <UserCircle2 className="w-4 h-4 text-primary" /> ملفي الشخصي واهتماماتي
+                  </Button>
+                </Link>
+                <Link href="/follows" onClick={() => setMobileOpen(false)}>
+                  <Button variant="ghost" className="w-full justify-start gap-2">
+                    <Users className="w-4 h-4 text-pink-500" /> المتابعات والأصدقاء
                   </Button>
                 </Link>
                 {user.id !== ADMIN_USER_ID && (
