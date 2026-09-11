@@ -61,3 +61,47 @@ test("gift receipt increases earned coins without increasing spendable balance",
     await pool.end();
   }
 });
+
+test("gift EGP credit uses explicit text casts for mixed legacy user-id types", { skip: !enabled }, async () => {
+  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  const client = await pool.connect();
+  try {
+    // This reproduces the deployed legacy shape in isolated temporary tables:
+    // revenue_transactions.user_id is text while channels.user_id is varchar.
+    await client.query("BEGIN");
+    await client.query(`
+      CREATE TEMP TABLE channels (
+        id integer PRIMARY KEY,
+        user_id varchar NOT NULL
+      );
+      CREATE TEMP TABLE revenue_transactions (
+        id serial PRIMARY KEY,
+        user_id text NOT NULL,
+        type text NOT NULL,
+        amount_egp real NOT NULL,
+        description text,
+        channel_id integer
+      )
+    `);
+    await client.query(`INSERT INTO channels (id, user_id) VALUES (7, 'gift-recipient')`);
+
+    await client.query(
+      `INSERT INTO revenue_transactions (user_id, type, amount_egp, description, channel_id)
+       VALUES ($1::text, 'earning', $2, $3,
+         (SELECT id FROM channels WHERE channels.user_id::text = $1::text LIMIT 1))`,
+      ["gift-recipient", 1.8, "gift earning"],
+    );
+    const result = await client.query(
+      `SELECT user_id, amount_egp, channel_id FROM revenue_transactions`,
+    );
+    assert.deepEqual(result.rows, [{
+      user_id: "gift-recipient",
+      amount_egp: 1.8,
+      channel_id: 7,
+    }]);
+  } finally {
+    await client.query("ROLLBACK").catch(() => {});
+    client.release();
+    await pool.end();
+  }
+});

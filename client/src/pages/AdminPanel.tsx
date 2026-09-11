@@ -1465,6 +1465,11 @@ function PaymentsSection({ logAction }: { logAction: any }) {
                           🎯 {SERVICE_TYPE_LABELS[p.serviceType] || p.serviceType}
                         </span>
                       )}
+                      {p.type === "top_up" && p.paymentRef && (
+                        <div className="mt-2 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs font-bold" data-testid={`payment-reference-${p.id}`}>
+                          🔑 مرجع الدفع: <span className="font-mono text-primary" dir="ltr">{p.paymentRef}</span>
+                        </div>
+                      )}
                       <div className="text-xs text-muted-foreground opacity-60 mt-0.5">ORD: {p.orderNumber || p.id} · ID: {p.userId}</div>
                       {p.type === 'withdrawal' && p.currentBalanceEGP !== undefined && (
                         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap" data-testid={`balance-info-${p.id}`}>
@@ -1510,7 +1515,7 @@ function PaymentsSection({ logAction }: { logAction: any }) {
                         className="w-full max-h-52 object-contain rounded-xl border bg-muted/20 cursor-zoom-in hover:opacity-90 transition-opacity"
                         data-testid={`screenshot-payment-${p.id}`}
                       />
-                      <p className="text-[10px] text-primary mt-1 text-center">📎 صورة إيصال الدفع — اضغط للتكبير</p>
+                       <p className="text-[10px] text-primary mt-1 text-center">📎 صورة إيصال الدفع — اضغط للتكبير · راجع نجاح التحويل فعلياً قبل الموافقة</p>
                     </a>
                   )}
                 </CardContent>
@@ -1531,6 +1536,9 @@ function PaymentsSection({ logAction }: { logAction: any }) {
                     <StatusBadge status={p.status} />
                   </div>
                   <div className="text-xs text-muted-foreground">{methodLabel[p.method] || p.method} · {p.phoneNumber}</div>
+                  {p.type === "top_up" && p.paymentRef && (
+                    <div className="text-xs font-bold mt-1">🔑 مرجع الدفع: <span className="font-mono text-primary" dir="ltr">{p.paymentRef}</span></div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -3781,19 +3789,42 @@ function CoinsSection({ logAction }: { logAction: any }) {
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
+                        {/*
+                         * API responses are camel-cased by the server. Keep
+                         * the legacy snake_case aliases for old deployments
+                         * while showing the exact server-confirmed package
+                         * amount and receipt.
+                         */}
+                        {(() => {
+                          const userName = order.userName ?? order.user_name ?? order.userId ?? order.user_id;
+                          const amount = order.amountEGP ?? order.amount_egp;
+                          const coins = order.coins;
+                          const method = order.paymentMethod ?? order.payment_method;
+                          const createdAt = order.createdAt ?? order.created_at;
+                          const paymentRef = order.paymentRef ?? order.payment_ref;
+                          const screenshotUrl = order.screenshotUrl ?? order.screenshot_url;
+                          const reviewedBy = order.reviewedBy ?? order.reviewed_by;
+                          return (
+                            <>
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="text-white font-bold text-sm">{order.user_name || order.user_id}</span>
+                          <span className="text-white font-bold text-sm">{userName}</span>
                           <Badge className={order.status === "pending" ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" : order.status === "approved" ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"}>
                             {order.status === "pending" ? "⏳ معلق" : order.status === "approved" ? "✅ مقبول" : "❌ مرفوض"}
                           </Badge>
                         </div>
                         <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-white/50 mb-2">
-                          <span>💰 المبلغ: <span className="text-yellow-400 font-bold">{order.amount_egp} ج.م</span></span>
-                          <span>🪙 العملات: <span className="text-yellow-400 font-bold">{order.coins}</span></span>
-                          <span>💳 الدفع: {order.payment_method}</span>
-                          <span>🕐 {new Date(order.created_at).toLocaleDateString("ar-EG")}</span>
-                          {order.payment_ref && <span className="col-span-2">🔑 مرجع: <span className="font-mono text-white">{order.payment_ref}</span></span>}
-                          {order.admin_note && <span className="col-span-2 text-orange-400">📝 {order.admin_note}</span>}
+                          <span>💰 المبلغ: <span className="text-yellow-400 font-bold">{amount} ج.م</span></span>
+                          <span>🪙 العملات: <span className="text-yellow-400 font-bold">{coins}</span></span>
+                          <span>💳 الدفع: {method}</span>
+                          <span>🕐 {createdAt ? new Date(createdAt).toLocaleDateString("ar-EG") : "—"}</span>
+                          {paymentRef && <span className="col-span-2">🔑 مرجع: <span className="font-mono text-white">{paymentRef}</span></span>}
+                          {screenshotUrl && (
+                            <a className="col-span-2 text-blue-400 underline" href={screenshotUrl} target="_blank" rel="noopener noreferrer">
+                              🧾 فتح إيصال الدفع
+                            </a>
+                          )}
+                          {reviewedBy && <span className="col-span-2 text-white/40">👤 راجعها: {reviewedBy}</span>}
+                          {order.adminNote && <span className="col-span-2 text-orange-400">📝 {order.adminNote}</span>}
                         </div>
 
                         {/* Admin actions (only for pending) */}
@@ -3823,6 +3854,9 @@ function CoinsSection({ logAction }: { logAction: any }) {
                             </Button>
                           </div>
                         )}
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
                   </CardContent>

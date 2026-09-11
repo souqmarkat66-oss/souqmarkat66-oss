@@ -355,6 +355,37 @@ async function runMigrations() {
       created_at TIMESTAMP DEFAULT NOW(),
       CONSTRAINT wallet_coin_purchases_user_key UNIQUE (user_id, idempotency_key)
     )`);
+    // Legacy manual coin orders existed on older development databases
+    // before they were represented in the shared schema. Keep this
+    // bootstrap additive: no balances or existing financial rows change.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS coin_purchase_orders (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        user_name TEXT,
+        package_id INTEGER,
+        coins INTEGER NOT NULL,
+        amount_egp NUMERIC(12,2) NOT NULL,
+        payment_method TEXT NOT NULL,
+        payment_ref TEXT,
+        proof_digest TEXT,
+        screenshot_url TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        admin_note TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        reviewed_at TIMESTAMP,
+        reviewed_by TEXT
+      )
+    `);
+    await db.execute(sql`ALTER TABLE coin_purchase_orders ADD COLUMN IF NOT EXISTS payment_ref TEXT`);
+    await db.execute(sql`ALTER TABLE coin_purchase_orders ADD COLUMN IF NOT EXISTS proof_digest TEXT`);
+    await db.execute(sql`ALTER TABLE coin_purchase_orders ADD COLUMN IF NOT EXISTS screenshot_url TEXT`);
+    await db.execute(sql`ALTER TABLE coin_purchase_orders ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE coin_purchase_orders ADD COLUMN IF NOT EXISTS reviewed_by TEXT`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS coin_purchase_orders_payment_ref_idx ON coin_purchase_orders(payment_ref)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS coin_purchase_orders_created_at_idx ON coin_purchase_orders(created_at DESC)`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS payment_ref TEXT`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS proof_digest TEXT`);
     await db.execute(sql`
       DO $$
       DECLARE constraint_name TEXT;

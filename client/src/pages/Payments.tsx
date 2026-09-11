@@ -99,7 +99,15 @@ export default function Payments() {
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ type: "top_up", method: "vodafone", phoneNumber: "", adId: "" });
+  const [formData, setFormData] = useState({
+    type: "top_up",
+    method: "vodafone",
+    phoneNumber: "",
+    paymentRef: "",
+    payoutName: "",
+    payoutDestination: "",
+    adId: "",
+  });
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [manualAmount, setManualAmount] = useState("");
   const [amountOverride, setAmountOverride] = useState(false);
@@ -156,6 +164,7 @@ export default function Payments() {
   const { data: walletSummary } = useQuery<{
     balanceEGP: number;
     withdrawableBalanceEGP?: number;
+    minWithdrawalEGP?: number;
   }>({
     queryKey: ["/api/revenue", "coin-wallet-balance", user?.id],
     queryFn: async () => {
@@ -271,6 +280,9 @@ export default function Payments() {
     setSelectedServices(new Set());
     setManualAmount("");
     setAmountOverride(false);
+    if (formData.type === "withdrawal" && formData.method === "souq") {
+      setFormData(f => ({ ...f, method: "vodafone" }));
+    }
   }, [formData.type]);
 
   // When selected services change, sync auto total into manual if no override
@@ -335,7 +347,15 @@ export default function Payments() {
       queryClient.invalidateQueries({ queryKey: ["/api/payments/unified"] });
       toast({ title: "✅ تم إرسال طلب الدفع", description: "سيتم مراجعته فوراً وتفعيل الخدمة عند القبول" });
       setShowForm(false);
-      setFormData({ type: "top_up", method: "vodafone", phoneNumber: "", adId: "" });
+       setFormData({
+         type: "top_up",
+         method: "vodafone",
+         phoneNumber: "",
+         paymentRef: "",
+         payoutName: "",
+         payoutDestination: "",
+         adId: "",
+       });
       setSelectedServices(new Set());
       setManualAmount("");
       setAmountOverride(false);
@@ -384,8 +404,9 @@ export default function Payments() {
 
   // Egyptian wallet number validation: 11 digits starting with 010/011/012/015
   const EG_PHONE_REGEX = /^01[0125]\d{8}$/;
+  const withdrawalMinimum = Math.max(10, Number(walletSummary?.minWithdrawalEGP || pricing.wallet_min_withdrawal_egp || 100));
   const phoneTrimmed = formData.phoneNumber.trim();
-  const phoneRequired = formData.method !== "souq";
+  const phoneRequired = formData.type === "top_up" && formData.method !== "souq";
   const phoneError = phoneRequired
     ? (!phoneTrimmed
         ? "أدخل رقم محفظتك"
@@ -393,20 +414,32 @@ export default function Payments() {
           ? "رقم غير صحيح — لازم 11 رقم يبدأ بـ 010/011/012/015"
           : "")
     : "";
+  const paymentRefError = formData.type === "top_up" && !formData.paymentRef.trim()
+    ? "أدخل رقم مرجع التحويل"
+    : "";
+  const payoutNameError = formData.type === "withdrawal" && !formData.payoutName.trim()
+    ? "اكتب الاسم الكامل لصاحب وسيلة الاستلام"
+    : "";
+  const payoutDestinationError = formData.type === "withdrawal" && !formData.payoutDestination.trim()
+    ? "أدخل وسيلة الاستلام"
+    : "";
   const amountNum = Number(effectiveAmount);
   const amountError = !effectiveAmount || amountNum <= 0
     ? ""
-    : amountNum < 10
-      ? "الحد الأدنى 10 جنيه"
+    : amountNum < (formData.type === "withdrawal" ? withdrawalMinimum : 10)
+      ? `الحد الأدنى ${formData.type === "withdrawal" ? withdrawalMinimum : 10} جنيه`
       : amountNum > 1_000_000
         ? "المبلغ كبير جداً"
         : "";
   const servicesError = formData.type === "top_up" && selectedServices.size === 0
     ? "اختر خدمة واحدة على الأقل"
     : "";
-  const screenshotError = !screenshotUrl ? "ارفع صورة الإيصال بعد إتمام التحويل" : "";
+  const screenshotError = formData.type === "top_up" && !screenshotUrl
+    ? "ارفع صورة الإيصال بعد إتمام التحويل"
+    : "";
 
-  const formValid = !phoneError && !amountError && !servicesError && !screenshotError
+  const formValid = !phoneError && !paymentRefError && !payoutNameError
+    && !payoutDestinationError && !amountError && !servicesError && !screenshotError
     && effectiveAmount && amountNum > 0;
 
   const removeScreenshot = () => {
@@ -735,8 +768,8 @@ export default function Payments() {
               ))}
             </div>
 
-            {/* Service Multi-Select */}
-            <div className="space-y-2">
+             {/* Service Multi-Select */}
+             {formData.type === "top_up" && <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold flex items-center gap-1">
                   <Tag className="w-3 h-3" />
@@ -767,7 +800,7 @@ export default function Payments() {
                       مسح
                     </button>
                   )}
-                </div>
+              </div>
               </div>
 
               <div className="grid grid-cols-2 gap-1.5">
@@ -805,7 +838,7 @@ export default function Payments() {
                   );
                 })}
               </div>
-            </div>
+            </div>}
 
             {/* Total Breakdown */}
             {selectedServices.size > 0 && (
@@ -912,7 +945,9 @@ export default function Payments() {
             <div className="space-y-1">
               <label className="text-xs font-bold">💳 طريقة الدفع</label>
               <div className="grid grid-cols-2 gap-2">
-                {PAYMENT_METHODS.map(m => (
+                 {PAYMENT_METHODS
+                   .filter(m => formData.type === "top_up" || m.value !== "souq")
+                   .map(m => (
                   <button
                     key={m.value}
                     type="button"
@@ -927,8 +962,8 @@ export default function Payments() {
               </div>
             </div>
 
-            {/* Phone — للطرق غير سوق ماركات */}
-            {formData.method !== "souq" && (
+             {/* Phone — رقم المحفظة المرسلة للإيداع */}
+             {formData.type === "top_up" && formData.method !== "souq" && (
               <div className="space-y-1">
                 <label className="text-xs font-bold flex items-center gap-1">
                   <Smartphone className="w-3 h-3" />
@@ -956,8 +991,56 @@ export default function Payments() {
               </div>
             )}
 
+             {formData.type === "top_up" && (
+               <div className="space-y-1">
+                 <label className="text-xs font-bold">🔑 رقم مرجع التحويل</label>
+                 <Input
+                   value={formData.paymentRef}
+                   onChange={e => setFormData(f => ({ ...f, paymentRef: e.target.value }))}
+                   placeholder="اكتب رقم العملية كما يظهر في تطبيق الدفع"
+                   className={`text-sm h-9 font-mono ${paymentRefError && formData.paymentRef ? "border-red-500" : ""}`}
+                   dir="ltr"
+                   maxLength={160}
+                   data-testid="input-payment-ref"
+                 />
+                 {paymentRefError && (
+                   <p className="text-[10px] text-red-600 font-bold">⚠️ {paymentRefError}</p>
+                 )}
+               </div>
+             )}
+
+             {formData.type === "withdrawal" && (
+               <div className="space-y-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+                 <p className="text-xs text-muted-foreground">
+                   السحب من الأرباح المتاحة فقط — لا تحتاج إلى إيصال إيداع. الحد الأدنى {withdrawalMinimum} ج.م.
+                 </p>
+                 <Input
+                   value={formData.payoutName}
+                   onChange={e => setFormData(f => ({ ...f, payoutName: e.target.value }))}
+                   placeholder="الاسم الكامل لصاحب وسيلة الاستلام"
+                   className="text-sm h-9"
+                   maxLength={120}
+                   data-testid="input-payout-name"
+                 />
+                 <Input
+                   value={formData.payoutDestination}
+                   onChange={e => setFormData(f => ({ ...f, payoutDestination: e.target.value }))}
+                   placeholder={formData.method === "instapay" ? "رقم الموبايل أو IPA في InstaPay" : "رقم المحفظة 01XXXXXXXXX"}
+                   className="text-sm h-9 font-mono"
+                   dir="ltr"
+                   maxLength={120}
+                   data-testid="input-payout-destination"
+                 />
+                 {(payoutNameError || payoutDestinationError) && (
+                   <p className="text-[10px] text-red-600 font-bold">
+                     ⚠️ {payoutNameError || payoutDestinationError}
+                   </p>
+                 )}
+               </div>
+             )}
+
             {/* سوق ماركات — خطوات الدفع */}
-            {formData.method === "souq" && (
+             {formData.type === "top_up" && formData.method === "souq" && (
               <div className="rounded-2xl border-2 border-primary/30 bg-primary/5 p-4 space-y-3">
                 <div className="flex items-center gap-2">
                   <span className="text-lg">🛒</span>
@@ -1004,8 +1087,9 @@ export default function Payments() {
               </div>
             )}
 
-            {/* Screenshot Upload */}
-            <div className="space-y-2">
+             {/* Screenshot Upload — deposits only; withdrawals reserve earnings
+                 atomically and must never require a deposit receipt. */}
+             {formData.type === "top_up" && <div className="space-y-2">
               <label className="text-xs font-bold flex items-center gap-1">
                 <ImageIcon className="w-3 h-3" />
                 صورة إيصال الدفع <span className="text-primary font-bold">(مطلوبة)</span>
@@ -1032,7 +1116,7 @@ export default function Payments() {
                   {screenshotUrl && (
                     <div className="absolute bottom-2 right-2 bg-green-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">
                       ✓ تم الرفع
-                    </div>
+                     </div>
                   )}
                 </div>
               ) : (
@@ -1054,13 +1138,13 @@ export default function Payments() {
                   )}
                 </button>
               )}
-            </div>
+             </div>}
 
 
             {/* Submit — show first blocking reason */}
-            {!formValid && (phoneError || amountError || servicesError || screenshotError) && (
+             {!formValid && (phoneError || paymentRefError || payoutNameError || payoutDestinationError || amountError || servicesError || screenshotError) && (
               <div className="rounded-xl border border-red-300 bg-red-50 dark:bg-red-950/30 px-3 py-2 text-[11px] text-red-700 dark:text-red-300 font-bold" data-testid="error-summary">
-                ⚠️ {phoneError || amountError || servicesError || screenshotError}
+                 ⚠️ {phoneError || paymentRefError || payoutNameError || payoutDestinationError || amountError || servicesError || screenshotError}
               </div>
             )}
             <Button
@@ -1070,10 +1154,15 @@ export default function Payments() {
                 type: formData.type,
                 amountEGP: Number(effectiveAmount),
                 method: formData.method,
-                phoneNumber: phoneTrimmed || undefined,
+                 phoneNumber: formData.type === "top_up" ? (phoneTrimmed || undefined) : undefined,
+                 paymentRef: formData.type === "top_up" ? (formData.paymentRef.trim() || undefined) : undefined,
+                 payoutName: formData.type === "withdrawal" ? (formData.payoutName.trim() || undefined) : undefined,
+                 payoutDestination: formData.type === "withdrawal" ? (formData.payoutDestination.trim() || undefined) : undefined,
                 adId: formData.adId && formData.adId !== "none" ? Number(formData.adId) : undefined,
-                serviceType: selectedServices.size > 0 ? Array.from(selectedServices).join(",") : undefined,
-                screenshotUrl: screenshotUrl || undefined,
+                 serviceType: formData.type === "top_up" && selectedServices.size > 0
+                   ? Array.from(selectedServices).join(",")
+                   : formData.type === "withdrawal" ? "withdrawal" : undefined,
+                 screenshotUrl: formData.type === "top_up" ? (screenshotUrl || undefined) : undefined,
               })}
               data-testid="btn-submit-payment"
             >

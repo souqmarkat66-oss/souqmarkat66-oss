@@ -1,5 +1,8 @@
 export type BattleMode = "1v1" | "2v2";
 
+export const BATTLE_ROUND_SECONDS = 300;
+export const BATTLE_ROUND_DURATION_MS = BATTLE_ROUND_SECONDS * 1000;
+
 export interface BattleGrid {
   columns: 2;
   rows: 1 | 2;
@@ -20,6 +23,10 @@ export function battleGridFor(mode: BattleMode): BattleGrid {
 export interface BattleSeat {
   socketId: string;
   name: string;
+}
+
+export interface ActiveBattleCoHost extends BattleSeat {
+  hasCamera?: boolean;
 }
 
 export interface BattleParticipant extends BattleSeat {
@@ -45,6 +52,78 @@ export interface PublicBattleRosterEntry {
 export interface BattleDisplayParticipant extends BattleParticipant {
   team: "A" | "B";
   score: number;
+}
+
+export interface BattleStartRoster {
+  teamA: string[];
+  teamB: string[];
+}
+
+/**
+ * Build the only roster that a broadcaster is allowed to submit when a
+ * round starts. The first admitted guest is always team B in 1v1; in 2v2
+ * the second guest joins the broadcaster on team A and guests one and three
+ * form team B. Socket ids are copied from the admitted-seat roster rather
+ * than inferred from an array index at the server.
+ */
+export function battleStartRoster(
+  mode: BattleMode,
+  cohosts: readonly ActiveBattleCoHost[],
+): BattleStartRoster | null {
+  const requiredGuests = mode === "2v2" ? 3 : 1;
+  const guests: string[] = [];
+  for (const cohost of cohosts) {
+    const socketId = String(cohost.socketId || "").trim();
+    if (socketId && !guests.includes(socketId)) guests.push(socketId);
+    if (guests.length === requiredGuests) break;
+  }
+  if (guests.length !== requiredGuests) return null;
+  return mode === "2v2"
+    ? { teamA: [guests[1]], teamB: [guests[0], guests[2]] }
+    : { teamA: [], teamB: [guests[0]] };
+}
+
+export interface BattleGiftTarget {
+  socketId: string;
+  name: string;
+  team: "A" | "B";
+  userId?: string;
+}
+
+/**
+ * Gift buttons must represent the current server roster one seat at a time.
+ * Keeping the broadcaster's real socket id here avoids a null/host alias
+ * becoming stale when a guest leaves and another guest takes a seat.
+ */
+export function battleGiftTargets(teams: BattleTeams): BattleGiftTarget[] {
+  return (["A", "B"] as const).flatMap(team =>
+    teams[team].map(member => ({
+      socketId: member.socketId,
+      userId: member.userId,
+      name: member.name,
+      team,
+    })),
+  );
+}
+
+export function battleGiftTargetIsActive(
+  targetSocketId: string | null | undefined,
+  teams: BattleTeams | undefined,
+): boolean {
+  if (!targetSocketId || !teams) return false;
+  return battleGiftTargets(teams).some(target => target.socketId === targetSocketId);
+}
+
+/**
+ * Countdown is calculated from the server deadline. A local interval only
+ * controls repaint cadence and can never extend a round past its deadline.
+ */
+export function battleSecondsRemaining(
+  endsAt: number,
+  now = Date.now(),
+): number {
+  if (!Number.isFinite(endsAt)) return 0;
+  return Math.max(0, Math.ceil((endsAt - now) / 1000));
 }
 
 function nonNegativeNumber(value: unknown, fallback = 0): number {

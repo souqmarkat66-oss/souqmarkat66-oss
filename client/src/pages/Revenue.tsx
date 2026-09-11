@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,7 @@ import {
   TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight, Loader2, CreditCard,
   Banknote, PhoneCall, AlertCircle, BarChart2, Eye, MousePointer,
   ShieldX, Tv, Megaphone, Receipt, Filter, X, Coins, CircleDollarSign,
-  History
+  History, MessageCircle
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -21,11 +21,17 @@ import {
   formatReportDate,
   formatReportMoney,
   formatReportMoneyOrUnavailable,
+  normalizeRevenueOwnAdStats,
+  normalizeRevenueTabPreference,
   normalizeRevenueActivity,
   normalizeRevenueActivityList,
   normalizeRevenueTransaction,
+  revenueReportPreferenceKey,
+  REVENUE_REPORT_PENDING_PREFERENCE_KEY,
   normalizeRevenueTransactions,
+  resolveRevenueTabState,
 } from "@/lib/revenue-report";
+import { useAuth } from "@/hooks/use-auth";
 
 const PAYMENT_METHODS = [
   { value: "mobile_wallet", label: "محفظة إلكترونية", hint: "010 / 011 / 012 / 015" },
@@ -409,6 +415,40 @@ function queryErrorText(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
+function OwnAdStatsCard({ value }: { value: unknown }) {
+  const stats = normalizeRevenueOwnAdStats(value);
+  const items = [
+    { label: "مشاهدات إعلاناتي", value: stats.views, icon: Eye, color: "text-teal-500" },
+    { label: "إعجابات إعلاناتي", value: stats.likes, icon: TrendingUp, color: "text-pink-500" },
+    { label: "تعليقات إعلاناتي", value: stats.comments, icon: MessageCircle, color: "text-indigo-500" },
+    { label: "الرسائل الواردة", value: stats.inboundMessages, icon: MessageCircle, color: "text-orange-500" },
+  ];
+
+  return (
+    <Card className="rounded-2xl" data-testid="own-ad-stats">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Megaphone className="w-4 h-4 text-primary" /> أداء إعلاناتي
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          {stats.adCount.toLocaleString("ar-EG")} إعلان — الرسائل الواردة المرتبطة بإعلاناتك فقط
+        </p>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {items.map(item => (
+            <div key={item.label} className="rounded-xl border bg-muted/20 p-3">
+              <item.icon className={`w-5 h-5 mb-1 ${item.color}`} />
+              <div className="font-bold text-base">{item.value.toLocaleString("ar-EG")}</div>
+              <div className="text-[10px] text-muted-foreground">{item.label}</div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 /**
  * The personal account section deliberately uses the authenticated unified
  * activity feed rather than inventing values from channel/campaign totals.
@@ -720,11 +760,15 @@ function PublisherTab() {
       تعذر تحميل تقرير الناشر: {queryErrorText(error, "الخدمة غير متاحة")}. لم يتم اعتبار التقرير فارغاً.
     </div>
   );
+  const ownAdStats = data?.ownAdStats;
   if (!data?.channel) return (
-    <div className="text-center py-16">
-      <Tv className="w-12 h-12 mx-auto mb-3 opacity-30" />
-      <p className="text-muted-foreground">ليس لديك قناة بعد لكسب الإيرادات منها</p>
-      <p className="text-xs text-muted-foreground mt-1">أنشئ قناتك من صفحة القنوات</p>
+    <div className="space-y-6">
+      <OwnAdStatsCard value={ownAdStats} />
+      <div className="text-center py-10">
+        <Tv className="w-12 h-12 mx-auto mb-3 opacity-30" />
+        <p className="text-muted-foreground">ليس لديك قناة بعد لكسب الإيرادات منها</p>
+        <p className="text-xs text-muted-foreground mt-1">أنشئ قناتك من صفحة القنوات</p>
+      </div>
     </div>
   );
 
@@ -744,6 +788,7 @@ function PublisherTab() {
 
   return (
     <div className="space-y-6">
+      <OwnAdStatsCard value={ownAdStats} />
       {/* رأس القناة */}
       <Card className="rounded-2xl border-green-200 dark:border-green-900 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/20">
         <CardContent className="p-5 flex items-center justify-between flex-wrap gap-4">
@@ -851,11 +896,15 @@ function AdvertiserTab() {
       تعذر تحميل تقرير المعلن: {queryErrorText(error, "الخدمة غير متاحة")}. لم يتم اعتبار التقرير فارغاً.
     </div>
   );
+  const ownAdStats = data?.ownAdStats;
   if (!data?.campaigns?.length) return (
-    <div className="text-center py-16">
-      <Megaphone className="w-12 h-12 mx-auto mb-3 opacity-30" />
-      <p className="text-muted-foreground">ليس لديك حملات إعلانية بعد</p>
-      <p className="text-xs text-muted-foreground mt-1">أنشئ حملتك الأولى من صفحة الحملات</p>
+    <div className="space-y-6">
+      <OwnAdStatsCard value={ownAdStats} />
+      <div className="text-center py-10">
+        <Megaphone className="w-12 h-12 mx-auto mb-3 opacity-30" />
+        <p className="text-muted-foreground">ليس لديك حملات إعلانية بعد</p>
+        <p className="text-xs text-muted-foreground mt-1">أنشئ حملتك الأولى من صفحة الحملات</p>
+      </div>
     </div>
   );
 
@@ -865,6 +914,7 @@ function AdvertiserTab() {
 
   return (
     <div className="space-y-6">
+      <OwnAdStatsCard value={ownAdStats} />
       {/* ملخص الإنفاق */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {[
@@ -1034,18 +1084,65 @@ function AdvertiserTab() {
 
 // ── الصفحة الرئيسية ───────────────────────────────────────────────────
 export default function Revenue() {
-  const { data: pubData } = useQuery<any>({
-    queryKey: ['/api/publisher/report'],
-    queryFn: () => fetchRevenueJson('/api/publisher/report'),
-  });
-  const { data: advData } = useQuery<any>({
-    queryKey: ['/api/advertiser/report'],
-    queryFn: () => fetchRevenueJson('/api/advertiser/report'),
+  const { user, isLoading: authLoading } = useAuth();
+  const {
+    data: capabilities,
+    isLoading: capabilitiesLoading,
+    isError: capabilitiesError,
+    error: capabilitiesQueryError,
+  } = useQuery<any>({
+    queryKey: ['/api/revenue/capabilities'],
+    queryFn: () => fetchRevenueJson('/api/revenue/capabilities'),
   });
 
-  const isPublisher = !!pubData?.channel;
-  const isAdvertiser = !!(advData?.campaigns?.length);
-  const defaultTab = isPublisher ? 'publisher' : 'advertiser';
+  const [savedReportPreference, setSavedReportPreference] = useState<"publisher" | "advertiser" | null>(null);
+  const [reportPreferenceReady, setReportPreferenceReady] = useState(false);
+  const userSelectedTab = useRef(false);
+  const authenticatedUserId = user?.id;
+
+  useEffect(() => {
+    userSelectedTab.current = false;
+    setReportPreferenceReady(false);
+    if (authLoading) return;
+
+    const userKey = revenueReportPreferenceKey(authenticatedUserId);
+    try {
+      let preference = userKey
+        ? normalizeRevenueTabPreference(localStorage.getItem(userKey))
+        : null;
+      const pending = normalizeRevenueTabPreference(
+        sessionStorage.getItem(REVENUE_REPORT_PENDING_PREFERENCE_KEY),
+      );
+      if (userKey && pending) {
+        // Promote the one-time login handoff only after this authenticated
+        // user is known.  This is a UI preference, not an auth capability.
+        localStorage.setItem(userKey, pending);
+        sessionStorage.removeItem(REVENUE_REPORT_PENDING_PREFERENCE_KEY);
+        preference = pending;
+      }
+      setSavedReportPreference(preference);
+    } catch {
+      setSavedReportPreference(null);
+    } finally {
+      setReportPreferenceReady(true);
+    }
+  }, [authLoading, authenticatedUserId]);
+
+  const tabState = resolveRevenueTabState(
+    capabilities?.role,
+    capabilitiesLoading,
+    savedReportPreference,
+  );
+  const [activeTab, setActiveTab] = useState<"publisher" | "advertiser">(tabState.defaultTab);
+  useEffect(() => {
+    if (capabilitiesLoading || !reportPreferenceReady) return;
+    if (!userSelectedTab.current || (
+      (activeTab === "publisher" && !tabState.publisherEnabled) ||
+      (activeTab === "advertiser" && !tabState.advertiserEnabled)
+    )) {
+      setActiveTab(tabState.defaultTab);
+    }
+  }, [activeTab, capabilitiesLoading, reportPreferenceReady, tabState.advertiserEnabled, tabState.defaultTab, tabState.publisherEnabled]);
 
   return (
     <div className="container px-4 py-10 max-w-4xl">
@@ -1055,13 +1152,32 @@ export default function Revenue() {
       </div>
 
       <PersonalReport />
+      {capabilitiesError && (
+        <div role="alert" className="mb-4 rounded-xl border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs text-yellow-800 dark:border-yellow-900 dark:bg-yellow-950/20 dark:text-yellow-300">
+          تعذر تحميل دور الحساب لتحديد التقرير الافتراضي: {queryErrorText(capabilitiesQueryError, "الخدمة غير متاحة")}.
+          تم إبقاء تبويبي الناشر والمعلن متاحين دون استنتاج الدور من البيانات.
+        </div>
+      )}
 
-      <Tabs defaultValue={defaultTab}>
+      <Tabs value={activeTab} onValueChange={(value) => {
+        if (value !== "publisher" && value !== "advertiser") return;
+        userSelectedTab.current = true;
+        setActiveTab(value);
+        const userKey = revenueReportPreferenceKey(authenticatedUserId);
+        if (userKey) {
+          try {
+            localStorage.setItem(userKey, value);
+            setSavedReportPreference(value);
+          } catch {
+            // Preferences are optional and must not block tab selection.
+          }
+        }
+      }}>
         <TabsList className="mb-6 w-full">
-          <TabsTrigger value="publisher" className="flex-1 gap-2" disabled={!isPublisher && pubData !== undefined}>
+          <TabsTrigger value="publisher" className="flex-1 gap-2" disabled={!tabState.publisherEnabled}>
             <Tv className="w-4 h-4" /> ناشر (صاحب قناة)
           </TabsTrigger>
-          <TabsTrigger value="advertiser" className="flex-1 gap-2" disabled={!isAdvertiser && advData !== undefined}>
+          <TabsTrigger value="advertiser" className="flex-1 gap-2" disabled={!tabState.advertiserEnabled}>
             <Megaphone className="w-4 h-4" /> معلن
           </TabsTrigger>
         </TabsList>

@@ -6,7 +6,12 @@ import {
   formatReportMoney,
   normalizeRevenueActivity,
   normalizeRevenueActivityList,
+  normalizeRevenueOwnAdStats,
+  normalizeRevenueReportRole,
+  normalizeRevenueTabPreference,
   normalizeRevenueTransaction,
+  revenueReportPreferenceKey,
+  resolveRevenueTabState,
 } from "./revenue-report";
 
 test("personal report numeric guards tolerate null, malformed, and pg string values", () => {
@@ -72,4 +77,49 @@ test("accepts paginated unified activity metadata without dropping coin/gift row
   });
   assert.deepEqual(rows.map(row => row.kind), ["gift_sent", "coin_recharge", "coin_purchase"]);
   assert.equal(rows[2].source, "afs_card");
+});
+
+test("report role selection does not infer a role from empty report data", () => {
+  assert.equal(normalizeRevenueReportRole("user"), "both");
+  assert.equal(normalizeRevenueReportRole(undefined), "both");
+  assert.equal(normalizeRevenueReportRole("advertiser"), "advertiser");
+  assert.equal(normalizeRevenueReportRole("channel"), "publisher");
+  assert.equal(normalizeRevenueTabPreference("channel"), "publisher");
+  assert.equal(normalizeRevenueTabPreference("client"), null);
+  assert.equal(revenueReportPreferenceKey("legacy-user/1"), "souq:revenue-report:user:legacy-user%2F1");
+
+  const emptyAccount = resolveRevenueTabState("user");
+  assert.equal(emptyAccount.advertiserEnabled, true);
+  assert.equal(emptyAccount.publisherEnabled, true);
+  assert.equal(emptyAccount.defaultTab, "advertiser");
+  const legacyPublisher = resolveRevenueTabState("user", false, "publisher");
+  assert.equal(legacyPublisher.defaultTab, "publisher");
+  assert.equal(legacyPublisher.publisherEnabled, true);
+  assert.equal(legacyPublisher.advertiserEnabled, true);
+  assert.equal(resolveRevenueTabState("advertiser", false, "publisher").defaultTab, "advertiser");
+
+  const publisherAccount = resolveRevenueTabState("publisher");
+  assert.equal(publisherAccount.publisherEnabled, true);
+  assert.equal(publisherAccount.advertiserEnabled, false);
+  assert.equal(publisherAccount.defaultTab, "publisher");
+
+  const loading = resolveRevenueTabState(undefined, true);
+  assert.equal(loading.publisherEnabled, true);
+  assert.equal(loading.advertiserEnabled, true);
+});
+
+test("own ad stats preserve valid zero counters and normalize database strings", () => {
+  assert.deepEqual(normalizeRevenueOwnAdStats({
+    adCount: "2",
+    views: "0",
+    likes: 4,
+    comments: "3",
+    inboundMessages: "0",
+  }), {
+    adCount: 2,
+    views: 0,
+    likes: 4,
+    comments: 3,
+    inboundMessages: 0,
+  });
 });

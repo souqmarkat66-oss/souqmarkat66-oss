@@ -349,6 +349,31 @@ export const afsPaymentOrders = pgTable("afs_payment_orders", {
 });
 export type AfsPaymentOrder = typeof afsPaymentOrders.$inferSelect;
 
+// Legacy manual coin purchases are kept separate from the wallet ledger.  A
+// pending row is the payment proof; coins are minted exactly once when an
+// admin changes that row to approved.
+export const coinPurchaseOrders = pgTable("coin_purchase_orders", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").references(() => users.id).notNull(),
+  userName: text("user_name"),
+  packageId: integer("package_id"),
+  coins: integer("coins").notNull(),
+  amountEGP: numeric("amount_egp", { precision: 12, scale: 2 }).notNull(),
+  paymentMethod: text("payment_method").notNull(),
+  paymentRef: text("payment_ref"),
+  proofDigest: text("proof_digest"),
+  screenshotUrl: text("screenshot_url"),
+  status: text("status", { enum: ["pending", "approved", "rejected"] }).notNull().default("pending"),
+  adminNote: text("admin_note"),
+  createdAt: timestamp("created_at").defaultNow(),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewedBy: text("reviewed_by"),
+}, (table) => ({
+  refIdx: index("coin_purchase_orders_payment_ref_idx").on(table.paymentRef),
+  createdIdx: index("coin_purchase_orders_created_at_idx").on(table.createdAt),
+}));
+export type CoinPurchaseOrder = typeof coinPurchaseOrders.$inferSelect;
+
 // EGP-wallet coin purchases are separate from card/manual payment orders.
 // The per-user idempotency key makes a retry unable to mint coins twice.
 export const walletCoinPurchases = pgTable("wallet_coin_purchases", {
@@ -433,6 +458,8 @@ export const paymentRequests = pgTable("payment_requests", {
   amountEGP: real("amount_egp").notNull(),
   method: text("method", { enum: ["vodafone", "etisalat", "mobile_wallet", "instapay", "souq", "visa_bank"] }).notNull(),
   phoneNumber: text("phone_number"),
+  paymentRef: text("payment_ref"),
+  proofDigest: text("proof_digest"),
   payoutName: text("payout_name"),
   payoutDestinationEncrypted: text("payout_destination_encrypted"),
   payoutDestinationIv: text("payout_destination_iv"),
@@ -469,6 +496,7 @@ export const insertPaymentRequestSchema = createInsertSchema(paymentRequests)
       .min(10, "الحد الأدنى للمبلغ هو 10 جنيه")
       .max(1_000_000, "المبلغ كبير جداً، تواصل مع الإدارة"),
     phoneNumber: z.string().trim().optional().nullable(),
+    paymentRef: z.string().trim().max(160).optional().nullable(),
     screenshotUrl: z.string().trim().optional().nullable(),
     serviceType: z.string().trim().optional().nullable(),
     payoutName: z.string().trim().max(120).optional().nullable(),
@@ -552,6 +580,13 @@ export const insertPaymentRequestSchema = createInsertSchema(paymentRequests)
     }
     // Only incoming legacy payments need an uploaded receipt. Withdrawals are
     // validated against the server ledger and therefore have no receipt.
+    if (data.type === "top_up" && !data.paymentRef) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["paymentRef"],
+        message: "رقم مرجع التحويل مطلوب",
+      });
+    }
     if (data.type === "top_up" && !data.screenshotUrl) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

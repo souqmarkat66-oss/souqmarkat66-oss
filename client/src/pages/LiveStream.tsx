@@ -7,7 +7,7 @@ import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Eye, Send, ArrowRight, Heart, RotateCcw,
   WifiOff, Volume2, VolumeX, FlipHorizontal,
-  Copy, Check, Radio, Monitor, UserPlus, Users,
+  Copy, Check, Radio, Monitor, UserPlus, Users, Upload,
   Loader2, X, CheckCircle, XCircle,
   Share2, Gift, Megaphone, Swords, Trophy, Timer,
   Layers, Tv2, Type, ChevronDown, ChevronUp, Palette,
@@ -23,8 +23,13 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { projectPublicStream, type PublicLiveStream } from "@/lib/public-projections";
 import {
+  BATTLE_ROUND_SECONDS,
+  battleGiftTargetIsActive,
+  battleGiftTargets,
   battleGridFor,
   battleParticipantsForDisplay,
+  battleSecondsRemaining,
+  battleStartRoster,
   reserveBattleSeats,
   type BattleTeams,
   type PublicBattleRosterEntry,
@@ -118,7 +123,7 @@ export default function LiveStream() {
   const [showChallengeList, setShowChallengeList] = useState(false);
   const [liveStreams,       setLiveStreams]    = useState<any[]>([]);
   const [challengeSentTo,   setChallengeSentTo]   = useState<string|null>(null); // streamId waiting for response
-  const [incomingChallenge, setIncomingChallenge] = useState<{challengerStreamId:string; challengerSocketId:string; challengerName:string}|null>(null);
+  const [incomingChallenge, setIncomingChallenge] = useState<{challengeId?: string; challengerStreamId:string; challengerSocketId:string; challengerName:string}|null>(null);
   // ── دعوة تحدي لمستخدم محدد (بحث + بروفايل + دعوة) ──
   const [userSearchQ,       setUserSearchQ]       = useState("");
   const [battleFriends,     setBattleFriends]     = useState<any[]>([]);
@@ -146,6 +151,7 @@ export default function LiveStream() {
   const battleScoreBRef   = useRef(0);
   const battleTimerRef    = useRef<ReturnType<typeof setInterval>|null>(null);
   const battleEndsAtRef   = useRef(0);
+  const battleStartedAtRef = useRef<number|null>(null);
   const battleCleanupTimerRef = useRef<ReturnType<typeof setTimeout>|null>(null);
   const giftAckWaitersRef = useRef<Map<string, (accepted: boolean) => void>>(new Map());
 
@@ -160,10 +166,14 @@ export default function LiveStream() {
   const [selectedPkg,     setSelectedPkg]     = useState<any>(null);
   const [payMethod,       setPayMethod]       = useState<"vodafone"|"vodafone2"|"instapay"|"bank">("vodafone");
   const [payRef,          setPayRef]          = useState("");
+  const [payScreenshotUrl, setPayScreenshotUrl] = useState("");
+  const [payScreenshotPreview, setPayScreenshotPreview] = useState("");
+  const [payUploading, setPayUploading] = useState(false);
   const [payLoading,      setPayLoading]      = useState(false);
   interface FlyingGift { id: number; emoji: string; x: number; glow?: string; big?: boolean; recipientSocketId?: string; }
   const [flyingGifts,     setFlyingGifts]     = useState<FlyingGift[]>([]);
   const giftAudioContextRef = useRef<AudioContext | null>(null);
+  const payFileRef = useRef<HTMLInputElement | null>(null);
 
   const playGiftSound = useCallback((coins: number) => {
     if (coins < 100 || typeof window === "undefined") return;
@@ -479,6 +489,18 @@ export default function LiveStream() {
         clearTimeout(battleCleanupTimerRef.current);
         battleCleanupTimerRef.current = null;
       }
+      // A new server-started round is the only time a previous seat choice
+      // may be carried over. Gift targets are socket seats, not team aliases,
+      // so retaining one across rounds can charge a gift to the wrong person.
+      if (state.active && battleStartedAtRef.current !== state.startedAt) {
+        setGiftTargetSocketId(null);
+        setGiftTeamChoice("A");
+      }
+      if (!state.active) {
+        setGiftTargetSocketId(null);
+        setGiftTeamChoice("A");
+      }
+      battleStartedAtRef.current = state.active ? state.startedAt : null;
       if (state.teams) setBattleTeams(state.teams);
       setBattleRoster(state.roster || {});
       setBattlePlayerScores(state.playerScores || {});
@@ -493,12 +515,14 @@ export default function LiveStream() {
       setBattleActive(state.active || !!state.winner);
       setBattleRunning(state.active);
       battleEndsAtRef.current = state.endsAt;
-      setBattleSecs(Math.max(0, Math.ceil((state.endsAt - Date.now()) / 1000)));
+      setBattleSecs(battleSecondsRemaining(state.endsAt));
     };
     socket.on("battle-state", applyBattleState);
     socket.on("battle-started", applyBattleState);
     socket.on("battle-ended", (state: BattleState) => {
       applyBattleState({ ...state, active: false });
+      setGiftTargetSocketId(null);
+      setGiftTeamChoice("A");
       toast({
         title: state.winner === "draw" ? "🤝 انتهت المعركة بالتعادل" : `🏆 الفريق ${state.winner === "A" ? "أ" : "ب"} فاز!`,
         description: `النتيجة ${state.scoreA.toLocaleString()} مقابل ${state.scoreB.toLocaleString()}`,
@@ -510,11 +534,17 @@ export default function LiveStream() {
         setBattleTeams(null);
         setBattleRoster({});
         setBattlePlayerScores({});
+        setGiftTargetSocketId(null);
+        setGiftTeamChoice("A");
+        battleStartedAtRef.current = null;
         battleCleanupTimerRef.current = null;
       }, 8_000);
     });
     socket.on("battle-rejected", (data: { reason: string }) => {
       setBattleActive(false); setBattleRunning(false);
+      battleStartedAtRef.current = null;
+      setGiftTargetSocketId(null);
+      setGiftTeamChoice("A");
       toast({ title: "تعذّر بدء المعركة", description: data.reason === "invalid_teams" ? "تشكيلة الفرق غير مكتملة — تأكد أن الضيوف مسجّلون دخولهم ومقبولون" : "حاول مجدداً", variant: "destructive" });
     });
     socket.on("battle-multiplier", (data: { multiplier: 2 | 3 | 5; durationSeconds: number; reason: string }) => {
@@ -826,7 +856,7 @@ export default function LiveStream() {
 
     // ── Cross-stream Battle Challenge ────────────────────────────────
     if (isBroadcast) {
-      socket.on("battle-challenge-incoming", (data: { challengerStreamId: string; challengerSocketId: string; challengerName: string }) => {
+      socket.on("battle-challenge-incoming", (data: { challengeId?: string; challengerStreamId: string; challengerSocketId: string; challengerName: string }) => {
         setIncomingChallenge(data);
       });
     }
@@ -932,6 +962,31 @@ export default function LiveStream() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isBroadcast]);
+
+  // Socket ids are ephemeral. A guest leaving or a new round replacing the
+  // roster must immediately invalidate the client's gift seat selection.
+  useEffect(() => {
+    if (!giftTargetSocketId) return;
+    if (battleActive) {
+      // Wait for the authoritative battle roster instead of briefly clearing
+      // a valid selection while battle-state is settling on a new viewer.
+      if (!battleTeams) return;
+      if (!battleGiftTargetIsActive(giftTargetSocketId, battleTeams)) {
+        setGiftTargetSocketId(null);
+        setGiftTeamChoice("A");
+        return;
+      }
+      const target = battleGiftTargets(battleTeams).find(
+        member => member.socketId === giftTargetSocketId,
+      );
+      if (target && target.team !== giftTeamChoice) setGiftTeamChoice(target.team);
+      return;
+    }
+
+    if (!activeCoHosts.some(cohost => cohost.socketId === giftTargetSocketId)) {
+      setGiftTargetSocketId(null);
+    }
+  }, [activeCoHosts, battleActive, battleTeams, giftTargetSocketId, giftTeamChoice]);
 
   /* ─── In-stream ads ─────────────────────────────────── */
   useEffect(() => {
@@ -1330,10 +1385,9 @@ export default function LiveStream() {
 
   const sendChat = () => {
     if (!chatInput.trim() || !user) return;
-    const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مستخدم";
     socketRef.current?.emit("chat-message", {
-      streamId: id, userId: user.id, userName,
-      message: chatInput.trim(), isOwner: isBroadcast,
+      streamId: id,
+      message: chatInput.trim(),
     });
     setChatInput("");
   };
@@ -1543,11 +1597,48 @@ export default function LiveStream() {
     setRechargeLoading(false);
   };
 
+  const uploadPayScreenshot = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "ارفع صورة فقط", variant: "destructive" });
+      return;
+    }
+    setPayUploading(true);
+    setPayScreenshotPreview(URL.createObjectURL(file));
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: form,
+        credentials: "include",
+      });
+      const data = await response.json();
+      if (!response.ok || !data.url) {
+        throw new Error(data.message || "تعذر رفع الإيصال");
+      }
+      setPayScreenshotUrl(data.url);
+    } catch (error) {
+      setPayScreenshotUrl("");
+      setPayScreenshotPreview("");
+      toast({
+        title: "تعذر رفع الإيصال",
+        description: error instanceof Error ? error.message : undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setPayUploading(false);
+    }
+  };
+
   /* ─── Submit coin purchase order ──────────────────────── */
   const submitPurchaseOrder = async () => {
     if (!selectedPkg) return;
     if (!payRef.trim()) {
       toast({ title: "أدخل رقم مرجع الدفع", variant: "destructive" });
+      return;
+    }
+    if (!payScreenshotUrl) {
+      toast({ title: "ارفع صورة إيصال الدفع", variant: "destructive" });
       return;
     }
     setPayLoading(true);
@@ -1557,8 +1648,12 @@ export default function LiveStream() {
         packageId: selectedPkg.id,
         coins: selectedPkg.coins + (selectedPkg.bonus_coins || 0),
         amountEGP: selectedPkg.price_egp,
-        paymentMethod: payMethod === "vodafone" || payMethod === "vodafone2" ? "فودافون كاش" : payMethod === "instapay" ? "إنستاباي" : "تحويل بنكي",
+        paymentMethod: payMethod === "vodafone" ? "etisalat"
+          : payMethod === "vodafone2" ? "vodafone"
+          : payMethod === "instapay" ? "instapay"
+          : "bank",
         paymentRef: payRef.trim(),
+        screenshotUrl: payScreenshotUrl,
         userName,
       });
       const data = await res.json();
@@ -1574,9 +1669,13 @@ export default function LiveStream() {
   };
 
   /* ─── Battle helpers ─────────────────────────────────── */
-  const unlockBattleAudio = () => {
+  const unlockBattleAudio = async (): Promise<boolean> => {
     try {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) {
+        setBattleAudioReady(false);
+        return false;
+      }
       let context = battleAudioCtxRef.current;
       if (!context || context.state === "closed") {
         context = new AudioContextClass();
@@ -1584,17 +1683,20 @@ export default function LiveStream() {
       }
       if (context.state === "running") {
         setBattleAudioReady(true);
+        return true;
       } else {
-        void context.resume()
-          .then(() => setBattleAudioReady(context?.state === "running"))
-          .catch(() => setBattleAudioReady(false));
+        await context.resume();
+        const ready = String(context.state) === "running";
+        setBattleAudioReady(ready);
+        return ready;
       }
     } catch {
       setBattleAudioReady(false);
+      return false;
     }
   };
 
-  const startBattle = (mode: "1v1"|"2v2") => {
+  const startBattle = async (mode: "1v1"|"2v2") => {
     if (broadcastMode !== "webrtc") {
       toast({
         title: "الجولات متاحة في البث من المتصفح",
@@ -1603,27 +1705,43 @@ export default function LiveStream() {
       });
       return;
     }
+    const roster = battleStartRoster(mode, activeCoHosts);
+    if (!roster) {
+      toast({
+        title: "تشكيلة المعركة غير مكتملة",
+        description: mode === "1v1" ? "تحتاج ضيفاً مقبولاً واحداً" : "تحتاج ثلاثة ضيوف مقبولين",
+        variant: "destructive",
+      });
+      return;
+    }
     // Audio mixing must be unlocked by this direct user gesture. If a browser
     // still refuses it, the compositor keeps the broadcaster's original audio
     // rather than replacing it with a silent destination track.
-    unlockBattleAudio();
+    const audioUnlocked = await unlockBattleAudio();
     setBattleMode(mode);
     setBattleScoreA(0); setBattleScoreB(0);
     battleScoreARef.current = 0; battleScoreBRef.current = 0;
-    setBattleSecs(300); setBattleWinner(null);
+    setBattleSecs(BATTLE_ROUND_SECONDS); setBattleWinner(null);
     setBattleMultiplier(1); setBattleMultiplierEndsAt(null);
+    setGiftTargetSocketId(null);
+    setGiftTeamChoice("A");
+    battleStartedAtRef.current = null;
     // The server turns the battle on and sends the authoritative start state.
     setBattleActive(false); setBattleRunning(false);
     setShowBattleSetup(false);
-    // إرسال تشكيلة الفرق للخادم: أ = المذيع (+ الضيف الثاني في 2v2)، ب = الضيف الأول (+ الثالث)
+    // أرقام المقاعد مأخوذة من قائمة الضيوف المقبولين الحالية، لا من حالة
+    // قديمة أو من أسماء قد يغيرها العميل.
     socketRef.current?.emit("battle-start", {
       streamId: id, mode,
-      teamA: mode === "2v2" && activeCoHosts[1] ? [activeCoHosts[1].socketId] : [],
-      teamB: [
-        ...(activeCoHosts[0] ? [activeCoHosts[0].socketId] : []),
-        ...(mode === "2v2" && activeCoHosts[2] ? [activeCoHosts[2].socketId] : []),
-      ],
+      teamA: roster.teamA,
+      teamB: roster.teamB,
     });
+    if (!audioUnlocked) {
+      toast({
+        title: "فعّل صوت المعركة من المتصفح",
+        description: "بدأت الجولة بالصوت الأصلي للمذيع. استخدم زر تفعيل الصوت للسماح بصوت الضيوف.",
+      });
+    }
     toast({ title: "⚔️ جاري بدء المعركة", description: `وضع ${mode === "1v1" ? "1 ضد 1" : "2 ضد 2"} — مدة 5 دقائق` });
   };
 
@@ -1638,7 +1756,7 @@ export default function LiveStream() {
   useEffect(() => {
     if (!battleRunning) return;
     const refreshFromServerDeadline = () => {
-      setBattleSecs(Math.max(0, Math.ceil((battleEndsAtRef.current - Date.now()) / 1000)));
+      setBattleSecs(battleSecondsRemaining(battleEndsAtRef.current));
     };
     refreshFromServerDeadline();
     battleTimerRef.current = setInterval(() => {
@@ -1687,12 +1805,24 @@ export default function LiveStream() {
       return Promise.resolve(false);
     }
     const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مستخدم";
-    // Viewers know participants from the server battle roster, not activeCoHosts.
-    const knownTarget =
-      activeCoHosts.some(c => c.socketId === giftTargetSocketId) ||
-      !!(battleTeams && [...battleTeams.A, ...battleTeams.B].some(m => m.socketId === giftTargetSocketId));
-    if (giftTargetSocketId && !knownTarget) {
+    // During a round, use the current server roster and default to the
+    // broadcaster's actual seat. Never send a stale co-host socket id.
+    if (battleActive && !battleTeams) {
+      toast({ title: "تشكيلة المعركة لم تكتمل بعد", description: "اختر المستلم بعد وصول المقاعد الحالية", variant: "destructive" });
+      return Promise.resolve(false);
+    }
+    const battleTarget = battleActive
+      ? giftTargetSocketId || battleTeams?.A[0]?.socketId || null
+      : giftTargetSocketId;
+    const battleTargetMember = battleActive && battleTeams
+      ? battleGiftTargets(battleTeams).find(member => member.socketId === battleTarget)
+      : undefined;
+    const knownTarget = battleActive
+      ? !!battleTargetMember
+      : !battleTarget || activeCoHosts.some(c => c.socketId === battleTarget);
+    if (battleTarget && !knownTarget) {
       setGiftTargetSocketId(null);
+      setGiftTeamChoice("A");
       toast({ title: "المستلم غادر البث", description: "لم يُخصم أي رصيد — اختر مستلماً آخر", variant: "destructive" });
       return Promise.resolve(false);
     }
@@ -1714,8 +1844,8 @@ export default function LiveStream() {
         streamId: id, giftType: gift.type, giftEmoji: gift.emoji,
         giftName: gift.name, giftCoins: gift.coins, userName, userId: (user as any).id,
         broadcasterUserId: stream?.userId,
-        recipientSocketId: giftTargetSocketId || undefined,
-        battleTeam: battleActive ? giftTeamChoice : undefined,
+        recipientSocketId: battleTarget || undefined,
+        battleTeam: battleActive ? (battleTargetMember?.team || giftTeamChoice) : undefined,
         glow: gift.glow,
       });
     });
@@ -3370,7 +3500,16 @@ export default function LiveStream() {
 
       {/* COIN RECHARGE MODAL */}
       {showRechargeModal && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => { if (purchaseStep !== "pay") { setShowRechargeModal(false); setPurchaseStep("packages"); setSelectedPkg(null); setPayRef(""); } }}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => {
+          if (purchaseStep !== "pay") {
+            setShowRechargeModal(false);
+            setPurchaseStep("packages");
+            setSelectedPkg(null);
+            setPayRef("");
+            setPayScreenshotUrl("");
+            setPayScreenshotPreview("");
+          }
+        }}>
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
           <div className="relative w-full max-w-lg bg-zinc-900 rounded-t-3xl p-5 pb-safe max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()} dir="rtl">
 
@@ -3391,7 +3530,14 @@ export default function LiveStream() {
                   رصيدي وتقاريري ↗
                 </button>
               </div>
-              <button onClick={() => { setShowRechargeModal(false); setPurchaseStep("packages"); setSelectedPkg(null); setPayRef(""); }} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+              <button onClick={() => {
+                setShowRechargeModal(false);
+                setPurchaseStep("packages");
+                setSelectedPkg(null);
+                setPayRef("");
+                setPayScreenshotUrl("");
+                setPayScreenshotPreview("");
+              }} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
                 <X className="w-4 h-4 text-white" />
               </button>
             </div>
@@ -3439,7 +3585,13 @@ export default function LiveStream() {
                           : "bg-gradient-to-b from-yellow-500/15 to-yellow-600/5 border-yellow-500/25 hover:border-yellow-400/50"
                       }`}
                       data-testid={`btn-buy-package-${pkg.id}`}
-                      onClick={() => { setSelectedPkg(pkg); setPurchaseStep("pay"); setPayRef(""); }}
+                      onClick={() => {
+                        setSelectedPkg(pkg);
+                        setPurchaseStep("pay");
+                        setPayRef("");
+                        setPayScreenshotUrl("");
+                        setPayScreenshotPreview("");
+                      }}
                     >
                       {idx === 1 && (
                         <span className="absolute -top-2 right-1/2 translate-x-1/2 bg-gradient-to-l from-red-600 to-orange-500 text-white text-[8px] font-black px-2 py-0.5 rounded-full whitespace-nowrap">الأكثر شيوعاً</span>
@@ -3454,7 +3606,13 @@ export default function LiveStream() {
                   ))}
                 </div>
                 <button
-                  onClick={() => { setSelectedPkg({ id: 0, name: "شحن مخصص", coins: 0, price_egp: 0, bonus_coins: 0 }); setPurchaseStep("pay"); setPayRef(""); }}
+                  onClick={() => {
+                    setSelectedPkg({ id: 0, name: "شحن مخصص", coins: 0, price_egp: 0, bonus_coins: 0 });
+                    setPurchaseStep("pay");
+                    setPayRef("");
+                    setPayScreenshotUrl("");
+                    setPayScreenshotPreview("");
+                  }}
                   className="w-full mb-3 py-2.5 rounded-2xl bg-teal-500/15 border border-teal-500/40 text-teal-300 text-xs font-bold active:scale-[0.98] transition-transform"
                   data-testid="btn-transfer-details"
                 >
@@ -3575,10 +3733,55 @@ export default function LiveStream() {
                   />
                 </div>
 
+                {/* Receipt upload */}
+                <div className="mb-4">
+                  <label className="text-white/60 text-xs font-bold mb-1.5 block">صورة إيصال الدفع (مطلوبة)</label>
+                  <input
+                    ref={payFileRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (file) void uploadPayScreenshot(file);
+                    }}
+                    data-testid="input-pay-screenshot"
+                  />
+                  {payScreenshotPreview ? (
+                    <div className="relative rounded-xl overflow-hidden border border-green-500/40">
+                      <img src={payScreenshotPreview} alt="إيصال الدفع" className="w-full max-h-32 object-contain bg-black/20" />
+                      {payUploading && (
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-white text-xs font-bold">
+                          جاري الرفع...
+                        </span>
+                      )}
+                      {!payUploading && (
+                        <button
+                          type="button"
+                          onClick={() => { setPayScreenshotUrl(""); setPayScreenshotPreview(""); }}
+                          className="absolute top-1 left-1 rounded-full bg-black/60 px-2 py-1 text-white text-xs"
+                        >
+                          إزالة
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => payFileRef.current?.click()}
+                      disabled={payUploading}
+                      className="w-full py-3 rounded-xl border border-dashed border-white/20 text-white/50 text-xs flex items-center justify-center gap-2"
+                    >
+                      <Upload className="w-4 h-4" /> اضغط لرفع صورة الإيصال
+                    </button>
+                  )}
+                </div>
+
                 {/* Buttons */}
                 <div className="flex gap-2">
                   <button onClick={() => setPurchaseStep("packages")} className="flex-1 py-3 rounded-2xl bg-white/10 text-white font-bold text-sm">رجوع</button>
-                  <button onClick={submitPurchaseOrder} disabled={payLoading || !payRef.trim()} className="flex-1 py-3 rounded-2xl bg-yellow-500 text-black font-bold text-sm disabled:opacity-50" data-testid="btn-submit-purchase">
+                  <button onClick={submitPurchaseOrder} disabled={payLoading || payUploading || !payRef.trim() || !payScreenshotUrl} className="flex-1 py-3 rounded-2xl bg-yellow-500 text-black font-bold text-sm disabled:opacity-50" data-testid="btn-submit-purchase">
                     {payLoading ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "تأكيد الطلب"}
                   </button>
                 </div>
@@ -3593,7 +3796,14 @@ export default function LiveStream() {
                 <h4 className="text-white font-bold text-xl mb-2">تم استلام طلبك!</h4>
                 <p className="text-white/60 text-sm mb-1">سيتم مراجعة الدفع وإضافة العملات لمحفظتك</p>
                 <p className="text-yellow-400 text-sm font-bold mb-6">خلال بضع دقائق ⚡</p>
-                <button onClick={() => { setShowRechargeModal(false); setPurchaseStep("packages"); setSelectedPkg(null); setPayRef(""); }}
+                 <button onClick={() => {
+                   setShowRechargeModal(false);
+                   setPurchaseStep("packages");
+                   setSelectedPkg(null);
+                   setPayRef("");
+                   setPayScreenshotUrl("");
+                   setPayScreenshotPreview("");
+                 }}
                   className="px-8 py-3 rounded-2xl bg-yellow-500 text-black font-bold">
                   حسناً
                 </button>
@@ -3718,13 +3928,14 @@ export default function LiveStream() {
             <p className="text-white/40 text-[10px] font-bold mb-1.5">الهدية موجهة إلى:</p>
             <div className="flex items-center gap-1.5 overflow-x-auto mb-3" style={{ scrollbarWidth: "none" }}>
               {battleActive ? (
-                /* أثناء المعركة: اختر الشخص نفسه — السكور يتجمع للفريق، لكن الفلوس تروح للشخص المختار فقط.
-                   القائمة من تشكيلة الخادم (يراها الجميع)، مع بديل محلي لو لم تصل بعد */
+                /* أثناء المعركة: اختر المقعد نفسه — السكور يتجمع للفريق،
+                   لكن الهدية تذهب للشخص المختار فقط. */
                 (battleTeams
-                  ? [
-                      ...battleTeams.A.map((m, i) => ({ sid: (i === 0 ? null : m.socketId) as string | null, name: i === 0 ? (stream?.channelName || m.name) : m.name, team: "A" as const })),
-                      ...battleTeams.B.map(m => ({ sid: m.socketId as string | null, name: m.name, team: "B" as const })),
-                    ]
+                  ? battleGiftTargets(battleTeams).map(target => ({
+                      sid: target.socketId,
+                      name: target.name,
+                      team: target.team,
+                    }))
                   : [
                       { sid: null as string | null, name: `${stream?.channelName || "المذيع"}`, team: "A" as const },
                       ...(battleMode === "2v2" && activeCoHosts[1] ? [{ sid: activeCoHosts[1].socketId as string | null, name: activeCoHosts[1].name, team: "A" as const }] : []),
@@ -3732,10 +3943,15 @@ export default function LiveStream() {
                       ...(battleMode === "2v2" && activeCoHosts[2] ? [{ sid: activeCoHosts[2].socketId as string | null, name: activeCoHosts[2].name, team: "B" as const }] : []),
                     ]
                 ).map(t => {
-                  const selected = giftTargetSocketId === t.sid && giftTeamChoice === t.team;
+                  const selected = (
+                    giftTargetSocketId === t.sid
+                    || (!giftTargetSocketId && t.team === "A" && (
+                      !battleTeams || t.sid === battleTeams.A[0]?.socketId
+                    ))
+                  ) && giftTeamChoice === t.team;
                   return (
                     <button
-                      key={t.sid ?? "host"}
+                      key={`${t.team}-${t.sid ?? "host"}`}
                       onClick={() => { setGiftTargetSocketId(t.sid); setGiftTeamChoice(t.team); }}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold flex-shrink-0 border transition-all ${
                         selected
@@ -3891,6 +4107,18 @@ export default function LiveStream() {
                 <X className="w-4 h-4 text-white" />
               </button>
             </div>
+            <button
+              type="button"
+              onClick={() => { void unlockBattleAudio(); }}
+              className={`mb-4 w-full rounded-xl border px-3 py-2 text-xs font-bold transition-colors ${
+                battleAudioReady
+                  ? "border-green-400/40 bg-green-500/10 text-green-200"
+                  : "border-yellow-400/40 bg-yellow-500/10 text-yellow-200"
+              }`}
+              data-testid="btn-unlock-battle-audio"
+            >
+              {battleAudioReady ? "🔊 صوت الضيوف مفعّل" : "🔇 اضغط لتفعيل صوت الضيوف قبل بدء الجولة"}
+            </button>
 
             {/* ── تبويبات الدعوة: الأصدقاء / البحث ── */}
             <div className="flex gap-2 mb-3">
@@ -3945,7 +4173,7 @@ export default function LiveStream() {
                           <button
                             disabled={st === "sent" || st === "sending"}
                             onClick={() => {
-                              unlockBattleAudio();
+                              void unlockBattleAudio();
                               setInviteStatus(p => ({ ...p, [String(u.id)]: "sending" }));
                               socketRef.current?.emit("challenge-user-invite", {
                                 targetUserId: String(u.id),
@@ -4030,7 +4258,7 @@ export default function LiveStream() {
                         <button
                           disabled={st === "sent" || st === "sending"}
                           onClick={() => {
-                          unlockBattleAudio();
+                          void unlockBattleAudio();
                             setInviteStatus(p => ({ ...p, [String(u.id)]: "sending" }));
                             socketRef.current?.emit("challenge-user-invite", {
                               targetUserId: String(u.id),
@@ -4132,7 +4360,7 @@ export default function LiveStream() {
                     key={s.id}
                     disabled={!!challengeSentTo}
                     onClick={() => {
-                      unlockBattleAudio();
+                      void unlockBattleAudio();
                       setChallengeSentTo(String(s.id));
                       socketRef.current?.emit("battle-challenge", {
                         challengerStreamId: String(id),
@@ -4184,9 +4412,10 @@ export default function LiveStream() {
             <div className="flex gap-3">
               <button
                 onClick={() => {
-                  unlockBattleAudio();
+                  void unlockBattleAudio();
                   socketRef.current?.emit("battle-challenge-response", {
                     accepted: true,
+                    challengeId: incomingChallenge.challengeId,
                     challengerSocketId: incomingChallenge.challengerSocketId,
                     responderStreamId: String(id),
                     responderName: user?.firstName || "مجهول",
@@ -4210,6 +4439,7 @@ export default function LiveStream() {
                 onClick={() => {
                   socketRef.current?.emit("battle-challenge-response", {
                     accepted: false,
+                    challengeId: incomingChallenge.challengeId,
                     challengerSocketId: incomingChallenge.challengerSocketId,
                     responderStreamId: String(id),
                     responderName: user?.firstName || "مجهول",
@@ -4242,7 +4472,7 @@ export default function LiveStream() {
             <div className="flex gap-3">
               <button
                 onClick={() => {
-                  unlockBattleAudio();
+                  void unlockBattleAudio();
                   const ch = incomingUserChallenge;
                   socketRef.current?.emit("challenge-user-response", {
                     accepted: true,

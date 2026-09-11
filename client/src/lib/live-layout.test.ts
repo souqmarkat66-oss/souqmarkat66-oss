@@ -1,8 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  battleGiftTargetIsActive,
   battleGridFor,
+  battleGiftTargets,
   battleParticipantsForDisplay,
+  battleSecondsRemaining,
+  battleStartRoster,
   reserveBattleSeats,
 } from "./live-layout";
 
@@ -97,4 +101,44 @@ test("public PK display falls back to public player scores without changing sock
       },
     ],
   );
+});
+
+test("battle start roster keeps admitted socket ids stable in 1v1 and 2v2", () => {
+  const cohosts = [
+    { socketId: "guest-one", name: "الأول" },
+    { socketId: "guest-two", name: "الثاني" },
+    { socketId: "guest-three", name: "الثالث" },
+  ];
+
+  assert.deepEqual(battleStartRoster("1v1", cohosts), {
+    teamA: [],
+    teamB: ["guest-one"],
+  });
+  assert.deepEqual(battleStartRoster("2v2", cohosts), {
+    teamA: ["guest-two"],
+    teamB: ["guest-one", "guest-three"],
+  });
+  assert.equal(battleStartRoster("2v2", cohosts.slice(0, 2)), null);
+});
+
+test("battle gift targets are individual active seats, not team aliases", () => {
+  const teams = {
+    A: [{ socketId: "host-socket", userId: "10", name: "المذيع", audienceCount: 4 }],
+    B: [{ socketId: "guest-socket", userId: "20", name: "الضيف", audienceCount: 5 }],
+  };
+
+  assert.deepEqual(battleGiftTargets(teams), [
+    { socketId: "host-socket", userId: "10", name: "المذيع", team: "A" },
+    { socketId: "guest-socket", userId: "20", name: "الضيف", team: "B" },
+  ]);
+  assert.equal(battleGiftTargetIsActive("guest-socket", teams), true);
+  assert.equal(battleGiftTargetIsActive("old-seat", teams), false);
+});
+
+test("battle countdown never exceeds the authoritative server deadline", () => {
+  const endsAt = 1_000_000 + 300_000;
+  assert.equal(battleSecondsRemaining(endsAt, 1_000_000), 300);
+  assert.equal(battleSecondsRemaining(endsAt, endsAt - 1), 1);
+  assert.equal(battleSecondsRemaining(endsAt, endsAt), 0);
+  assert.equal(battleSecondsRemaining(endsAt, endsAt + 10_000), 0);
 });

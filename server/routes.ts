@@ -55,6 +55,12 @@ import {
   sameGiftEventIdentity,
 } from "./wallet-ledger";
 import { purchaseCoinsWithWallet } from "./walletCoinPurchase";
+import {
+  canonicalPaymentReference,
+  canonicalPaymentReferenceSql,
+  digestOwnedPaymentProof,
+  paymentProofLockKeys,
+} from "./payment-proof";
 import { resolvePaymentUserScope } from "./activity-scope";
 import {
   buildExpiredRechargeCodeResponse,
@@ -96,6 +102,7 @@ function safePaymentRequest(payment: any) {
     payoutDestinationEncrypted: _encrypted,
     payoutDestinationIv: _iv,
     payoutDestinationAuthTag: _authTag,
+    proofDigest: _proofDigest,
     ...safe
   } = payment;
   if (safe.type === "withdrawal") {
@@ -360,6 +367,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   /* بعد قبول دعوة التحدي: أول ما المدعو ينضم كضيف للغرفة دي، المعركة تبدأ تلقائياً 1v1 */
   const pendingAutoBattles = new Map<string, { targetUserId: string; expiresAt: number }>();
   const battleFinishPromises = new WeakMap<object, Promise<void>>();
+  const BATTLE_ROUND_DURATION_MS = 300_000;
 
   const streamRooms: Map<string, {
     broadcasterId: string | null;
@@ -529,8 +537,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const broadcasterUid = (broadcasterSocket.data as any).authUserId;
     // Strict composition: distinct, admitted co-hosts with verified identity.
     // 1v1 = broadcaster vs 1 co-host; 2v2 = broadcaster + 1 vs exactly 2.
-    const uniqA = Array.from(new Set(extrasA));
-    const uniqB = Array.from(new Set(extrasB));
+    const normalizeSocketIds = (value: unknown): string[] =>
+      Array.isArray(value)
+        ? value
+          .filter(entry => typeof entry === "string")
+          .map(entry => entry.trim())
+          .filter(Boolean)
+        : [];
+    const uniqA = Array.from(new Set(normalizeSocketIds(extrasA)));
+    const uniqB = Array.from(new Set(normalizeSocketIds(extrasB)));
     const wantA = mode === "2v2" ? 1 : 0;
     const wantB = mode === "2v2" ? 2 : 1;
     const allExtras = [...uniqA, ...uniqB];
@@ -539,11 +554,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       uniqA.length === wantA &&
       uniqB.length === wantB &&
       new Set(allExtras).size === allExtras.length &&
-      allExtras.every(sid =>
-        sid !== room.broadcasterId &&
-        room.cohostIds.includes(sid) &&
-        !!room.socketToUser.get(sid)?.userId,
-      );
+      allExtras.every(sid => {
+        const member = room.socketToUser.get(sid);
+        const memberSocket = io.sockets.sockets.get(sid);
+        return sid !== room.broadcasterId
+          && room.cohostIds.includes(sid)
+          && !!member?.userId
+          && String((memberSocket?.data as any)?.authUserId) === String(member.userId)
+          && Number.isInteger(Number((memberSocket?.data as any)?.authGeneration));
+      });
     if (!valid) {
       broadcasterSocket.emit("battle-rejected", { reason: "invalid_teams" });
       return false;
@@ -605,17 +624,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const playerScores: Record<string, number> = {};
     for (const m of [...teamA, ...teamB]) playerScores[m.userId] = 0;
     room.battle = {
-      active: true, mode, startedAt, endsAt: startedAt + 300_000,
+      active: true, mode, startedAt, endsAt: startedAt + BATTLE_ROUND_DURATION_MS,
       scoreA: 0, scoreB: 0, multiplier: 1, multiplierEndsAt: null,
       roseCount: 0, nextRoseThreshold: 5, winner: null,
       playerScores,
       teams: { A: teamA, B: teamB },
     };
-    room.battle.timer = setTimeout(() => {
-      const battle = room.battle;
-      if (!battle?.active || battle.endsAt > Date.now()) return;
+    const battle = room.battle;
+    const scheduleBattleFinish = () => {
+      if (!battle || room.battle !== battle || !battle.active) return;
+      const remaining = battle.endsAt - Date.now();
+      if (remaining > 0) {
+        battle.timer = setTimeout(scheduleBattleFinish, remaining);
+        return;
+      }
       void finishBattle(streamId, battle);
-    }, 300_000);
+    };
+    room.battle.timer = setTimeout(scheduleBattleFinish, BATTLE_ROUND_DURATION_MS);
     const state = publicBattleState(room.battle, room);
     io.to(`stream:${streamId}`).emit("battle-started", state);
     io.to(`stream:${streamId}`).emit("battle-state", state);
@@ -714,17 +739,55 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       io.to(`stream:${streamId}`).emit("viewer-count", count);
     });
 
-    socket.on("chat-message", (data: { streamId: string; userId: string; userName: string; message: string; isVoice?: boolean; voiceUrl?: string; isOwner?: boolean }) => {
-      const room = streamRooms.get(data.streamId);
-      if (room) room.totalComments++;
-      const msg = { ...data, timestamp: new Date().toISOString(), id: Date.now() };
-      io.to(`stream:${data.streamId}`).emit("chat-message", msg);
+    socket.on("chat-message", async (data: { streamId: string; message: string; isVoice?: boolean; voiceUrl?: string }) => {
+      const streamId = typeof data?.streamId === "string" ? data.streamId : "";
+      const room = streamRooms.get(streamId);
+      const authUid = (socket.data as any).authUserId;
+      const authGeneration = (socket.data as any).authGeneration;
+      // A comment is authored by the authenticated room member, never by
+      // userId/userName values supplied by a browser. This also prevents a
+      // connected account from commenting into an unrelated live room.
+      if (!room || !authUid || !isAuthenticatedRoomMember(room, {
+        socketId: socket.id,
+        authUserId: authUid,
+        authGeneration,
+      })) return;
+      const message = filterBadWords(String(data?.message || "").trim()).slice(0, 200);
+      const numericStreamId = Number(streamId);
+      if (!message || !Number.isInteger(numericStreamId) || numericStreamId <= 0) return;
+
+      let userName = "مستخدم";
+      try {
+        const profile = await pool.query(
+          `SELECT first_name, last_name FROM users WHERE id::text = $1 LIMIT 1`,
+          [String(authUid)],
+        );
+        const row = profile.rows[0] as any;
+        userName = `${row?.first_name || ""} ${row?.last_name || ""}`.trim() || userName;
+      } catch {
+        // The authenticated id remains authoritative even if profile lookup
+        // is temporarily unavailable; do not fall back to client text.
+      }
+      const isOwner = room.broadcasterId === socket.id;
+      room.totalComments++;
+      const msg = {
+        streamId,
+        userId: String(authUid),
+        userName,
+        message,
+        isVoice: data?.isVoice === true,
+        ...(typeof data?.voiceUrl === "string" ? { voiceUrl: data.voiceUrl } : {}),
+        isOwner,
+        timestamp: new Date().toISOString(),
+        id: Date.now(),
+      };
+      io.to(`stream:${streamId}`).emit("chat-message", msg);
       storage.createChatMessage({
-        streamId: Number(data.streamId),
-        userId: data.userId,
-        userName: data.userName,
-        message: data.message,
-        isVoice: data.isVoice || false,
+        streamId: numericStreamId,
+        userId: String(authUid),
+        userName,
+        message,
+        isVoice: data?.isVoice === true,
         isHidden: false,
       }).catch(() => {});
     });
@@ -1294,7 +1357,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             recipientGiftEGP = egpAmount;
             const revenueCredit = await client.query(
               `INSERT INTO revenue_transactions (user_id, type, amount_egp, description, channel_id)
-               VALUES ($1, 'earning', $2, $3, (SELECT id FROM channels WHERE user_id = $1 LIMIT 1))
+               VALUES ($1::text, 'earning', $2, $3,
+                 (SELECT id FROM channels WHERE channels.user_id::text = $1::text LIMIT 1))
                RETURNING id`,
                 [recipientUserId, egpAmount, `هدايا من بث مباشر - ${gift.name}`]
             );
@@ -1430,10 +1494,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
     });
 
-    socket.on("battle-start", (data: { streamId: string; mode: "1v1" | "2v2"; teamA?: string[]; teamB?: string[] }) => {
+    socket.on("battle-start", (data: { streamId: string; mode: "1v1" | "2v2"; teamA?: unknown; teamB?: unknown }) => {
+      if (!data || typeof data.streamId !== "string") return;
       const room = streamRooms.get(data.streamId);
       if (!room || room.broadcasterId !== socket.id || !["1v1", "2v2"].includes(data.mode)) return;
-      void startRoomBattle(data.streamId, data.mode, data.teamA || [], data.teamB || []);
+      void startRoomBattle(
+        data.streamId,
+        data.mode,
+        Array.isArray(data.teamA) ? data.teamA.filter((sid): sid is string => typeof sid === "string") : [],
+        Array.isArray(data.teamB) ? data.teamB.filter((sid): sid is string => typeof sid === "string") : [],
+      );
     });
 
     socket.on("battle-end", (data: { streamId: string }) => {
@@ -1997,24 +2067,173 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // Submit coin purchase order (user pays via Vodafone Cash / InstaPay / Bank)
   app.post("/api/coins/purchase-order", isAuthenticated, async (req: any, res) => {
-    const userId = req.user.claims.sub;
-    const { packageId, coins, amountEGP, paymentMethod, paymentRef, screenshotUrl, userName } = req.body || {};
-    if (!coins || !amountEGP || !paymentMethod) return res.status(400).json({ message: "بيانات ناقصة" });
-
-    const r = await pool.query(
-      `INSERT INTO coin_purchase_orders (user_id, user_name, package_id, coins, amount_egp, payment_method, payment_ref, screenshot_url, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending') RETURNING *`,
-      [userId, userName || null, packageId || null, coins, amountEGP, paymentMethod, paymentRef || null, screenshotUrl || null]
+    const userId = String(req.user.claims.sub);
+    const parsedPackageId = Number(req.body?.packageId);
+    const paymentRef = String(req.body?.paymentRef || "").trim();
+    const canonicalRef = canonicalPaymentReference(paymentRef);
+    const screenshotUrl = typeof req.body?.screenshotUrl === "string"
+      ? req.body.screenshotUrl.trim()
+      : "";
+    const rawPaymentMethod = String(req.body?.paymentMethod || "").trim();
+    const paymentMethodAliases: Record<string, string> = {
+      vodafone: "vodafone",
+      vodafone2: "vodafone2",
+      etisalat: "etisalat",
+      bank: "bank",
+      mobile_wallet: "mobile_wallet",
+      visa_bank: "visa_bank",
+      "فودافون كاش": "vodafone",
+      "اتصالات كاش": "etisalat",
+      instapay: "instapay",
+      "إنستاباي": "instapay",
+      "تحويل بنكي": "bank",
+    };
+    const paymentMethod = paymentMethodAliases[rawPaymentMethod] || "";
+    if (!Number.isInteger(parsedPackageId) || parsedPackageId <= 0) {
+      return res.status(400).json({ message: "باقة العملات غير صالحة" });
+    }
+    if (!paymentRef || paymentRef.length > 160 || !canonicalRef) {
+      return res.status(400).json({ message: "رقم مرجع الدفع مطلوب وصالح" });
+    }
+    if (!paymentMethod) {
+      return res.status(400).json({ message: "طريقة الدفع غير صالحة" });
+    }
+    if (!screenshotUrl) {
+      return res.status(400).json({ message: "صورة إيصال الدفع مطلوبة" });
+    }
+    if (!screenshotUrl.startsWith("/uploads/")) {
+      return res.status(400).json({ message: "صورة الإيصال لازم ترفعها من الزرار، مش رابط خارجي" });
+    }
+    const filename = screenshotUrl.replace(/^\/uploads\//, "");
+    const ownedFile = await pool.query(
+      `SELECT filename, mime_type, size FROM uploaded_files
+       WHERE user_id = $1 AND filename = $2 AND mime_type LIKE 'image/%'
+       LIMIT 1`,
+      [userId, filename],
     );
-    // Notify admin
+    if (ownedFile.rowCount !== 1) {
+      return res.status(400).json({ message: "صورة الإيصال غير صالحة — ارفعها من نفس حسابك" });
+    }
+    let proofDigest: string;
     try {
-      const adminId = ADMIN_USER_ID;
-      await pool.query(
-        `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coin_purchase', $2, $3)`,
-        [adminId, `طلب شحن عملات: ${userName || userId} دفع ${amountEGP} ج.م مقابل ${coins} عملة`, JSON.stringify({ orderId: r.rows[0].id, paymentMethod })]
+      proofDigest = await digestOwnedPaymentProof(screenshotUrl, {
+        filename: ownedFile.rows[0].filename,
+        mimeType: ownedFile.rows[0].mime_type,
+        size: ownedFile.rows[0].size,
+      });
+    } catch {
+      return res.status(400).json({ message: "تعذر التحقق من صورة الإيصال — ارفعها مرة أخرى" });
+    }
+    const userProfile = await pool.query(
+      `SELECT NULLIF(trim(concat_ws(' ', first_name, last_name)), '') AS user_name
+       FROM users WHERE id = $1 LIMIT 1`,
+      [userId],
+    );
+    const verifiedUserName = userProfile.rows[0]?.user_name || null;
+
+    let client: PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      await client.query("BEGIN");
+      const packageResult = await client.query(
+        `SELECT id, name, coins, bonus_coins, price_egp
+         FROM coin_packages
+         WHERE id = $1 AND is_active = true
+         FOR SHARE`,
+        [parsedPackageId],
       );
-    } catch (_) {}
-    res.json({ success: true, order: r.rows[0], message: "تم استلام طلبك — سيتم تأكيد الشحن خلال دقائق" });
+      if (packageResult.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "باقة العملات غير متاحة" });
+      }
+      const packageRow = packageResult.rows[0];
+      const packageCoins = parseCoinAmount(packageRow.coins, "coin package amount");
+      const bonusCoins = parseLedgerAmount(packageRow.bonus_coins ?? 0, "coin package bonus");
+      if (!Number.isInteger(bonusCoins) || bonusCoins < 0) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ message: "بيانات باقة العملات غير صالحة" });
+      }
+      const totalCoins = packageCoins + bonusCoins;
+      const packagePrice = parseLedgerAmount(packageRow.price_egp, "coin package price");
+      if (totalCoins <= 0 || packagePrice <= 0) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ message: "بيانات باقة العملات غير صالحة" });
+      }
+
+      // One receipt/reference can only represent one payment. Advisory locks
+      // cover concurrent retries without imposing a uniqueness constraint on
+      // historical rows that may already contain duplicates.
+      const lockKeys = paymentProofLockKeys(canonicalRef, proofDigest);
+      for (const lockKey of lockKeys) {
+        await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [lockKey]);
+      }
+      const duplicate = await client.query(
+        `SELECT id, status, 'coin_purchase'::text AS source
+         FROM coin_purchase_orders
+         WHERE ${canonicalPaymentReferenceSql("payment_ref")} = $1
+            OR proof_digest = $2
+            OR (proof_digest IS NULL AND screenshot_url = $3)
+         UNION ALL
+         SELECT id, status, 'payment_request'::text AS source
+         FROM payment_requests
+         WHERE ${canonicalPaymentReferenceSql("payment_ref")} = $1
+            OR proof_digest = $2
+            OR (proof_digest IS NULL AND screenshot_url = $3)
+         LIMIT 1`,
+        [canonicalRef, proofDigest, screenshotUrl],
+      );
+      if (duplicate.rowCount === 1) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          message: "تم تقديم إيصال أو مرجع الدفع من قبل، ولا يمكن شحنه مرتين",
+          existingStatus: duplicate.rows[0].status,
+        });
+      }
+
+      const inserted = await client.query(
+        `INSERT INTO coin_purchase_orders
+          (user_id, user_name, package_id, coins, amount_egp, payment_method,
+           payment_ref, proof_digest, screenshot_url, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
+         RETURNING *`,
+        [
+          userId,
+          verifiedUserName,
+          parsedPackageId,
+          totalCoins,
+          packagePrice,
+          paymentMethod,
+          paymentRef,
+          proofDigest,
+          screenshotUrl || null,
+        ],
+      );
+      assertSingleRowResult(inserted, "coin purchase order");
+      await client.query("COMMIT");
+
+      const order = inserted.rows[0];
+      await createNotification(
+        ADMIN_USER_ID,
+        "payment",
+        "طلب شراء عملات جديد",
+        `طلب ${order.user_name || userId}: ${totalCoins} عملة مقابل ${packagePrice.toFixed(2)} ج.م`,
+        "/admin",
+        undefined,
+        userId,
+        `coin-purchase:${order.id}:created`,
+      );
+      return res.json({
+        success: true,
+        order,
+        message: "تم استلام طلبك — سيتم تأكيد الشحن بعد مراجعة الإيصال",
+      });
+    } catch (error) {
+      if (client) await client.query("ROLLBACK").catch(() => {});
+      console.error("Coin purchase order create error:", error);
+      return res.status(500).json({ message: "تعذر إرسال طلب شراء العملات" });
+    } finally {
+      client?.release();
+    }
   });
 
   // Get my purchase orders
@@ -2111,12 +2330,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
         // Notifications are intentionally outside the ledger transaction:
         // a notification outage must never roll back a successful payment.
-        try {
-          await pool.query(
-            `INSERT INTO notifications (user_id, type, message, data) VALUES ($1, 'coins_approved', $2, $3)`,
-            [order.user_id, `✅ تم قبول طلب شحن ${coins} عملة وإضافتها لمحفظتك`, JSON.stringify({ orderId, coins })],
-          );
-        } catch (_) {}
+        await createNotification(
+          order.user_id,
+          "payment",
+          "تم قبول طلب شراء العملات",
+          `تم قبول طلب شحن ${coins} عملة وإضافتها لمحفظتك`,
+          "/wallet",
+          undefined,
+          adminId,
+          `coin-purchase:${orderId}:approved`,
+        );
         return res.json({ success: true, message: `تم قبول الطلب وإضافة ${coins} عملة` });
       }
 
@@ -3627,7 +3850,13 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     try {
       const { insertCommentSchema } = await import("@shared/schema");
       const userId = req.user.claims.sub;
-      const userName = req.user.claims?.first_name || req.user.claims?.name || "مستخدم";
+      let userName = "مستخدم";
+      const profile = await pool.query(
+        `SELECT first_name, last_name FROM users WHERE id::text = $1 LIMIT 1`,
+        [String(userId)],
+      );
+      const profileRow = profile.rows[0] as any;
+      userName = `${profileRow?.first_name || ""} ${profileRow?.last_name || ""}`.trim() || userName;
       const input = insertCommentSchema.parse({ ...req.body, userId, userName });
       const comment = await storage.createComment(input);
       // Notify content owner
@@ -4431,6 +4660,52 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     }
   });
 
+  type RevenueReportRole = "advertiser" | "publisher" | "both";
+
+  function normalizeRevenueReportRole(value: unknown): RevenueReportRole {
+    const role = typeof value === "string" ? value.trim().toLowerCase() : "";
+    if (role === "advertiser") return "advertiser";
+    if (role === "publisher" || role === "channel" || role === "creator") return "publisher";
+    // `user` is the persisted default for the custom signup flow and does
+    // not identify which account mode the user selected at login.
+    return "both";
+  }
+
+  /**
+   * Aggregate counters from the owner's ads without joining messages into the
+   * aggregate.  A message join would repeat each ad's counters once per
+   * message and make views/likes/comments incorrect.
+   */
+  async function getOwnAdStats(userId: string) {
+    const result = await db.execute(sql`
+      SELECT
+        COUNT(*)::int AS ad_count,
+        COALESCE(SUM(COALESCE(views_count, 0)), 0)::int AS views,
+        COALESCE(SUM(COALESCE(likes_count, 0)), 0)::int AS likes,
+        COALESCE(SUM(COALESCE(comments_count, 0)), 0)::int AS comments,
+        (
+          SELECT COUNT(*)::int
+          FROM direct_messages dm
+          WHERE dm.to_user_id = ${userId}
+            AND dm.ad_id IN (
+              SELECT own_ads.id
+              FROM ads own_ads
+              WHERE own_ads.user_id = ${userId}
+            )
+        ) AS inbound_messages
+      FROM ads
+      WHERE user_id = ${userId}
+    `);
+    const row = (result.rows[0] || {}) as any;
+    return {
+      adCount: Number(row.ad_count || 0),
+      views: Number(row.views || 0),
+      likes: Number(row.likes || 0),
+      comments: Number(row.comments || 0),
+      inboundMessages: Number(row.inbound_messages || 0),
+    };
+  }
+
   // REVENUE ROUTES (isolated per user)
   // ================================================================
   app.get("/api/revenue", isAuthenticated, async (req: any, res) => {
@@ -4488,6 +4763,39 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     }
   });
 
+  // The role is read from the authenticated user's persisted account record.
+  // It must not be inferred from whether campaign/channel rows happen to
+  // exist: both reports have valid empty states.
+  app.get("/api/revenue/capabilities", isAuthenticated, async (req: any, res) => {
+    const userId = String(req.user.claims.sub);
+    try {
+      const result = await db.execute(sql`SELECT role FROM users WHERE id = ${userId} LIMIT 1`);
+      const role = normalizeRevenueReportRole((result.rows[0] as any)?.role);
+      res.json({
+        role,
+        tabs: {
+          publisher: role !== "advertiser",
+          advertiser: role !== "publisher",
+        },
+      });
+    } catch (e: any) {
+      console.error("[revenue/capabilities] failed:", e instanceof Error ? e.message : "unknown database error");
+      res.status(500).json({ message: "تعذر تحميل صلاحيات تقارير الإيرادات حالياً" });
+    }
+  });
+
+  // Read-only counters for ads owned by the authenticated account.  Admins
+  // receive their own counters here, never a platform-wide aggregate.
+  app.get("/api/revenue/own-ad-stats", isAuthenticated, async (req: any, res) => {
+    const userId = String(req.user.claims.sub);
+    try {
+      res.json(await getOwnAdStats(userId));
+    } catch (e: any) {
+      console.error("[revenue/own-ad-stats] failed:", e instanceof Error ? e.message : "unknown database error");
+      res.status(500).json({ message: "تعذر تحميل إحصائيات إعلاناتك حالياً" });
+    }
+  });
+
   // ── تقرير المعلن التفصيلي ──────────────────────────────────────
   app.get("/api/advertiser/report", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
@@ -4530,10 +4838,11 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       // معاملات الإنفاق فقط (الصفحة الأولى فقط — استخدم /api/revenue?type=spending للترقيم)
       const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 30, 1), 100);
       const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
-      const [txs, totals, balance] = await Promise.all([
+      const [txs, totals, balance, ownAdStats] = await Promise.all([
         storage.getRevenueTransactions(userId, { type: 'spending', limit, offset }),
         storage.getRevenueTotals(userId),
         storage.getUserBalanceEGP(userId),
+        getOwnAdStats(userId),
       ]);
 
       res.json({
@@ -4541,6 +4850,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         transactions: txs,
         totalSpentEGP: totals.spending,
         balanceEGP: balance,
+        ownAdStats,
         hasMore: txs.length === limit,
         limit, offset,
       });
@@ -4572,11 +4882,12 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       // معاملات الأرباح فقط (الصفحة الأولى فقط — استخدم /api/revenue?type=earning للترقيم)
       const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 30, 1), 100);
       const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
-      const [txs, totals, balance, minWithdrawalRaw] = await Promise.all([
+      const [txs, totals, balance, minWithdrawalRaw, ownAdStats] = await Promise.all([
         storage.getRevenueTransactions(userId, { type: 'earning', limit, offset }),
         storage.getRevenueTotals(userId),
         storage.getWithdrawableBalanceEGP(userId),
         storage.getSetting('wallet_min_withdrawal_egp'),
+        getOwnAdStats(userId),
       ]);
       const configuredMinimum = Number(minWithdrawalRaw);
 
@@ -4585,6 +4896,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         totalEarnedEGP: totals.earning,
         withdrawnEGP: totals.withdrawal,
         balanceEGP: balance,
+        ownAdStats,
         minWithdrawalEGP: Math.max(10, Number.isFinite(configuredMinimum) ? configuredMinimum : 100),
         hasMore: txs.length === limit,
         limit, offset,
@@ -5325,11 +5637,23 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         input.serviceType = services.join(",");
       }
 
-      if (input.type === "top_up" && input.screenshotUrl) {
+      let proofDigest: string | null = null;
+      if (input.type === "top_up") {
+        const canonicalRef = canonicalPaymentReference(input.paymentRef);
+        if (!canonicalRef) {
+          return res.status(400).json({ message: "رقم مرجع الدفع غير صالح", field: "paymentRef" });
+        }
+        if (!input.screenshotUrl || !input.screenshotUrl.startsWith("/uploads/")) {
+          return res.status(400).json({ message: "صورة الإيصال غير صالحة", field: "screenshotUrl" });
+        }
         // Anti-fraud: verify the receipt screenshot was uploaded by this user.
         const filename = input.screenshotUrl.replace(/^\/uploads\//, "");
         const ownedFile = await db
-          .select({ id: uploadedFiles.id, mimeType: uploadedFiles.mimeType })
+          .select({
+            filename: uploadedFiles.filename,
+            mimeType: uploadedFiles.mimeType,
+            size: uploadedFiles.size,
+          })
           .from(uploadedFiles)
           .where(and(eq(uploadedFiles.userId, userId), eq(uploadedFiles.filename, filename)))
           .limit(1);
@@ -5345,6 +5669,17 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
             message: "صورة الإيصال لازم تكون صورة (PNG / JPG / WEBP) — مش فيديو أو ملف تاني",
             field: "screenshotUrl",
           });
+        }
+        try {
+          proofDigest = await digestOwnedPaymentProof(input.screenshotUrl, ownedFile[0]);
+        } catch {
+          return res.status(400).json({
+            message: "تعذر التحقق من صورة الإيصال — ارفعها مرة أخرى",
+            field: "screenshotUrl",
+          });
+        }
+        if (!proofDigest) {
+          return res.status(400).json({ message: "تعذر التحقق من صورة الإيصال", field: "screenshotUrl" });
         }
       }
 
@@ -5419,6 +5754,72 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
               normalizedDestination.replace(/\D/g, "").slice(-4) || normalizedDestination.slice(-4),
             ]
           );
+          await client.query("COMMIT");
+          return res.status(201).json(safePaymentRequest(deepToCamel(inserted.rows[0])));
+        } catch (error) {
+          await client.query("ROLLBACK").catch(() => undefined);
+          throw error;
+        } finally {
+          client.release();
+        }
+      }
+
+      if (input.type === "top_up") {
+        const paymentRef = String(input.paymentRef || "").trim();
+        const canonicalRef = canonicalPaymentReference(paymentRef);
+        const screenshotUrl = input.screenshotUrl || null;
+        if (!proofDigest || !screenshotUrl) {
+          return res.status(400).json({ message: "تعذر التحقق من صورة الإيصال", field: "screenshotUrl" });
+        }
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          const lockKeys = paymentProofLockKeys(canonicalRef, proofDigest);
+          for (const lockKey of lockKeys) {
+            await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [lockKey]);
+          }
+          const duplicate = await client.query(
+            `SELECT id, status, 'payment_request'::text AS source
+             FROM payment_requests
+             WHERE ${canonicalPaymentReferenceSql("payment_ref")} = $1
+                OR proof_digest = $2
+                OR (proof_digest IS NULL AND screenshot_url = $3)
+             UNION ALL
+             SELECT id, status, 'coin_purchase'::text AS source
+             FROM coin_purchase_orders
+             WHERE ${canonicalPaymentReferenceSql("payment_ref")} = $1
+                OR proof_digest = $2
+                OR (proof_digest IS NULL AND screenshot_url = $3)
+             LIMIT 1`,
+            [canonicalRef, proofDigest, screenshotUrl],
+          );
+          if (duplicate.rowCount === 1) {
+            await client.query("ROLLBACK");
+            return res.status(409).json({
+              message: "تم تقديم إيصال أو مرجع الدفع من قبل، ولا يمكن شحنه مرتين",
+              existingStatus: duplicate.rows[0].status,
+            });
+          }
+          const inserted = await client.query(
+            `INSERT INTO payment_requests
+              (order_number, user_id, ad_id, type, amount_egp, method, phone_number,
+               payment_ref, proof_digest, payout_name, service_type, screenshot_url, status)
+             VALUES ($1, $2, $3, 'top_up', $4, $5, $6, $7, $8, NULL, $9, $10, 'pending')
+             RETURNING *`,
+            [
+              input.orderNumber,
+              userId,
+              input.adId ?? null,
+              input.amountEGP,
+              input.method,
+              input.phoneNumber ?? null,
+              paymentRef,
+              proofDigest,
+              input.serviceType,
+              screenshotUrl,
+            ],
+          );
+          assertSingleRowResult(inserted, "manual payment request");
           await client.query("COMMIT");
           return res.status(201).json(safePaymentRequest(deepToCamel(inserted.rows[0])));
         } catch (error) {

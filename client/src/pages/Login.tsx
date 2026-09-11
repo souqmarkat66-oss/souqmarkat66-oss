@@ -9,6 +9,11 @@ import {
   Mail, Lock, UserPlus, ChevronLeft, KeyRound
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import {
+  REVENUE_REPORT_PENDING_PREFERENCE_KEY,
+  normalizeRevenueTabPreference,
+  revenueReportPreferenceKey,
+} from "@/lib/revenue-report";
 
 const ROLES = [
   {
@@ -38,6 +43,27 @@ const ROLES = [
 ];
 
 type Screen = "welcome" | "login" | "register" | "forgot" | "otp" | "set-password";
+
+function rememberReportPreferenceForLogin(selectedRole: string | null, userId?: unknown) {
+  const tab = normalizeRevenueTabPreference(selectedRole);
+  try {
+    if (!tab) {
+      sessionStorage.removeItem(REVENUE_REPORT_PENDING_PREFERENCE_KEY);
+      return;
+    }
+    const userKey = revenueReportPreferenceKey(userId);
+    if (userKey) {
+      localStorage.setItem(userKey, tab);
+      sessionStorage.removeItem(REVENUE_REPORT_PENDING_PREFERENCE_KEY);
+    } else {
+      // Temporary handoff only. Revenue promotes this to a user-keyed value
+      // after authentication, so it cannot act as an auth/permission flag.
+      sessionStorage.setItem(REVENUE_REPORT_PENDING_PREFERENCE_KEY, tab);
+    }
+  } catch {
+    // A browser storage restriction must never block authentication.
+  }
+}
 
 export default function Login() {
   const { user, login, register, setPassword } = useAuth();
@@ -86,8 +112,11 @@ export default function Login() {
     if (!identifier || !password) return toast({ variant: "destructive", title: "أدخل البيانات المطلوبة" });
     try {
       if (selectedRole) localStorage.setItem("souq_role", selectedRole);
-      await login.mutateAsync({ identifier, password });
+      rememberReportPreferenceForLogin(selectedRole);
+      const result = await login.mutateAsync({ identifier, password });
+      rememberReportPreferenceForLogin(selectedRole, result?.user?.id);
     } catch (err: any) {
+      rememberReportPreferenceForLogin(null);
       if (err?.status === 403) {
         setForgotIdentifier(identifier);
         setScreen("forgot");
@@ -104,13 +133,16 @@ export default function Login() {
     if (regPassword.length < 6) return toast({ variant: "destructive", title: "كلمة المرور 6 أحرف على الأقل" });
     try {
       if (selectedRole) localStorage.setItem("souq_role", selectedRole);
-      await register.mutateAsync({
+      rememberReportPreferenceForLogin(selectedRole);
+      const result = await register.mutateAsync({
         firstName: regFirstName,
         lastName: regLastName,
         email: regEmail,
         password: regPassword,
       });
+      rememberReportPreferenceForLogin(selectedRole, result?.user?.id);
     } catch (err: any) {
+      rememberReportPreferenceForLogin(null);
       toast({ variant: "destructive", title: err?.message || "فشل التسجيل" });
     }
   };

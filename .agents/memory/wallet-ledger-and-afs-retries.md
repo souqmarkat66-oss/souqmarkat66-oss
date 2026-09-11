@@ -26,3 +26,15 @@ Payment outcome notifications and rejection audit records need stable operation-
 **Why:** Provider verification pages and admin review endpoints can be retried, which must not create duplicate user messages, admin alerts, or rejected-payment rows.
 
 **How to apply:** Derive keys from the durable payment/order ID plus outcome and recipient; expose only categorized Arabic decline reasons to users, never raw provider descriptions.
+
+The legacy external-wallet transfer/reference/receipt flow must remain a first-class alternative to AFS and internal EGP-to-coin conversion.
+
+**Why:** The owner clarified that “the old wallet” means Vodafone Cash, Etisalat Cash, InstaPay and Souq Market transfers reviewed by an administrator—not Visa and not merely spending an existing site balance. Replacing that path with a new wallet-purchase button did not address the request.
+
+**How to apply:** Verify submission, receipt/reference review, approval, coin or EGP credit, gift spending and withdrawal separately. A payment reference is not proof of settlement. Deposits and coin purchases need verified transfer evidence; withdrawal requests must not require an incoming-payment receipt.
+
+Legacy production identifier columns can mix PostgreSQL text and varchar even when development schemas look uniform.
+
+**Why:** The deployed gift transaction rolled back with PostgreSQL 42P08 because one parameter was inferred as both types across an inserted ledger user ID and a channel lookup. This was confirmed from production errors and reproduced with mixed-type temporary tables.
+
+**How to apply:** Explicitly type parameters used across legacy identifier columns and include mixed-schema integration coverage. Diagnose actual production error codes before guessing that a table or balance is missing.
