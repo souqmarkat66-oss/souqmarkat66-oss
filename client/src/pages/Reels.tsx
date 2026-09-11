@@ -15,6 +15,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { apiRequest } from "@/lib/queryClient";
 import { useTTS } from "@/hooks/use-tts";
 import { useAuth } from "@/hooks/use-auth";
+import { buildImagesToVideoRequest, formatReelCreationError } from "@/lib/reels-creation";
 
 type Reel = {
   id: number;
@@ -50,12 +51,6 @@ function getYouTubeEmbedUrl(url: string): string | null {
   return null;
 }
 
-// Check if URL is an external video (non-uploaded)
-function isExternalVideoUrl(url: string): boolean {
-  if (!url) return false;
-  return (url.startsWith('http://') || url.startsWith('https://')) && !url.includes('/uploads/');
-}
-
 // Parse videoUrl — may be a JSON array of image URLs or a single URL
 function parseMediaUrls(videoUrl: string): string[] {
   if (!videoUrl) return [];
@@ -63,6 +58,22 @@ function parseMediaUrls(videoUrl: string): string[] {
     try { return JSON.parse(videoUrl) as string[]; } catch {}
   }
   return [videoUrl];
+}
+
+async function readReelApiResponse(res: Response): Promise<any> {
+  const text = await res.text();
+  let data: any = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+  }
+  if (!res.ok) {
+    throw new Error(formatReelCreationError(res.status, data?.message ?? data));
+  }
+  return data;
 }
 
 function renderWithHashtags(text: string, onHashtag?: (tag: string) => void) {
@@ -973,6 +984,9 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [mediaTypeTab, setMediaTypeTab] = useState<'video' | 'image'>('video');
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [generatingImage, setGeneratingImage] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   // Video mode
   const [videoUrl, setVideoUrl] = useState("");
   const [uploadingVideo, setUploadingVideo] = useState(false);
@@ -999,45 +1013,64 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
   const hasMedia = finalVideoUrl.trim() !== "" && finalVideoUrl !== "[]";
 
   const createMutation = useMutation({
-    mutationFn: () => apiRequest('POST', '/api/reels', {
-      title,
-      description,
-      videoUrl: finalVideoUrl,
-      audioUrl: (() => {
-        const explicit = audioUrl.trim();
-        if (explicit) return explicit;
-        if (tts.audioUrl) return tts.audioUrl;
-        return undefined;
-      })(),
-    }),
+    mutationFn: async () => {
+      const res = await fetch('/api/reels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          title: title.trim(),
+          description: description.trim(),
+          videoUrl: finalVideoUrl,
+          audioUrl: audioUrl.trim() || tts.audioUrl || undefined,
+        }),
+      });
+      return readReelApiResponse(res);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/reels'] });
       setOpen(false);
       setTitle(""); setDescription(""); setVideoUrl(""); setImageUrls([]); setAudioUrl("");
+      setAiPrompt(""); setFormError(null);
+      if (fileVideoRef.current) fileVideoRef.current.value = "";
+      if (fileImageRef.current) fileImageRef.current.value = "";
+      if (fileAudioRef.current) fileAudioRef.current.value = "";
       tts.reset();
       toast({ title: "🎉 تم النشر بنجاح!" });
     },
-    onError: (err: any) => toast({ variant: "destructive", title: "خطأ", description: err.message }),
+    onError: (err: any) => {
+      const message = err instanceof Error ? err.message : formatReelCreationError(0, err?.message);
+      setFormError(message);
+      toast({ variant: "destructive", title: "فشل نشر الريل", description: message });
+    },
   });
 
   const uploadFile = async (file: File): Promise<string> => {
     const formData = new FormData();
     formData.append("file", file);
     const res = await fetch("/api/upload", { method: "POST", body: formData, credentials: "include" });
-    const data = await res.json();
-    if (!data.url) throw new Error("رفع فاشل");
+    const data = await readReelApiResponse(res);
+    if (typeof data.url !== "string" || !data.url.trim()) {
+      throw new Error("لم يُرجع الخادم رابط الملف المرفوع.");
+    }
     return data.url;
   };
 
   const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = "";
+    setFormError(null);
     setUploadingVideo(true);
     try {
       const url = await uploadFile(file);
       setVideoUrl(url);
       toast({ title: "✅ تم رفع الفيديو!" });
-    } catch { toast({ variant: "destructive", title: "فشل رفع الفيديو" }); }
+    } catch (err: any) {
+      const message = err instanceof Error ? err.message : formatReelCreationError(0, err?.message);
+      setFormError(message);
+      toast({ variant: "destructive", title: "فشل رفع الفيديو", description: message });
+    }
     finally { setUploadingVideo(false); }
   };
 
@@ -1045,6 +1078,7 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
     e.target.value = "";
+    setFormError(null);
     const remaining = 10 - imageUrls.length;
     const toUpload = files.slice(0, remaining);
     if (!toUpload.length) { toast({ title: "⚠ وصلت للحد الأقصى (10 صور)" }); return; }
@@ -1053,25 +1087,78 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
       const uploaded = await Promise.all(toUpload.map(uploadFile));
       setImageUrls(prev => [...prev, ...uploaded]);
       toast({ title: `✅ تم رفع ${uploaded.length} صورة دفعة واحدة!` });
-    } catch { toast({ variant: "destructive", title: "فشل رفع الصور" }); }
+    } catch (err: any) {
+      const message = err instanceof Error ? err.message : formatReelCreationError(0, err?.message);
+      setFormError(message);
+      toast({ variant: "destructive", title: "فشل رفع الصور", description: message });
+    }
     finally { setUploadingImages(false); }
   };
 
   const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = "";
+    setFormError(null);
     setUploadingAudio(true);
     try {
       const url = await uploadFile(file);
       setAudioUrl(url);
       toast({ title: "🎵 تم رفع الموسيقى!" });
-    } catch { toast({ variant: "destructive", title: "فشل رفع الصوت" }); }
+    } catch (err: any) {
+      const message = err instanceof Error ? err.message : formatReelCreationError(0, err?.message);
+      setFormError(message);
+      toast({ variant: "destructive", title: "فشل رفع الصوت", description: message });
+    }
     finally { setUploadingAudio(false); }
+  };
+
+  const handleGenerateImage = async () => {
+    if (imageUrls.length >= 10) {
+      const message = "وصلت للحد الأقصى (10 صور). احذف صورة أولاً ثم حاول مرة أخرى.";
+      setFormError(message);
+      toast({ variant: "destructive", title: "تعذّر توليد الصورة", description: message });
+      return;
+    }
+    const prompt = aiPrompt.trim() || [title.trim(), description.trim()].filter(Boolean).join(". ");
+    if (!prompt) {
+      const message = "اكتب وصفاً للصورة أو أدخل عنوان الريل أولاً.";
+      setFormError(message);
+      toast({ variant: "destructive", title: "وصف الصورة مطلوب", description: message });
+      return;
+    }
+    setFormError(null);
+    setGeneratingImage(true);
+    try {
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ prompt, size: "1024x1024" }),
+      });
+      const data = await readReelApiResponse(res);
+      if (typeof data.url !== "string" || !data.url.trim()) {
+        throw new Error("لم يُرجع الخادم رابط الصورة المولدة.");
+      }
+      setImageUrls(prev => [...prev, data.url].slice(0, 10));
+      setMediaTypeTab("image");
+      toast({ title: "🎨 تم توليد الصورة وإضافتها إلى الريل!" });
+    } catch (err: any) {
+      const message = err instanceof Error ? err.message : formatReelCreationError(0, err?.message);
+      setFormError(message);
+      toast({ variant: "destructive", title: "فشل توليد الصورة", description: message });
+    } finally {
+      setGeneratingImage(false);
+    }
   };
 
   const resetTab = (tab: 'video' | 'image') => {
     setMediaTypeTab(tab);
     setVideoUrl(""); setImageUrls([]); setAudioUrl("");
+    setFormError(null);
+    if (fileVideoRef.current) fileVideoRef.current.value = "";
+    if (fileImageRef.current) fileImageRef.current.value = "";
+    if (fileAudioRef.current) fileAudioRef.current.value = "";
   };
 
   return (
@@ -1112,6 +1199,44 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
             </button>
           </div>
 
+          {/* ── AI IMAGE MODE ── */}
+          <div className="rounded-xl bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border border-purple-200/50 dark:border-purple-700/30 p-3 space-y-2">
+            <p className="text-sm font-bold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
+              🎨 ولّد صورة بالذكاء الاصطناعي
+            </p>
+            <p className="text-xs text-muted-foreground">
+              ستُحفظ الصورة في حسابك ويمكن استخدامها مباشرة في الريل. هذه الميزة قد تستهلك رصيد ذكاء اصطناعي.
+            </p>
+            <Input
+              value={aiPrompt}
+              onChange={e => setAiPrompt(e.target.value)}
+              placeholder="صف الصورة التي تريدها..."
+              dir="rtl"
+              disabled={generatingImage}
+              data-testid="input-reel-ai-image-prompt"
+            />
+            <Button
+              type="button"
+              onClick={handleGenerateImage}
+              disabled={generatingImage || imageUrls.length >= 10 || (!aiPrompt.trim() && !title.trim() && !description.trim())}
+              className="w-full gap-2 bg-purple-600 hover:bg-purple-700"
+              data-testid="btn-generate-reel-ai-image"
+            >
+              {generatingImage
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> جاري توليد الصورة...</>
+                : <>✨ توليد صورة وإضافتها للريل</>}
+            </Button>
+          </div>
+
+          {formError && (
+            <div
+              role="alert"
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800/50 dark:bg-red-950/30 dark:text-red-300"
+            >
+              {formError}
+            </div>
+          )}
+
           {/* ── VIDEO MODE ── */}
           {mediaTypeTab === 'video' && (
             <div className="space-y-2">
@@ -1134,8 +1259,9 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
                       : <><Upload className="w-8 h-8 text-primary" /><span className="text-sm font-medium">ارفع فيديو</span><span className="text-xs text-muted-foreground">MP4، MOV — حتى 200MB</span></>
                     }
                   </button>
-                  <div className="flex items-center gap-2"><div className="flex-1 h-px bg-border" /><span className="text-xs text-muted-foreground">أو رابط</span><div className="flex-1 h-px bg-border" /></div>
-                  <Input placeholder="https://example.com/video.mp4" value={videoUrl} onChange={e => setVideoUrl(e.target.value)} dir="ltr" data-testid="input-video-url" />
+                  <p className="text-xs text-muted-foreground text-center">
+                    ارفع ملفاً من جهازك — الروابط الخارجية غير مدعومة حفاظاً على ملكية ملفاتك.
+                  </p>
                 </>
               )}
             </div>
@@ -1191,12 +1317,9 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
                         : <><ImageIcon className="w-8 h-8 text-primary" /><span className="text-sm font-medium">ارفع صوراً من جهازك</span><span className="text-xs text-muted-foreground">يمكن اختيار أكثر من صورة — JPG, PNG, WebP</span></>
                       }
                     </button>
-                    <div className="flex items-center gap-2"><div className="flex-1 h-px bg-border" /><span className="text-xs text-muted-foreground">أو أدخل رابط صورة</span><div className="flex-1 h-px bg-border" /></div>
-                    <Input
-                      placeholder="https://example.com/image.jpg"
-                      onBlur={e => { if (e.target.value.trim() && isImageUrl(e.target.value.trim())) setImageUrls([e.target.value.trim()]); }}
-                      dir="ltr" data-testid="input-image-url"
-                    />
+                    <p className="text-xs text-muted-foreground text-center">
+                      ارفع صوراً من جهازك أو استخدم مولّد الصور أعلاه — الروابط الخارجية غير مدعومة.
+                    </p>
                   </>
                 )}
               </div>
@@ -1214,25 +1337,27 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
                     type="button"
                     disabled={convertingToVideo}
                     onClick={async () => {
+                       setFormError(null);
                       setConvertingToVideo(true);
                       try {
-                        const res = await fetch('/api/ai/images-to-video', {
+                         const res = await fetch('/api/ai/images-to-video', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            imageUrls,
-                            audioUrl: audioUrl || (tts.audioUrl ?? undefined),
-                            duration: 3,
-                          }),
-                        });
-                        const data = await res.json();
-                        if (!res.ok) throw new Error(data.message);
+                           credentials: 'include',
+                           body: JSON.stringify(buildImagesToVideoRequest(imageUrls, audioUrl || tts.audioUrl || undefined)),
+                         });
+                         const data = await readReelApiResponse(res);
+                         if (typeof data.url !== "string" || !data.url.trim()) {
+                           throw new Error("لم يُرجع الخادم رابط الفيديو الناتج.");
+                         }
                         setVideoUrl(data.url);
                         setImageUrls([]);
                         setMediaTypeTab('video');
                         toast({ title: "🎬 تم تحويل الصور لفيديو بنجاح!" });
                       } catch (e: any) {
-                        toast({ variant: "destructive", title: "فشل التحويل", description: e.message });
+                         const message = e instanceof Error ? e.message : formatReelCreationError(0, e?.message);
+                         setFormError(message);
+                         toast({ variant: "destructive", title: "فشل التحويل", description: message });
                       } finally {
                         setConvertingToVideo(false);
                       }
@@ -1272,7 +1397,9 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
                   </div>
                 )}
                 {!audioUrl && (
-                  <Input placeholder="أو رابط مباشر لملف mp3..." value={audioUrl} onChange={e => setAudioUrl(e.target.value)} dir="ltr" className="text-sm" data-testid="input-audio-url" />
+                   <p className="text-xs text-muted-foreground text-center">
+                     اختياري — ارفع ملفاً من جهازك فقط. يمكن أيضاً استخدام الصوت المولّد من وصف الريل.
+                   </p>
                 )}
               </div>
             </div>
@@ -1347,8 +1474,10 @@ function CreateReelDialog({ centered = false }: { centered?: boolean }) {
                         : title;
                       try {
                         await tts.generate(text, ttsVoice, true);
-                      } catch {
-                        toast({ variant: "destructive", title: "فشل توليد الصوت", description: "تأكد من اتصالك" });
+                       } catch (err: any) {
+                         const message = formatReelCreationError(0, err instanceof Error ? err.message : err?.message);
+                         setFormError(message);
+                         toast({ variant: "destructive", title: "فشل توليد الصوت", description: message });
                       }
                     }}
                     className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-purple-600 text-white text-sm font-bold hover:bg-purple-700 disabled:opacity-50 transition-all"

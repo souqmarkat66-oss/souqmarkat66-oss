@@ -14,3 +14,4 @@
 - [Admin provider secret vault](admin-provider-secret-vault.md) — external provider keys may be admin-managed only as AES-GCM ciphertext; environment values always win and plaintext never returns.
 - [Frontend module recovery](frontend-recovery.md) — retry code downloads only; require explicit reloads so recovery cannot silently disrupt financial forms.
 - [Personal report scope](personal-report-scope.md) — personal financial reports stay self-only even for admins; pending requests are not settled ledger movements.
+- [Legacy Reels media](legacy-reels-media.md) — validate new/replaced uploads strictly; preserve unchanged historical references and recover missing originals separately.

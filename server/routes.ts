@@ -24,6 +24,7 @@ import { tmpdir } from "os";
 import { secureUpload } from "./upload";
 import path from "path";
 import fs from "fs";
+import sharp from "sharp";
 import { db, pool } from "./db";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { uploadedFiles } from "@shared/schema";
@@ -181,6 +182,7 @@ const MAX_AI_VIDEO_IMAGE_BYTES = 25 * 1024 * 1024;
 const MAX_AI_VIDEO_IMAGE_TOTAL_BYTES = 100 * 1024 * 1024;
 const MAX_AI_VIDEO_AUDIO_BYTES = 25 * 1024 * 1024;
 const MAX_AI_VIDEO_OUTPUT_BYTES = 250 * 1024 * 1024;
+const MAX_REEL_MEDIA_BYTES = 200 * 1024 * 1024;
 
 function ownedUploadFilename(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -202,7 +204,7 @@ async function removeOwnedUploadRecord(userId: string, filename: string): Promis
 async function resolveOwnedLocalMedia(
   userId: string,
   urls: unknown[],
-  mimePrefix: "image/" | "audio/",
+  mimePrefix: "image/" | "audio/" | "video/" | readonly string[],
   maxEachBytes: number,
   maxTotalBytes: number,
 ): Promise<string[] | undefined> {
@@ -236,7 +238,9 @@ async function resolveOwnedLocalMedia(
     const declaredSize = Number(file.size);
     if (
       file.url !== `/uploads/${file.filename}` ||
-      !file.mimeType.startsWith(mimePrefix) ||
+      !(typeof mimePrefix === "string"
+        ? file.mimeType.startsWith(mimePrefix)
+        : mimePrefix.some(prefix => file.mimeType.startsWith(prefix))) ||
       !Number.isSafeInteger(declaredSize) ||
       declaredSize < 1 ||
       declaredSize > maxEachBytes
@@ -253,6 +257,53 @@ async function resolveOwnedLocalMedia(
     localPaths.push(localPath);
   }
   return localPaths;
+}
+
+/**
+ * Reel media is intentionally restricted to the same upload records used by
+ * the media picker.  Legacy reels may still contain provider URLs and remain
+ * readable, but newly published/replaced media must be an owned local file.
+ */
+function parseReelMediaUrls(value: unknown): string[] | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 20_000) {
+    return undefined;
+  }
+  if (ownedUploadFilename(value)) return [value];
+  try {
+    const parsed = JSON.parse(value);
+    if (
+      !Array.isArray(parsed) ||
+      parsed.length < 1 ||
+      parsed.length > 15 ||
+      parsed.some(item => typeof item !== "string")
+    ) {
+      return undefined;
+    }
+    return parsed as string[];
+  } catch {
+    return undefined;
+  }
+}
+
+async function isOwnedReelMedia(
+  userId: string,
+  value: unknown,
+  mimePrefixes: "image/" | "audio/" | "video/" | readonly string[],
+): Promise<boolean> {
+  const urls = parseReelMediaUrls(value);
+  if (!urls) return false;
+  const isJsonCollection = typeof value === "string" && value.trim().startsWith("[");
+  if (mimePrefixes === "audio/" && (isJsonCollection || urls.length !== 1)) return false;
+  // The legacy JSON representation is an image slideshow. Do not accept
+  // videos inside it, since the existing player renders every item as <img>.
+  const effectivePrefixes = isJsonCollection ? ["image/"] : mimePrefixes;
+  return !!(await resolveOwnedLocalMedia(
+    userId,
+    urls,
+    effectivePrefixes,
+    MAX_REEL_MEDIA_BYTES,
+    MAX_REEL_MEDIA_BYTES,
+  ));
 }
 
 async function requireAdmin(req: any, res: any, next: any) {
@@ -4115,8 +4166,28 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     try {
       const { insertReelSchema } = await import("@shared/schema");
       const userId = req.user.claims.sub;
+      const body = req.body ?? {};
+      if (!(await isOwnedReelMedia(userId, body.videoUrl, ["image/", "video/"]))) {
+        return res.status(403).json({ message: "محتوى الريل يجب أن يكون ملفاً مرفوعاً من حسابك" });
+      }
+      if (
+        body.audioUrl !== undefined &&
+        body.audioUrl !== null &&
+        body.audioUrl !== "" &&
+        !(await isOwnedReelMedia(userId, body.audioUrl, "audio/"))
+      ) {
+        return res.status(403).json({ message: "الصوت يجب أن يكون ملفاً مرفوعاً من حسابك" });
+      }
+      if (
+        body.thumbnailUrl !== undefined &&
+        body.thumbnailUrl !== null &&
+        body.thumbnailUrl !== "" &&
+        !(await isOwnedReelMedia(userId, body.thumbnailUrl, "image/"))
+      ) {
+        return res.status(403).json({ message: "غلاف الريل يجب أن يكون ملفاً مرفوعاً من حسابك" });
+      }
       const channel = await storage.getChannelByUserId(userId);
-      const input = insertReelSchema.parse({ ...req.body, userId, channelId: channel?.id });
+      const input = insertReelSchema.parse({ ...body, userId, channelId: channel?.id });
       const reel = await storage.createReel(input);
       res.status(201).json(reel);
     } catch (err: any) {
@@ -4125,11 +4196,85 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   });
 
   app.put("/api/reels/:id", isAuthenticated, async (req: any, res) => {
-    const reel = await storage.getReel(Number(req.params.id));
-    if (!reel) return res.status(404).json({ message: "Not found" });
-    if (reel.userId !== req.user.claims.sub && !isAdminUser(req)) return res.status(403).json({ message: "Forbidden" });
-    const updated = await storage.updateReel(Number(req.params.id), req.body);
-    res.json(updated);
+    try {
+      const reelId = Number(req.params.id);
+      if (!Number.isSafeInteger(reelId) || reelId < 1) return res.status(400).json({ message: "Invalid reel id" });
+      const reel = await storage.getReel(reelId);
+      if (!reel) return res.status(404).json({ message: "Not found" });
+      const userId = req.user.claims.sub;
+      const admin = isAdminUser(req);
+      if (reel.userId !== userId && !admin) return res.status(403).json({ message: "Forbidden" });
+
+      const body = req.body ?? {};
+      const update: Record<string, unknown> = {};
+      if (body.title !== undefined) {
+        if (typeof body.title !== "string" || !body.title.trim() || body.title.length > 500) {
+          return res.status(400).json({ message: "عنوان الريل غير صالح" });
+        }
+        update.title = body.title;
+      }
+      if (body.description !== undefined) {
+        if (body.description !== null && (typeof body.description !== "string" || body.description.length > 10_000)) {
+          return res.status(400).json({ message: "وصف الريل غير صالح" });
+        }
+        update.description = body.description;
+      }
+      if (body.videoUrl !== undefined) {
+        // A legacy provider URL may be sent back unchanged by the old edit
+        // dialog. Keep it readable, but never allow a new/replaced remote
+        // reference to be published.
+        const unchangedLegacyMedia = body.videoUrl === reel.videoUrl;
+        if (body.videoUrl !== null && body.videoUrl !== "" && !unchangedLegacyMedia) {
+          if (!(await isOwnedReelMedia(userId, body.videoUrl, ["image/", "video/"]))) {
+            return res.status(403).json({ message: "محتوى الريل يجب أن يكون ملفاً مرفوعاً من حسابك" });
+          }
+        }
+        update.videoUrl = body.videoUrl;
+      }
+      if (body.audioUrl !== undefined) {
+        const unchangedLegacyAudio = body.audioUrl === reel.audioUrl;
+        if (body.audioUrl !== null && body.audioUrl !== "" && !unchangedLegacyAudio) {
+          if (!(await isOwnedReelMedia(userId, body.audioUrl, "audio/"))) {
+            return res.status(403).json({ message: "الصوت يجب أن يكون ملفاً مرفوعاً من حسابك" });
+          }
+        }
+        update.audioUrl = body.audioUrl;
+      }
+      if (body.thumbnailUrl !== undefined) {
+        if (body.thumbnailUrl !== null && typeof body.thumbnailUrl !== "string") {
+          return res.status(400).json({ message: "غلاف الريل غير صالح" });
+        }
+        const unchangedLegacyThumbnail = body.thumbnailUrl === reel.thumbnailUrl;
+        if (
+          body.thumbnailUrl !== null &&
+          body.thumbnailUrl !== "" &&
+          !unchangedLegacyThumbnail &&
+          !(await isOwnedReelMedia(userId, body.thumbnailUrl, "image/"))
+        ) {
+          return res.status(403).json({ message: "غلاف الريل يجب أن يكون ملفاً مرفوعاً من حسابك" });
+        }
+        update.thumbnailUrl = body.thumbnailUrl;
+      }
+      if (body.duration !== undefined) {
+        if (!Number.isSafeInteger(body.duration) || body.duration < 0 || body.duration > 24 * 60 * 60) {
+          return res.status(400).json({ message: "مدة الريل غير صالحة" });
+        }
+        update.duration = body.duration;
+      }
+      // Status is an administrative moderation field, not a user-controlled
+      // content field. Keeping it here preserves the existing admin panel.
+      if (body.status !== undefined) {
+        if (!admin || (body.status !== "active" && body.status !== "hidden")) {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+        update.status = body.status;
+      }
+      if (!Object.keys(update).length) return res.status(400).json({ message: "لا توجد تعديلات صالحة" });
+      const updated = await storage.updateReel(reelId, update);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message || "تعذر تعديل الريل" });
+    }
   });
 
   app.delete("/api/reels/:id", isAuthenticated, async (req: any, res) => {
@@ -7026,21 +7171,48 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         n: 1,
         size: size as any,
       });
-      // Always save locally — b64_json or download from URL — so the image persists
+      // Always save locally — b64_json or download from URL — so the image
+      // persists. Normalize through sharp before creating the ownership record:
+      // Buffer.from() alone accepts arbitrary bytes as "base64", which would
+      // leave a broken upload that later fails in the images-to-video route.
       const b64 = response.data?.[0]?.b64_json;
       const imageUrl = response.data?.[0]?.url;
-      const filename = `ai-img-${Date.now()}.png`;
+      const filename = `ai-img-${randomUUID()}.png`;
       const savePath = path.join(process.cwd(), 'uploads', filename);
+      let sourceBuffer: Buffer;
       if (b64) {
-        fs.writeFileSync(savePath, Buffer.from(b64, 'base64'));
+        const compactB64 = b64.replace(/\s/g, "");
+        if (
+          !compactB64 ||
+          compactB64.length % 4 === 1 ||
+          !/^[A-Za-z0-9+/]*={0,2}$/.test(compactB64)
+        ) {
+          throw new Error("Generated image data is invalid");
+        }
+        sourceBuffer = Buffer.from(compactB64, 'base64');
       } else if (imageUrl) {
         const imgRes = await fetch(imageUrl);
         if (!imgRes.ok) throw new Error("Could not download generated image");
-        const buf = Buffer.from(await imgRes.arrayBuffer());
-        fs.writeFileSync(savePath, buf);
+        const contentLength = Number(imgRes.headers.get("content-length") || 0);
+        if (contentLength > MAX_AI_VIDEO_IMAGE_BYTES) {
+          throw new Error("Generated image is too large");
+        }
+        sourceBuffer = Buffer.from(await imgRes.arrayBuffer());
       } else {
         throw new Error("No image generated");
       }
+      if (!sourceBuffer.length || sourceBuffer.length > MAX_AI_VIDEO_IMAGE_BYTES) {
+        throw new Error("Generated image size is invalid");
+      }
+      const normalizedImage = await sharp(sourceBuffer, {
+        failOn: "error",
+        limitInputPixels: 40_000_000,
+      }).png().toBuffer();
+      if (!normalizedImage.length || normalizedImage.length > MAX_AI_VIDEO_IMAGE_BYTES) {
+        throw new Error("Generated image size is invalid");
+      }
+      await fs.promises.mkdir(path.dirname(savePath), { recursive: true });
+      await writeFile(savePath, normalizedImage);
       const finalUrl = `/uploads/${filename}`;
       const imageSize = (await fs.promises.stat(savePath)).size;
       if (!imageSize || imageSize > MAX_AI_VIDEO_IMAGE_BYTES) {
@@ -7075,7 +7247,8 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       }
       res.json({ url: finalUrl, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
-      res.status(500).json({ message: "Failed to generate image: " + error.message });
+      console.error("AI image generation error:", error?.message);
+      res.status(500).json({ message: "فشل توليد الصورة" });
     }
   });
 
@@ -7541,6 +7714,8 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   // ─── AI IMAGES-TO-VIDEO (FFmpeg Cinematic HD) ──────────────────
   app.post("/api/ai/images-to-video", isAuthenticated, checkAiCredits, async (req: any, res) => {
     const tmpFiles: string[] = [];
+    let outPath: string | undefined;
+    let ffmpegStarted = false;
     try {
       const {
         imageUrls,
@@ -7574,10 +7749,11 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         return res.status(400).json({ message: "الصور يجب أن تكون ملفات صور مرفوعة من حسابك" });
       }
       let audioFilePath: string | null = null;
-      if (audioUrl != null) {
+      const requestedAudioUrl = typeof audioUrl === "string" ? audioUrl.trim() : audioUrl;
+      if (requestedAudioUrl) {
         const localAudio = await resolveOwnedLocalMedia(
           userId,
-          [audioUrl],
+          [requestedAudioUrl],
           "audio/",
           MAX_AI_VIDEO_AUDIO_BYTES,
           MAX_AI_VIDEO_AUDIO_BYTES,
@@ -7585,7 +7761,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         if (!localAudio) return res.status(400).json({ message: "الصوت يجب أن يكون ملفاً مرفوعاً من حسابك" });
         audioFilePath = localAudio[0];
       }
-      if (audioUrl != null && !audioFilePath) {
+      if (requestedAudioUrl != null && requestedAudioUrl !== "" && !audioFilePath) {
         return res.status(400).json({ message: "رابط الصوت غير صالح" });
       }
 
@@ -7608,7 +7784,13 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         const tmpPath = path.join(tmpdir(), `img-${randomUUID()}.jpg`);
         tmpFiles.push(tmpPath);
         const buf = await readFile(sourcePath);
-        await writeFile(tmpPath, buf);
+        // Uploaded images may be PNG/WebP even though the temporary suffix is
+        // .jpg. The concat demuxer chooses its decoder from that suffix, so
+        // decode and normalize every input before handing it to FFmpeg.
+        await sharp(buf, {
+          failOn: "error",
+          limitInputPixels: 40_000_000,
+        }).rotate().jpeg({ quality: 90 }).toFile(tmpPath);
         preparedImages.push(tmpPath);
       }
 
@@ -7616,11 +7798,13 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       const listFile = path.join(tmpdir(), `list-${randomUUID()}.txt`);
       tmpFiles.push(listFile);
       const listContent = preparedImages.map(p => `file '${p}'\nduration ${duration}`).join('\n');
-      // repeat last image (required by concat demuxer to finish last frame)
-      await writeFile(listFile, listContent + `\nfile '${preparedImages[preparedImages.length - 1]}'\nduration 0.04`);
+      // zoompan expands each concat frame to exactly durationFrames. Repeating
+      // the last entry here would therefore append one extra full scene (the
+      // old list produced a 2x video for one image).
+      await writeFile(listFile, listContent);
 
-      const outFilename = `video-${Date.now()}.mp4`;
-      const outPath = path.join(uploadsDir, outFilename);
+      const outFilename = `video-${randomUUID()}.mp4`;
+      outPath = path.join(uploadsDir, outFilename);
 
       // ── Cinematic video filter chain ───────────────────────────
       // 1. Scale with Lanczos (sharpest quality)
@@ -7666,11 +7850,14 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         outPath,
       );
 
+      ffmpegStarted = true;
       await new Promise<void>((resolve, reject) => {
-        const proc = spawn("ffmpeg", ffmpegArgs);
+        const proc = spawn(process.env.FFMPEG_PATH || "ffmpeg", ffmpegArgs);
         let stderr = "";
         proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
-        proc.on("close", (code) => code === 0 ? resolve() : reject(new Error("ffmpeg: " + stderr.slice(-600))));
+        proc.on("close", (code) => code === 0
+          ? resolve()
+          : reject(new Error(`ffmpeg exited with code ${code}: ${stderr.slice(-600)}`)));
         proc.on("error", reject);
       });
 
@@ -7707,8 +7894,14 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       }
       res.json({ url: `/uploads/${outFilename}`, quality, resolution: `${W}x${H}` });
     } catch (error: any) {
-      console.error("images-to-video error:", error.message);
-      res.status(500).json({ message: "فشل تحويل الصور لفيديو: " + error.message });
+      if (outPath) await unlink(outPath).catch(() => undefined);
+      console.error("images-to-video error:", error?.message);
+      // Do not expose provider/FFmpeg stderr to the browser. It can contain
+      // local paths and implementation details; the server log retains it for
+      // diagnostics. Encoding failures are an upstream processing error.
+      res.status(ffmpegStarted ? 502 : 500).json({
+        message: ffmpegStarted ? "تعذر إنشاء فيديو MP4" : "فشل تحويل الصور لفيديو",
+      });
     } finally {
       for (const f of tmpFiles) await unlink(f).catch(() => {});
     }

@@ -14,7 +14,7 @@ const MAX_DURATIONLESS_WEBM_BYTES = 25 * 1024 * 1024;
 fs.mkdirSync(quarantineDir, { recursive: true, mode: 0o700 });
 fs.chmodSync(quarantineDir, 0o700);
 
-type MediaKind = "jpeg" | "png" | "gif" | "webp" | "mp4" | "mov" | "avi" | "webm" | "ogg";
+type MediaKind = "jpeg" | "png" | "gif" | "webp" | "mp3" | "mp4" | "mov" | "avi" | "webm" | "ogg";
 type UploadMode = "image" | "media";
 type DeclaredKind = "image" | "video" | "audio";
 
@@ -23,6 +23,7 @@ const declaredTypes: Record<string, { kind: DeclaredKind; extensions: string[] }
   "image/png": { kind: "image", extensions: [".png"] },
   "image/gif": { kind: "image", extensions: [".gif"] },
   "image/webp": { kind: "image", extensions: [".webp"] },
+  "audio/mpeg": { kind: "audio", extensions: [".mp3", ".mpeg", ".mpga"] },
   "video/mp4": { kind: "video", extensions: [".mp4"] },
   "video/quicktime": { kind: "video", extensions: [".mov"] },
   "video/x-msvideo": { kind: "video", extensions: [".avi"] },
@@ -44,6 +45,11 @@ function detectMediaKind(header: Buffer): MediaKind | null {
     const brand = header.subarray(8, 12).toString("ascii").toLowerCase();
     return brand.includes("qt") ? "mov" : "mp4";
   }
+  // MP3 files may be ID3-tagged or begin directly with an MPEG audio frame.
+  if (header.length >= 3 && header.subarray(0, 3).toString("ascii") === "ID3") return "mp3";
+  for (let i = 0; i + 1 < header.length; i++) {
+    if (header[i] === 0xff && (header[i + 1] & 0xe0) === 0xe0) return "mp3";
+  }
   return null;
 }
 
@@ -56,6 +62,7 @@ function expectedMime(kind: MediaKind): string[] {
   if (kind === "avi") return ["video/x-msvideo"];
   if (kind === "webm") return ["video/webm", "audio/webm"];
   if (kind === "ogg") return ["audio/ogg"];
+  if (kind === "mp3") return ["audio/mpeg"];
   return ["video/mp4", "audio/mp4"];
 }
 
@@ -74,6 +81,7 @@ function formatMatchesDetected(formatName: string, detected: MediaKind): boolean
   const formats = new Set(formatName.toLowerCase().split(","));
   if (detected === "webm") return formats.has("webm") || formats.has("matroska");
   if (detected === "ogg") return formats.has("ogg");
+  if (detected === "mp3") return formats.has("mp3");
   if (detected === "avi") return formats.has("avi");
   if (detected === "mov" || detected === "mp4") return formats.has("mov") || formats.has("mp4");
   return false;
@@ -244,6 +252,7 @@ async function secureStoredFile(file: Express.Multer.File, mode: UploadMode): Pr
       await probeMedia(file.path, detected, declaredKind);
       finalExtension = detected === "mov" ? ".mov"
         : detected === "avi" ? ".avi"
+        : detected === "mp3" ? ".mp3"
         : detected === "webm" ? ".webm"
         : detected === "ogg" ? ".ogg"
         : file.mimetype === "audio/mp4" ? ".m4a"
