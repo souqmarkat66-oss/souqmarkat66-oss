@@ -41,7 +41,9 @@ export default function AfsCheckout() {
       paymentTarget: "afs-payment-target",
       shopperResultTarget: "afs-payment-target",
       brandDetection: true,
-      showCVVHint: true,
+      // AFS draws this hint inside the hosted CVV frame. In RTL card style it
+      // can cover the right-aligned digits, so keep the guidance outside it.
+      showCVVHint: false,
       onReady: markReady,
       onError: markError,
       labels: {
@@ -126,6 +128,9 @@ export default function AfsCheckout() {
               : "تعذر تحميل نموذج AFS. إذا كنت قد أرسلت بيانات الدفع، تحقق من حالة العملية في صفحة المدفوعات قبل محاولة الدفع مرة أخرى."}
           </div>
         )}
+        <p className="mb-2 text-xs text-muted-foreground">
+          رمز الأمان (CVV): الأرقام الثلاثة على ظهر البطاقة.
+        </p>
         <form action={action} className="paymentWidgets" data-brands="VISA MASTER MEEZA"></form>
         <iframe
           name="afs-payment-target"

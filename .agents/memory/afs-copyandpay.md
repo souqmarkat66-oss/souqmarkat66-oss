@@ -38,3 +38,9 @@ CVV and card-number controls are hosted cross-origin iframe fields, not ordinary
 **Why:** Main-document selectors miss them, and raw browser-debugger iframe sessions can detach during navigation, producing “Session with given id not found” or “Invalid InterceptionId” before any input validation is tested. These harness errors are not evidence of a CVV length limit.
 
 **How to apply:** Use frame-aware browser interaction with fresh frame contexts when investigating typing. Preserve hosted fields and SRI; do not collect CVV locally or enable optional/empty CVV as a supposed fix.
+
+AFS's built-in CVV hint can visually cover right-aligned digits in Arabic card-style hosted fields, even when the field accepts all three digits.
+
+**Why:** Isolated sandbox comparisons at 360px and 390px showed three entered digits with only part of the text visible when the hint was on, and all three visible with it off. Equal scroll/client widths did not detect this overlay. These were Chromium mobile-viewport tests, not physical Samsung tests.
+
+**How to apply:** Keep CVV guidance outside the hosted field rather than restoring the overlapping hint. Compare actual screenshots as well as input length when diagnosing apparent truncation; never weaken validation or replace secure hosted inputs.
