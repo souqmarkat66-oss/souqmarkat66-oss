@@ -3939,6 +3939,15 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
             RETURNING id`
       );
       if (inserted.rows.length === 0) return;
+      io.to(`user:${userId}`).emit("notification:new", {
+        id: inserted.rows[0].id,
+        type,
+        title,
+        body,
+        link: link ?? null,
+        voiceUrl: voiceUrl ?? null,
+        senderUserId: senderUserId ?? null,
+      });
       // Deliver web push if user has subscriptions
       const subs = await db.execute(sql`SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ${userId}`);
       for (const sub of subs.rows as any[]) {
@@ -8628,7 +8637,27 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         ON CONFLICT (follower_id, following_id) DO NOTHING
       `);
       const state = await db.execute(sql`SELECT 1 FROM user_follows WHERE follower_id = ${me} AND following_id = ${target}`);
-      res.json({ following: state.rows.length > 0 });
+      const following = state.rows.length > 0;
+      if (following) {
+        const followerResult = await db.execute(sql`
+          SELECT first_name, last_name
+          FROM users
+          WHERE id = ${me}
+          LIMIT 1
+        `);
+        const follower = followerResult.rows[0] as any;
+        const followerName = [follower?.first_name, follower?.last_name].filter(Boolean).join(" ").trim() || "مستخدم";
+        await createNotification(
+          target,
+          "new_follower",
+          "لديك متابع جديد",
+          `${followerName} بدأ متابعتك`,
+          "/follows?tab=followers",
+          undefined,
+          me,
+        );
+      }
+      res.json({ following });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 

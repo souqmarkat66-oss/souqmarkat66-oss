@@ -1,5 +1,6 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { io } from "socket.io-client";
 import { useAuth } from "@/hooks/use-auth";
 import { Bell, Check, Trash2, Play, Square, Mic, MicOff, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ const TYPE_ICONS: Record<string, string> = {
   campaign_approved: "✅",
   campaign_rejected: "❌",
   new_subscriber: "🔔",
+  new_follower: "👤",
   fraud_alert: "🚨",
   system: "📢",
 };
@@ -140,6 +142,20 @@ export function NotificationBell() {
   const qc = useQueryClient();
   const [, setLocation] = useLocation();
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    const socket = io({ path: "/socket.io", transports: ["websocket", "polling"] });
+    const refreshNotifications = () => {
+      qc.invalidateQueries({ queryKey: ["/api/notifications/unread-count"] });
+      qc.invalidateQueries({ queryKey: ["/api/notifications"] });
+    };
+    socket.on("notification:new", refreshNotifications);
+    return () => {
+      socket.off("notification:new", refreshNotifications);
+      socket.disconnect();
+    };
+  }, [user, qc]);
 
   const { data: countData } = useQuery<{ count: number }>({
     queryKey: ["/api/notifications/unread-count"],
