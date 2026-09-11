@@ -1,12 +1,16 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
-import nodemailer from "nodemailer";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { checkIsAdmin } from "./adminCheck";
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { disconnectUserSockets } from "./socketRegistry";
+import {
+  mailErrorSummary,
+  sendPasswordResetOtp,
+  sendRegistrationWelcome,
+} from "./mailHelper";
 
 const RESET_TTL_MS = 10 * 60 * 1000;
 const PROOF_TTL_MS = 5 * 60 * 1000;
@@ -86,74 +90,52 @@ function maskEmail(email: string): string {
   return `${local.slice(0, 2)}${"*".repeat(Math.max(2, local.length - 2))}@${domain}`;
 }
 
-async function sendResetOtp(destination: string, otp: string) {
-  const emailFrom = process.env.PASSWORD_RESET_EMAIL_FROM?.trim();
-  if (!emailFrom) throw new Error("PASSWORD_RESET_EMAIL_FROM is not configured");
-
-  const smtpHost = process.env.EMAIL_HOST?.trim();
-  const smtpPortValue = process.env.EMAIL_PORT?.trim();
-  const smtpUser = process.env.EMAIL_USER?.trim();
-  const smtpPass = process.env.EMAIL_PASS?.trim();
-  const hasAnySmtpSetting = !!(smtpHost || smtpPortValue || smtpUser || smtpPass);
-
-  if (hasAnySmtpSetting) {
-    if (!smtpHost || !smtpUser || !smtpPass) {
-      throw new Error("Hostinger SMTP configuration is incomplete");
-    }
-    const smtpPort = smtpPortValue ? Number(smtpPortValue) : 465;
-    if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65_535) {
-      throw new Error("EMAIL_PORT is invalid");
-    }
-    const transport = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465,
-      requireTLS: smtpPort !== 465,
-      auth: { user: smtpUser, pass: smtpPass },
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 15_000,
-      tls: {
-        minVersion: "TLSv1.2",
-        servername: smtpHost,
-      },
-    });
-    try {
-      await transport.sendMail({
-        from: emailFrom,
-        to: destination,
-        subject: "رمز إعادة تعيين كلمة المرور",
-        html: `<p dir="rtl">رمز التحقق الخاص بك هو <strong>${otp}</strong>. تنتهي صلاحيته خلال 10 دقائق. لا تشاركه مع أحد.</p>`,
-      });
-    } finally {
-      transport.close();
-    }
-    return;
-  }
-
-  const apiKey = process.env.RESEND_API_KEY?.trim();
-  if (!apiKey) throw new Error("Email delivery is not configured");
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      from: emailFrom,
-      to: [destination],
-      subject: "رمز إعادة تعيين كلمة المرور",
-      html: `<p dir="rtl">رمز التحقق الخاص بك هو <strong>${otp}</strong>. تنتهي صلاحيته خلال 10 دقائق. لا تشاركه مع أحد.</p>`,
-    }),
-    signal: AbortSignal.timeout(10_000),
+/**
+ * Accept the numerals users commonly paste from Arabic and Persian keyboards,
+ * while hashing one canonical ASCII representation server-side.
+ */
+export function normalizeOtpDigits(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().normalize("NFKC").replace(/[٠-٩]/g, digit => {
+    return String(digit.charCodeAt(0) - "٠".charCodeAt(0));
+  }).replace(/[۰-۹]/g, digit => {
+    return String(digit.charCodeAt(0) - "۰".charCodeAt(0));
   });
-  if (!response.ok) throw new Error(`Resend delivery failed (${response.status})`);
+  return /^\d{6}$/.test(normalized) ? normalized : null;
+}
+
+export interface ResetChallengeState {
+  usedAt?: unknown;
+  verifiedAt?: unknown;
+  expiresAt?: unknown;
+  attempts?: number | string | null;
+}
+
+/**
+ * A challenge cannot be returned for a subsequent request once it has been
+ * consumed, verified, expired, or exhausted.  Expiry is checked both here and
+ * in SQL so a stale row never becomes a resend target.
+ */
+export function isTerminalResetChallenge(
+  challenge: ResetChallengeState | null | undefined,
+  now = Date.now(),
+): boolean {
+  if (!challenge) return true;
+  if (challenge.usedAt != null || challenge.verifiedAt != null) return true;
+  const attempts = Number(challenge.attempts);
+  if (Number.isFinite(attempts) && attempts >= 5) return true;
+  const expiresAt = challenge.expiresAt == null ? NaN : new Date(challenge.expiresAt as any).getTime();
+  return Number.isFinite(expiresAt) && expiresAt <= now;
+}
+
+// Keep the legacy helper name local to this module while the transport lives
+// in the injectable, provider-agnostic mail helper.
+export async function sendResetOtp(destination: string, otp: string): Promise<void> {
+  await sendPasswordResetOtp(destination, otp);
 }
 
 function deliveryErrorSummary(error: any): string {
-  const code = typeof error?.code === "string" ? error.code : "DELIVERY_FAILED";
-  const responseCode = Number.isInteger(error?.responseCode) ? ` (${error.responseCode})` : "";
-  return `${code}${responseCode}`;
+  return mailErrorSummary(error);
 }
 
 function regenerateSession(req: Request): Promise<void> {
@@ -366,9 +348,15 @@ export function registerCustomAuthRoutes(app: Express) {
       };
       await saveSession(req);
 
+      // The insert has committed before this point.  This is a notification,
+      // not email verification: no verified-email state is created or changed.
       res.status(201).json({ success: true, user: { id: newId, email: normalizedEmail, firstName, lastName } });
+      void sendRegistrationWelcome(normalizedEmail, firstName || null).catch((deliveryError: unknown) => {
+        console.error("[Registration email] welcome delivery failed:", deliveryErrorSummary(deliveryError));
+      });
     } catch (e: any) {
-      res.status(500).json({ message: e.message });
+      console.error("[Custom auth] registration failed:", e instanceof Error ? e.name : "REGISTRATION_FAILED");
+      res.status(500).json({ message: "تعذر إنشاء الحساب" });
     }
   });
 
@@ -495,15 +483,35 @@ export function registerCustomAuthRoutes(app: Express) {
         const rateResult = await tx.execute(sql`
           SELECT
             COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour')::int AS hourly_count,
-            MAX(last_sent_at) AS last_sent_at,
-            (ARRAY_AGG(id ORDER BY last_sent_at DESC))[1] AS latest_id
+            MAX(last_sent_at) AS last_sent_at
           FROM password_reset_challenges WHERE identifier_hash = ${identifierHash}
         `);
+        const latestResult = await tx.execute(sql`
+          SELECT id,
+                 last_sent_at AS "lastSentAt",
+                 expires_at AS "expiresAt",
+                 attempts,
+                 verified_at AS "verifiedAt",
+                 used_at AS "usedAt"
+          FROM password_reset_challenges
+          WHERE identifier_hash = ${identifierHash}
+          ORDER BY created_at DESC
+          LIMIT 1
+        `);
         const rate: any = rateResult.rows[0];
+        const latest: any = latestResult.rows[0];
         const lastSent = rate?.last_sent_at ? new Date(rate.last_sent_at).getTime() : 0;
         const coolingDown = Date.now() - lastSent < RESEND_COOLDOWN_MS;
-        if ((rate?.hourly_count || 0) >= 5 || coolingDown) {
-          return { challengeId: rate.latest_id || randomBytes(24).toString("hex"), shouldSend: false };
+        const rateLimited = Number(rate?.hourly_count || 0) >= 5 || coolingDown;
+        if (rateLimited) {
+          // Reusing an active challenge is safe and lets a user who requested
+          // twice during the cooldown enter the first code.  Never return a
+          // terminal row (verified, consumed, expired, or exhausted): expose
+          // a fresh opaque id instead, without creating an undeliverable row.
+          if (!isTerminalResetChallenge(latest)) {
+            return { challengeId: String(latest.id), shouldSend: false };
+          }
+          return { challengeId: randomBytes(24).toString("hex"), shouldSend: false };
         }
         await tx.execute(sql`
           INSERT INTO password_reset_challenges
@@ -516,15 +524,7 @@ export function registerCustomAuthRoutes(app: Express) {
         `);
         return { challengeId, shouldSend: deliverable };
       });
-      // Respond before external delivery so provider latency cannot reveal
-      // whether the identifier matched an account.
-      if (issuance.shouldSend) {
-        void sendResetOtp(destination, otp).catch(async (deliveryError: any) => {
-          await db.execute(sql`UPDATE password_reset_challenges SET used_at = NOW() WHERE id = ${issuance.challengeId}`).catch(() => undefined);
-          console.error("[Password reset] OTP delivery failed:", deliveryErrorSummary(deliveryError));
-        });
-      }
-      return res.status(202).json({
+      const response = res.status(202).json({
         message: GENERIC_RESET_MESSAGE,
         challengeId: issuance.challengeId,
         channel: selectedChannel,
@@ -532,8 +532,17 @@ export function registerCustomAuthRoutes(app: Express) {
         expiresInSeconds: 600,
         resendAfterSeconds: 60,
       });
+      // The response is committed before any provider work starts.  A
+      // timeout/rejected connection may happen after SMTP accepted the
+      // message, so keep this OTP valid until its normal expiry.
+      if (issuance.shouldSend && destination) {
+        void sendResetOtp(destination, otp).catch((deliveryError: unknown) => {
+          console.error("[Password reset] OTP delivery failed:", deliveryErrorSummary(deliveryError));
+        });
+      }
+      return response;
     } catch (e: any) {
-      console.error("[Password reset] request failed:", e?.message);
+      console.error("[Password reset] request failed:", e instanceof Error ? e.name : "REQUEST_FAILED");
       res.status(500).json({ message: "تعذر بدء إعادة تعيين كلمة المرور" });
     }
   });
@@ -541,10 +550,11 @@ export function registerCustomAuthRoutes(app: Express) {
   // ── POST /api/auth/verify-reset-otp ─────────────────────────────
   app.post("/api/auth/verify-reset-otp", async (req: Request, res: Response) => {
     const { challengeId, otp } = req.body;
-    if (typeof challengeId !== "string" || !/^\d{6}$/.test(otp || ""))
+    const normalizedOtp = normalizeOtpDigits(otp);
+    if (typeof challengeId !== "string" || !normalizedOtp)
       return res.status(400).json({ message: "رمز التحقق غير صالح أو منتهي" });
     try {
-      const otpHash = keyedHash("otp", challengeId, otp);
+      const otpHash = keyedHash("otp", challengeId, normalizedOtp);
       const proof = randomBytes(32).toString("base64url");
       const verified = await db.transaction(async (tx) => {
         const result = await tx.execute(sql`

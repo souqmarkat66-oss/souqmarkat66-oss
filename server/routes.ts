@@ -11,6 +11,12 @@ import { registerSocketServer } from "./socketRegistry";
 import { registerImageRoutes, openai } from "./replit_integrations/image";
 import { registerAiAgentRoutes } from "./aiAgentRoutes";
 import { textToSpeech } from "./replit_integrations/audio";
+import {
+  completeAiMediaJob,
+  createAiMediaJob,
+  getAiMediaJob,
+  markAiMediaJobFailed,
+} from "./ai-media-jobs";
 import { spawn } from "child_process";
 import { writeFile, unlink, readFile, mkdir } from "fs/promises";
 import { randomUUID } from "crypto";
@@ -19,7 +25,8 @@ import { secureUpload } from "./upload";
 import path from "path";
 import fs from "fs";
 import { db, pool } from "./db";
-import { sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { uploadedFiles } from "@shared/schema";
 import { getAfsEntityId, getAfsPaymentStatus, getAfsWidget, prepareAfsCheckout } from "./afsPayments";
 import { afsOrderMode, assertAfsLiveSettlement, bindAfsEnvironment, resolveAfsEnvironment, sameAfsReference } from "./afsEnvironment";
 import { verifyAfsSandboxOrder } from "./afsSandbox";
@@ -59,8 +66,10 @@ import {
   canonicalPaymentReference,
   canonicalPaymentReferenceSql,
   digestOwnedPaymentProof,
+  outgoingTransferReferenceLockKey,
   paymentProofLockKeys,
 } from "./payment-proof";
+import { resolveManualPaymentPrice } from "./manual-payment";
 import { resolvePaymentUserScope } from "./activity-scope";
 import {
   buildExpiredRechargeCodeResponse,
@@ -98,19 +107,52 @@ function mayViewChannelOwnerFields(req: any, channel: any): boolean {
 
 function safePaymentRequest(payment: any) {
   if (!payment) return payment;
-  const {
-    payoutDestinationEncrypted: _encrypted,
-    payoutDestinationIv: _iv,
-    payoutDestinationAuthTag: _authTag,
-    proofDigest: _proofDigest,
-    ...safe
-  } = payment;
+  const field = (camel: string, snake: string) => payment[camel] ?? payment[snake] ?? null;
+  const amountNumber = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === "") return null;
+    const amount = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(amount) ? amount : null;
+  };
+  // Do not spread raw PostgreSQL rows: that can expose a snake_case encrypted
+  // payout field after the global response camelizer runs.
+  const safe: Record<string, unknown> = {
+    id: field("id", "id"),
+    orderNumber: field("orderNumber", "order_number"),
+    userId: field("userId", "user_id"),
+    adId: field("adId", "ad_id"),
+    type: field("type", "type"),
+    amountEGP: amountNumber(field("amountEGP", "amount_egp")),
+    method: field("method", "method"),
+    phoneNumber: field("phoneNumber", "phone_number"),
+    paymentRef: field("paymentRef", "payment_ref"),
+    payoutName: field("payoutName", "payout_name"),
+    payoutDestinationLast4: field("payoutDestinationLast4", "payout_destination_last4"),
+    serviceType: field("serviceType", "service_type"),
+    serviceQuantity: field("serviceQuantity", "service_quantity"),
+    servicePackageId: field("servicePackageId", "service_package_id"),
+    screenshotUrl: field("screenshotUrl", "screenshot_url"),
+    status: field("status", "status"),
+    adminNote: field("adminNote", "admin_note"),
+    fulfillmentStatus: field("fulfillmentStatus", "fulfillment_status")
+      ?? (field("status", "status") === "approved" ? "legacy_review" : null),
+    fulfillmentNote: field("fulfillmentNote", "fulfillment_note"),
+    fulfillmentResult: field("fulfillmentResult", "fulfillment_result"),
+    fulfillmentBy: field("fulfillmentBy", "fulfillment_by"),
+    fulfilledAt: field("fulfilledAt", "fulfilled_at"),
+    transferReference: field("transferReference", "transfer_reference"),
+    createdAt: field("createdAt", "created_at"),
+  };
+  // Admin list enrichment is not stored on payment_requests but is part of
+  // its safe response contract.
+  for (const key of ["currentBalanceEGP", "insufficientBalance"]) {
+    if (payment[key] !== undefined) safe[key] = payment[key];
+  }
   if (safe.type === "withdrawal") {
     const legacyDestination = typeof safe.phoneNumber === "string" ? safe.phoneNumber : "";
     const masked = safe.payoutDestinationLast4
-      ? maskPayoutDestination(safe.method, safe.payoutDestinationLast4)
+      ? maskPayoutDestination(String(safe.method || ""), String(safe.payoutDestinationLast4))
       : legacyDestination
-        ? maskPayoutDestination(safe.method, legacyDestination)
+        ? maskPayoutDestination(String(safe.method || ""), legacyDestination)
         : null;
     safe.phoneNumber = masked;
     safe.payoutDestinationMasked = masked;
@@ -132,6 +174,85 @@ function isSuperAdmin(req: any): boolean {
 
 function isAdminUser(req: any): boolean {
   return isSuperAdmin(req);
+}
+
+const OWNED_UPLOAD_URL = /^\/uploads\/([A-Za-z0-9][A-Za-z0-9._-]{0,199})$/;
+const MAX_AI_VIDEO_IMAGE_BYTES = 25 * 1024 * 1024;
+const MAX_AI_VIDEO_IMAGE_TOTAL_BYTES = 100 * 1024 * 1024;
+const MAX_AI_VIDEO_AUDIO_BYTES = 25 * 1024 * 1024;
+const MAX_AI_VIDEO_OUTPUT_BYTES = 250 * 1024 * 1024;
+
+function ownedUploadFilename(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return OWNED_UPLOAD_URL.exec(value)?.[1];
+}
+
+async function removeOwnedUploadRecord(userId: string, filename: string): Promise<void> {
+  await db.delete(uploadedFiles).where(and(
+    eq(uploadedFiles.userId, userId),
+    eq(uploadedFiles.filename, filename),
+  ));
+}
+
+/**
+ * AI video rendering accepts only media uploaded/generated for this account.
+ * This keeps FFmpeg off arbitrary remote URLs and verifies the ownership
+ * record, MIME type, declared size, and bounded on-disk regular file.
+ */
+async function resolveOwnedLocalMedia(
+  userId: string,
+  urls: unknown[],
+  mimePrefix: "image/" | "audio/",
+  maxEachBytes: number,
+  maxTotalBytes: number,
+): Promise<string[] | undefined> {
+  const filenames = urls.map(ownedUploadFilename);
+  if (
+    filenames.some((filename): filename is undefined => !filename) ||
+    new Set(filenames).size !== filenames.length
+  ) {
+    return undefined;
+  }
+  const names = filenames as string[];
+  const rows = await db.select({
+    filename: uploadedFiles.filename,
+    mimeType: uploadedFiles.mimeType,
+    size: uploadedFiles.size,
+    url: uploadedFiles.url,
+  }).from(uploadedFiles).where(and(
+    eq(uploadedFiles.userId, userId),
+    inArray(uploadedFiles.filename, names),
+  ));
+  if (rows.length !== names.length) return undefined;
+
+  const byName = new Map(rows.map(row => [row.filename, row]));
+  const files = names.map(name => byName.get(name));
+  if (files.some(file => !file)) return undefined;
+  const resolved = files as typeof rows;
+  let totalBytes = 0;
+  const uploadDirectory = path.join(process.cwd(), "uploads");
+  const localPaths: string[] = [];
+  for (const file of resolved) {
+    const declaredSize = Number(file.size);
+    if (
+      file.url !== `/uploads/${file.filename}` ||
+      !file.mimeType.startsWith(mimePrefix) ||
+      !Number.isSafeInteger(declaredSize) ||
+      declaredSize < 1 ||
+      declaredSize > maxEachBytes
+    ) {
+      return undefined;
+    }
+    totalBytes += declaredSize;
+    if (totalBytes > maxTotalBytes) return undefined;
+    const localPath = path.join(uploadDirectory, file.filename);
+    const stat = await fs.promises.lstat(localPath).catch(() => undefined);
+    if (!stat || !stat.isFile() || stat.isSymbolicLink() || stat.size !== declaredSize) {
+      return undefined;
+    }
+    localPaths.push(localPath);
+  }
+  return localPaths;
 }
 
 async function requireAdmin(req: any, res: any, next: any) {
@@ -192,18 +313,29 @@ async function checkAiCredits(req: any, res: any, next: any) {
   const freeCredits = parseInt(await storage.getSetting('ai_free_credits') || '3');
   const usageCount = await storage.getAiUsageCount(userId);
   if (usageCount >= freeCredits && !isAdminUser(req)) {
-    const pricePerCredit = parseFloat(await storage.getSetting('ai_price_per_credit_egp') || '5');
-    const balance = await storage.getUserBalanceEGP(userId);
-    if (balance < pricePerCredit) {
-      return res.status(402).json({
-        message: "insufficient_credits",
-        usageCount,
-        freeCredits,
-        pricePerCredit,
-        balance
-      });
+    const purchasedCredits = await storage.getAiCreditBalance(userId);
+    if (purchasedCredits < 1) {
+      let pricePerCredit: number;
+      try {
+        const rawPrice = await storage.getSetting('ai_price_per_credit_egp');
+        pricePerCredit = rawPrice == null ? 5 : parseLedgerAmount(rawPrice, "ai_price_per_credit_egp");
+        if (pricePerCredit <= 0) throw new Error("invalid");
+      } catch {
+        return res.status(503).json({ message: "إعداد سعر رصيد الذكاء الاصطناعي غير صالح. تواصل مع الإدارة." });
+      }
+      const balance = await storage.getUserBalanceEGP(userId);
+      if (balance < pricePerCredit) {
+        return res.status(402).json({
+          message: "insufficient_credits",
+          usageCount,
+          freeCredits,
+          purchasedCredits,
+          pricePerCredit,
+          balance,
+        });
+      }
+      req.aiWalletPriceEGP = pricePerCredit;
     }
-    req.aiChargeEGP = pricePerCredit;
   }
   req.aiUsageCount = usageCount;
   req.aiFreeCredits = freeCredits;
@@ -213,7 +345,13 @@ async function checkAiCredits(req: any, res: any, next: any) {
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   await setupAuth(app);
   registerCustomAuthRoutes(app);
-  registerImageRoutes(app);
+  // settleAiCredit is a function declaration in this scope, so it is available
+  // here even though its implementation appears alongside the credit helpers.
+  registerImageRoutes(app, {
+    authenticate: isAuthenticated,
+    checkAiCredits,
+    settleAiCredit,
+  });
   registerAiAgentRoutes(app, isAuthenticated, requireAdmin);
 
   // ── Redirect www.ads-as.com → ads-as.com (permanent 301) ──
@@ -2098,31 +2236,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!paymentMethod) {
       return res.status(400).json({ message: "طريقة الدفع غير صالحة" });
     }
-    if (!screenshotUrl) {
-      return res.status(400).json({ message: "صورة إيصال الدفع مطلوبة" });
-    }
-    if (!screenshotUrl.startsWith("/uploads/")) {
+    if (screenshotUrl && !screenshotUrl.startsWith("/uploads/")) {
       return res.status(400).json({ message: "صورة الإيصال لازم ترفعها من الزرار، مش رابط خارجي" });
     }
-    const filename = screenshotUrl.replace(/^\/uploads\//, "");
-    const ownedFile = await pool.query(
-      `SELECT filename, mime_type, size FROM uploaded_files
-       WHERE user_id = $1 AND filename = $2 AND mime_type LIKE 'image/%'
-       LIMIT 1`,
-      [userId, filename],
-    );
-    if (ownedFile.rowCount !== 1) {
-      return res.status(400).json({ message: "صورة الإيصال غير صالحة — ارفعها من نفس حسابك" });
-    }
-    let proofDigest: string;
-    try {
-      proofDigest = await digestOwnedPaymentProof(screenshotUrl, {
-        filename: ownedFile.rows[0].filename,
-        mimeType: ownedFile.rows[0].mime_type,
-        size: ownedFile.rows[0].size,
-      });
-    } catch {
-      return res.status(400).json({ message: "تعذر التحقق من صورة الإيصال — ارفعها مرة أخرى" });
+    let proofDigest: string | null = null;
+    if (screenshotUrl) {
+      const filename = screenshotUrl.replace(/^\/uploads\//, "");
+      const ownedFile = await pool.query(
+        `SELECT filename, mime_type, size FROM uploaded_files
+         WHERE user_id = $1 AND filename = $2 AND mime_type LIKE 'image/%'
+         LIMIT 1`,
+        [userId, filename],
+      );
+      if (ownedFile.rowCount !== 1) {
+        return res.status(400).json({ message: "صورة الإيصال غير صالحة — ارفعها من نفس حسابك" });
+      }
+      try {
+        proofDigest = await digestOwnedPaymentProof(screenshotUrl, {
+          filename: ownedFile.rows[0].filename,
+          mimeType: ownedFile.rows[0].mime_type,
+          size: ownedFile.rows[0].size,
+        });
+      } catch {
+        return res.status(400).json({ message: "تعذر التحقق من صورة الإيصال — ارفعها مرة أخرى" });
+      }
     }
     const userProfile = await pool.query(
       `SELECT NULLIF(trim(concat_ws(' ', first_name, last_name)), '') AS user_name
@@ -2155,7 +2292,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       const totalCoins = packageCoins + bonusCoins;
       const packagePrice = parseLedgerAmount(packageRow.price_egp, "coin package price");
-      if (totalCoins <= 0 || packagePrice <= 0) {
+      if (
+        totalCoins <= 0
+        || packagePrice <= 0
+        || packagePrice > 1_000_000
+        || Math.abs(packagePrice * 100 - Math.round(packagePrice * 100)) > 1e-8
+      ) {
         await client.query("ROLLBACK");
         return res.status(409).json({ message: "بيانات باقة العملات غير صالحة" });
       }
@@ -2170,13 +2312,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const duplicate = await client.query(
         `SELECT id, status, 'coin_purchase'::text AS source
          FROM coin_purchase_orders
-         WHERE ${canonicalPaymentReferenceSql("payment_ref")} = $1
+          WHERE (canonical_payment_ref = $1 OR ${canonicalPaymentReferenceSql("payment_ref")} = $1)
             OR proof_digest = $2
             OR (proof_digest IS NULL AND screenshot_url = $3)
          UNION ALL
          SELECT id, status, 'payment_request'::text AS source
          FROM payment_requests
-         WHERE ${canonicalPaymentReferenceSql("payment_ref")} = $1
+          WHERE (canonical_payment_ref = $1 OR ${canonicalPaymentReferenceSql("payment_ref")} = $1)
             OR proof_digest = $2
             OR (proof_digest IS NULL AND screenshot_url = $3)
          LIMIT 1`,
@@ -2193,8 +2335,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const inserted = await client.query(
         `INSERT INTO coin_purchase_orders
           (user_id, user_name, package_id, coins, amount_egp, payment_method,
-           payment_ref, proof_digest, screenshot_url, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
+           payment_ref, canonical_payment_ref, proof_digest, screenshot_url, status)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
          RETURNING *`,
         [
           userId,
@@ -2204,11 +2346,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           packagePrice,
           paymentMethod,
           paymentRef,
+          canonicalRef,
           proofDigest,
           screenshotUrl || null,
         ],
       );
       assertSingleRowResult(inserted, "coin purchase order");
+      const claim = await client.query(
+        `INSERT INTO manual_payment_reference_claims (flow, canonical_reference, source_type, source_id)
+         VALUES ('incoming', $1, 'coin_purchase_order', $2)
+         ON CONFLICT (flow, canonical_reference) DO NOTHING
+         RETURNING canonical_reference`,
+        [canonicalRef, inserted.rows[0].id],
+      );
+      if (claim.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ message: "تم تقديم مرجع الدفع من قبل، ولا يمكن شحنه مرتين" });
+      }
       await client.query("COMMIT");
 
       const order = inserted.rows[0];
@@ -2685,11 +2839,16 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   // ================================================================
   app.get("/api/ai/usage", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
-    const usageCount = await storage.getAiUsageCount(userId);
-    const freeCredits = parseInt(await storage.getSetting('ai_free_credits') || '3');
-    const pricePerCredit = parseFloat(await storage.getSetting('ai_price_per_credit_egp') || '5');
-    const balance = await storage.getUserBalanceEGP(userId);
-    res.json({ usageCount, freeCredits, pricePerCredit, balance, remaining: Math.max(0, freeCredits - usageCount) });
+    const [usageCount, freeCreditSetting, priceSetting, balance, purchasedCredits] = await Promise.all([
+      storage.getAiUsageCount(userId),
+      storage.getSetting('ai_free_credits'),
+      storage.getSetting('ai_price_per_credit_egp'),
+      storage.getUserBalanceEGP(userId),
+      storage.getAiCreditBalance(userId),
+    ]);
+    const freeCredits = parseInt(freeCreditSetting || '3');
+    const pricePerCredit = parseFloat(priceSetting || '5');
+    res.json({ usageCount, freeCredits, pricePerCredit, balance, purchasedCredits, remaining: Math.max(0, freeCredits - usageCount) });
   });
 
   // ================================================================
@@ -3789,22 +3948,15 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     );
   }
 
-  async function settleAiWalletCharge(req: any, userId: string, serviceType: string, description: string) {
-    const amount = Number(req.aiChargeEGP || 0);
-    if (amount <= 0) return true;
-    const debit = await storage.debitWalletAtomic(userId, amount, "ai_charge", description);
-    if (debit.success) return true;
-    const reason = `رصيد المحفظة غير كافٍ. المطلوب ${amount.toFixed(2)} ج.م والمتاح ${debit.balance.toFixed(2)} ج.م.`;
-    await recordPaymentFailure({
-      dedupeKey: `wallet:${serviceType}:${randomUUID()}`,
-      userId,
-      method: "wallet",
-      serviceType,
-      amountEGP: amount,
-      reasonCode: "insufficient_balance",
-      reasonMessage: reason,
-    });
-    return false;
+  async function settleAiCredit(req: any, userId: string, usageType: string, description: string) {
+    if (isAdminUser(req)) {
+      await storage.recordAiUsage(userId, usageType);
+      return true;
+    }
+    const configuredPrice = req.aiWalletPriceEGP ?? await storage.getSetting("ai_price_per_credit_egp");
+    const price = configuredPrice == null ? 5 : Number(configuredPrice);
+    const result = await storage.consumeAiCreditAtomic(userId, usageType, req.aiFreeCredits || 0, price, description);
+    return result.consumed;
   }
 
   app.post("/api/likes", isAuthenticated, async (req: any, res) => {
@@ -4910,14 +5062,19 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   // ================================================================
   // PAYMENT REQUESTS
   // ================================================================
+  const withPaymentDeliveries = async (payments: any[]) => Promise.all(payments.map(async (payment) => ({
+    ...safePaymentRequest(payment),
+    serviceDeliveries: await storage.getPaymentServiceDeliveries(Number(payment.id)),
+  })));
+
   app.get("/api/payments", isAuthenticated, async (req: any, res) => {
     const userScope = resolvePaymentUserScope(req, isAdminUser(req));
     if (userScope === null) {
       const all = await storage.getPaymentRequests();
-      return res.json(all.map(safePaymentRequest));
+      return res.json(await withPaymentDeliveries(all));
     }
     const mine = await storage.getPaymentRequests(userScope);
-    res.json(mine.map(safePaymentRequest));
+    res.json(await withPaymentDeliveries(mine));
   });
 
   // A user-facing activity feed. Keep the underlying ledgers independent: each
@@ -5596,8 +5753,21 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       const rand = Math.floor(1000 + Math.random() * 9000);
       const orderNumber = `ORD-${datePart}-${rand}`;
 
+      // Server-priced orders intentionally omit amountEGP in the client
+      // contract. Supply only a parse placeholder; it is replaced below by
+      // the server price before anything is written.
+      const requestedServiceType = String(req.body?.serviceType || "").trim();
+      const requestedAiCredits = req.body?.aiCreditsQuantity;
+      const requestedCoinPackage = req.body?.coinPackageId;
       const parsed = insertPaymentRequestSchema.safeParse({
         ...req.body,
+        serviceQuantity: req.body?.serviceQuantity ?? requestedAiCredits,
+        servicePackageId: requestedCoinPackage,
+        amountEGP: req.body?.amountEGP ?? (
+          // All paid services are server-priced. A wallet recharge is the one
+          // exception because the user chooses the wallet-credit amount.
+          req.body?.type === "top_up" && requestedServiceType !== "wallet_recharge" ? 1 : undefined
+        ),
         userId,
         orderNumber,
       });
@@ -5611,30 +5781,54 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       }
       const input = parsed.data;
       if (input.type === "top_up") {
-        const allowedServices = new Set([
-          "wallet_recharge", "ad_boost", "campaign", "renewal", "fire_notify",
-          "ai_image", "ai_video", "ai_content", "ai_credits",
-        ]);
-        const services = Array.from(new Set(
-          String(input.serviceType || "").split(",").map((service) => service.trim()).filter(Boolean),
-        ));
-        const invalidService = services.find((service) => !allowedServices.has(service));
-        if (invalidService) {
-          return res.status(400).json({ message: "نوع الخدمة غير صالح", field: "serviceType" });
+        let priced: ReturnType<typeof resolveManualPaymentPrice>;
+        if (requestedServiceType === "coin_package") {
+          if (!Number.isSafeInteger(Number(requestedCoinPackage)) || Number(requestedCoinPackage) < 1) {
+            return res.status(400).json({ message: "اختر باقة عملات صالحة", field: "coinPackageId" });
+          }
+          const packages = await pool.query(
+            `SELECT id, coins, bonus_coins, price_egp FROM coin_packages WHERE id = $1 AND is_active = true`,
+            [Number(requestedCoinPackage)],
+          );
+          if (packages.rowCount !== 1) {
+            return res.status(404).json({ message: "باقة العملات غير متاحة", field: "coinPackageId" });
+          }
+          const selectedPackage = packages.rows[0];
+          const coins = parseCoinAmount(selectedPackage.coins, "manual coin package amount");
+          const bonus = parseLedgerAmount(selectedPackage.bonus_coins ?? 0, "manual coin package bonus");
+          const amountEGP = parseLedgerAmount(selectedPackage.price_egp, "manual coin package price");
+          if (
+            !Number.isInteger(bonus)
+            || bonus < 0
+            || coins + bonus < 1
+            || amountEGP <= 0
+            || amountEGP > 1_000_000
+            || Math.abs(amountEGP * 100 - Math.round(amountEGP * 100)) > 1e-8
+          ) {
+            return res.status(409).json({ message: "بيانات باقة العملات غير صالحة" });
+          }
+          priced = { services: ["coin_package"], quantity: coins + bonus, amountEGP };
+        } else {
+          try {
+            priced = resolveManualPaymentPrice(
+              await storage.getAllSettings(),
+              input.serviceType,
+              input.serviceQuantity,
+              req.body?.amountEGP,
+            );
+          } catch (error: any) {
+            return res.status(400).json({ message: error.message || "تعذر تسعير الطلب", field: "amountEGP" });
+          }
         }
-        if (services.includes("wallet_recharge") && services.length !== 1) {
-          return res.status(400).json({
-            message: "شحن المحفظة يجب أن يكون في طلب مستقل ولا يمكن جمعه مع خدمة أخرى",
-            field: "serviceType",
-          });
-        }
-        if (services.some((service) => service === "ad_boost" || service === "renewal") && !input.adId) {
+        if (priced.services.some((service) => service === "ad_boost" || service === "renewal") && !input.adId) {
           return res.status(400).json({
             message: "اختر الإعلان المطلوب تعزيزه أو تجديده",
             field: "adId",
           });
         }
-        input.serviceType = services.join(",");
+        input.serviceType = priced.services.join(",");
+        input.serviceQuantity = priced.quantity;
+        input.amountEGP = priced.amountEGP;
       }
 
       let proofDigest: string | null = null;
@@ -5643,43 +5837,27 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         if (!canonicalRef) {
           return res.status(400).json({ message: "رقم مرجع الدفع غير صالح", field: "paymentRef" });
         }
-        if (!input.screenshotUrl || !input.screenshotUrl.startsWith("/uploads/")) {
-          return res.status(400).json({ message: "صورة الإيصال غير صالحة", field: "screenshotUrl" });
-        }
-        // Anti-fraud: verify the receipt screenshot was uploaded by this user.
-        const filename = input.screenshotUrl.replace(/^\/uploads\//, "");
-        const ownedFile = await db
-          .select({
-            filename: uploadedFiles.filename,
-            mimeType: uploadedFiles.mimeType,
-            size: uploadedFiles.size,
-          })
-          .from(uploadedFiles)
-          .where(and(eq(uploadedFiles.userId, userId), eq(uploadedFiles.filename, filename)))
-          .limit(1);
-
-        if (ownedFile.length === 0) {
-          return res.status(400).json({
-            message: "صورة الإيصال غير صالحة — لازم ترفعها من نفس حسابك دلوقتي",
-            field: "screenshotUrl",
-          });
-        }
-        if (ownedFile[0].mimeType && !ownedFile[0].mimeType.startsWith("image/")) {
-          return res.status(400).json({
-            message: "صورة الإيصال لازم تكون صورة (PNG / JPG / WEBP) — مش فيديو أو ملف تاني",
-            field: "screenshotUrl",
-          });
-        }
-        try {
-          proofDigest = await digestOwnedPaymentProof(input.screenshotUrl, ownedFile[0]);
-        } catch {
-          return res.status(400).json({
-            message: "تعذر التحقق من صورة الإيصال — ارفعها مرة أخرى",
-            field: "screenshotUrl",
-          });
-        }
-        if (!proofDigest) {
-          return res.status(400).json({ message: "تعذر التحقق من صورة الإيصال", field: "screenshotUrl" });
+        if (input.screenshotUrl) {
+          // Proof is optional, but if supplied it must be a local image owned
+          // by this account before its normalized digest is used for locking.
+          const filename = input.screenshotUrl.replace(/^\/uploads\//, "");
+          const ownedFile = await db
+            .select({
+              filename: uploadedFiles.filename,
+              mimeType: uploadedFiles.mimeType,
+              size: uploadedFiles.size,
+            })
+            .from(uploadedFiles)
+            .where(and(eq(uploadedFiles.userId, userId), eq(uploadedFiles.filename, filename)))
+            .limit(1);
+          if (ownedFile.length === 0 || !ownedFile[0].mimeType?.startsWith("image/")) {
+            return res.status(400).json({ message: "صورة الإيصال غير صالحة — ارفعها من نفس حسابك", field: "screenshotUrl" });
+          }
+          try {
+            proofDigest = await digestOwnedPaymentProof(input.screenshotUrl, ownedFile[0]);
+          } catch {
+            return res.status(400).json({ message: "تعذر التحقق من صورة الإيصال — ارفعها مرة أخرى", field: "screenshotUrl" });
+          }
         }
       }
 
@@ -5755,7 +5933,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
             ]
           );
           await client.query("COMMIT");
-          return res.status(201).json(safePaymentRequest(deepToCamel(inserted.rows[0])));
+          return res.status(201).json((await withPaymentDeliveries([inserted.rows[0]]))[0]);
         } catch (error) {
           await client.query("ROLLBACK").catch(() => undefined);
           throw error;
@@ -5768,9 +5946,6 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         const paymentRef = String(input.paymentRef || "").trim();
         const canonicalRef = canonicalPaymentReference(paymentRef);
         const screenshotUrl = input.screenshotUrl || null;
-        if (!proofDigest || !screenshotUrl) {
-          return res.status(400).json({ message: "تعذر التحقق من صورة الإيصال", field: "screenshotUrl" });
-        }
         const client = await pool.connect();
         try {
           await client.query("BEGIN");
@@ -5781,13 +5956,13 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           const duplicate = await client.query(
             `SELECT id, status, 'payment_request'::text AS source
              FROM payment_requests
-             WHERE ${canonicalPaymentReferenceSql("payment_ref")} = $1
+             WHERE (canonical_payment_ref = $1 OR ${canonicalPaymentReferenceSql("payment_ref")} = $1)
                 OR proof_digest = $2
                 OR (proof_digest IS NULL AND screenshot_url = $3)
              UNION ALL
              SELECT id, status, 'coin_purchase'::text AS source
              FROM coin_purchase_orders
-             WHERE ${canonicalPaymentReferenceSql("payment_ref")} = $1
+             WHERE (canonical_payment_ref = $1 OR ${canonicalPaymentReferenceSql("payment_ref")} = $1)
                 OR proof_digest = $2
                 OR (proof_digest IS NULL AND screenshot_url = $3)
              LIMIT 1`,
@@ -5803,8 +5978,8 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           const inserted = await client.query(
             `INSERT INTO payment_requests
               (order_number, user_id, ad_id, type, amount_egp, method, phone_number,
-               payment_ref, proof_digest, payout_name, service_type, screenshot_url, status)
-             VALUES ($1, $2, $3, 'top_up', $4, $5, $6, $7, $8, NULL, $9, $10, 'pending')
+                payment_ref, canonical_payment_ref, proof_digest, payout_name, service_type, service_quantity, service_package_id, screenshot_url, status)
+              VALUES ($1, $2, $3, 'top_up', $4, $5, $6, $7, $8, $9, NULL, $10, $11, $12, $13, 'pending')
              RETURNING *`,
             [
               input.orderNumber,
@@ -5814,14 +5989,28 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
               input.method,
               input.phoneNumber ?? null,
               paymentRef,
+              canonicalRef,
               proofDigest,
               input.serviceType,
+              input.serviceQuantity || 1,
+              input.servicePackageId ?? null,
               screenshotUrl,
             ],
           );
           assertSingleRowResult(inserted, "manual payment request");
+          const claim = await client.query(
+            `INSERT INTO manual_payment_reference_claims (flow, canonical_reference, source_type, source_id)
+             VALUES ('incoming', $1, 'payment_request', $2)
+             ON CONFLICT (flow, canonical_reference) DO NOTHING
+             RETURNING canonical_reference`,
+            [canonicalRef, inserted.rows[0].id],
+          );
+          if (claim.rowCount !== 1) {
+            await client.query("ROLLBACK");
+            return res.status(409).json({ message: "تم تقديم مرجع الدفع من قبل، ولا يمكن شحنه مرتين" });
+          }
           await client.query("COMMIT");
-          return res.status(201).json(safePaymentRequest(deepToCamel(inserted.rows[0])));
+          return res.status(201).json((await withPaymentDeliveries([inserted.rows[0]]))[0]);
         } catch (error) {
           await client.query("ROLLBACK").catch(() => undefined);
           throw error;
@@ -5832,18 +6021,48 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
 
       const { payoutDestination: _payoutDestination, ...storedInput } = input;
       const payment = await storage.createPaymentRequest(storedInput);
-      res.status(201).json(safePaymentRequest(payment));
+      res.status(201).json((await withPaymentDeliveries([payment]))[0]);
     } catch (err: any) {
       res.status(400).json({ message: err.message || "فشل إنشاء الطلب" });
     }
   });
 
   app.put("/api/payments/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
-    const { status, adminNote } = req.body;
+    const { status, action, transferExecuted, adminNote, transferReference } = req.body;
     const id = Number(req.params.id);
     if (status === 'approved') {
-      const { payment: p, alreadyProcessed, insufficientBalance, currentBalanceEGP } = await storage.approvePaymentRequestAtomic(id, adminNote);
+      const adminUserId = (await validatedAuthUserId(req)) || req.user?.claims?.sub;
+      // A privileged endpoint is still not allowed to treat a generic
+      // "approved" flag as transfer evidence. The action is recorded by this
+      // route; client-supplied fulfillment flags/details are deliberately
+      // ignored and each manual item must use the completion endpoint below.
+      if (action !== "verify_transfer" && action !== "transfer_executed") {
+        return res.status(400).json({ message: "اختر إجراء تحقق التحويل الصريح قبل الاعتماد", field: "action" });
+      }
+      if (action === "transfer_executed" && transferExecuted !== true) {
+        return res.status(400).json({ message: "أكد أن التحويل تم فعلياً قبل اعتماد السحب", field: "transferExecuted" });
+      }
+      const target = await pool.query(`SELECT type FROM payment_requests WHERE id = $1`, [id]);
+      if (target.rowCount === 1 && target.rows[0].type === "withdrawal" && action !== "transfer_executed") {
+        return res.status(400).json({ message: "اعتمد السحب بعد اختيار إجراء تنفيذ التحويل", field: "action" });
+      }
+      if (target.rowCount === 1 && target.rows[0].type === "top_up" && action !== "verify_transfer") {
+        return res.status(400).json({ message: "اعتمد الإيداع بعد اختيار إجراء تحقق التحويل", field: "action" });
+      }
+      const { payment: p, alreadyProcessed, insufficientBalance, currentBalanceEGP, transferReferenceRequired, transferReferenceDuplicate } =
+        await storage.approvePaymentRequestAtomic(
+          id,
+          adminNote,
+          transferReference,
+          adminUserId,
+        );
       if (!p) return res.status(404).json({ message: "الطلب غير موجود" });
+      if (p.type === "withdrawal" && action !== "transfer_executed") {
+        return res.status(400).json({ message: "اعتمد السحب بعد اختيار إجراء تنفيذ التحويل", field: "action" });
+      }
+      if (p.type === "top_up" && action !== "verify_transfer") {
+        return res.status(400).json({ message: "اعتمد الإيداع بعد اختيار إجراء تحقق التحويل", field: "action" });
+      }
       if (alreadyProcessed) {
         return res.status(409).json({ message: `تمت معالجة الطلب مسبقاً وحالته الحالية: ${p.status}`, status: p.status });
       }
@@ -5854,11 +6073,20 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           requestedAmountEGP: p?.amountEGP,
         });
       }
+      if (transferReferenceRequired) {
+        return res.status(400).json({
+          message: "أدخل رقم مرجع التحويل الفعلي قبل اعتماد طلب السحب",
+          field: "transferReference",
+        });
+      }
+      if (transferReferenceDuplicate) {
+        return res.status(409).json({ message: "رقم مرجع التحويل مستخدم في طلب سحب آخر", field: "transferReference" });
+      }
       if (p && !alreadyProcessed) {
         const services = String(p.serviceType || "").split(",").map((s: string) => s.trim()).filter(Boolean);
         const isWalletRecharge = p.serviceType === "wallet_recharge";
         const isWithdrawal = p.type === "withdrawal";
-        const needsManualFulfillment = p.fulfillmentStatus === "manual_required";
+        const needsManualFulfillment = p.fulfillmentStatus === "pending" || p.fulfillmentStatus === "partial";
         await createNotification(
           p.userId,
           'payment',
@@ -5892,7 +6120,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           );
         }
       }
-      return res.json(safePaymentRequest(p));
+      return res.json((await withPaymentDeliveries([p]))[0]);
     }
     if (status === 'rejected') {
       const { payment: p, alreadyProcessed } = await storage.rejectPaymentRequestAtomic(id, adminNote);
@@ -5912,9 +6140,40 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           reference: p.orderNumber || p.id,
         });
       }
-      return res.json(safePaymentRequest(p));
+      return res.json((await withPaymentDeliveries([p]))[0]);
     }
     res.status(400).json({ message: "الحالة غير صالحة؛ الطلب المعلق يمكن اعتماده أو رفضه فقط" });
+  });
+
+  // A human-delivered item cannot be represented by payment approval alone.
+  // This endpoint records who completed the specific service and its result.
+  app.put("/api/admin/payments/:id/deliveries/:serviceType", isAuthenticated, requireAdmin, async (req: any, res) => {
+    const paymentRequestId = Number(req.params.id);
+    const serviceType = String(req.params.serviceType || "").trim();
+    const deliveryNote = typeof req.body?.deliveryNote === "string" ? req.body.deliveryNote.slice(0, 2_000) : undefined;
+    const deliveryResult = typeof req.body?.deliveryResult === "string" ? req.body.deliveryResult.slice(0, 2_000) : undefined;
+    const adminUserId = (await validatedAuthUserId(req)) || req.user?.claims?.sub;
+    if (!Number.isSafeInteger(paymentRequestId) || paymentRequestId < 1 || !serviceType || !adminUserId) {
+      return res.status(400).json({ message: "بيانات إتمام الخدمة غير صالحة" });
+    }
+    const result = await storage.completePaymentServiceDeliveryAtomic(
+      paymentRequestId, serviceType, adminUserId, deliveryNote, deliveryResult,
+    );
+    if (!result.payment) return res.status(404).json({ message: "طلب الخدمة غير متاح للإتمام" });
+    if (!result.delivery) return res.status(404).json({ message: "بند الخدمة غير موجود" });
+    if (!result.alreadyCompleted) {
+      await createNotification(
+        result.payment.userId,
+        "payment",
+        result.payment.fulfillmentStatus === "fulfilled" ? "✅ اكتمل تنفيذ الطلب" : "✅ تم تنفيذ جزء من الطلب",
+        `تم تسجيل تنفيذ خدمة ${serviceType}${deliveryResult ? `: ${deliveryResult}` : ""}`,
+        "/payments",
+        undefined,
+        adminUserId,
+        `manual:${paymentRequestId}:delivery:${serviceType}:completed`,
+      );
+    }
+    return res.json((await withPaymentDeliveries([result.payment]))[0]);
   });
 
   // ================================================================
@@ -6021,7 +6280,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       }
       return p;
     });
-    res.json(enriched.map(safePaymentRequest));
+    res.json(await withPaymentDeliveries(enriched));
   });
 
   app.post("/api/admin/payments/:id/reveal-payout", isAuthenticated, requireAdmin, async (req: any, res) => {
@@ -6150,11 +6409,37 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   });
 
   app.put("/api/admin/payments/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
-    const { status, adminNote } = req.body;
+    const { status, action, transferExecuted, adminNote, transferReference } = req.body;
     const id = Number(req.params.id);
     if (status === 'approved') {
-      const { payment: p, alreadyProcessed, insufficientBalance, currentBalanceEGP } = await storage.approvePaymentRequestAtomic(id, adminNote);
+      const adminUserId = (await validatedAuthUserId(req)) || req.user?.claims?.sub;
+      if (action !== "verify_transfer" && action !== "transfer_executed") {
+        return res.status(400).json({ message: "اختر إجراء تحقق التحويل الصريح قبل الاعتماد", field: "action" });
+      }
+      if (action === "transfer_executed" && transferExecuted !== true) {
+        return res.status(400).json({ message: "أكد أن التحويل تم فعلياً قبل اعتماد السحب", field: "transferExecuted" });
+      }
+      const target = await pool.query(`SELECT type FROM payment_requests WHERE id = $1`, [id]);
+      if (target.rowCount === 1 && target.rows[0].type === "withdrawal" && action !== "transfer_executed") {
+        return res.status(400).json({ message: "اعتمد السحب بعد اختيار إجراء تنفيذ التحويل", field: "action" });
+      }
+      if (target.rowCount === 1 && target.rows[0].type === "top_up" && action !== "verify_transfer") {
+        return res.status(400).json({ message: "اعتمد الإيداع بعد اختيار إجراء تحقق التحويل", field: "action" });
+      }
+      const { payment: p, alreadyProcessed, insufficientBalance, currentBalanceEGP, transferReferenceRequired, transferReferenceDuplicate } =
+        await storage.approvePaymentRequestAtomic(
+          id,
+          adminNote,
+          transferReference,
+          adminUserId,
+        );
       if (!p) return res.status(404).json({ message: "الطلب غير موجود" });
+      if (p.type === "withdrawal" && action !== "transfer_executed") {
+        return res.status(400).json({ message: "اعتمد السحب بعد اختيار إجراء تنفيذ التحويل", field: "action" });
+      }
+      if (p.type === "top_up" && action !== "verify_transfer") {
+        return res.status(400).json({ message: "اعتمد الإيداع بعد اختيار إجراء تحقق التحويل", field: "action" });
+      }
       if (alreadyProcessed) {
         return res.status(409).json({ message: `تمت معالجة الطلب مسبقاً وحالته الحالية: ${p.status}`, status: p.status });
       }
@@ -6165,11 +6450,20 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           requestedAmountEGP: p?.amountEGP,
         });
       }
+      if (transferReferenceRequired) {
+        return res.status(400).json({
+          message: "أدخل رقم مرجع التحويل الفعلي قبل اعتماد طلب السحب",
+          field: "transferReference",
+        });
+      }
+      if (transferReferenceDuplicate) {
+        return res.status(409).json({ message: "رقم مرجع التحويل مستخدم في طلب سحب آخر", field: "transferReference" });
+      }
       if (p && !alreadyProcessed) {
         const services = String(p.serviceType || "").split(",").map((s: string) => s.trim()).filter(Boolean);
         const isWalletRecharge = p.serviceType === "wallet_recharge";
         const isWithdrawal = p.type === "withdrawal";
-        const needsManualFulfillment = p.fulfillmentStatus === "manual_required";
+        const needsManualFulfillment = p.fulfillmentStatus === "pending" || p.fulfillmentStatus === "partial";
         await createNotification(
           p.userId,
           'payment',
@@ -6203,7 +6497,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           );
         }
       }
-      return res.json(safePaymentRequest(p));
+      return res.json((await withPaymentDeliveries([p]))[0]);
     }
     if (status === 'rejected') {
       const { payment: p, alreadyProcessed } = await storage.rejectPaymentRequestAtomic(id, adminNote);
@@ -6223,7 +6517,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           reference: p.orderNumber || p.id,
         });
       }
-      return res.json(safePaymentRequest(p));
+      return res.json((await withPaymentDeliveries([p]))[0]);
     }
     res.status(400).json({ message: "الحالة غير صالحة؛ الطلب المعلق يمكن اعتماده أو رفضه فقط" });
   });
@@ -6630,10 +6924,9 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         response_format: { type: "json_object" },
       });
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
-      if (!(await settleAiWalletCharge(req, userId, "ai_content", "رسوم توليد نص بالذكاء الاصطناعي"))) {
+      if (!(await settleAiCredit(req, userId, "copy", "رسوم توليد نص بالذكاء الاصطناعي"))) {
         return res.status(402).json({ message: "insufficient_credits" });
       }
-      await storage.recordAiUsage(userId, 'copy');
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
       res.status(500).json({ message: "Failed to generate ad copy: " + error.message });
@@ -6662,10 +6955,9 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         response_format: { type: "json_object" },
       });
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
-      if (!(await settleAiWalletCharge(req, userId, "ai_content", "رسوم توليد إعلان فيروسي"))) {
+      if (!(await settleAiCredit(req, userId, "copy", "رسوم توليد إعلان فيروسي"))) {
         return res.status(402).json({ message: "insufficient_credits" });
       }
-      await storage.recordAiUsage(userId, 'viral_ad');
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
       res.status(500).json({ message: "Failed to generate viral ad: " + error.message });
@@ -6685,10 +6977,9 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         response_format: { type: "json_object" },
       });
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
-      if (!(await settleAiWalletCharge(req, userId, "ai_content", "رسوم توليد مقالة بالذكاء الاصطناعي"))) {
+      if (!(await settleAiCredit(req, userId, "article", "رسوم توليد مقالة بالذكاء الاصطناعي"))) {
         return res.status(402).json({ message: "insufficient_credits" });
       }
-      await storage.recordAiUsage(userId, 'article');
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
       res.status(500).json({ message: "Failed to generate article: " + error.message });
@@ -6709,10 +7000,9 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         response_format: { type: "json_object" },
       });
       const content = JSON.parse(response.choices[0]?.message?.content || "{}");
-      if (!(await settleAiWalletCharge(req, userId, "ai_video", "رسوم توليد سكريبت فيديو"))) {
+      if (!(await settleAiCredit(req, userId, "video_script", "رسوم توليد سكريبت فيديو"))) {
         return res.status(402).json({ message: "insufficient_credits" });
       }
-      await storage.recordAiUsage(userId, 'video_script');
       res.json({ ...content, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
       res.status(500).json({ message: "Failed to generate script: " + error.message });
@@ -6723,12 +7013,18 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   app.post("/api/ai/generate-image", isAuthenticated, requireSubscription, checkAiCredits, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const { prompt, size } = req.body;
+      const { prompt, size = "1024x1024" } = req.body ?? {};
+      if (typeof prompt !== "string" || !prompt.trim() || prompt.trim().length > 4_000) {
+        return res.status(400).json({ message: "وصف الصورة مطلوب" });
+      }
+      if (!["1024x1024", "512x512", "256x256"].includes(size)) {
+        return res.status(400).json({ message: "حجم الصورة غير صالح" });
+      }
       const response = await openai.images.generate({
         model: "gpt-image-1",
-        prompt: prompt,
+        prompt: prompt.trim(),
         n: 1,
-        size: (size || "1024x1024") as any,
+        size: size as any,
       });
       // Always save locally — b64_json or download from URL — so the image persists
       const b64 = response.data?.[0]?.b64_json;
@@ -6739,17 +7035,44 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         fs.writeFileSync(savePath, Buffer.from(b64, 'base64'));
       } else if (imageUrl) {
         const imgRes = await fetch(imageUrl);
+        if (!imgRes.ok) throw new Error("Could not download generated image");
         const buf = Buffer.from(await imgRes.arrayBuffer());
         fs.writeFileSync(savePath, buf);
       } else {
         throw new Error("No image generated");
       }
       const finalUrl = `/uploads/${filename}`;
-      if (!(await settleAiWalletCharge(req, userId, "ai_image", "رسوم توليد صورة بالذكاء الاصطناعي"))) {
+      const imageSize = (await fs.promises.stat(savePath)).size;
+      if (!imageSize || imageSize > MAX_AI_VIDEO_IMAGE_BYTES) {
         await unlink(savePath).catch(() => undefined);
+        return res.status(502).json({ message: "حجم الصورة المولدة غير صالح" });
+      }
+      try {
+        await storage.createUploadedFile({
+          userId,
+          filename,
+          originalName: filename,
+          mimeType: "image/png",
+          size: imageSize,
+          url: finalUrl,
+        });
+      } catch (recordError) {
+        await unlink(savePath).catch(() => undefined);
+        throw recordError;
+      }
+      let settled: boolean;
+      try {
+        settled = await settleAiCredit(req, userId, "image", "رسوم توليد صورة بالذكاء الاصطناعي");
+      } catch (settlementError) {
+        await unlink(savePath).catch(() => undefined);
+        await removeOwnedUploadRecord(userId, filename).catch(() => undefined);
+        throw settlementError;
+      }
+      if (!settled) {
+        await unlink(savePath).catch(() => undefined);
+        await removeOwnedUploadRecord(userId, filename).catch(() => undefined);
         return res.status(402).json({ message: "insufficient_credits" });
       }
-      await storage.recordAiUsage(userId, 'image');
       res.json({ url: finalUrl, creditsUsed: (req.aiUsageCount || 0) + 1 });
     } catch (error: any) {
       res.status(500).json({ message: "Failed to generate image: " + error.message });
@@ -6787,10 +7110,9 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       });
 
       const result = JSON.parse(response.choices[0].message.content || "{}");
-      if (!(await settleAiWalletCharge(req, userId, "ai_image", "رسوم تحليل صورة بالذكاء الاصطناعي"))) {
+      if (!(await settleAiCredit(req, userId, "copy", "رسوم تحليل صورة بالذكاء الاصطناعي"))) {
         return res.status(402).json({ message: "insufficient_credits" });
       }
-      await storage.recordAiUsage(userId, 'text');
       res.json({ title: result.title || "", description: result.description || "" });
     } catch (error: any) {
       res.status(500).json({ message: "فشل تحليل الصورة: " + error.message });
@@ -6815,10 +7137,9 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       });
 
       const result = JSON.parse(response.choices[0].message.content || "{}");
-      if (!(await settleAiWalletCharge(req, userId, "ai_content", "رسوم ترجمة بالذكاء الاصطناعي"))) {
+      if (!(await settleAiCredit(req, userId, "copy", "رسوم ترجمة بالذكاء الاصطناعي"))) {
         return res.status(402).json({ message: "insufficient_credits" });
       }
-      await storage.recordAiUsage(userId, 'text');
       res.json({ title: result.title || "", description: result.description || "" });
     } catch (error: any) {
       res.status(500).json({ message: "فشل الترجمة: " + error.message });
@@ -6953,11 +7274,6 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
 
       reply = reply || "عذراً، مش قادر أرد دلوقتي. حاول تاني بعد شوية.";
 
-      if (req.user) {
-        const userId = req.user?.claims?.sub;
-        if (userId) storage.recordAiUsage(userId, 'chat').catch(() => {});
-      }
-
       res.json({ reply });
     } catch (error: any) {
       console.error("[ai/chat] error:", error?.message);
@@ -6966,10 +7282,12 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   });
 
   // ─── AI TEXT-TO-SPEECH (Egyptian Arabic — high quality via gpt-4o-mini-tts) ───────
-  app.post("/api/ai/tts", isAuthenticated, async (req: any, res) => {
+  app.post("/api/ai/tts", isAuthenticated, checkAiCredits, async (req: any, res) => {
     try {
-      const { text, voice = "nova" } = req.body;
-      if (!text || text.trim().length < 2) return res.status(400).json({ message: "النص مطلوب" });
+      const { text, voice = "nova" } = req.body ?? {};
+      if (typeof text !== "string" || text.trim().length < 2 || text.trim().length > 4_000) {
+        return res.status(400).json({ message: "النص مطلوب" });
+      }
 
       // Map our gender voices to OpenAI voices that handle Arabic well
       // nova = warm female, onyx = deep male — both speak clear Egyptian when instructed
@@ -6981,7 +7299,10 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         echo:    "echo",
         fable:   "fable",
       };
-      const ttsVoice = voiceMap[voice] || "nova";
+      if (typeof voice !== "string" || !voiceMap[voice]) {
+        return res.status(400).json({ message: "الصوت المختار غير صالح" });
+      }
+      const ttsVoice = voiceMap[voice];
       const isFemale = ttsVoice === "nova" || ttsVoice === "shimmer" || ttsVoice === "alloy";
 
       // Egyptian Arabic accent instructions — applied via the dedicated TTS instructions param
@@ -7015,6 +7336,32 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       const filename = `tts-${Date.now()}.mp3`;
       const savePath = path.join(process.cwd(), 'uploads', filename);
       await writeFile(savePath, audioBuffer);
+      try {
+        await storage.createUploadedFile({
+          userId: req.user.claims.sub,
+          filename,
+          originalName: filename,
+          mimeType: "audio/mpeg",
+          size: audioBuffer.length,
+          url: `/uploads/${filename}`,
+        });
+      } catch (recordError) {
+        await unlink(savePath).catch(() => undefined);
+        throw recordError;
+      }
+      let settled: boolean;
+      try {
+        settled = await settleAiCredit(req, req.user.claims.sub, "tts", "رسوم توليد صوت بالذكاء الاصطناعي");
+      } catch (settlementError) {
+        await unlink(savePath).catch(() => undefined);
+        await removeOwnedUploadRecord(req.user.claims.sub, filename).catch(() => undefined);
+        throw settlementError;
+      }
+      if (!settled) {
+        await unlink(savePath).catch(() => undefined);
+        await removeOwnedUploadRecord(req.user.claims.sub, filename).catch(() => undefined);
+        return res.status(402).json({ message: "insufficient_credits" });
+      }
       res.json({ url: `/uploads/${filename}`, size: audioBuffer.length });
     } catch (error: any) {
       console.error("TTS error:", error);
@@ -7023,11 +7370,20 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   });
 
   // ─── D-ID TALKING AVATAR ─────────────────────────────────────────
-  app.post("/api/ai/talking-avatar", isAuthenticated, async (req: any, res) => {
+  app.post("/api/ai/talking-avatar", isAuthenticated, checkAiCredits, async (req: any, res) => {
     try {
-      const { imageUrl, text, voice = "female" } = req.body;
-      if (!imageUrl) return res.status(400).json({ message: "imageUrl مطلوب" });
-      if (!text || text.trim().length < 2) return res.status(400).json({ message: "النص مطلوب" });
+      const { imageUrl, text, voice = "female" } = req.body ?? {};
+      const sourceImages = await resolveOwnedLocalMedia(
+        req.user.claims.sub, [imageUrl], "image/",
+        MAX_AI_VIDEO_IMAGE_BYTES, MAX_AI_VIDEO_IMAGE_BYTES,
+      );
+      if (!sourceImages) {
+        return res.status(400).json({ message: "الصورة يجب أن تكون ملفاً مرفوعاً من حسابك" });
+      }
+      if (typeof text !== "string" || text.trim().length < 2 || text.trim().length > 4_000) {
+        return res.status(400).json({ message: "النص مطلوب" });
+      }
+      if (voice !== "female" && voice !== "male") return res.status(400).json({ message: "الصوت المختار غير صالح" });
 
       const DID_KEY = process.env.DID_API_KEY;
       if (!DID_KEY) return res.status(500).json({ message: "DID_API_KEY غير مضبوط" });
@@ -7042,7 +7398,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           "Authorization": authHeader,
         },
         body: JSON.stringify({
-          source_url: imageUrl.startsWith("http") ? imageUrl : `https://ads-as.com${imageUrl}`,
+          source_url: `https://ads-as.com/uploads/${path.basename(sourceImages[0])}`,
           script: {
             type: "text",
             input: text.trim(),
@@ -7058,7 +7414,14 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         return res.status(500).json({ message: createData.description || createData.message || "فشل إنشاء الفيديو" });
       }
 
-      res.json({ id: createData.id });
+      const providerJobId = typeof createData?.id === "string" ? createData.id : "";
+      if (!/^[A-Za-z0-9_-]{1,200}$/.test(providerJobId)) {
+        return res.status(502).json({ message: "D-ID لم يرجع معرف فيديو صالح" });
+      }
+      await createAiMediaJob(req.user.claims.sub, providerJobId);
+      // D-ID accepts work asynchronously. Charging occurs only after a later
+      // owner-scoped poll observes and caches a successful completed video.
+      res.json({ id: providerJobId });
     } catch (error: any) {
       console.error("D-ID error:", error);
       res.status(500).json({ message: "خطأ في D-ID: " + error.message });
@@ -7067,50 +7430,116 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
 
   app.get("/api/ai/talking-avatar/:id", isAuthenticated, async (req: any, res) => {
     try {
+      const providerJobId = String(req.params.id || "");
+      if (!/^[A-Za-z0-9_-]{1,200}$/.test(providerJobId)) {
+        return res.status(400).json({ message: "معرف الفيديو غير صالح" });
+      }
+      const userId = req.user.claims.sub;
+      const job = await getAiMediaJob(userId, providerJobId);
+      if (!job) return res.status(404).json({ message: "فيديو الأفاتار غير موجود" });
+      if (job.status === "completed") {
+        return res.json({ id: providerJobId, status: "done", result_url: job.cachedResultUrl });
+      }
+      if (job.status === "failed") {
+        return res.json({ id: providerJobId, status: "error" });
+      }
+
       const DID_KEY = process.env.DID_API_KEY;
       if (!DID_KEY) return res.status(500).json({ message: "DID_API_KEY غير مضبوط" });
 
       const authHeader = "Basic " + Buffer.from(`${DID_KEY}:`).toString("base64");
-      const pollRes = await fetch(`https://api.d-id.com/talks/${req.params.id}`, {
+      const pollRes = await fetch(`https://api.d-id.com/talks/${providerJobId}`, {
         headers: { "Authorization": authHeader },
       });
       const data: any = await pollRes.json();
+      if (!pollRes.ok) {
+        return res.status(pollRes.status >= 400 && pollRes.status < 500 ? pollRes.status : 502)
+          .json({ message: data?.description || data?.message || "فشل الاستعلام عن فيديو D-ID" });
+      }
 
-      // ── If video is ready, download it locally so the URL never expires ──
-      if (data.status === "done" && data.result_url) {
+      if (["error", "failed", "rejected"].includes(data.status)) {
+        await markAiMediaJobFailed(userId, providerJobId);
+        return res.json(data);
+      }
+      if (data.status !== "done" || typeof data.result_url !== "string" || !data.result_url) {
+        return res.json(data);
+      }
+
+      let freeCredits = 3;
+      let walletPriceEGP = 0;
+      if (!isAdminUser(req)) {
+        const [freeSetting, priceSetting] = await Promise.all([
+          storage.getSetting("ai_free_credits"),
+          storage.getSetting("ai_price_per_credit_egp"),
+        ]);
+        const configuredFreeCredits = Number.parseInt(freeSetting || "3", 10);
+        freeCredits = Number.isFinite(configuredFreeCredits) ? Math.max(0, configuredFreeCredits) : 3;
         try {
-          const uploadsDir = path.join(process.cwd(), "uploads");
-          await fs.promises.mkdir(uploadsDir, { recursive: true });
-          const safeId = String(req.params.id).replace(/[^a-zA-Z0-9_-]/g, "_");
-          const filename = `did-${safeId}-${Date.now()}.mp4`;
-          const localPath = path.join(uploadsDir, filename);
-
-          // Skip download if file already cached
-          if (!fs.existsSync(localPath)) {
-            const videoRes = await fetch(data.result_url);
-            if (videoRes.ok && videoRes.body) {
-              const buf = Buffer.from(await videoRes.arrayBuffer());
-              await fs.promises.writeFile(localPath, buf);
-            }
-          }
-
-          if (fs.existsSync(localPath)) {
-            data.result_url = `/uploads/${filename}`;
-          }
-        } catch (downloadErr: any) {
-          console.error("[D-ID] failed to cache video locally:", downloadErr?.message);
-          // Fallback: return the original (expiring) URL
+          walletPriceEGP = priceSetting == null ? 5 : parseLedgerAmount(priceSetting, "ai_price_per_credit_egp");
+          if (walletPriceEGP <= 0) throw new Error("invalid");
+        } catch {
+          return res.status(503).json({ message: "إعداد سعر رصيد الذكاء الاصطناعي غير صالح. تواصل مع الإدارة." });
         }
       }
 
-      res.json(data);
+      // A deterministic filename makes repeat polls reuse the same cached
+      // result. It is not returned until its durable job completion/debit
+      // transaction succeeds.
+      const uploadsDir = path.join(process.cwd(), "uploads");
+      await fs.promises.mkdir(uploadsDir, { recursive: true });
+      const filename = `did-${providerJobId}.mp4`;
+      const localPath = path.join(uploadsDir, filename);
+      const cachedResultUrl = `/uploads/${filename}`;
+      if (!fs.existsSync(localPath)) {
+        const videoRes = await fetch(data.result_url);
+        if (!videoRes.ok || !videoRes.body) {
+          return res.status(502).json({ message: "تعذر حفظ فيديو D-ID المكتمل" });
+        }
+        const buf = Buffer.from(await videoRes.arrayBuffer());
+        if (!buf.length) return res.status(502).json({ message: "تعذر حفظ فيديو D-ID المكتمل" });
+        await fs.promises.writeFile(localPath, buf);
+      }
+
+      let completion;
+      try {
+        completion = await completeAiMediaJob({
+          userId,
+          providerJobId,
+          cachedResultUrl,
+          freeCredits,
+          walletPriceEGP,
+          description: "رسوم إنشاء أفاتار متحدث بالذكاء الاصطناعي",
+          adminBypass: isAdminUser(req),
+        });
+      } catch (completionError) {
+        await unlink(localPath).catch(() => undefined);
+        throw completionError;
+      }
+      if (completion.status === "insufficient") {
+        await unlink(localPath).catch(() => undefined);
+        return res.status(402).json({ message: "insufficient_credits" });
+      }
+      if (completion.status === "not_found") {
+        await unlink(localPath).catch(() => undefined);
+        return res.status(404).json({ message: "فيديو الأفاتار غير موجود" });
+      }
+      if (completion.status === "failed") {
+        await unlink(localPath).catch(() => undefined);
+        return res.status(409).json({ message: "فشل فيديو الأفاتار" });
+      }
+      if (completion.status !== "completed") {
+        await unlink(localPath).catch(() => undefined);
+        return res.status(500).json({ message: "تعذر إكمال فيديو الأفاتار" });
+      }
+
+      res.json({ ...data, result_url: completion.cachedResultUrl });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
   });
 
   // ─── AI IMAGES-TO-VIDEO (FFmpeg Cinematic HD) ──────────────────
-  app.post("/api/ai/images-to-video", isAuthenticated, async (req: any, res) => {
+  app.post("/api/ai/images-to-video", isAuthenticated, checkAiCredits, async (req: any, res) => {
     const tmpFiles: string[] = [];
     try {
       const {
@@ -7119,10 +7548,45 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         duration = 4,
         quality = "hd",        // standard | hd | cinema
         format = "vertical",   // vertical (9:16) | landscape (16:9)
-      } = req.body;
+      } = req.body ?? {};
 
-      if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length < 1) {
+      if (!Array.isArray(imageUrls) || imageUrls.length < 1 || imageUrls.length > 15) {
         return res.status(400).json({ message: "أرسل صورة واحدة على الأقل" });
+      }
+      if (!Number.isFinite(duration) || duration < 1 || duration > 30) {
+        return res.status(400).json({ message: "مدة الفيديو غير صالحة" });
+      }
+      if (quality !== "standard" && quality !== "hd" && quality !== "cinema") {
+        return res.status(400).json({ message: "جودة الفيديو غير صالحة" });
+      }
+      if (format !== "vertical" && format !== "landscape") {
+        return res.status(400).json({ message: "أبعاد الفيديو غير صالحة" });
+      }
+      const userId = req.user.claims.sub;
+      const localImages = await resolveOwnedLocalMedia(
+        userId,
+        imageUrls,
+        "image/",
+        MAX_AI_VIDEO_IMAGE_BYTES,
+        MAX_AI_VIDEO_IMAGE_TOTAL_BYTES,
+      );
+      if (!localImages) {
+        return res.status(400).json({ message: "الصور يجب أن تكون ملفات صور مرفوعة من حسابك" });
+      }
+      let audioFilePath: string | null = null;
+      if (audioUrl != null) {
+        const localAudio = await resolveOwnedLocalMedia(
+          userId,
+          [audioUrl],
+          "audio/",
+          MAX_AI_VIDEO_AUDIO_BYTES,
+          MAX_AI_VIDEO_AUDIO_BYTES,
+        );
+        if (!localAudio) return res.status(400).json({ message: "الصوت يجب أن يكون ملفاً مرفوعاً من حسابك" });
+        audioFilePath = localAudio[0];
+      }
+      if (audioUrl != null && !audioFilePath) {
+        return res.status(400).json({ message: "رابط الصوت غير صالح" });
       }
 
       // ── Resolution & encode settings by quality ──────────────
@@ -7139,27 +7603,21 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       const uploadsDir = path.join(process.cwd(), 'uploads');
 
       // ── Download / resolve images ──────────────────────────────
-      const localImages: string[] = [];
-      for (const imgUrl of imageUrls) {
+      const preparedImages: string[] = [];
+      for (const sourcePath of localImages) {
         const tmpPath = path.join(tmpdir(), `img-${randomUUID()}.jpg`);
         tmpFiles.push(tmpPath);
-        if (imgUrl.startsWith('/uploads/')) {
-          const buf = await readFile(path.join(process.cwd(), imgUrl));
-          await writeFile(tmpPath, buf);
-        } else {
-          const resp = await fetch(imgUrl);
-          const buf = Buffer.from(await resp.arrayBuffer());
-          await writeFile(tmpPath, buf);
-        }
-        localImages.push(tmpPath);
+        const buf = await readFile(sourcePath);
+        await writeFile(tmpPath, buf);
+        preparedImages.push(tmpPath);
       }
 
       // ── Concat list file (each image shown for `duration` seconds) ─
       const listFile = path.join(tmpdir(), `list-${randomUUID()}.txt`);
       tmpFiles.push(listFile);
-      const listContent = localImages.map(p => `file '${p}'\nduration ${duration}`).join('\n');
+      const listContent = preparedImages.map(p => `file '${p}'\nduration ${duration}`).join('\n');
       // repeat last image (required by concat demuxer to finish last frame)
-      await writeFile(listFile, listContent + `\nfile '${localImages[localImages.length - 1]}'\nduration 0.04`);
+      await writeFile(listFile, listContent + `\nfile '${preparedImages[preparedImages.length - 1]}'\nduration 0.04`);
 
       const outFilename = `video-${Date.now()}.mp4`;
       const outPath = path.join(uploadsDir, outFilename);
@@ -7185,14 +7643,8 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       // ── Build ffmpeg command ────────────────────────────────────
       const ffmpegArgs: string[] = ["-y", "-f", "concat", "-safe", "0", "-i", listFile];
 
-      // Add audio input if provided
-      let audioFilePath: string | null = null;
-      if (audioUrl) {
-        audioFilePath = audioUrl.startsWith('/uploads/')
-          ? path.join(process.cwd(), audioUrl)
-          : audioUrl;
-        ffmpegArgs.push("-i", audioFilePath!);
-      }
+      // Audio is already resolved to an owned, local file above.
+      if (audioFilePath) ffmpegArgs.push("-i", audioFilePath);
 
       ffmpegArgs.push(
         "-vf", videoFilter,
@@ -7222,6 +7674,37 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         proc.on("error", reject);
       });
 
+      const outputSize = (await fs.promises.stat(outPath)).size;
+      if (!outputSize || outputSize > MAX_AI_VIDEO_OUTPUT_BYTES) {
+        await unlink(outPath).catch(() => undefined);
+        return res.status(502).json({ message: "حجم الفيديو الناتج غير صالح" });
+      }
+      try {
+        await storage.createUploadedFile({
+          userId,
+          filename: outFilename,
+          originalName: outFilename,
+          mimeType: "video/mp4",
+          size: outputSize,
+          url: `/uploads/${outFilename}`,
+        });
+      } catch (recordError) {
+        await unlink(outPath).catch(() => undefined);
+        throw recordError;
+      }
+      let settled: boolean;
+      try {
+        settled = await settleAiCredit(req, userId, "video", "رسوم تحويل الصور إلى فيديو بالذكاء الاصطناعي");
+      } catch (settlementError) {
+        await unlink(outPath).catch(() => undefined);
+        await removeOwnedUploadRecord(userId, outFilename).catch(() => undefined);
+        throw settlementError;
+      }
+      if (!settled) {
+        await unlink(outPath).catch(() => undefined);
+        await removeOwnedUploadRecord(userId, outFilename).catch(() => undefined);
+        return res.status(402).json({ message: "insufficient_credits" });
+      }
       res.json({ url: `/uploads/${outFilename}`, quality, resolution: `${W}x${H}` });
     } catch (error: any) {
       console.error("images-to-video error:", error.message);

@@ -1,5 +1,6 @@
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
+import { normalizeResetOtp } from "@/lib/reset-otp-input";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -98,6 +99,15 @@ export default function Login() {
   const [resetDestination, setResetDestination] = useState("");
   const [otp, setOtp] = useState("");
   const [otpLoading, setOtpLoading] = useState(false);
+  const [resendAt, setResendAt] = useState(0);
+  const [resendSeconds, setResendSeconds] = useState(0);
+
+  useEffect(() => {
+    const update = () => setResendSeconds(Math.max(0, Math.ceil((resendAt - Date.now()) / 1000)));
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [resendAt]);
 
   useEffect(() => {
     if (user) {
@@ -158,6 +168,7 @@ export default function Login() {
   };
 
   const handleForgotPassword = async () => {
+    if (forgotLoading || Date.now() < resendAt) return;
     if (!forgotIdentifier.trim()) return toast({ variant: "destructive", title: "أدخل البريد الإلكتروني" });
     setForgotLoading(true);
     try {
@@ -168,14 +179,18 @@ export default function Login() {
         body: JSON.stringify({ identifier: forgotIdentifier.trim() }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.message || "تعذر إرسال الرمز");
+      if (!res.ok) {
+        if (res.status === 429) setResendAt(Date.now() + Math.max(1, Number(json.retryAfterSeconds) || 60) * 1000);
+        throw new Error(json.message || "تعذر طلب الرمز");
+      }
       setResetChallengeId(json.challengeId || "");
       setResetDestination(json.destination || "وسيلة الاتصال المسجلة");
       setOtp("");
+      setResendAt(Date.now() + Math.max(1, Number(json.resendAfterSeconds) || 60) * 1000);
       setScreen("otp");
       toast({ title: json.message });
-    } catch {
-      toast({ variant: "destructive", title: "حدث خطأ، حاول مجدداً" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: err?.message || "حدث خطأ، حاول مجدداً" });
     } finally {
       setForgotLoading(false);
     }
@@ -566,14 +581,14 @@ export default function Login() {
               <Button
                 size="lg" className="w-full h-12 gap-2 rounded-xl"
                  onClick={() => handleForgotPassword()}
-                disabled={forgotLoading || !forgotIdentifier.trim()}
+                disabled={forgotLoading || resendSeconds > 0 || !forgotIdentifier.trim()}
                 data-testid="btn-forgot-submit"
               >
                 {forgotLoading
                   ? <span className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
                   : <KeyRound className="w-4 h-4" />
                 }
-                 إرسال رمز التحقق
+                 {resendSeconds > 0 ? `انتظر ${resendSeconds} ثانية لإعادة الإرسال` : "إرسال رمز التحقق"}
               </Button>
 
               <p className="text-center text-sm text-muted-foreground">
@@ -593,11 +608,11 @@ export default function Login() {
               </button>
               <div>
                 <h2 className="text-xl font-bold">أدخل رمز التحقق</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">أرسلنا رمزاً من 6 أرقام إلى {resetDestination}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">إذا كان البريد مسجلاً، سيصله رمز من 6 أرقام على {resetDestination}</p>
               </div>
             </div>
             <div className="space-y-4">
-              <Input value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              <Input value={otp} onChange={e => setOtp(normalizeResetOtp(e.target.value))}
                 inputMode="numeric" autoComplete="one-time-code" maxLength={6} dir="ltr"
                 className="h-14 text-center text-2xl tracking-[0.5em]" placeholder="000000"
                 data-testid="input-reset-otp" onKeyDown={e => e.key === "Enter" && handleVerifyOtp()} />
@@ -609,8 +624,11 @@ export default function Login() {
                   : <Shield className="w-4 h-4" />}
                 تحقق من الرمز
               </Button>
-              <button className="w-full text-xs text-primary hover:underline" onClick={() => setScreen("forgot")}>
-                لم يصلك الرمز؟ اطلب رمزاً جديداً
+              <p className="text-xs text-muted-foreground">راجع البريد غير الهام أيضاً. استخدم الرمز الأحدث بعد إعادة الإرسال.</p>
+              <button className="w-full text-xs text-primary hover:underline disabled:opacity-50"
+                disabled={forgotLoading || otpLoading || resendSeconds > 0}
+                data-testid="btn-resend-reset-otp" onClick={handleForgotPassword}>
+                {forgotLoading ? "جارٍ طلب الرمز..." : resendSeconds > 0 ? `إعادة إرسال الرمز بعد ${resendSeconds} ثانية` : "لم يصلك الرمز؟ أعد إرساله"}
               </button>
             </div>
           </div>

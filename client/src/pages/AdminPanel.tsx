@@ -41,7 +41,7 @@ const NAV = [
   { key: "streams",        label: "البث المباشر",          icon: Radio,           color: "text-red-400" },
   { key: "campaigns",      label: "الحملات الإعلانية",    icon: BarChart2,       color: "text-teal-400" },
   { key: "ticker_ads",     label: "شريط الإعلان العاجل",   icon: Megaphone,       color: "text-red-500" },
-  { key: "payments",       label: "طلبات السحب",          icon: Banknote,        color: "text-green-400" },
+  { key: "payments",       label: "طلبات التحويل والتنفيذ", icon: Banknote,        color: "text-green-400" },
   { key: "payment_report", label: "تقرير المدفوعات",      icon: DollarSign,      color: "text-violet-400" },
   { key: "boostorders",    label: "طلبات التعزيز",         icon: Zap,             color: "text-orange-400" },
   { key: "payreceipts",    label: "إيصالات الدفع",          icon: Banknote,        color: "text-emerald-500" },
@@ -73,6 +73,8 @@ function StatusBadge({ status }: { status: string }) {
     paused:    { label: "متوقف",   cls: "bg-yellow-500/15 text-yellow-600 border-yellow-500/30" },
     pending:   { label: "معلق",    cls: "bg-blue-500/15 text-blue-600 border-blue-500/30" },
     approved:  { label: "مقبول",   cls: "bg-green-500/15 text-green-600 border-green-500/30" },
+    transfer_executed: { label: "تم التحويل", cls: "bg-green-500/15 text-green-600 border-green-500/30" },
+    partial:   { label: "تنفيذ جزئي", cls: "bg-amber-500/15 text-amber-600 border-amber-500/30" },
     rejected:  { label: "مرفوض",   cls: "bg-red-500/15 text-red-600 border-red-500/30" },
     resolved:  { label: "محلول",   cls: "bg-green-500/15 text-green-600 border-green-500/30" },
     dismissed: { label: "مرفوض",   cls: "bg-gray-500/15 text-gray-500 border-gray-500/30" },
@@ -1289,6 +1291,11 @@ function PaymentsSection({ logAction }: { logAction: any }) {
   const qc = useQueryClient();
   const [revealedPayouts, setRevealedPayouts] = useState<Record<number, { destination: string; payoutName?: string; amountEGP: number }>>({});
   const [revealingPayoutId, setRevealingPayoutId] = useState<number | null>(null);
+  const [transferVerified, setTransferVerified] = useState<Record<number, boolean>>({});
+  const [transferReferences, setTransferReferences] = useState<Record<number, string>>({});
+  const [reviewNotes, setReviewNotes] = useState<Record<number, string>>({});
+  const [deliveryNotes, setDeliveryNotes] = useState<Record<string, string>>({});
+  const [deliveryResults, setDeliveryResults] = useState<Record<string, string>>({});
   const revealAttempts = useRef<Record<number, number>>({});
 
   const { data: payments = [], isLoading } = useQuery<any[]>({
@@ -1326,9 +1333,14 @@ function PaymentsSection({ logAction }: { logAction: any }) {
   }, [payments]);
 
   const updatePayment = useMutation({
-    mutationFn: async ({ id, status }: any) => {
+    mutationFn: async ({ id, status, action, transferExecuted, transferReference, adminNote }: any) => {
       clearRevealedPayout(id);
-      const r = await fetch(`/api/admin/payments/${id}`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+      const r = await fetch(`/api/admin/payments/${id}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, action, transferExecuted, transferReference, adminNote }),
+      });
       const data = await r.json().catch(() => ({} as any));
       if (!r.ok) {
         const err: any = new Error(data?.message || "فشل تحديث الطلب");
@@ -1340,8 +1352,14 @@ function PaymentsSection({ logAction }: { logAction: any }) {
     },
     onSuccess: (_data: any, vars) => {
       qc.invalidateQueries({ queryKey: ["/api/admin/payments"] });
-      toast({ title: vars.status === "approved" ? "✅ تمت الموافقة" : "❌ تم الرفض" });
-      logAction("update_payment", `pay#${vars.id}`, vars.status);
+      setTransferReferences(prev => {
+        if (!(vars.id in prev)) return prev;
+        const next = { ...prev };
+        delete next[vars.id];
+        return next;
+      });
+      toast({ title: vars.action === "transfer_executed" ? "✅ تم تسجيل التحويل المنفذ" : vars.status === "approved" ? "✅ تم التحقق من التحويل" : "❌ تم الرفض" });
+      logAction("update_payment", `pay#${vars.id}`, vars.action || vars.status);
     },
     onError: (err: any, vars) => {
       qc.invalidateQueries({ queryKey: ["/api/admin/payments"] });
@@ -1353,6 +1371,26 @@ function PaymentsSection({ logAction }: { logAction: any }) {
       }
       logAction("update_payment_failed", `pay#${vars.id}`, vars.status);
     },
+  });
+
+  const completeDelivery = useMutation({
+    mutationFn: async ({ paymentId, serviceType, deliveryNote, deliveryResult }: { paymentId: number; serviceType: string; deliveryNote: string; deliveryResult: string }) => {
+      const response = await fetch(`/api/admin/payments/${paymentId}/deliveries/${encodeURIComponent(serviceType)}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deliveryNote, deliveryResult }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message || "تعذر تسجيل تنفيذ الخدمة");
+      return body;
+    },
+    onSuccess: (_payment, variables) => {
+      qc.invalidateQueries({ queryKey: ["/api/admin/payments"] });
+      toast({ title: "✅ تم تسجيل تنفيذ الخدمة", description: "تم تحديث حالة الخدمة ونتيجتها للمستخدم." });
+      logAction("complete_payment_delivery", `pay#${variables.paymentId}:${variables.serviceType}`);
+    },
+    onError: (error: Error) => toast({ title: "تعذر تسجيل التنفيذ", description: error.message, variant: "destructive" }),
   });
 
   const handleRevealPayout = async (id: number) => {
@@ -1398,12 +1436,35 @@ function PaymentsSection({ logAction }: { logAction: any }) {
         );
         if (!ok) return;
       }
+      if (!transferReferences[p.id]?.trim()) {
+        toast({
+          title: "أدخل مرجع التحويل الصادر",
+          description: "سجّل رقم العملية الفعلي والفريد بعد تحويل المبلغ للمستفيد.",
+          variant: "destructive",
+        });
+        return;
+      }
       const transferred = confirm(
         `هل تم تحويل ${Number(p.amountEGP).toFixed(2)} ج.م فعلياً إلى ${p.payoutName || "المستفيد"}؟\n\nالموافقة ستخصم المبلغ من أرباح المستخدم ولا يمكن تكرارها.`
       );
       if (!transferred) return;
     }
-    updatePayment.mutate({ id: p.id, status: "approved" });
+    if (p.type === "top_up" && !transferVerified[p.id]) {
+      toast({
+        title: "يلزم تأكيد التحويل الحقيقي",
+        description: "راجع المرجع/كشف الحساب ثم فعّل تأكيد تحقق التحويل قبل متابعة الطلب.",
+        variant: "destructive",
+      });
+      return;
+    }
+    updatePayment.mutate({
+      id: p.id,
+      status: "approved",
+      action: p.type === "withdrawal" ? "transfer_executed" : "verify_transfer",
+      transferExecuted: p.type === "withdrawal",
+      transferReference: p.type === "withdrawal" ? transferReferences[p.id].trim() : undefined,
+      adminNote: reviewNotes[p.id] || undefined,
+    });
   };
 
   const pending = payments.filter((p: any) => p.status === "pending");
@@ -1458,6 +1519,16 @@ function PaymentsSection({ logAction }: { logAction: any }) {
                               كشف بيانات التحويل
                             </Button>
                           )}
+                          <Input
+                            value={transferReferences[p.id] || ""}
+                            onChange={(event) => setTransferReferences(prev => ({ ...prev, [p.id]: event.target.value }))}
+                            placeholder="رقم مرجع التحويل الصادر الفعلي (مطلوب)"
+                            className="mt-2 h-8 text-xs font-mono"
+                            dir="ltr"
+                            maxLength={160}
+                            data-testid={`input-outgoing-transfer-reference-${p.id}`}
+                          />
+                          <p className="text-[10px] text-muted-foreground">لا يتم اعتماد السحب قبل تسجيل مرجع التحويل الفريد المنفذ.</p>
                         </div>
                       )}
                       {p.serviceType && (
@@ -1470,6 +1541,24 @@ function PaymentsSection({ logAction }: { logAction: any }) {
                           🔑 مرجع الدفع: <span className="font-mono text-primary" dir="ltr">{p.paymentRef}</span>
                         </div>
                       )}
+                      {p.type === "top_up" && (
+                        <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-50/70 px-2.5 py-2 text-xs font-bold text-amber-900 dark:bg-amber-950/30 dark:text-amber-200" data-testid={`transfer-verification-${p.id}`}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(transferVerified[p.id])}
+                            onChange={(event) => setTransferVerified(prev => ({ ...prev, [p.id]: event.target.checked }))}
+                            className="mt-0.5"
+                          />
+                          <span>تحققت فعلياً من وصول التحويل بالمرجع/كشف الحساب. الإيصال المرفوع مساعد فقط ولا يكفي وحده.</span>
+                        </label>
+                      )}
+                      <Textarea
+                        value={reviewNotes[p.id] || ""}
+                        onChange={(event) => setReviewNotes(prev => ({ ...prev, [p.id]: event.target.value }))}
+                        placeholder="ملاحظة المراجعة/سبب الرفض (اختياري)"
+                        className="mt-2 min-h-16 text-xs"
+                        data-testid={`input-payment-note-${p.id}`}
+                      />
                       <div className="text-xs text-muted-foreground opacity-60 mt-0.5">ORD: {p.orderNumber || p.id} · ID: {p.userId}</div>
                       {p.type === 'withdrawal' && p.currentBalanceEGP !== undefined && (
                         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap" data-testid={`balance-info-${p.id}`}>
@@ -1503,8 +1592,10 @@ function PaymentsSection({ logAction }: { logAction: any }) {
                       )}
                     </div>
                     <div className="flex gap-1.5 flex-shrink-0">
-                      <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => handleApprove(p)} data-testid={`button-approve-payment-${p.id}`}><CheckCircle className="w-3 h-3 me-1" />موافقة</Button>
-                      <Button size="sm" variant="destructive" className="text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "rejected" })} data-testid={`button-reject-payment-${p.id}`}><XCircle className="w-3 h-3 me-1" />رفض</Button>
+                      <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white text-xs" onClick={() => handleApprove(p)} disabled={p.type === "top_up" && !transferVerified[p.id]} data-testid={`button-approve-payment-${p.id}`}>
+                        <CheckCircle className="w-3 h-3 me-1" />{p.type === "withdrawal" ? "تم تنفيذ التحويل" : "تأكيد التحويل"}
+                      </Button>
+                      <Button size="sm" variant="destructive" className="text-xs" onClick={() => updatePayment.mutate({ id: p.id, status: "rejected", action: "reject", adminNote: reviewNotes[p.id] || undefined })} data-testid={`button-reject-payment-${p.id}`}><XCircle className="w-3 h-3 me-1" />رفض</Button>
                     </div>
                   </div>
                   {p.screenshotUrl && (
@@ -1534,10 +1625,80 @@ function PaymentsSection({ logAction }: { logAction: any }) {
                   <div className="flex items-center gap-2 mb-1">
                     <span className="font-semibold">{p.amountEGP} ج.م</span>
                     <StatusBadge status={p.status} />
+                    <Badge variant="outline" className={p.fulfillmentStatus === "fulfilled" ? "text-emerald-600" : "text-amber-600"} data-testid={`fulfillment-status-${p.id}`}>
+                      {p.fulfillmentStatus === "fulfilled"
+                        ? "اكتمل التنفيذ"
+                        : p.fulfillmentStatus === "partial"
+                          ? "تنفيذ جزئي — راجع التفاصيل"
+                          : p.fulfillmentStatus
+                            ? "يتطلب متابعة التنفيذ"
+                            : "طلب قديم — راجع التنفيذ"}
+                    </Badge>
                   </div>
                   <div className="text-xs text-muted-foreground">{methodLabel[p.method] || p.method} · {p.phoneNumber}</div>
                   {p.type === "top_up" && p.paymentRef && (
                     <div className="text-xs font-bold mt-1">🔑 مرجع الدفع: <span className="font-mono text-primary" dir="ltr">{p.paymentRef}</span></div>
+                  )}
+                  {p.adminNote && (
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      📝 {p.adminNote}
+                    </div>
+                  )}
+                  {Array.isArray(p.serviceDeliveries) && p.serviceDeliveries.length > 0 && (
+                    <div className="mt-3 space-y-2 rounded-xl border bg-muted/20 p-3" data-testid={`service-deliveries-${p.id}`}>
+                      <p className="text-xs font-bold">تفاصيل تنفيذ الخدمات</p>
+                      {p.serviceDeliveries.map((delivery: any) => {
+                        const serviceType = delivery.serviceType;
+                        const key = `${p.id}:${serviceType}`;
+                        const completed = delivery.status === "completed";
+                        return (
+                          <div key={serviceType} className={`rounded-lg border p-2 text-xs ${completed ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/30 bg-amber-500/5"}`}>
+                            <div className="mb-1 flex flex-wrap items-center gap-2">
+                              <strong>{SERVICE_TYPE_LABELS[serviceType] || serviceType}</strong>
+                              <Badge variant="outline" className={completed ? "text-emerald-600" : "text-amber-600"}>
+                                {completed ? "اكتمل التنفيذ" : "بانتظار التنفيذ"}
+                              </Badge>
+                            </div>
+                            {completed ? (
+                              <p className="text-muted-foreground">
+                                {delivery.deliveryResult || delivery.deliveryNote || "تم تسجيل التنفيذ دون تفاصيل إضافية"}
+                              </p>
+                            ) : (
+                              <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                                <Textarea
+                                  value={deliveryNotes[key] || ""}
+                                  onChange={(event) => setDeliveryNotes(prev => ({ ...prev, [key]: event.target.value }))}
+                                  placeholder="ملاحظة التنفيذ"
+                                  className="min-h-14 text-xs"
+                                  data-testid={`input-delivery-note-${p.id}-${serviceType}`}
+                                />
+                                <Textarea
+                                  value={deliveryResults[key] || ""}
+                                  onChange={(event) => setDeliveryResults(prev => ({ ...prev, [key]: event.target.value }))}
+                                  placeholder="نتيجة/رابط التسليم"
+                                  className="min-h-14 text-xs"
+                                  data-testid={`input-delivery-result-${p.id}-${serviceType}`}
+                                />
+                                <Button
+                                  size="sm"
+                                  className="self-center"
+                                  disabled={completeDelivery.isPending}
+                                  onClick={() => completeDelivery.mutate({
+                                    paymentId: p.id,
+                                    serviceType,
+                                    deliveryNote: deliveryNotes[key] || "",
+                                    deliveryResult: deliveryResults[key] || "",
+                                  })}
+                                  data-testid={`button-complete-delivery-${p.id}-${serviceType}`}
+                                >
+                                  {completeDelivery.isPending ? "جارٍ الحفظ..." : "تسجيل الإتمام"}
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
               </CardContent>

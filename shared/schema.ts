@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, varchar, real, numeric, jsonb, index, uniqueIndex, check } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, varchar, real, numeric, jsonb, index, uniqueIndex, check, customType } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations, sql } from "drizzle-orm";
@@ -7,6 +7,27 @@ export * from "./models/auth";
 export * from "./models/chat";
 
 import { users } from "./models/auth";
+
+// PostgreSQL's numeric is returned as a string by node-postgres.  Revenue
+// values include CPM/CPC and revenue-share fractions, so preserve them at
+// high precision while keeping the established number-based API contract.
+const revenueAmount = customType<{ data: number; driverData: string }>({
+  dataType: () => "numeric(24,10)",
+  fromDriver: (value) => Number(value),
+  toDriver: (value) => {
+    if (!Number.isFinite(value)) throw new Error("Invalid revenue amount");
+    return String(value);
+  },
+});
+
+const paymentAmount = customType<{ data: number; driverData: string }>({
+  dataType: () => "numeric(12,2)",
+  fromDriver: (value) => Number(value),
+  toDriver: (value) => {
+    if (!Number.isFinite(value)) throw new Error("Invalid payment amount");
+    return String(value);
+  },
+});
 
 // ============================================================
 // PLATFORM SETTINGS (Admin controlled)
@@ -37,11 +58,38 @@ export type SecretVault = typeof secretVault.$inferSelect;
 export const aiUsage = pgTable("ai_usage", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").references(() => users.id).notNull(),
-  type: text("type", { enum: ["image", "copy", "video_script", "article"] }).notNull(),
+  type: text("type", { enum: ["image", "copy", "video_script", "article", "tts", "avatar", "video"] }).notNull(),
   creditsUsed: integer("credits_used").default(1),
   cost: real("cost").default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+// Purchased AI credits are deliberately separate from the EGP wallet.  A
+// credit is only reduced by the same transaction that records its AI use.
+export const aiCreditWallets = pgTable("ai_credit_wallets", {
+  userId: varchar("user_id").primaryKey().references(() => users.id),
+  balance: integer("balance").notNull().default(0),
+  totalPurchased: integer("total_purchased").notNull().default(0),
+  totalConsumed: integer("total_consumed").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type AiCreditWallet = typeof aiCreditWallets.$inferSelect;
+
+// A provider job is owned by exactly one user. Completion and its corresponding
+// credit settlement are committed together so polling cannot debit twice.
+export const aiMediaJobs = pgTable("ai_media_jobs", {
+  id: serial("id").primaryKey(),
+  providerJobId: varchar("provider_job_id", { length: 200 }).notNull().unique(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  status: text("status", { enum: ["pending", "completed", "failed"] }).notNull().default("pending"),
+  cachedResultUrl: text("cached_result_url"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("ai_media_jobs_user_created_idx").on(table.userId, table.createdAt),
+]);
+export type AiMediaJob = typeof aiMediaJobs.$inferSelect;
 
 // ============================================================
 // ADS TABLE
@@ -309,7 +357,7 @@ export const revenueTransactions = pgTable("revenue_transactions", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").references(() => users.id).notNull(),
   type: text("type", { enum: ["earning", "spending", "withdrawal", "ai_charge", "wallet_recharge"] }).notNull(),
-  amountEGP: real("amount_egp").notNull(),
+  amountEGP: revenueAmount("amount_egp").notNull(),
   description: text("description"),
   campaignId: integer("campaign_id"),
   channelId: integer("channel_id"),
@@ -361,6 +409,7 @@ export const coinPurchaseOrders = pgTable("coin_purchase_orders", {
   amountEGP: numeric("amount_egp", { precision: 12, scale: 2 }).notNull(),
   paymentMethod: text("payment_method").notNull(),
   paymentRef: text("payment_ref"),
+  canonicalPaymentRef: text("canonical_payment_ref"),
   proofDigest: text("proof_digest"),
   screenshotUrl: text("screenshot_url"),
   status: text("status", { enum: ["pending", "approved", "rejected"] }).notNull().default("pending"),
@@ -455,10 +504,11 @@ export const paymentRequests = pgTable("payment_requests", {
   userId: varchar("user_id").references(() => users.id).notNull(),
   adId: integer("ad_id"),
   type: text("type", { enum: ["withdrawal", "top_up"] }).notNull(),
-  amountEGP: real("amount_egp").notNull(),
+  amountEGP: paymentAmount("amount_egp").notNull(),
   method: text("method", { enum: ["vodafone", "etisalat", "mobile_wallet", "instapay", "souq", "visa_bank"] }).notNull(),
   phoneNumber: text("phone_number"),
   paymentRef: text("payment_ref"),
+  canonicalPaymentRef: text("canonical_payment_ref"),
   proofDigest: text("proof_digest"),
   payoutName: text("payout_name"),
   payoutDestinationEncrypted: text("payout_destination_encrypted"),
@@ -466,11 +516,17 @@ export const paymentRequests = pgTable("payment_requests", {
   payoutDestinationAuthTag: text("payout_destination_auth_tag"),
   payoutDestinationLast4: text("payout_destination_last4"),
   serviceType: text("service_type"),
+  serviceQuantity: integer("service_quantity"),
+  servicePackageId: integer("service_package_id"),
   screenshotUrl: text("screenshot_url"),
   status: text("status", { enum: ["pending", "approved", "rejected"] }).default("pending"),
   adminNote: text("admin_note"),
   fulfillmentStatus: text("fulfillment_status"),
+  fulfillmentNote: text("fulfillment_note"),
+  fulfillmentResult: text("fulfillment_result"),
+  fulfillmentBy: varchar("fulfillment_by"),
   fulfilledAt: timestamp("fulfilled_at"),
+  transferReference: text("transfer_reference"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -481,10 +537,15 @@ export const insertPaymentRequestSchema = createInsertSchema(paymentRequests)
   .omit({
     id: true,
     createdAt: true,
+    canonicalPaymentRef: true,
     status: true,
     adminNote: true,
     fulfillmentStatus: true,
+    fulfillmentNote: true,
+    fulfillmentResult: true,
+    fulfillmentBy: true,
     fulfilledAt: true,
+    transferReference: true,
     payoutDestinationEncrypted: true,
     payoutDestinationIv: true,
     payoutDestinationAuthTag: true,
@@ -493,25 +554,22 @@ export const insertPaymentRequestSchema = createInsertSchema(paymentRequests)
   .extend({
     amountEGP: z.coerce.number()
       .positive("المبلغ لازم يكون أكبر من صفر")
-      .min(10, "الحد الأدنى للمبلغ هو 10 جنيه")
-      .max(1_000_000, "المبلغ كبير جداً، تواصل مع الإدارة"),
+      .max(1_000_000, "المبلغ كبير جداً، تواصل مع الإدارة")
+      .refine((value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-8, "المبلغ يجب أن يكون بدقة قرشين كحد أقصى"),
     phoneNumber: z.string().trim().optional().nullable(),
     paymentRef: z.string().trim().max(160).optional().nullable(),
     screenshotUrl: z.string().trim().optional().nullable(),
     serviceType: z.string().trim().optional().nullable(),
+    serviceQuantity: z.coerce.number().int().positive().max(10_000).optional().nullable(),
+    servicePackageId: z.coerce.number().int().positive().optional().nullable(),
     payoutName: z.string().trim().max(120).optional().nullable(),
     payoutDestination: z.string().trim().max(120).optional().nullable(),
   })
   .superRefine((data, ctx) => {
-    // Legacy incoming payments continue to use the phone number field.
-    if (data.type === "top_up" && data.method !== "souq") {
-      if (!data.phoneNumber || data.phoneNumber.length === 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["phoneNumber"],
-          message: "رقم محفظتك مطلوب لإتمام التحويل",
-        });
-      } else if (data.method !== "visa_bank" && !EG_PHONE_REGEX.test(data.phoneNumber)) {
+    // A manual incoming payment is identified by its transfer reference. The
+    // sender wallet number is optional metadata, never proof of payment.
+    if (data.type === "top_up" && data.phoneNumber && data.method !== "souq" && data.method !== "visa_bank") {
+      if (!EG_PHONE_REGEX.test(data.phoneNumber)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["phoneNumber"],
@@ -587,13 +645,7 @@ export const insertPaymentRequestSchema = createInsertSchema(paymentRequests)
         message: "رقم مرجع التحويل مطلوب",
       });
     }
-    if (data.type === "top_up" && !data.screenshotUrl) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["screenshotUrl"],
-        message: "صورة الإيصال مطلوبة",
-      });
-    } else if (data.screenshotUrl && !data.screenshotUrl.startsWith("/uploads/")) {
+    if (data.screenshotUrl && !data.screenshotUrl.startsWith("/uploads/")) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["screenshotUrl"],
@@ -611,6 +663,38 @@ export const insertPaymentRequestSchema = createInsertSchema(paymentRequests)
   });
 export type PaymentRequest = typeof paymentRequests.$inferSelect;
 export type InsertPaymentRequest = z.infer<typeof insertPaymentRequestSchema>;
+
+// Every manually paid service has a durable execution record.  Automatic
+// services are inserted as completed during approval; human-delivered
+// services remain pending until an administrator records a result.
+export const paymentServiceDeliveries = pgTable("payment_service_deliveries", {
+  id: serial("id").primaryKey(),
+  paymentRequestId: integer("payment_request_id").references(() => paymentRequests.id, { onDelete: "cascade" }).notNull(),
+  serviceType: text("service_type").notNull(),
+  status: text("status", { enum: ["pending", "completed"] }).notNull().default("pending"),
+  deliveryNote: text("delivery_note"),
+  deliveryResult: text("delivery_result"),
+  completedBy: varchar("completed_by").references(() => users.id, { onDelete: "set null" }),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  requestServiceIdx: uniqueIndex("payment_service_deliveries_request_service_idx").on(table.paymentRequestId, table.serviceType),
+}));
+export type PaymentServiceDelivery = typeof paymentServiceDeliveries.$inferSelect;
+
+// New payment references are claimed atomically in their own incoming/outgoing
+// namespace. Historical duplicate rows remain readable and are not forced into
+// this registry during migration.
+export const manualPaymentReferenceClaims = pgTable("manual_payment_reference_claims", {
+  flow: text("flow", { enum: ["incoming", "outgoing"] }).notNull(),
+  canonicalReference: text("canonical_reference").notNull(),
+  sourceType: text("source_type").notNull(),
+  sourceId: integer("source_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  flowReferenceKey: uniqueIndex("manual_payment_reference_claims_flow_ref_idx").on(table.flow, table.canonicalReference),
+}));
+export type ManualPaymentReferenceClaim = typeof manualPaymentReferenceClaims.$inferSelect;
 
 // ============================================================
 // NOTIFICATIONS TABLE

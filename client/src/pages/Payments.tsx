@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { CreditCard, Search, Plus, Receipt, Clock, CheckCircle2, XCircle, Smartphone, Upload, X, ImageIcon, Tag, CheckSquare, Square, Calculator, Download, Apple, Coins, ArrowDownLeft, ArrowUpRight, CircleDollarSign } from "lucide-react";
 import { SiGoogleplay, SiHuawei } from "react-icons/si";
 import { useLocation } from "wouter";
+import type { CoinPackage } from "@/lib/coin-package";
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {
   ad_boost:        "⚡ تعزيز إعلان",
@@ -31,18 +32,21 @@ function buildServiceTypes(p: Record<string, string>) {
   const fmt = (v: string | undefined, suffix = " ج.م") => v ? `${parseFloat(v)} ${suffix}` : "";
   return {
     top_up: [
-      { value: "ad_boost",   label: "⚡ تعزيز إعلان",    price: fmt(p.boost_price_egp),         desc: "ظهور مميز لإعلانك",        amount: num(p.boost_price_egp) },
-      { value: "campaign",   label: "📣 حملة إعلانية",    price: `من ${fmt(p.campaign_min_budget_egp)}`, desc: "CPM=" + fmt(p.cpm_rate_egp) + " / نقرة=" + fmt(p.cpc_rate_egp), amount: num(p.campaign_min_budget_egp) },
-      { value: "renewal",         label: "🔄 تجديد إعلان",    price: `من ${fmt(p.renewal_price_7d)}`, desc: "تمديد صلاحية إعلانك (7/15/30 يوم)", amount: num(p.renewal_price_7d) },
-      { value: "fire_notify",     label: "🔥 إشعار ناري",     price: fmt(p.fire_price_egp),          desc: "إشعار فوري لكل المستخدمين",          amount: num(p.fire_price_egp) },
-      { value: "ai_image",        label: "🖼️ ذكاء: صورة",    price: fmt(p.ai_price_image),          desc: "توليد صورة بالذكاء",                 amount: num(p.ai_price_image) },
-      { value: "ai_video",        label: "🎬 ذكاء: فيديو",    price: fmt(p.ai_price_video),          desc: "إنشاء مقطع فيديو",                   amount: num(p.ai_price_video) },
-      { value: "ai_content",      label: "✍️ ذكاء: محتوى",   price: fmt(p.ai_price_content),        desc: "كتابة نص إعلاني",                    amount: num(p.ai_price_content) },
-      { value: "ai_credits",      label: "🤖 رصيد ذكاء",     price: fmt(p.ai_price_per_credit_egp) + "/كريدت", desc: `${p.ai_free_credits || 3} مجاناً`, amount: num(p.ai_price_per_credit_egp) },
+      { value: "ad_boost",   label: "⚡ تعزيز إعلان",    price: fmt(p.boostPriceEgp || "250"), desc: "ظهور مميز لإعلانك",        amount: num(p.boostPriceEgp || "250") },
+      { value: "campaign",   label: "📣 حملة إعلانية",    price: `من ${fmt(p.campaignMinBudgetEgp || "100")}`, desc: "CPM=" + fmt(p.cpmRateEgp) + " / نقرة=" + fmt(p.cpcRateEgp), amount: num(p.campaignMinBudgetEgp || "100") },
+      // Manual renewal is explicitly a 30-day service; the backend charges
+      // renewal_price_30d and grants 30 days per requested quantity.
+      { value: "renewal",         label: "🔄 تجديد إعلان",    price: fmt(p.renewalPrice30d || "60"), desc: "تمديد صلاحية إعلانك 30 يوماً", amount: num(p.renewalPrice30d || "60") },
+      { value: "fire_notify",     label: "🔥 إشعار ناري",     price: fmt(p.firePriceEgp || "100"),  desc: "إشعار فوري لكل المستخدمين",          amount: num(p.firePriceEgp || "100") },
+      { value: "ai_image",        label: "🖼️ ذكاء: صورة",    price: fmt(p.aiPriceImage || "10"),     desc: "تنفيذ يدوي بعد المراجعة",              amount: num(p.aiPriceImage || "10") },
+      { value: "ai_video",        label: "🎬 ذكاء: فيديو",    price: fmt(p.aiPriceVideo || "25"),     desc: "تنفيذ يدوي بعد المراجعة",              amount: num(p.aiPriceVideo || "25") },
+      { value: "ai_content",      label: "✍️ ذكاء: محتوى",   price: fmt(p.aiPriceContent || "5"),    desc: "تنفيذ يدوي بعد المراجعة",              amount: num(p.aiPriceContent || "5") },
+      { value: "ai_credits",      label: "🤖 شراء رصيد ذكاء", price: `${p.aiPricePerCreditEgp || 5} ج.م/كريدت`, desc: "اختر كمية الكريدت المطلوبة", amount: num(p.aiPricePerCreditEgp || "5") },
       { value: "wallet_recharge", label: "💰 شحن محفظة",     price: "",                              desc: "شحن رصيد المحفظة",                   amount: 0 },
+      { value: "coin_package",    label: "🪙 باقة عملات",   price: "سعرها يحدده الخادم",              desc: "اختر باقة العملات",                  amount: 0 },
     ],
     withdrawal: [
-      { value: "withdrawal", label: "🏧 سحب أرباح", price: `أدنى ${fmt(p.wallet_min_withdrawal_egp || "100")}`, desc: "تحويل أرباحك", amount: 0 },
+      { value: "withdrawal", label: "🏧 سحب أرباح", price: `أدنى ${fmt(p.walletMinWithdrawalEgp || "100")}`, desc: "تحويل أرباحك", amount: 0 },
     ],
   };
 }
@@ -107,6 +111,7 @@ export default function Payments() {
     payoutName: "",
     payoutDestination: "",
     adId: "",
+    aiCreditsQuantity: "",
   });
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [manualAmount, setManualAmount] = useState("");
@@ -114,6 +119,7 @@ export default function Payments() {
   const [screenshotUrl, setScreenshotUrl] = useState("");
   const [screenshotPreview, setScreenshotPreview] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [manualCoinPackageId, setManualCoinPackageId] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [activityKind, setActivityKind] = useState("all");
@@ -147,6 +153,16 @@ export default function Payments() {
       return res.json();
     },
   });
+  const { data: manualOrders = [] } = useQuery<any[]>({
+    queryKey: ["/api/payments", "self-with-deliveries"],
+    queryFn: async () => {
+      const response = await fetch("/api/payments?scope=self", { credentials: "include" });
+      if (!response.ok) throw new Error("تعذر تحميل تفاصيل تنفيذ الطلبات");
+      const body = await response.json();
+      return Array.isArray(body) ? body : [];
+    },
+    refetchInterval: 15_000,
+  });
 
   const { data: ads = [] } = useQuery<any[]>({
     queryKey: ["/api/ads/mine"],
@@ -154,10 +170,12 @@ export default function Payments() {
   });
   const userAds = ads.filter((a: any) => a.userId === (user as any)?.id);
 
+  // API responses are deepToCamel-ed: do not use the database snake_case
+  // setting names in this customer form.
   const { data: pricing = {} } = useQuery<Record<string, string>>({
     queryKey: ["/api/pricing"],
   });
-  const { data: coinPackages = [] } = useQuery<any[]>({
+  const { data: coinPackages = [] } = useQuery<CoinPackage[]>({
     queryKey: ["/api/coins/packages"],
     queryFn: () => fetch("/api/coins/packages", { credentials: "include" }).then(r => r.json()),
   });
@@ -182,6 +200,16 @@ export default function Payments() {
       return response.json();
     },
     enabled: !!user,
+  });
+  const { data: aiUsage } = useQuery<{ purchasedCredits?: number | string | null }>({
+    queryKey: ["/api/ai/usage", user?.id],
+    queryFn: async () => {
+      const response = await fetch("/api/ai/usage", { credentials: "include" });
+      if (!response.ok) throw new Error("تعذر تحميل رصيد الذكاء");
+      return response.json();
+    },
+    enabled: !!user?.id,
+    refetchInterval: 15_000,
   });
   const [afsPurpose, setAfsPurpose] = useState<"wallet_top_up" | "service_payment">("wallet_top_up");
   const [afsAmount, setAfsAmount] = useState("");
@@ -273,13 +301,31 @@ export default function Payments() {
     .filter(s => selectedServices.has(s.value))
     .reduce((sum, s) => sum + (s.amount || 0), 0);
 
-  const effectiveAmount = amountOverride ? manualAmount : (autoTotal > 0 ? String(autoTotal) : manualAmount);
+  const selectedCoinPackage = coinPackages.find(pkg => String(pkg.id) === manualCoinPackageId);
+  const serviceQuantity = selectedServices.has("ai_credits")
+    ? Number(formData.aiCreditsQuantity || 0)
+    : 1;
+  const serverQuoteAmount = selectedServices.has("coin_package")
+    ? Number(selectedCoinPackage?.priceEgp ?? 0)
+    : serviceList
+      .filter(service => selectedServices.has(service.value))
+      .reduce((sum, service) => sum + service.amount * serviceQuantity, 0);
+  // Every non-wallet manual service is priced by the server. The displayed
+  // quote mirrors the current pricing response, but is never submitted as an
+  // override (which prevents a stale tab from changing the order amount).
+  const serverPricedManualOrder = formData.type === "top_up"
+    && !selectedServices.has("wallet_recharge")
+    && selectedServices.size > 0;
+  const effectiveAmount = serverPricedManualOrder
+    ? String(serverQuoteAmount)
+    : amountOverride ? manualAmount : (autoTotal > 0 ? String(autoTotal) : manualAmount);
 
   // Reset services when type changes
   useEffect(() => {
     setSelectedServices(new Set());
     setManualAmount("");
     setAmountOverride(false);
+    setManualCoinPackageId("");
     if (formData.type === "withdrawal" && formData.method === "souq") {
       setFormData(f => ({ ...f, method: "vodafone" }));
     }
@@ -295,7 +341,7 @@ export default function Payments() {
   const toggleService = (value: string) => {
     setSelectedServices(prev => {
       const next = new Set(prev);
-      if (value === "wallet_recharge") {
+      if (["wallet_recharge", "coin_package", "ai_credits"].includes(value)) {
         if (next.has(value)) next.clear();
         else {
           next.clear();
@@ -303,6 +349,8 @@ export default function Payments() {
         }
       } else {
         next.delete("wallet_recharge");
+        next.delete("coin_package");
+        next.delete("ai_credits");
         if (next.has(value)) next.delete(value);
         else next.add(value);
       }
@@ -314,7 +362,7 @@ export default function Payments() {
   const selectAll = () => {
     // Wallet recharge is a balance credit, not a paid service. Never combine
     // it with services in the same manual payment request.
-    setSelectedServices(new Set(serviceList.filter(s => s.value !== "wallet_recharge").map(s => s.value)));
+    setSelectedServices(new Set(serviceList.filter(s => !["wallet_recharge", "coin_package", "ai_credits"].includes(s.value)).map(s => s.value)));
     setAmountOverride(false);
   };
 
@@ -322,9 +370,10 @@ export default function Payments() {
     setSelectedServices(new Set());
     setManualAmount("");
     setAmountOverride(false);
+    setManualCoinPackageId("");
   };
 
-  const paidServices = serviceList.filter(s => s.value !== "wallet_recharge");
+  const paidServices = serviceList.filter(s => !["wallet_recharge", "coin_package", "ai_credits"].includes(s.value));
   const allSelected = paidServices.length > 0 && paidServices.every(s => selectedServices.has(s.value));
   const noneSelected = selectedServices.size === 0;
 
@@ -345,6 +394,9 @@ export default function Payments() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
       queryClient.invalidateQueries({ queryKey: ["/api/payments/unified"] });
+       queryClient.invalidateQueries({ queryKey: ["/api/revenue"] });
+       queryClient.invalidateQueries({ queryKey: ["/api/coins/wallet"] });
+       queryClient.invalidateQueries({ queryKey: ["/api/ai/usage"] });
       toast({ title: "✅ تم إرسال طلب الدفع", description: "سيتم مراجعته فوراً وتفعيل الخدمة عند القبول" });
       setShowForm(false);
        setFormData({
@@ -355,12 +407,14 @@ export default function Payments() {
          payoutName: "",
          payoutDestination: "",
          adId: "",
+          aiCreditsQuantity: "",
        });
       setSelectedServices(new Set());
       setManualAmount("");
       setAmountOverride(false);
       setScreenshotUrl("");
       setScreenshotPreview("");
+       setManualCoinPackageId("");
     },
     onError: (err: Error) => toast({
       title: "تعذّر إرسال الطلب",
@@ -404,16 +458,14 @@ export default function Payments() {
 
   // Egyptian wallet number validation: 11 digits starting with 010/011/012/015
   const EG_PHONE_REGEX = /^01[0125]\d{8}$/;
-  const withdrawalMinimum = Math.max(10, Number(walletSummary?.minWithdrawalEGP || pricing.wallet_min_withdrawal_egp || 100));
-  const phoneTrimmed = formData.phoneNumber.trim();
-  const phoneRequired = formData.type === "top_up" && formData.method !== "souq";
-  const phoneError = phoneRequired
-    ? (!phoneTrimmed
-        ? "أدخل رقم محفظتك"
-        : !EG_PHONE_REGEX.test(phoneTrimmed)
-          ? "رقم غير صحيح — لازم 11 رقم يبدأ بـ 010/011/012/015"
-          : "")
-    : "";
+   const withdrawalMinimum = Math.max(10, Number(walletSummary?.minWithdrawalEGP || pricing.walletMinWithdrawalEgp || 100));
+   const phoneTrimmed = formData.phoneNumber.trim();
+   // A transfer reference is the mandatory proof for a manual incoming order.
+   // Sender phone and a screenshot can help review but must not block a valid
+   // reference-only request.
+   const phoneError = phoneTrimmed && !EG_PHONE_REGEX.test(phoneTrimmed)
+     ? "رقم غير صحيح — لازم 11 رقم يبدأ بـ 010/011/012/015"
+     : "";
   const paymentRefError = formData.type === "top_up" && !formData.paymentRef.trim()
     ? "أدخل رقم مرجع التحويل"
     : "";
@@ -423,9 +475,11 @@ export default function Payments() {
   const payoutDestinationError = formData.type === "withdrawal" && !formData.payoutDestination.trim()
     ? "أدخل وسيلة الاستلام"
     : "";
-  const amountNum = Number(effectiveAmount);
-  const amountError = !effectiveAmount || amountNum <= 0
-    ? ""
+   const amountNum = Number(effectiveAmount);
+   const amountError = serverPricedManualOrder
+     ? serverQuoteAmount <= 0 ? "تعذر عرض سعر الخادم الحالي" : ""
+     : !effectiveAmount || amountNum <= 0
+     ? "أدخل مبلغاً صحيحاً"
     : amountNum < (formData.type === "withdrawal" ? withdrawalMinimum : 10)
       ? `الحد الأدنى ${formData.type === "withdrawal" ? withdrawalMinimum : 10} جنيه`
       : amountNum > 1_000_000
@@ -434,13 +488,22 @@ export default function Payments() {
   const servicesError = formData.type === "top_up" && selectedServices.size === 0
     ? "اختر خدمة واحدة على الأقل"
     : "";
-  const screenshotError = formData.type === "top_up" && !screenshotUrl
-    ? "ارفع صورة الإيصال بعد إتمام التحويل"
-    : "";
+   const coinPackageError = selectedServices.has("coin_package") && !manualCoinPackageId
+     ? "اختر باقة العملات"
+     : "";
+   const aiCreditsError = selectedServices.has("ai_credits")
+     && (!Number.isSafeInteger(Number(formData.aiCreditsQuantity)) || Number(formData.aiCreditsQuantity) < 1)
+     ? "أدخل كمية كريدت صحيحة"
+     : "";
+   const requiresAd = selectedServices.has("ad_boost") || selectedServices.has("renewal");
+   const adError = requiresAd && (!formData.adId || formData.adId === "none")
+     ? "اختر الإعلان المطلوب لهذه الخدمة"
+     : "";
+   const screenshotError = "";
 
-  const formValid = !phoneError && !paymentRefError && !payoutNameError
-    && !payoutDestinationError && !amountError && !servicesError && !screenshotError
-    && effectiveAmount && amountNum > 0;
+   const formValid = !phoneError && !paymentRefError && !payoutNameError
+     && !payoutDestinationError && !amountError && !servicesError && !coinPackageError && !aiCreditsError && !adError && !screenshotError
+     && (serverPricedManualOrder || (effectiveAmount && amountNum > 0));
 
   const removeScreenshot = () => {
     setScreenshotUrl("");
@@ -459,7 +522,7 @@ export default function Payments() {
   const selectedMethod = PAYMENT_METHODS.find(m => m.value === formData.method);
   // Breakdown of selected services with prices
   const selectedWithPrices = serviceList.filter(s => selectedServices.has(s.value) && s.amount > 0);
-  const hasZeroPriceSelected = serviceList.some(s => selectedServices.has(s.value) && s.amount === 0);
+  const hasZeroPriceSelected = !serverPricedManualOrder && serviceList.some(s => selectedServices.has(s.value) && s.amount === 0);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6" dir="rtl">
@@ -488,7 +551,7 @@ export default function Payments() {
           <h2 className="font-extrabold">تقرير محفظتي</h2>
         </div>
         <p className="text-xs text-muted-foreground mb-3">الأرصدة والحركات الخاصة بحسابك فقط</p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
           <div className="rounded-xl border bg-background p-3">
             <p className="text-[11px] text-muted-foreground">المتاح للإنفاق</p>
             <p className="text-lg font-black text-sky-600">
@@ -505,6 +568,12 @@ export default function Payments() {
             <p className="text-[11px] text-muted-foreground">رصيد العملات</p>
             <p className="text-lg font-black text-amber-600">
               {coinWallet?.balance == null ? "—" : `${Number(coinWallet.balance).toLocaleString("ar-EG")} عملة`}
+            </p>
+          </div>
+          <div className="rounded-xl border bg-background p-3" data-testid="purchased-ai-credits">
+            <p className="text-[11px] text-muted-foreground">رصيد الذكاء المشتَرى</p>
+            <p className="text-lg font-black text-violet-600">
+              {aiUsage?.purchasedCredits == null ? "—" : `${Number(aiUsage.purchasedCredits).toLocaleString("ar-EG")} كريدت`}
             </p>
           </div>
         </div>
@@ -535,7 +604,7 @@ export default function Payments() {
         <div className="flex flex-col sm:flex-row gap-2">
           <Select value={afsPackageId} onValueChange={setAfsPackageId} disabled={walletCoinPurchase.isPending}>
             <SelectTrigger className="flex-1"><SelectValue placeholder="اختر باقة العملات" /></SelectTrigger>
-            <SelectContent>{coinPackages.map((p: any) => <SelectItem key={p.id} value={String(p.id)}>{p.name} — {p.coins + (p.bonusCoins || p.bonus_coins || 0)} عملة / {p.priceEGP || p.price_egp} ج.م</SelectItem>)}</SelectContent>
+            <SelectContent>{coinPackages.map(p => <SelectItem key={p.id} value={String(p.id)}>{p.name} — {p.coins + (p.bonusCoins || 0)} عملة / {p.priceEgp} ج.م</SelectItem>)}</SelectContent>
           </Select>
           <Button
             type="button"
@@ -570,9 +639,9 @@ export default function Payments() {
             <Select value={afsServiceType} onValueChange={(v: any) => setAfsServiceType(v)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="ad_boost">تعزيز إعلان — {pricing.boost_price_egp || 250} ج.م</SelectItem>
+                <SelectItem value="ad_boost">تعزيز إعلان — {pricing.boostPriceEgp || 250} ج.م</SelectItem>
                 <SelectItem value="ad_renewal">تجديد إعلان</SelectItem>
-                <SelectItem value="subscription">اشتراك أسبوعي — {pricing.subscription_price_egp || 250} ج.م</SelectItem>
+                <SelectItem value="subscription">اشتراك أسبوعي — {pricing.subscriptionPriceEgp || 250} ج.م</SelectItem>
               </SelectContent>
             </Select>
             {afsServiceType !== "subscription" && (
@@ -585,9 +654,9 @@ export default function Payments() {
               <Select value={afsRenewalDays} onValueChange={setAfsRenewalDays}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="7">7 أيام — {pricing.renewal_price_7d || 20} ج.م</SelectItem>
-                  <SelectItem value="15">15 يوماً — {pricing.renewal_price_15d || 35} ج.م</SelectItem>
-                  <SelectItem value="30">30 يوماً — {pricing.renewal_price_30d || 60} ج.م</SelectItem>
+                  <SelectItem value="7">7 أيام — {pricing.renewalPrice7d || 20} ج.م</SelectItem>
+                  <SelectItem value="15">15 يوماً — {pricing.renewalPrice15d || 35} ج.م</SelectItem>
+                  <SelectItem value="30">30 يوماً — {pricing.renewalPrice30d || 60} ج.م</SelectItem>
                 </SelectContent>
               </Select>
             )}
@@ -678,6 +747,13 @@ export default function Payments() {
                   </td>
                 </tr>
               ) : filtered.map((p: any) => {
+                const manualOrder = manualOrders.find((order: any) => String(order.id) === String(p.sourceId ?? p.id));
+                const completedDeliveries = Array.isArray(manualOrder?.serviceDeliveries)
+                  ? manualOrder.serviceDeliveries
+                    .filter((delivery: any) => delivery.status === "completed")
+                    .map((delivery: any) => delivery.deliveryResult || delivery.deliveryNote)
+                    .filter(Boolean)
+                  : [];
                 const method = METHOD_LABELS[p.method] || { label: p.method || "—", emoji: "💰", color: "" };
                 const status = STATUS_MAP[p.status] || STATUS_MAP.approved;
                 const StatusIcon = status.icon;
@@ -700,7 +776,9 @@ export default function Payments() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-xs">{p.description || "—"}</span>
+                      <span className="text-xs">
+                        {completedDeliveries.length > 0 ? completedDeliveries.join(" · ") : p.deliveryDetails || p.delivery_details || p.description || "—"}
+                      </span>
                     </td>
                     <td className={`px-4 py-3 font-bold whitespace-nowrap ${signedAmount >= 0 ? "text-green-600" : "text-rose-600"}`}>
                       {signedAmount >= 0 ? "+" : "−"}{Math.abs(signedAmount).toLocaleString("ar-EG")} {p.asset === "COIN" ? "🪙" : "ج.م"}
@@ -838,6 +916,39 @@ export default function Payments() {
                   );
                 })}
               </div>
+               {selectedServices.has("coin_package") && (
+                 <div className="rounded-xl border border-amber-400/40 bg-amber-50/50 p-3 dark:bg-amber-950/20">
+                   <label className="mb-1 block text-xs font-bold">🪙 اختر باقة العملات</label>
+                   <Select value={manualCoinPackageId} onValueChange={setManualCoinPackageId}>
+                     <SelectTrigger data-testid="select-manual-coin-package"><SelectValue placeholder="اختر الباقة" /></SelectTrigger>
+                     <SelectContent>
+                       {coinPackages.map(pkg => {
+                         const coins = Number(pkg.coins || 0) + Number(pkg.bonusCoins ?? 0);
+                         return <SelectItem key={pkg.id} value={String(pkg.id)}>{pkg.name} — {coins.toLocaleString("ar-EG")} عملة</SelectItem>;
+                       })}
+                     </SelectContent>
+                   </Select>
+                   <p className="mt-1 text-[10px] text-muted-foreground">السعر والعدد يثبتان من الباقة على الخادم، وليس من المتصفح.</p>
+                 </div>
+               )}
+               {selectedServices.has("ai_credits") && (
+                 <div className="rounded-xl border border-violet-400/40 bg-violet-50/50 p-3 dark:bg-violet-950/20">
+                   <label className="mb-1 block text-xs font-bold">🤖 كمية رصيد الذكاء المطلوبة</label>
+                   <Input
+                     type="number"
+                     min="1"
+                     step="1"
+                     value={formData.aiCreditsQuantity}
+                     onChange={e => setFormData(f => ({ ...f, aiCreditsQuantity: e.target.value }))}
+                     placeholder="مثال: 10 كريدت"
+                     data-testid="input-ai-credits-quantity"
+                   />
+                   <p className="mt-1 text-[10px] text-muted-foreground">لا تدخل سعراً أو عملات: الخادم يحسب سعر الكريدت والطلب المعلّق.</p>
+                 </div>
+               )}
+               {(coinPackageError || aiCreditsError) && (
+                 <p className="text-[10px] font-bold text-red-600">⚠️ {coinPackageError || aiCreditsError}</p>
+               )}
             </div>}
 
             {/* Total Breakdown */}
@@ -850,7 +961,7 @@ export default function Payments() {
                 {selectedWithPrices.map(s => (
                   <div key={s.value} className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">{s.label}</span>
-                    <span className="font-bold font-mono">{s.amount.toLocaleString()} ج.م</span>
+                    <span className="font-bold font-mono">{(s.amount * (s.value === "ai_credits" ? serviceQuantity : 1)).toLocaleString()} ج.م</span>
                   </div>
                 ))}
                 {hasZeroPriceSelected && (
@@ -859,25 +970,25 @@ export default function Payments() {
                     <span className="text-muted-foreground text-[10px]">أدخل المبلغ يدوياً</span>
                   </div>
                 )}
-                {selectedWithPrices.length > 1 && (
+                {(selectedWithPrices.length > 1 || serverPricedManualOrder) && (
                   <div className="border-t border-primary/20 pt-1.5 flex items-center justify-between text-sm font-extrabold">
-                    <span className="text-primary">الإجمالي التلقائي</span>
-                    <span className="text-primary font-mono">{autoTotal.toLocaleString()} ج.م</span>
+                    <span className="text-primary">{serverPricedManualOrder ? "قيمة التحويل الحالية" : "الإجمالي التلقائي"}</span>
+                    <span className="text-primary font-mono">{(serverPricedManualOrder ? serverQuoteAmount : autoTotal).toLocaleString()} ج.م</span>
                   </div>
                 )}
               </div>
             )}
 
             {/* Ad ID (optional) */}
-            <div className="space-y-1">
-              <label className="text-xs font-bold flex items-center gap-1">📋 رقم الإعلان (اختياري)</label>
+            {(!serverPricedManualOrder || requiresAd) && <div className="space-y-1">
+              <label className="text-xs font-bold flex items-center gap-1">📋 رقم الإعلان {requiresAd ? "(مطلوب)" : "(اختياري)"}</label>
               {userAds.length > 0 ? (
                 <Select value={formData.adId} onValueChange={v => setFormData(f => ({ ...f, adId: v }))}>
                   <SelectTrigger className="text-xs h-9" data-testid="select-ad-id">
                     <SelectValue placeholder="اختر إعلان (اختياري)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">بدون إعلان محدد</SelectItem>
+                    {!requiresAd && <SelectItem value="none">بدون إعلان محدد</SelectItem>}
                     {userAds.map((a: any) => (
                       <SelectItem key={a.id} value={String(a.id)}>
                         #{a.id} — {a.title?.slice(0, 30)}
@@ -895,10 +1006,17 @@ export default function Payments() {
                   data-testid="input-ad-id"
                 />
               )}
-            </div>
+              {adError && <p className="text-[10px] font-bold text-red-600" data-testid="error-ad-id">⚠️ {adError}</p>}
+            </div>}
+            {serverPricedManualOrder && (
+              <p className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground" data-testid="server-priced-notice">
+                قيمة التحويل الحالية: <strong className="text-primary">{serverQuoteAmount.toLocaleString("ar-EG")} ج.م</strong>
+                {" "}— محسوبة من أسعار الخادم الحالية وتتحقق منها المنصة عند إنشاء الطلب؛ لا يمكن تعديلها من المتصفح.
+              </p>
+            )}
 
-            {/* Amount */}
-            <div className="space-y-1">
+            {/* Amount — package and AI-credit orders are priced only by server */}
+            {!serverPricedManualOrder && <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold">💵 المبلغ الإجمالي (جنيه مصري)</label>
                 {autoTotal > 0 && amountOverride && (
@@ -939,7 +1057,7 @@ export default function Payments() {
               {servicesError && (
                 <p className="text-[10px] text-red-600 font-bold" data-testid="error-services">⚠️ {servicesError}</p>
               )}
-            </div>
+            </div>}
 
             {/* Method */}
             <div className="space-y-1">
@@ -967,7 +1085,7 @@ export default function Payments() {
               <div className="space-y-1">
                 <label className="text-xs font-bold flex items-center gap-1">
                   <Smartphone className="w-3 h-3" />
-                  رقم المحفظة الخاصة بك
+                  رقم المحفظة الخاصة بك (اختياري)
                 </label>
                 <Input
                   type="tel"
@@ -1092,7 +1210,7 @@ export default function Payments() {
              {formData.type === "top_up" && <div className="space-y-2">
               <label className="text-xs font-bold flex items-center gap-1">
                 <ImageIcon className="w-3 h-3" />
-                صورة إيصال الدفع <span className="text-primary font-bold">(مطلوبة)</span>
+                 صورة إيصال الدفع <span className="text-muted-foreground">(اختيارية)</span>
               </label>
               <input
                 ref={fileRef}
@@ -1142,9 +1260,9 @@ export default function Payments() {
 
 
             {/* Submit — show first blocking reason */}
-             {!formValid && (phoneError || paymentRefError || payoutNameError || payoutDestinationError || amountError || servicesError || screenshotError) && (
+             {!formValid && (phoneError || paymentRefError || payoutNameError || payoutDestinationError || amountError || servicesError || coinPackageError || aiCreditsError || adError || screenshotError) && (
               <div className="rounded-xl border border-red-300 bg-red-50 dark:bg-red-950/30 px-3 py-2 text-[11px] text-red-700 dark:text-red-300 font-bold" data-testid="error-summary">
-                 ⚠️ {phoneError || paymentRefError || payoutNameError || payoutDestinationError || amountError || servicesError || screenshotError}
+                  ⚠️ {phoneError || paymentRefError || payoutNameError || payoutDestinationError || amountError || servicesError || coinPackageError || aiCreditsError || adError || screenshotError}
               </div>
             )}
             <Button
@@ -1152,24 +1270,27 @@ export default function Payments() {
               disabled={!formValid || uploading || createMutation.isPending}
               onClick={() => createMutation.mutate({
                 type: formData.type,
-                amountEGP: Number(effectiveAmount),
+                ...(serverPricedManualOrder ? {} : { amountEGP: Number(effectiveAmount) }),
                 method: formData.method,
-                 phoneNumber: formData.type === "top_up" ? (phoneTrimmed || undefined) : undefined,
-                 paymentRef: formData.type === "top_up" ? (formData.paymentRef.trim() || undefined) : undefined,
-                 payoutName: formData.type === "withdrawal" ? (formData.payoutName.trim() || undefined) : undefined,
-                 payoutDestination: formData.type === "withdrawal" ? (formData.payoutDestination.trim() || undefined) : undefined,
+                phoneNumber: formData.type === "top_up" ? (phoneTrimmed || undefined) : undefined,
+                paymentRef: formData.type === "top_up" ? (formData.paymentRef.trim() || undefined) : undefined,
+                payoutName: formData.type === "withdrawal" ? (formData.payoutName.trim() || undefined) : undefined,
+                payoutDestination: formData.type === "withdrawal" ? (formData.payoutDestination.trim() || undefined) : undefined,
                 adId: formData.adId && formData.adId !== "none" ? Number(formData.adId) : undefined,
-                 serviceType: formData.type === "top_up" && selectedServices.size > 0
-                   ? Array.from(selectedServices).join(",")
-                   : formData.type === "withdrawal" ? "withdrawal" : undefined,
-                 screenshotUrl: formData.type === "top_up" ? (screenshotUrl || undefined) : undefined,
+                serviceType: formData.type === "top_up" && selectedServices.size > 0
+                  ? Array.from(selectedServices).join(",")
+                  : formData.type === "withdrawal" ? "withdrawal" : undefined,
+                coinPackageId: selectedServices.has("coin_package") ? Number(manualCoinPackageId) : undefined,
+                serviceQuantity: selectedServices.has("ai_credits") ? undefined : 1,
+                aiCreditsQuantity: selectedServices.has("ai_credits") ? Number(formData.aiCreditsQuantity) : undefined,
+                screenshotUrl: formData.type === "top_up" ? (screenshotUrl || undefined) : undefined,
               })}
               data-testid="btn-submit-payment"
             >
               {createMutation.isPending ? "جاري الإرسال..." : (
                 <>
                   📤 إرسال الطلب
-                  {effectiveAmount && Number(effectiveAmount) > 0 && (
+                  {!serverPricedManualOrder && effectiveAmount && Number(effectiveAmount) > 0 && (
                     <span className="mr-1 bg-white/20 px-2 py-0.5 rounded-lg font-mono text-sm">
                       {Number(effectiveAmount).toLocaleString()} ج.م
                     </span>

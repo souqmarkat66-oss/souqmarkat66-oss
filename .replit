@@ -37,6 +37,10 @@ author = "agent"
 task = "workflow.run"
 args = "Start application"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "manual-payment-regressions"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -45,6 +49,17 @@ author = "agent"
 task = "shell.exec"
 args = "npm run dev"
 waitForPort = 5000
+
+[[workflows.workflow]]
+name = "manual-payment-regressions"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run check && NODE_ENV=development WALLET_COIN_PURCHASE_DB_TEST=1 PAYMENT_PROOF_DB_TEST=1 npx tsx --test server/manual-payment.test.ts server/manual-payment.integration.test.ts server/ai-media-jobs.integration.test.ts server/replit_integrations/image/routes.test.ts server/payment-proof.test.ts server/walletCoinPurchase.integration.test.ts server/giftReceipt.integration.test.ts server/afsSandbox.test.ts client/src/lib/manual-payment-ui-contract.test.ts client/src/lib/live-privacy.test.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [agent]
 integrations = ["javascript_log_in_with_replit:2.0.0", "javascript_openai_ai_integrations:2.0.0"]

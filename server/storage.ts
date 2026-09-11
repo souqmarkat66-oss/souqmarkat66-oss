@@ -2,19 +2,115 @@ import { db } from "./db";
 import { 
   ads, channels, liveStreams, chatMessages, likes, comments, follows, 
   adCampaigns, revenueTransactions, reports, uploadedFiles,
-  platformSettings, aiUsage, reels, paymentRequests, tickerAds,
+  platformSettings, aiUsage, aiCreditWallets, reels, paymentRequests, paymentServiceDeliveries, tickerAds,
   type Ad, type InsertAd, type Channel, type InsertChannel,
   type LiveStream, type InsertLiveStream, type ChatMessage, type Like,
   type Comment, type InsertComment, type Follow, type AdCampaign, 
   type InsertAdCampaign, type RevenueTransaction, type Report, 
   type InsertReport, type UploadedFile, type Reel, type InsertReel,
-  type PaymentRequest, type InsertPaymentRequest,
+  type PaymentRequest, type InsertPaymentRequest, type PaymentServiceDelivery,
   type TickerAd, type InsertTickerAd
 } from "@shared/schema";
-import { eq, desc, and, sql, ne, gte, lte } from "drizzle-orm";
+import { eq, desc, and, sql, ne, gte, lte, inArray } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { walletEmitter } from "./wallet-events";
 import { parseLedgerAmount } from "./wallet-ledger";
+import { AUTOMATIC_MANUAL_SERVICES, parseManualServices } from "./manual-payment";
+import { canonicalPaymentReference, canonicalPaymentReferenceSql, outgoingTransferReferenceLockKey } from "./payment-proof";
+
+// Legacy conversational rows were historically recorded in ai_usage but were
+// never a billable AI-tool credit. Only these tool types consume free,
+// purchased, or EGP-backed AI credits.
+const BILLABLE_AI_USAGE_TYPES = ["image", "copy", "video_script", "article", "tts", "avatar", "video"] as const;
+
+function labelLegacyPaymentForRead(payment: PaymentRequest): PaymentRequest {
+  return payment.status === "approved" && !payment.fulfillmentStatus
+    ? { ...payment, fulfillmentStatus: "legacy_review" }
+    : payment;
+}
+
+export type AiCreditConsumptionResult = {
+  consumed: boolean;
+  source: "free" | "purchased" | "wallet";
+  remainingPurchasedCredits: number;
+  walletBalanceEGP?: number;
+};
+
+/**
+ * Transaction-owned variant for long-running AI providers: callers perform
+ * their idempotent completion update and the debit in one transaction. `tx`
+ * is intentionally structural so route/job modules need not couple to a
+ * Drizzle dialect-specific transaction type.
+ */
+export async function consumeAiCreditAtomicInTransaction(
+  tx: any,
+  userId: string,
+  type: string,
+  freeCredits: number,
+  walletPriceEGP: number,
+  description: string,
+): Promise<AiCreditConsumptionResult> {
+  if (!BILLABLE_AI_USAGE_TYPES.includes(type as typeof BILLABLE_AI_USAGE_TYPES[number])) {
+    throw new Error("Invalid billable AI usage type");
+  }
+  const allowedFreeCredits = Math.max(0, Math.floor(freeCredits));
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${'ai-credit:' + userId}, 0))`);
+  const [usage] = await tx.select({ count: sql<string>`COUNT(*)::text` })
+    .from(aiUsage)
+    .where(and(eq(aiUsage.userId, userId), inArray(aiUsage.type, [...BILLABLE_AI_USAGE_TYPES])));
+  const uses = Number(usage?.count || 0);
+  if (uses < allowedFreeCredits) {
+    await tx.insert(aiUsage).values({ userId, type: type as any, creditsUsed: 1, cost: 0 });
+    const [wallet] = await tx.select({ balance: aiCreditWallets.balance })
+      .from(aiCreditWallets)
+      .where(eq(aiCreditWallets.userId, userId));
+    return { consumed: true, source: "free", remainingPurchasedCredits: Number(wallet?.balance || 0) };
+  }
+  const [wallet] = await tx.update(aiCreditWallets)
+    .set({
+      balance: sql`${aiCreditWallets.balance} - 1`,
+      totalConsumed: sql`${aiCreditWallets.totalConsumed} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(aiCreditWallets.userId, userId), gte(aiCreditWallets.balance, 1)))
+    .returning({ balance: aiCreditWallets.balance });
+  if (wallet) {
+    await tx.insert(aiUsage).values({ userId, type: type as any, creditsUsed: 1, cost: 0 });
+    return { consumed: true, source: "purchased", remainingPurchasedCredits: wallet.balance };
+  }
+
+  const walletPrice = parseLedgerAmount(walletPriceEGP, "AI wallet price");
+  if (walletPrice <= 0) throw new Error("سعر استخدام الذكاء الاصطناعي غير صالح");
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${'wallet:' + userId}, 0))`);
+  const [balanceRow] = await tx.select({
+    balance: sql<string>`COALESCE(SUM(
+      CASE
+        WHEN ${revenueTransactions.type} IN ('earning', 'wallet_recharge') THEN ${revenueTransactions.amountEGP}
+        WHEN ${revenueTransactions.type} IN ('spending', 'withdrawal', 'ai_charge') THEN -${revenueTransactions.amountEGP}
+        ELSE 0
+      END
+    ), 0)::numeric`,
+  }).from(revenueTransactions).where(eq(revenueTransactions.userId, userId));
+  const walletBalanceEGP = parseLedgerAmount(balanceRow?.balance ?? 0, "AI wallet balance");
+  if (walletBalanceEGP < walletPrice) {
+    return { consumed: false, source: "wallet", remainingPurchasedCredits: 0, walletBalanceEGP };
+  }
+  await tx.insert(revenueTransactions).values({
+    userId,
+    type: "ai_charge",
+    amountEGP: walletPrice,
+    description,
+    campaignId: null,
+    channelId: null,
+  });
+  await tx.insert(aiUsage).values({ userId, type: type as any, creditsUsed: 1, cost: walletPrice });
+  return {
+    consumed: true,
+    source: "wallet",
+    remainingPurchasedCredits: 0,
+    walletBalanceEGP: walletBalanceEGP - walletPrice,
+  };
+}
 
 export interface IStorage {
   // Ads
@@ -100,6 +196,8 @@ export interface IStorage {
   // AI Usage
   getAiUsageCount(userId: string): Promise<number>;
   recordAiUsage(userId: string, type: string, cost?: number): Promise<void>;
+  getAiCreditBalance(userId: string): Promise<number>;
+  consumeAiCreditAtomic(userId: string, type: string, freeCredits: number, walletPriceEGP: number, description: string): Promise<{ consumed: boolean; source: 'free' | 'purchased' | 'wallet'; remainingPurchasedCredits: number; walletBalanceEGP?: number }>;
 
   // Reels
   getReels(userId?: string): Promise<Reel[]>;
@@ -110,8 +208,10 @@ export interface IStorage {
 
   // Payment Requests
   getPaymentRequests(userId?: string): Promise<PaymentRequest[]>;
+  getPaymentServiceDeliveries(paymentRequestId: number): Promise<PaymentServiceDelivery[]>;
   createPaymentRequest(req: InsertPaymentRequest): Promise<PaymentRequest>;
-  approvePaymentRequestAtomic(id: number, adminNote?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean; insufficientBalance?: boolean; currentBalanceEGP?: number }>;
+  approvePaymentRequestAtomic(id: number, adminNote?: string, transferReference?: string, adminUserId?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean; insufficientBalance?: boolean; currentBalanceEGP?: number; transferReferenceRequired?: boolean; transferReferenceDuplicate?: boolean }>;
+  completePaymentServiceDeliveryAtomic(paymentRequestId: number, serviceType: string, adminUserId: string, deliveryNote?: string, deliveryResult?: string): Promise<{ payment: PaymentRequest | undefined; delivery: PaymentServiceDelivery | undefined; alreadyCompleted: boolean }>;
   rejectPaymentRequestAtomic(id: number, adminNote?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean }>;
 
   // Ticker Ads
@@ -768,12 +868,36 @@ export class DatabaseStorage implements IStorage {
   // ─── AI USAGE ─────────────────────────────────────────────────
   async getAiUsageCount(userId: string): Promise<number> {
     const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(aiUsage)
-      .where(eq(aiUsage.userId, userId));
+      .where(and(eq(aiUsage.userId, userId), inArray(aiUsage.type, [...BILLABLE_AI_USAGE_TYPES])));
     return Number(count);
   }
 
   async recordAiUsage(userId: string, type: string, cost = 0): Promise<void> {
     await db.insert(aiUsage).values({ userId, type: type as any, cost });
+  }
+
+  async getAiCreditBalance(userId: string): Promise<number> {
+    const [wallet] = await db.select({ balance: aiCreditWallets.balance })
+      .from(aiCreditWallets)
+      .where(eq(aiCreditWallets.userId, userId));
+    return Number(wallet?.balance || 0);
+  }
+
+  /**
+   * Consume either an earned free use or one specifically purchased AI credit.
+   * The usage row and purchased-credit decrement share one transaction and
+   * advisory lock, so concurrent tool calls can never overspend credits.
+   */
+  async consumeAiCreditAtomic(
+    userId: string,
+    type: string,
+    freeCredits: number,
+    walletPriceEGP: number,
+    description: string,
+  ): Promise<{ consumed: boolean; source: 'free' | 'purchased' | 'wallet'; remainingPurchasedCredits: number; walletBalanceEGP?: number }> {
+    return db.transaction((tx) =>
+      consumeAiCreditAtomicInTransaction(tx, userId, type, freeCredits, walletPriceEGP, description),
+    );
   }
 
   // ─── REELS ────────────────────────────────────────────────────
@@ -809,9 +933,17 @@ export class DatabaseStorage implements IStorage {
   // ─── PAYMENT REQUESTS ─────────────────────────────────────────
   async getPaymentRequests(userId?: string): Promise<PaymentRequest[]> {
     if (userId) {
-      return db.select().from(paymentRequests).where(eq(paymentRequests.userId, userId)).orderBy(desc(paymentRequests.createdAt));
+      const payments = await db.select().from(paymentRequests).where(eq(paymentRequests.userId, userId)).orderBy(desc(paymentRequests.createdAt));
+      return payments.map(labelLegacyPaymentForRead);
     }
-    return db.select().from(paymentRequests).orderBy(desc(paymentRequests.createdAt));
+    const payments = await db.select().from(paymentRequests).orderBy(desc(paymentRequests.createdAt));
+    return payments.map(labelLegacyPaymentForRead);
+  }
+
+  async getPaymentServiceDeliveries(paymentRequestId: number): Promise<PaymentServiceDelivery[]> {
+    return db.select().from(paymentServiceDeliveries)
+      .where(eq(paymentServiceDeliveries.paymentRequestId, paymentRequestId))
+      .orderBy(paymentServiceDeliveries.id);
   }
 
   async createPaymentRequest(req: InsertPaymentRequest): Promise<PaymentRequest> {
@@ -825,7 +957,12 @@ export class DatabaseStorage implements IStorage {
    * Locks the row and is idempotent: if it's already approved/rejected
    * the existing record is returned and no extra ledger entry is written.
    */
-  async approvePaymentRequestAtomic(id: number, adminNote?: string): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean; insufficientBalance?: boolean; currentBalanceEGP?: number }> {
+  async approvePaymentRequestAtomic(
+    id: number,
+    adminNote?: string,
+    transferReference?: string,
+    adminUserId?: string,
+  ): Promise<{ payment: PaymentRequest | undefined; alreadyProcessed: boolean; insufficientBalance?: boolean; currentBalanceEGP?: number; transferReferenceRequired?: boolean; transferReferenceDuplicate?: boolean }> {
     return await db.transaction(async (tx) => {
       const [locked] = await tx
         .select()
@@ -837,7 +974,13 @@ export class DatabaseStorage implements IStorage {
         return { payment: locked, alreadyProcessed: true };
       }
 
+      let canonicalTransferReference: string | null = null;
       if (locked.type === 'withdrawal') {
+        canonicalTransferReference = canonicalPaymentReference(transferReference);
+        if (!canonicalTransferReference || transferReference!.trim().length > 160) {
+          return { payment: locked, alreadyProcessed: false, transferReferenceRequired: true };
+        }
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${outgoingTransferReferenceLockKey(canonicalTransferReference)}, 0))`);
         // Serialize concurrent withdrawal approvals for the same user
         // by acquiring a transaction-scoped advisory lock keyed by userId.
         // Uses hashtextextended to map the userId string to a bigint key.
@@ -854,9 +997,33 @@ export class DatabaseStorage implements IStorage {
         if (requested > currentBalanceEGP) {
           return { payment: locked, alreadyProcessed: false, insufficientBalance: true, currentBalanceEGP };
         }
+        const legacyReferenceUse = await tx.execute(sql`
+          SELECT id
+          FROM payment_requests
+          WHERE type = 'withdrawal'
+            AND id <> ${locked.id}
+            AND ${sql.raw(canonicalPaymentReferenceSql("transfer_reference"))} = ${canonicalTransferReference}
+          LIMIT 1
+        `);
+        if (legacyReferenceUse.rows.length > 0) {
+          return { payment: locked, alreadyProcessed: false, transferReferenceDuplicate: true };
+        }
+        // Claim only after the balance check. Returning early from a Drizzle
+        // transaction commits, so claiming first would poison a retriable
+        // insufficient-funds request.
+        const claimed = await tx.execute(sql`
+          INSERT INTO manual_payment_reference_claims (flow, canonical_reference, source_type, source_id)
+          VALUES ('outgoing', ${canonicalTransferReference}, 'payment_request', ${locked.id})
+          ON CONFLICT (flow, canonical_reference) DO NOTHING
+          RETURNING canonical_reference
+        `);
+        if (claimed.rows.length !== 1) {
+          return { payment: locked, alreadyProcessed: false, transferReferenceDuplicate: true };
+        }
       }
 
       let fulfillmentStatus: string | null = null;
+      let fulfilledAt: Date | null = null;
       if (locked.type === 'withdrawal') {
         await tx.insert(revenueTransactions).values({
           userId: locked.userId,
@@ -867,18 +1034,25 @@ export class DatabaseStorage implements IStorage {
           channelId: null,
         });
         fulfillmentStatus = 'fulfilled';
+        fulfilledAt = new Date();
       } else if (locked.type === 'top_up') {
-        const rawServiceType = String(locked.serviceType || "");
-        const services = rawServiceType
-          .split(",")
-          .map((service) => service.trim())
-          .filter(Boolean);
+        const services = parseManualServices(locked.serviceType);
+        const quantity = Math.max(1, Number(locked.serviceQuantity || 1));
+        if (
+          quantity > 1
+          && !(
+            services.length === 1
+            && (services[0] === "ai_credits" || services[0] === "coin_package")
+          )
+        ) {
+          throw new Error("الكمية الأكبر من واحد متاحة فقط لرصيد الذكاء الاصطناعي أو الكمية المحسوبة لباقة العملات");
+        }
         // Wallet credit must always be explicit. A malformed or legacy request
         // without a service marker must not silently mint spendable balance.
         if (services.length === 0) {
           throw new Error("طلب الدفع لا يحدد شحن محفظة أو خدمة");
         }
-        const isWalletRecharge = rawServiceType === "wallet_recharge";
+        const isWalletRecharge = services.length === 1 && services[0] === "wallet_recharge";
         if (services.includes("wallet_recharge") && !isWalletRecharge) {
           throw new Error("لا يمكن جمع شحن المحفظة مع شراء خدمة في طلب واحد");
         }
@@ -892,34 +1066,103 @@ export class DatabaseStorage implements IStorage {
             channelId: null,
           });
           fulfillmentStatus = 'fulfilled';
+          fulfilledAt = new Date();
+          await tx.insert(paymentServiceDeliveries).values({
+            paymentRequestId: locked.id,
+            serviceType: "wallet_recharge",
+            status: "completed",
+            deliveryNote: "تم شحن رصيد المحفظة تلقائياً بعد اعتماد الإدارة",
+            deliveryResult: `${Number(locked.amountEGP).toFixed(2)} EGP`,
+            completedBy: adminUserId || null,
+            completedAt: fulfilledAt,
+          });
         } else {
-          let requiresManualFulfillment = false;
+          let completedCount = 0;
           for (const service of services) {
+            let deliveryNote: string | null = null;
+            let deliveryResult: string | null = null;
             if (service === 'ad_boost') {
               if (!locked.adId) throw new Error("طلب تعزيز الإعلان غير مرتبط بإعلان");
               const result = await tx.execute(sql`
                 UPDATE ads
                 SET is_boosted = true,
-                    boosted_until = GREATEST(COALESCE(boosted_until, NOW()), NOW()) + INTERVAL '30 days'
+                    boosted_until = GREATEST(COALESCE(boosted_until, NOW()), NOW()) + (${quantity} * INTERVAL '30 days')
                 WHERE id = ${locked.adId} AND user_id = ${locked.userId}
                 RETURNING id
               `);
               if (result.rows.length === 0) throw new Error("تعذر العثور على الإعلان المطلوب تعزيزه");
+              deliveryNote = "تم تعزيز الإعلان تلقائياً";
+              deliveryResult = `مدة التعزيز: ${quantity * 30} يوماً`;
             } else if (service === 'renewal') {
               if (!locked.adId) throw new Error("طلب تجديد الإعلان غير مرتبط بإعلان");
               const result = await tx.execute(sql`
                 UPDATE ads
                 SET status = 'active',
-                    expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + INTERVAL '30 days'
+                    expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW()) + (${quantity} * INTERVAL '30 days')
                 WHERE id = ${locked.adId} AND user_id = ${locked.userId}
                 RETURNING id
               `);
               if (result.rows.length === 0) throw new Error("تعذر العثور على الإعلان المطلوب تجديده");
+              deliveryNote = "تم تجديد الإعلان تلقائياً";
+              deliveryResult = `مدة التجديد: ${quantity * 30} يوماً`;
+            } else if (service === "ai_credits") {
+              const credited = quantity;
+              await tx.insert(aiCreditWallets).values({
+                userId: locked.userId,
+                balance: credited,
+                totalPurchased: credited,
+                totalConsumed: 0,
+                updatedAt: new Date(),
+              }).onConflictDoUpdate({
+                target: aiCreditWallets.userId,
+                set: {
+                  balance: sql`${aiCreditWallets.balance} + ${credited}`,
+                  totalPurchased: sql`${aiCreditWallets.totalPurchased} + ${credited}`,
+                  updatedAt: new Date(),
+                },
+              });
+              deliveryNote = "تمت إضافة أرصدة الذكاء الاصطناعي تلقائياً";
+              deliveryResult = `${credited} رصيد AI`;
+            } else if (service === "coin_package") {
+              if (!locked.servicePackageId) throw new Error("طلب باقة العملات لا يحدد الباقة");
+              const coins = quantity;
+              const wallet = await tx.execute(sql`
+                INSERT INTO coin_wallets (user_id, balance, total_spent, total_earned)
+                VALUES (${locked.userId}, ${coins}, 0, ${coins})
+                ON CONFLICT (user_id) DO UPDATE
+                SET balance = coin_wallets.balance + ${coins},
+                    total_earned = coin_wallets.total_earned + ${coins},
+                    updated_at = NOW()
+                RETURNING balance
+              `);
+              if (wallet.rows.length !== 1) throw new Error("تعذر شحن محفظة العملات");
+              await tx.execute(sql`
+                INSERT INTO coin_transactions (user_id, type, coins, description)
+                VALUES (${locked.userId}, 'purchase', ${coins},
+                  ${`شراء باقة عملات #${locked.servicePackageId} — اعتماد دفع يدوي`})
+              `);
+              deliveryNote = "تمت إضافة باقة العملات تلقائياً";
+              deliveryResult = `${coins} عملة`;
             } else {
-              requiresManualFulfillment = true;
+              // Human-delivered services get a durable pending item. They are
+              // intentionally not inferred complete from payment approval.
             }
+            const isAutomatic = AUTOMATIC_MANUAL_SERVICES.has(service);
+            if (isAutomatic) completedCount++;
+            await tx.insert(paymentServiceDeliveries).values({
+              paymentRequestId: locked.id,
+              serviceType: service,
+              status: isAutomatic ? "completed" : "pending",
+              deliveryNote,
+              deliveryResult,
+              completedBy: isAutomatic ? (adminUserId || null) : null,
+              completedAt: isAutomatic ? new Date() : null,
+            });
           }
-          fulfillmentStatus = requiresManualFulfillment ? 'manual_required' : 'fulfilled';
+          fulfillmentStatus = completedCount === services.length
+            ? "fulfilled"
+            : completedCount > 0 ? "partial" : "pending";
+          if (fulfillmentStatus === "fulfilled") fulfilledAt = new Date();
         }
       }
       const [updated] = await tx.update(paymentRequests)
@@ -927,7 +1170,8 @@ export class DatabaseStorage implements IStorage {
           status: 'approved',
           adminNote,
           fulfillmentStatus,
-          fulfilledAt: fulfillmentStatus === 'fulfilled' ? new Date() : null,
+          fulfilledAt,
+          transferReference: locked.type === "withdrawal" ? transferReference!.trim() : null,
           ...(locked.type === 'withdrawal' ? {
             payoutDestinationEncrypted: null,
             payoutDestinationIv: null,
@@ -937,6 +1181,48 @@ export class DatabaseStorage implements IStorage {
         .where(eq(paymentRequests.id, id))
         .returning();
       return { payment: updated, alreadyProcessed: false };
+    });
+  }
+
+  async completePaymentServiceDeliveryAtomic(
+    paymentRequestId: number,
+    serviceType: string,
+    adminUserId: string,
+    deliveryNote?: string,
+    deliveryResult?: string,
+  ): Promise<{ payment: PaymentRequest | undefined; delivery: PaymentServiceDelivery | undefined; alreadyCompleted: boolean }> {
+    return db.transaction(async (tx) => {
+      const [payment] = await tx.select().from(paymentRequests)
+        .where(eq(paymentRequests.id, paymentRequestId)).for("update");
+      if (!payment || payment.status !== "approved") {
+        return { payment: undefined, delivery: undefined, alreadyCompleted: false };
+      }
+      const [delivery] = await tx.select().from(paymentServiceDeliveries)
+        .where(and(
+          eq(paymentServiceDeliveries.paymentRequestId, paymentRequestId),
+          eq(paymentServiceDeliveries.serviceType, serviceType),
+        )).for("update");
+      if (!delivery) return { payment, delivery: undefined, alreadyCompleted: false };
+      if (delivery.status === "completed") return { payment, delivery, alreadyCompleted: true };
+      const [completed] = await tx.update(paymentServiceDeliveries).set({
+        status: "completed",
+        deliveryNote: deliveryNote?.trim() || null,
+        deliveryResult: deliveryResult?.trim() || null,
+        completedBy: adminUserId,
+        completedAt: new Date(),
+      }).where(eq(paymentServiceDeliveries.id, delivery.id)).returning();
+      const rows = await tx.select({ status: paymentServiceDeliveries.status })
+        .from(paymentServiceDeliveries)
+        .where(eq(paymentServiceDeliveries.paymentRequestId, paymentRequestId));
+      const pending = rows.filter(row => row.status !== "completed").length;
+      const [updatedPayment] = await tx.update(paymentRequests).set({
+        fulfillmentStatus: pending === 0 ? "fulfilled" : "partial",
+        fulfillmentNote: deliveryNote?.trim() || null,
+        fulfillmentResult: deliveryResult?.trim() || null,
+        fulfillmentBy: adminUserId,
+        fulfilledAt: pending === 0 ? new Date() : null,
+      }).where(eq(paymentRequests.id, paymentRequestId)).returning();
+      return { payment: updatedPayment, delivery: completed, alreadyCompleted: false };
     });
   }
 

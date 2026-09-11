@@ -58,14 +58,19 @@ export function canonicalPaymentReference(value: unknown): string {
 export function canonicalPaymentReferenceSql(column: string): string {
   const sourceDigits = `${ARABIC_DIGITS}${PERSIAN_DIGITS}${FULLWIDTH_DIGITS}`;
   const targetDigits = `${ASCII_DIGITS}${ASCII_DIGITS}${ASCII_DIGITS}`;
-  return `lower(regexp_replace(translate(coalesce(${column}, ''), '${sourceDigits}', '${targetDigits}'), '[[:space:][:punct:]]+', '', 'g'))`;
+  // PostgreSQL normalize(..., NFKC) mirrors the JS normalization used for new
+  // submissions, including full-width Latin letters and digits in old rows.
+  return `lower(regexp_replace(translate(normalize(coalesce(${column}, ''), NFKC), '${sourceDigits}', '${targetDigits}'), '[[:space:][:punct:]]+', '', 'g'))`;
 }
 
-export function paymentProofLockKeys(reference: string, proofDigest: string): string[] {
-  return [
-    `manual-payment-proof:${proofDigest}`,
-    `manual-payment-ref:${reference}`,
-  ].sort();
+export function paymentProofLockKeys(reference: string, proofDigest?: string | null): string[] {
+  const keys = [`manual-payment-ref:${reference}`];
+  if (proofDigest) keys.push(`manual-payment-proof:${proofDigest}`);
+  return keys.sort();
+}
+
+export function outgoingTransferReferenceLockKey(reference: string): string {
+  return `manual-outgoing-transfer-ref:${reference}`;
 }
 
 export type OwnedProofFile = {

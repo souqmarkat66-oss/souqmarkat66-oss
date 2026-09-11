@@ -21,6 +21,8 @@ import { Badge } from "@/components/ui/badge";
 import GlobalTicker from "@/components/GlobalTicker";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { LIVE_PAYMENT_METHODS } from "@/lib/live-payment-method";
+import type { CoinPackage } from "@/lib/coin-package";
 import { projectPublicStream, type PublicLiveStream } from "@/lib/public-projections";
 import {
   BATTLE_ROUND_SECONDS,
@@ -163,7 +165,7 @@ export default function LiveStream() {
   const [rechargeLoading, setRechargeLoading] = useState(false);
   // Purchase flow states
   const [purchaseStep,    setPurchaseStep]    = useState<"packages"|"pay"|"done">("packages");
-  const [selectedPkg,     setSelectedPkg]     = useState<any>(null);
+  const [selectedPkg,     setSelectedPkg]     = useState<CoinPackage | null>(null);
   const [payMethod,       setPayMethod]       = useState<"vodafone"|"vodafone2"|"instapay"|"bank">("vodafone");
   const [payRef,          setPayRef]          = useState("");
   const [payScreenshotUrl, setPayScreenshotUrl] = useState("");
@@ -328,7 +330,7 @@ export default function LiveStream() {
     enabled: !!id,
     refetchInterval: 5000,
   });
-  const { data: coinPackages } = useQuery<any[]>({
+  const { data: coinPackages } = useQuery<CoinPackage[]>({
     queryKey: ["/api/coins/packages"],
     queryFn: () => fetch("/api/coins/packages").then(r => r.json()),
   });
@@ -1637,24 +1639,17 @@ export default function LiveStream() {
       toast({ title: "أدخل رقم مرجع الدفع", variant: "destructive" });
       return;
     }
-    if (!payScreenshotUrl) {
-      toast({ title: "ارفع صورة إيصال الدفع", variant: "destructive" });
-      return;
-    }
     setPayLoading(true);
     try {
-      const userName = user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : "";
-      const res = await apiRequest("POST", "/api/coins/purchase-order", {
-        packageId: selectedPkg.id,
-        coins: selectedPkg.coins + (selectedPkg.bonus_coins || 0),
-        amountEGP: selectedPkg.price_egp,
-        paymentMethod: payMethod === "vodafone" ? "etisalat"
-          : payMethod === "vodafone2" ? "vodafone"
-          : payMethod === "instapay" ? "instapay"
-          : "bank",
+      // The package is priced and fulfilled by the server. Do not send a
+      // client-calculated price, quantity, or any private wallet balance.
+      const res = await apiRequest("POST", "/api/payments", {
+        type: "top_up",
+        serviceType: "coin_package",
+        coinPackageId: selectedPkg.id,
+        method: LIVE_PAYMENT_METHODS[payMethod],
         paymentRef: payRef.trim(),
-        screenshotUrl: payScreenshotUrl,
-        userName,
+        screenshotUrl: payScreenshotUrl || undefined,
       });
       const data = await res.json();
       if (res.ok) {
@@ -3567,17 +3562,10 @@ export default function LiveStream() {
                   </div>
                 </div>
 
-                {/* Packages grid — باقات الشحن الفوري */}
-                <p className="text-white/50 text-xs font-bold mb-2">اختر باقة الشحن المناسبة للشحن المباشر والفوري بحسابك:</p>
+                {/* Packages grid — API data only; no client-side price fallback. */}
+                <p className="text-white/50 text-xs font-bold mb-2">اختر باقة الشحن المناسبة. السعر والكمية يؤكدهما الخادم:</p>
                 <div className="grid grid-cols-3 gap-2 mb-4">
-                  {(coinPackages && coinPackages.length > 0 ? coinPackages : [
-                    { id:1, name:"باقة البداية",     coins:100,   price_egp:10,   bonus_coins:0,    bonus_label:"+0% بونص" },
-                    { id:2, name:"باقة إضافية",      coins:500,   price_egp:50,   bonus_coins:25,   bonus_label:"+5% إضافي" },
-                    { id:3, name:"باقة VIP",         coins:1200,  price_egp:100,  bonus_coins:240,  bonus_label:"+20% بونص VIP" },
-                    { id:4, name:"باقة VIP بلس",     coins:3000,  price_egp:250,  bonus_coins:750,  bonus_label:"+25% بونص VIP" },
-                    { id:5, name:"باقة الداعم الذهبي", coins:6500, price_egp:500,  bonus_coins:1950, bonus_label:"+30% باقة الداعم الذهبي" },
-                    { id:6, name:"باقة الحوت",       coins:15000, price_egp:1000, bonus_coins:7500, bonus_label:"+50% باقة الحوت" },
-                  ]).map((pkg: any, idx: number) => (
+                  {(coinPackages || []).map((pkg, idx: number) => (
                     <button key={pkg.id}
                       className={`relative rounded-2xl p-2.5 text-center border transition-all active:scale-95 ${
                         idx === 1
@@ -3596,28 +3584,18 @@ export default function LiveStream() {
                       {idx === 1 && (
                         <span className="absolute -top-2 right-1/2 translate-x-1/2 bg-gradient-to-l from-red-600 to-orange-500 text-white text-[8px] font-black px-2 py-0.5 rounded-full whitespace-nowrap">الأكثر شيوعاً</span>
                       )}
-                      <p className="text-yellow-400 font-black text-base leading-none">{pkg.coins.toLocaleString()}</p>
-                      <p className="text-green-400 text-[9px] font-bold mt-1 leading-tight">{pkg.bonus_label || (pkg.bonus_coins > 0 ? `+${pkg.bonus_coins} بونص` : "بدون بونص")}</p>
-                      <p className="text-white font-bold text-xs mt-1.5">{pkg.price_egp} ج.م</p>
+                      <p className="text-yellow-400 font-black text-base leading-none">{(Number(pkg.coins || 0) + Number(pkg.bonusCoins ?? 0)).toLocaleString()}</p>
+                      <p className="text-green-400 text-[9px] font-bold mt-1 leading-tight">{pkg.bonusLabel ?? (Number(pkg.bonusCoins ?? 0) > 0 ? `+${pkg.bonusCoins} بونص` : "بدون بونص")}</p>
+                      <p className="text-white font-bold text-xs mt-1.5">{pkg.priceEgp} ج.م</p>
                       <span className="mt-1.5 inline-block w-full py-1 rounded-full bg-gradient-to-l from-red-600 to-orange-500 text-white text-[9px] font-black">
                         اشحن الآن +
                       </span>
                     </button>
                   ))}
                 </div>
-                <button
-                  onClick={() => {
-                    setSelectedPkg({ id: 0, name: "شحن مخصص", coins: 0, price_egp: 0, bonus_coins: 0 });
-                    setPurchaseStep("pay");
-                    setPayRef("");
-                    setPayScreenshotUrl("");
-                    setPayScreenshotPreview("");
-                  }}
-                  className="w-full mb-3 py-2.5 rounded-2xl bg-teal-500/15 border border-teal-500/40 text-teal-300 text-xs font-bold active:scale-[0.98] transition-transform"
-                  data-testid="btn-transfer-details"
-                >
-                  تريد الدفع عبر اتصالات كاش أو فودافون كاش أو انستاباي؟ — تفاصيل التحويل
-                </button>
+                {coinPackages && coinPackages.length === 0 && (
+                  <p className="mb-3 text-center text-xs text-white/50">لا توجد باقات متاحة حالياً. حدّث الصفحة لاحقاً.</p>
+                )}
                 <p className="text-white/25 text-[10px] text-center flex items-center justify-center gap-1">
                   <CheckCircle className="w-3 h-3 text-green-500" />
                   شحن محلي وآمن وموثّق 100% عبر بوابات سوق ماركات الرسمية
@@ -3631,11 +3609,11 @@ export default function LiveStream() {
                 {/* Selected package summary */}
                 <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-3.5 mb-4 flex items-center justify-between">
                   <div>
-                    <p className="text-yellow-400 font-bold text-base">{(selectedPkg.coins + (selectedPkg.bonus_coins || 0)).toLocaleString()} عملة</p>
-                    {selectedPkg.bonus_coins > 0 && <p className="text-green-400 text-xs">شاملة {selectedPkg.bonus_coins} عملة مجانًا</p>}
+                    <p className="text-yellow-400 font-bold text-base">{(Number(selectedPkg.coins || 0) + Number(selectedPkg.bonusCoins ?? 0)).toLocaleString()} عملة</p>
+                    {Number(selectedPkg.bonusCoins ?? 0) > 0 && <p className="text-green-400 text-xs">شاملة {selectedPkg.bonusCoins} عملة مجانًا</p>}
                   </div>
                   <div className="text-left">
-                    <p className="text-white font-bold text-xl">{selectedPkg.price_egp} ج.م</p>
+                    <p className="text-white font-bold text-xl">{selectedPkg.priceEgp} ج.م</p>
                     <p className="text-white/40 text-xs">{selectedPkg.name}</p>
                   </div>
                 </div>
@@ -3718,7 +3696,7 @@ export default function LiveStream() {
                     </>
                   )}
                   <div className="mt-3 pt-3 border-t border-white/10">
-                    <p className="text-yellow-400 font-bold text-base">المبلغ: {selectedPkg.price_egp} ج.م</p>
+                    <p className="text-yellow-400 font-bold text-base">المبلغ: {selectedPkg.priceEgp} ج.م</p>
                     <p className="text-white/40 text-[10px]">اكتب في ملاحظة التحويل: "شحن عملات"</p>
                   </div>
                 </div>
@@ -3733,9 +3711,9 @@ export default function LiveStream() {
                   />
                 </div>
 
-                {/* Receipt upload */}
+                {/* Receipt upload is useful for review but the transfer reference is the required proof. */}
                 <div className="mb-4">
-                  <label className="text-white/60 text-xs font-bold mb-1.5 block">صورة إيصال الدفع (مطلوبة)</label>
+                  <label className="text-white/60 text-xs font-bold mb-1.5 block">صورة إيصال الدفع (اختيارية)</label>
                   <input
                     ref={payFileRef}
                     type="file"
@@ -3781,7 +3759,7 @@ export default function LiveStream() {
                 {/* Buttons */}
                 <div className="flex gap-2">
                   <button onClick={() => setPurchaseStep("packages")} className="flex-1 py-3 rounded-2xl bg-white/10 text-white font-bold text-sm">رجوع</button>
-                  <button onClick={submitPurchaseOrder} disabled={payLoading || payUploading || !payRef.trim() || !payScreenshotUrl} className="flex-1 py-3 rounded-2xl bg-yellow-500 text-black font-bold text-sm disabled:opacity-50" data-testid="btn-submit-purchase">
+                  <button onClick={submitPurchaseOrder} disabled={payLoading || payUploading || !payRef.trim()} className="flex-1 py-3 rounded-2xl bg-yellow-500 text-black font-bold text-sm disabled:opacity-50" data-testid="btn-submit-purchase">
                     {payLoading ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "تأكيد الطلب"}
                   </button>
                 </div>

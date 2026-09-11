@@ -386,6 +386,51 @@ async function runMigrations() {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS coin_purchase_orders_created_at_idx ON coin_purchase_orders(created_at DESC)`);
     await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS payment_ref TEXT`);
     await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS proof_digest TEXT`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS canonical_payment_ref TEXT`);
+    await db.execute(sql`ALTER TABLE coin_purchase_orders ADD COLUMN IF NOT EXISTS canonical_payment_ref TEXT`);
+    // Manual-order lifecycle. This mirrors the forward migration only
+    // for disposable development databases; production startup DDL is gated
+    // below and must use the reviewed migration.
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS ai_credit_wallets (
+      user_id VARCHAR PRIMARY KEY REFERENCES users(id),
+      balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
+      total_purchased INTEGER NOT NULL DEFAULT 0 CHECK (total_purchased >= 0),
+      total_consumed INTEGER NOT NULL DEFAULT 0 CHECK (total_consumed >= 0),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )`);
+    const { ensureAiMediaJobsTable } = await import("./ai-media-jobs");
+    await ensureAiMediaJobsTable();
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS service_quantity INTEGER`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS service_package_id INTEGER`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS fulfillment_note TEXT`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS fulfillment_result TEXT`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS fulfillment_by VARCHAR`);
+    await db.execute(sql`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS transfer_reference TEXT`);
+    await db.execute(sql`ALTER TABLE payment_requests ALTER COLUMN amount_egp TYPE NUMERIC(12,2) USING round(amount_egp::numeric, 2)`);
+    await db.execute(sql`ALTER TABLE revenue_transactions ALTER COLUMN amount_egp TYPE NUMERIC(24,10) USING amount_egp::text::numeric`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS payment_requests_canonical_payment_ref_idx ON payment_requests(canonical_payment_ref)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS coin_purchase_orders_canonical_payment_ref_idx ON coin_purchase_orders(canonical_payment_ref)`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS manual_payment_reference_claims (
+      flow TEXT NOT NULL CHECK (flow IN ('incoming', 'outgoing')),
+      canonical_reference TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      source_id INTEGER NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (flow, canonical_reference)
+    )`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS payment_service_deliveries (
+      id SERIAL PRIMARY KEY,
+      payment_request_id INTEGER NOT NULL REFERENCES payment_requests(id) ON DELETE CASCADE,
+      service_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed')),
+      delivery_note TEXT,
+      delivery_result TEXT,
+      completed_by VARCHAR REFERENCES users(id) ON DELETE SET NULL,
+      completed_at TIMESTAMP,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      CONSTRAINT payment_service_deliveries_request_service_unique UNIQUE(payment_request_id, service_type)
+    )`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS payment_service_deliveries_request_idx ON payment_service_deliveries(payment_request_id)`);
     await db.execute(sql`
       DO $$
       DECLARE constraint_name TEXT;

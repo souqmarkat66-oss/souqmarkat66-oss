@@ -38,3 +38,15 @@ Legacy production identifier columns can mix PostgreSQL text and varchar even wh
 **Why:** The deployed gift transaction rolled back with PostgreSQL 42P08 because one parameter was inferred as both types across an inserted ledger user ID and a channel lookup. This was confirmed from production errors and reproduced with mixed-type temporary tables.
 
 **How to apply:** Explicitly type parameters used across legacy identifier columns and include mixed-schema integration coverage. Diagnose actual production error codes before guessing that a table or balance is missing.
+
+Accept a transfer reference without an image only as a pending manual-payment claim, never as settlement evidence.
+
+**Why:** The owner explicitly requested reference-only submission as part of the old wallet flow. Optional screenshots must not weaken the administrator's responsibility to match the actual transfer before approval.
+
+**How to apply:** Keep reference replay protection across incoming order sources, validate ownership of any supplied image, and clearly distinguish submission, verified payment, and service delivery.
+
+Never automatically replay historical approved orders merely because their fulfillment metadata is missing.
+
+**Why:** Read-only production inspection found historical approved orders with no fulfillment evidence, including mixed service markers that current validation would reject. Missing metadata cannot establish whether money or a service was already delivered.
+
+**How to apply:** Mark ambiguous historical orders for reconciliation without posting financial movements; require a separate audited reconciliation decision instead of rerunning approval.
