@@ -12,7 +12,7 @@ import {
   Share2, Gift, Megaphone, Swords, Trophy, Timer,
   Layers, Tv2, Type, ChevronDown, ChevronUp, Palette,
   Armchair, User as UserIcon, Sparkles, Star, Package,
-  MessageCircle, Search, Wallet,
+  MessageCircle, Search,
 } from "lucide-react";
 import { SiWhatsapp, SiFacebook, SiX, SiTelegram, SiInstagram, SiTiktok, SiSnapchat } from "react-icons/si";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,13 @@ import GlobalTicker from "@/components/GlobalTicker";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { projectPublicStream, type PublicLiveStream } from "@/lib/public-projections";
-import { battleGridFor, reserveBattleSeats } from "@/lib/live-layout";
+import {
+  battleGridFor,
+  battleParticipantsForDisplay,
+  reserveBattleSeats,
+  type BattleTeams,
+  type PublicBattleRosterEntry,
+} from "@/lib/live-layout";
 
 /* ─── ICE servers ─────────────────────────────────────── */
 const ICE: RTCIceServer[] = [
@@ -34,91 +40,6 @@ const ICE: RTCIceServer[] = [
 ];
 
 interface ChatMsg { userName: string; message: string; isOwner?: boolean; }
-
-interface CoinWalletSummary {
-  balance?: number | string | null;
-}
-
-interface RevenueWalletSummary {
-  balanceEGP?: number | string | null;
-  withdrawableBalanceEGP?: number | string | null;
-}
-
-interface LiveWalletSummaryProps {
-  coinWallet?: CoinWalletSummary;
-  coinWalletLoading: boolean;
-  coinWalletError: boolean;
-  revenue?: RevenueWalletSummary;
-  revenueLoading: boolean;
-  revenueError: boolean;
-}
-
-function formatLiveWalletAmount(value: unknown, decimals: number): string | null {
-  if (value === null || value === undefined || value === "") return null;
-  const amount = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(amount)) return null;
-  return amount.toLocaleString("ar-EG", {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-}
-
-function LiveWalletSummary({
-  coinWallet,
-  coinWalletLoading,
-  coinWalletError,
-  revenue,
-  revenueLoading,
-  revenueError,
-}: LiveWalletSummaryProps) {
-  const coinBalance = formatLiveWalletAmount(coinWallet?.balance, 0);
-  const spendableEGP = formatLiveWalletAmount(revenue?.balanceEGP, 2);
-  const withdrawableEGP = formatLiveWalletAmount(revenue?.withdrawableBalanceEGP, 2);
-  const valueFor = (value: string | null, loading: boolean, error: boolean) => {
-    if (loading) return "جاري التحميل…";
-    if (error) return "تعذّر التحديث";
-    return value ?? "غير متاح";
-  };
-
-  return (
-    <section
-      className="pointer-events-auto w-[min(18rem,calc(100vw-1.5rem))] rounded-2xl border border-white/15 bg-black/65 px-2.5 py-2 text-white shadow-lg backdrop-blur-md"
-      aria-label="ملخص محفظتي وأرباحي"
-      data-testid="live-own-wallet-summary"
-    >
-      <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold text-white/65">
-        <Wallet className="h-3.5 w-3.5 text-emerald-300" />
-        <span>بياناتي الخاصة</span>
-        {(coinWalletError || revenueError) && (
-          <span className="ms-auto text-[9px] font-semibold text-amber-200">تعذّر تحديث بعض البيانات</span>
-        )}
-      </div>
-      <div className="grid grid-cols-3 gap-1.5 text-center">
-        <div className="min-w-0 rounded-xl bg-amber-500/10 px-1 py-1.5" data-testid="live-own-coin-balance">
-          <p className="truncate text-[9px] font-semibold text-amber-200/75">رصيد العملات</p>
-          <p className="mt-0.5 truncate text-[11px] font-black text-amber-100">
-            {valueFor(coinBalance, coinWalletLoading, coinWalletError)}
-          </p>
-          <p className="text-[8px] text-white/45">عملة</p>
-        </div>
-        <div className="min-w-0 rounded-xl bg-sky-500/10 px-1 py-1.5" data-testid="live-own-spendable-egp">
-          <p className="truncate text-[9px] font-semibold text-sky-200/75">المتاح للإنفاق</p>
-          <p className="mt-0.5 truncate text-[11px] font-black text-sky-100">
-            {valueFor(spendableEGP, revenueLoading, revenueError)}
-          </p>
-          <p className="text-[8px] text-white/45">ج.م</p>
-        </div>
-        <div className="min-w-0 rounded-xl bg-emerald-500/10 px-1 py-1.5" data-testid="live-own-withdrawable-earnings">
-          <p className="truncate text-[9px] font-semibold text-emerald-200/75">أرباح قابلة للسحب</p>
-          <p className="mt-0.5 truncate text-[11px] font-black text-emerald-100">
-            {valueFor(withdrawableEGP, revenueLoading, revenueError)}
-          </p>
-          <p className="text-[8px] text-white/45">ج.م</p>
-        </div>
-      </div>
-    </section>
-  );
-}
 
 /* ═══════════════════════════════════════════════════════ */
 export default function LiveStream() {
@@ -182,7 +103,8 @@ export default function LiveStream() {
   const [giftTeamChoice,  setGiftTeamChoice]  = useState<"A"|"B">("A"); // viewer's chosen side
   const [giftTargetSocketId, setGiftTargetSocketId] = useState<string|null>(null); // null = المذيع
   // قائمة المشاركين في المعركة كما أعلنها الخادم — يراها الجميع (مذيع ومشاهدين)
-  const [battleTeams, setBattleTeams] = useState<{A:{socketId:string;userId:string;name:string;audienceCount:number}[];B:{socketId:string;userId:string;name:string;audienceCount:number}[]}|null>(null);
+  const [battleTeams, setBattleTeams] = useState<BattleTeams | null>(null);
+  const [battleRoster, setBattleRoster] = useState<Record<string, PublicBattleRosterEntry>>({});
   // عدادات فردية مستقلة لكل حساب — المفتاح userId الدائم؛ لا تتأثر خانة بأخرى
   const [battlePlayerScores, setBattlePlayerScores] = useState<Record<string, number>>({});
   const [showBattleSetup, setShowBattleSetup] = useState(false);
@@ -241,7 +163,6 @@ export default function LiveStream() {
   const [payLoading,      setPayLoading]      = useState(false);
   interface FlyingGift { id: number; emoji: string; x: number; glow?: string; big?: boolean; recipientSocketId?: string; }
   const [flyingGifts,     setFlyingGifts]     = useState<FlyingGift[]>([]);
-  const [myCoins,         setMyCoins]         = useState<number | null>(null); // loaded from DB
   const giftAudioContextRef = useRef<AudioContext | null>(null);
 
   const playGiftSound = useCallback((coins: number) => {
@@ -397,60 +318,10 @@ export default function LiveStream() {
     enabled: !!id,
     refetchInterval: 5000,
   });
-  // `mode=broadcast` is a UI hint and can be typed into a URL.  Treat the
-  // server-provided stream owner as the authority before rendering or
-  // fetching broadcaster earnings.
-  const isStreamOwner = !!user && !!stream?.userId && String(stream.userId) === String(user.id);
-  const isStreamOwnerRef = useRef(false);
-  isStreamOwnerRef.current = isStreamOwner;
-
-  /* ── coin wallet (the signed-in sender's own balance; needed for gifts) ── */
-  const {
-    data: coinWallet,
-    isLoading: coinWalletLoading,
-    isFetching: coinWalletFetching,
-    isError: coinWalletError,
-    refetch: refetchWallet,
-  } = useQuery<CoinWalletSummary>({
-    queryKey: ["/api/coins/wallet", user?.id],
-    queryFn: async () => {
-      const response = await fetch("/api/coins/wallet", { credentials: "include" });
-      if (!response.ok) throw new Error("تعذر تحميل رصيد العملات");
-      return response.json();
-    },
-    enabled: !!user,
-  });
-  const {
-    data: revenueWallet,
-    isLoading: revenueWalletLoading,
-    isFetching: revenueWalletFetching,
-    isError: revenueWalletError,
-    refetch: refetchRevenue,
-  } = useQuery<RevenueWalletSummary>({
-    queryKey: ["/api/revenue", "live-wallet", user?.id],
-    queryFn: async () => {
-      const response = await fetch("/api/revenue?limit=1", { credentials: "include" });
-      if (!response.ok) throw new Error("تعذر تحميل ملخص الأرباح");
-      return response.json();
-    },
-    // Revenue is broadcaster-private, unlike the sender's coin balance.
-    enabled: isStreamOwner,
-  });
   const { data: coinPackages } = useQuery<any[]>({
     queryKey: ["/api/coins/packages"],
     queryFn: () => fetch("/api/coins/packages").then(r => r.json()),
   });
-  useEffect(() => {
-    // Avoid carrying a previous authenticated account's balance while the
-    // account-scoped wallet query is switching users.
-    setMyCoins(null);
-  }, [user?.id]);
-  useEffect(() => {
-    if (coinWallet?.balance !== undefined && coinWallet?.balance !== null) {
-      const balance = Number(coinWallet.balance);
-      if (Number.isFinite(balance)) setMyCoins(balance);
-    }
-  }, [coinWallet?.balance]);
 
   /* ─── HLS player for viewers (RTMP streams) ─────────── */
   const startHlsPlayer = useCallback(async (url: string) => {
@@ -600,7 +471,8 @@ export default function LiveStream() {
       multiplierEndsAt: number | null;
       winner: "A" | "B" | "draw" | null;
       playerScores?: Record<string, number>;
-      teams?: { A: { socketId: string; userId: string; name: string; audienceCount: number }[]; B: { socketId: string; userId: string; name: string; audienceCount: number }[] };
+      teams?: BattleTeams;
+      roster?: Record<string, PublicBattleRosterEntry>;
     };
     const applyBattleState = (state: BattleState) => {
       if (state.active && battleCleanupTimerRef.current) {
@@ -608,6 +480,7 @@ export default function LiveStream() {
         battleCleanupTimerRef.current = null;
       }
       if (state.teams) setBattleTeams(state.teams);
+      setBattleRoster(state.roster || {});
       setBattlePlayerScores(state.playerScores || {});
       setBattleMode(state.mode);
       setBattleScoreA(state.scoreA);
@@ -635,6 +508,7 @@ export default function LiveStream() {
         setBattleActive(false);
         setBattleWinner(null);
         setBattleTeams(null);
+        setBattleRoster({});
         setBattlePlayerScores({});
         battleCleanupTimerRef.current = null;
       }, 8_000);
@@ -648,14 +522,12 @@ export default function LiveStream() {
       setBattleMultiplierEndsAt(Date.now() + data.durationSeconds * 1000);
       toast({ title: `${data.multiplier}x! ⚡`, description: `مضاعف السكور — ${data.reason}` });
     });
-    socket.on("gift-rejected", (data: { reason: string; balance?: number; required?: number; eventId?: string }) => {
+    socket.on("gift-rejected", (data: { reason: string; required?: number; eventId?: string }) => {
       if (data.eventId) {
         giftAckWaitersRef.current.get(data.eventId)?.(false);
         giftAckWaitersRef.current.delete(data.eventId);
       }
       if (data.reason === "insufficient_balance") {
-        if (typeof data.balance === "number") setMyCoins(data.balance);
-        void refetchWallet();
         toast({ title: "رصيدك غير كافٍ", description: `تحتاج ${data.required} عملة`, variant: "destructive" });
       } else if (data.reason === "target_left") {
         setGiftTargetSocketId(null);
@@ -671,14 +543,11 @@ export default function LiveStream() {
         toast({ title: "تعذّر إرسال الهدية", description: "حدث خطأ — لم يُخصم أي رصيد، حاول مجدداً", variant: "destructive" });
       }
     });
-    socket.on("gift-accepted", (data: { balance: number; eventId?: string }) => {
+    socket.on("gift-accepted", (data: { eventId?: string }) => {
       if (data.eventId) {
         giftAckWaitersRef.current.get(data.eventId)?.(true);
         giftAckWaitersRef.current.delete(data.eventId);
       }
-      if (typeof data.balance === "number") setMyCoins(data.balance);
-      void refetchWallet();
-      if (isStreamOwnerRef.current) void refetchRevenue();
     });
 
     if (isBroadcast) {
@@ -972,13 +841,6 @@ export default function LiveStream() {
 
     // ── Gift events (both broadcaster and viewer) ──
     socket.on("stream-gift", (data: { id: number; giftEmoji: string; giftName: string; giftCoins: number; userName: string; userId?: string; recipientUserId?: string; battleTeam?: "A"|"B"; glow?: string; recipientSocketId?: string }) => {
-      // The sender gets a private acknowledgement above. The recipient does
-      // not, so refresh only when this authenticated account is the credited
-      // user. No participant's private wallet data is ever read or displayed.
-      if (user && data.recipientUserId === String(user.id)) {
-        void refetchWallet();
-        void refetchRevenue();
-      }
       const x = 10 + Math.random() * 60;
       const flyId = Date.now() + Math.random();
       const big = data.giftCoins >= 100;
@@ -1222,7 +1084,9 @@ export default function LiveStream() {
   }, [bgMode]);
 
   const battleRosterKey = battleTeams
-    ? [...battleTeams.A, ...battleTeams.B].map(member => `${member.socketId}:${member.name}`).join("|")
+    ? battleParticipantsForDisplay(battleTeams, battleRoster, battlePlayerScores)
+      .map(member => `${member.socketId}:${member.name}`)
+      .join("|")
     : activeCoHosts.map(member => `${member.socketId}:${member.name}:${member.hasCamera !== false}`).join("|");
 
   /* ─── Browser battle compositor ─────────────────────────
@@ -1240,7 +1104,7 @@ export default function LiveStream() {
     if (!ctx) return;
 
     const roster = battleTeams
-      ? [...battleTeams.A, ...battleTeams.B]
+      ? battleParticipantsForDisplay(battleTeams, battleRoster, battlePlayerScores)
       : [
           { socketId: socketRef.current?.id || "host", name: stream?.channelName || "المذيع" },
           ...activeCoHosts.slice(0, battleMode === "2v2" ? 3 : 1),
@@ -1670,7 +1534,6 @@ export default function LiveStream() {
         toast({ title: "✅ تم الشحن!", description: data.message });
         setRechargeCode("");
         setShowRechargeModal(false);
-        refetchWallet();
       } else {
         toast({ title: "خطأ", description: data.message, variant: "destructive" });
       }
@@ -1823,14 +1686,6 @@ export default function LiveStream() {
       toast({ title: "الاتصال بالبث غير متاح", description: "لم تُرسل الهدية ولم يُخصم أي رصيد", variant: "destructive" });
       return Promise.resolve(false);
     }
-    if (myCoins === null) {
-      toast({ title: "تعذر تحميل رصيد العملات", description: "حاول مجدداً قبل إرسال الهدية", variant: "destructive" });
-      return Promise.resolve(false);
-    }
-    if (myCoins < gift.coins) {
-      toast({ title: "عملاتك غير كافية", description: `تحتاج ${gift.coins} عملة — رصيدك ${myCoins}`, variant: "destructive" });
-      return Promise.resolve(false);
-    }
     const userName = `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim() || "مستخدم";
     // Viewers know participants from the server battle roster, not activeCoHosts.
     const knownTarget =
@@ -1869,14 +1724,6 @@ export default function LiveStream() {
   /* إرسال كومبو — تكرار الإرسال حسب المضاعف المختار (x1/x2/x3) */
   const sendGiftCombo = async (gift: typeof GIFTS[0], times: number): Promise<boolean> => {
     if (!user) return false;
-    if (myCoins === null) {
-      toast({ title: "تعذر تحميل رصيد العملات", description: "حاول مجدداً قبل إرسال الهدية", variant: "destructive" });
-      return false;
-    }
-    if (myCoins < gift.coins * times) {
-      toast({ title: "رصيدك غير كافٍ للكومبو", description: `تحتاج ${gift.coins * times} عملة — رصيدك ${myCoins}`, variant: "destructive" });
-      return false;
-    }
     for (let i = 0; i < times; i++) {
       const accepted = await sendGift(gift);
       if (!accepted) return false;
@@ -2321,22 +2168,6 @@ export default function LiveStream() {
           </div>
         </div>
 
-        {/* Only the authenticated broadcaster may see this earnings summary.
-            Viewers may still see their own coin balance in the gift composer;
-            the battle roster contains public gift/score data only. */}
-        {isStreamOwner && (
-          <div className="absolute start-3 top-16 z-20 max-w-[calc(100%-1.5rem)]">
-            <LiveWalletSummary
-              coinWallet={coinWallet}
-              coinWalletLoading={coinWalletLoading || coinWalletFetching}
-              coinWalletError={coinWalletError}
-              revenue={revenueWallet}
-              revenueLoading={revenueWalletLoading || revenueWalletFetching}
-              revenueError={revenueWalletError}
-            />
-          </div>
-        )}
-
         {/* CHAT MESSAGES (floating) */}
         <div
           className="absolute start-0 w-[65%] px-3 z-10 max-h-[40vh] overflow-hidden flex flex-col-reverse gap-0.5 pointer-events-none"
@@ -2362,7 +2193,14 @@ export default function LiveStream() {
             >
               <Gift className="w-4 h-4" />
               هدية
-              <span className="bg-black/30 rounded-full px-1.5 text-[10px]">{myCoins === null ? "—" : myCoins}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => window.open("/payments#wallet-report", "_blank", "noopener,noreferrer")}
+              className="h-10 px-3 rounded-full bg-black/60 backdrop-blur border border-amber-400/30 text-amber-200 font-bold text-[11px] shadow-lg active:scale-95 transition-transform"
+              data-testid="link-personal-reports-stage"
+            >
+              رصيدي وتقاريري ↗
             </button>
             <button
               onClick={() => { setShowRechargeModal(true); setShowGiftPanel(false); setShowShare(false); }}
@@ -2737,16 +2575,12 @@ export default function LiveStream() {
                       A: [{ socketId: socketRef.current?.id || "host", userId: String((user as any)?.id || "host"), name: stream?.channelName || "المذيع", audienceCount: Number(stream?.subscriberCount || 0) }],
                       B: activeCoHosts.slice(0, battleMode === "2v2" ? 2 : 1).map(c => ({ socketId: c.socketId, userId: c.socketId, name: c.name, audienceCount: 0 })),
                     };
-                    const members = [
-                      ...teams.A.map(member => ({ ...member, team: "A" as const })),
-                      ...teams.B.map(member => ({ ...member, team: "B" as const })),
-                    ];
+                    const members = battleParticipantsForDisplay(teams, battleRoster, battlePlayerScores);
                     return members.map(member => {
                       const isSelf = member.socketId === socketRef.current?.id;
                       const hostSeat = member.socketId === socketRef.current?.id ||
                         (isBroadcast && member.team === "A" && member === teams.A[0]);
                       const cohost = activeCoHosts.find(c => c.socketId === member.socketId);
-                      const score = battlePlayerScores[member.userId];
                       return (
                         <div key={`${member.team}-${member.userId}`} className={`relative min-h-0 overflow-hidden rounded-2xl border ${member.team === "A" ? "border-orange-300/55" : "border-cyan-300/55"} bg-[#101a2a]/90 shadow-2xl`}>
                           <div className={`absolute inset-0 flex items-center justify-center ${member.team === "A" ? "bg-[#241b24]" : "bg-[#12252d]"}`}>
@@ -2785,11 +2619,11 @@ export default function LiveStream() {
                                   {member.team === "A" ? "فريق أ" : "فريق ب"}{isSelf ? " · أنت" : ""}
                                 </p>
                                 <p className="text-[9px] font-semibold text-white/65">
-                                  {Number(member.audienceCount || 0).toLocaleString()} متابع
+                                  {member.audienceCount.toLocaleString()} جمهور
                                 </p>
                               </div>
                               <div className="shrink-0 rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-amber-200">
-                                {typeof score === "number" ? `${score.toLocaleString()} نقطة` : "—"}
+                                {member.score.toLocaleString()} نقطة
                               </div>
                             </div>
                           </div>
@@ -2820,7 +2654,6 @@ export default function LiveStream() {
                 >
                   <Gift className="w-4 h-4" />
                   هدية
-                  <span className="bg-black/30 rounded-full px-1.5 text-[10px]">{myCoins === null ? "—" : myCoins}</span>
                 </button>
                 <button
                   onClick={() => { setShowRechargeModal(true); setShowGiftPanel(false); setShowShare(false); }}
@@ -3549,7 +3382,14 @@ export default function LiveStream() {
                   {purchaseStep === "pay" && "إتمام الدفع 💳"}
                   {purchaseStep === "done" && "تم استلام الطلب ✅"}
                 </h3>
-                <p className="text-yellow-400 text-xs font-bold">رصيدك: {myCoins === null ? "غير متاح" : myCoins} عملة</p>
+                <button
+                  type="button"
+                  onClick={() => window.open("/payments#wallet-report", "_blank", "noopener,noreferrer")}
+                  className="text-yellow-300 text-xs font-bold underline underline-offset-2"
+                  data-testid="link-personal-reports-recharge"
+                >
+                  رصيدي وتقاريري ↗
+                </button>
               </div>
               <button onClick={() => { setShowRechargeModal(false); setPurchaseStep("packages"); setSelectedPkg(null); setPayRef(""); }} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
                 <X className="w-4 h-4 text-white" />
@@ -3559,6 +3399,16 @@ export default function LiveStream() {
             {/* ── Step 1: Packages ── */}
             {purchaseStep === "packages" && (
               <>
+                <a
+                  href="/payments#coin-purchase"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mb-4 block rounded-xl bg-amber-500 px-4 py-3 text-center font-bold text-black"
+                  data-testid="link-live-wallet-coin-purchase"
+                >
+                  شراء عملات من المحفظة ↗
+                </a>
+                <p className="mb-4 text-xs text-white/60">تفتح صفحة الدفع الخاصة بك في نافذة أخرى دون مغادرة اللايف.</p>
                 {/* Recharge code */}
                 <div className="bg-white/5 rounded-2xl p-3.5 mb-4 border border-white/10">
                   <p className="text-white/60 text-xs mb-2 font-bold">لديك كود شحن؟</p>
@@ -3815,7 +3665,7 @@ export default function LiveStream() {
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div className="relative w-full max-w-lg bg-zinc-950 border-t border-orange-500/20 rounded-t-3xl p-4 pb-safe max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()} dir="rtl">
 
-            {/* Header: balance + recharge */}
+            {/* Header: recharge + private reports link */}
             <div className="flex items-center justify-between mb-3">
               <button onClick={() => setShowGiftPanel(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center" data-testid="btn-close-gift-panel">
                 <X className="w-4 h-4 text-white" />
@@ -3828,10 +3678,14 @@ export default function LiveStream() {
                 >
                   شحن +
                 </button>
-                <div className="flex items-center gap-1.5 bg-black/60 border border-yellow-500/30 rounded-full px-3 py-1.5">
-                  <span className="text-white/50 text-[10px]">رصيد العملات</span>
-                  <span className="text-yellow-400 font-black text-sm" data-testid="text-gift-balance">{myCoins === null ? "—" : myCoins.toLocaleString()}</span>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => window.open("/payments#wallet-report", "_blank", "noopener,noreferrer")}
+                  className="text-yellow-300 text-[11px] font-bold underline underline-offset-2"
+                  data-testid="link-personal-reports-gift"
+                >
+                  رصيدي وتقاريري ↗
+                </button>
               </div>
             </div>
 
@@ -3937,7 +3791,6 @@ export default function LiveStream() {
               <div className="grid grid-cols-3 gap-2 mb-3">
                 {giftTabGifts.map(gift => {
                   const selected = selectedGiftType === gift.type;
-                  const affordable = myCoins !== null && myCoins >= gift.coins;
                   return (
                     <button
                       key={gift.type}
@@ -3945,9 +3798,7 @@ export default function LiveStream() {
                       className={`relative flex flex-col items-center gap-1 active:scale-95 transition-all rounded-2xl p-3 border ${
                         selected
                           ? "bg-gradient-to-b from-orange-500/25 to-red-600/10 border-orange-400/70 shadow-lg shadow-orange-900/30"
-                          : affordable
-                            ? "bg-white/5 border-white/10"
-                            : "bg-white/5 border-white/10 opacity-45"
+                          : "bg-white/5 border-white/10"
                       }`}
                       data-testid={`btn-gift-${gift.type}`}
                     >
@@ -4013,7 +3864,6 @@ export default function LiveStream() {
                   onPointerUp={stopRapidFire}
                   onPointerCancel={stopRapidFire}
                   onPointerLeave={stopRapidFire}
-                  disabled={myCoins === null || myCoins < selectedGift.coins * comboMult}
                   className="w-full py-3.5 rounded-2xl souq-glow-btn text-white font-black text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-40 disabled:animate-none"
                   data-testid="btn-send-gift"
                 >

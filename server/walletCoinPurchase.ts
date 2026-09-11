@@ -22,6 +22,12 @@ export type WalletCoinPurchaseResult =
     }
   | {
       status: "package_not_found";
+    }
+  | {
+      status: "idempotency_conflict";
+      purchaseId: number;
+      requestedPackageId: number;
+      processedPackageId: number;
     };
 
 /**
@@ -52,6 +58,16 @@ export async function purchaseCoinsWithWallet(
     );
     if (existing.rows.length > 0) {
       const row = existing.rows[0];
+      const processedPackageId = Number(row.package_id);
+      if (!Number.isInteger(processedPackageId) || processedPackageId !== input.packageId) {
+        await client.query("ROLLBACK");
+        return {
+          status: "idempotency_conflict",
+          purchaseId: Number(row.id),
+          requestedPackageId: input.packageId,
+          processedPackageId,
+        };
+      }
       await client.query("COMMIT");
       return {
         status: "already_processed",

@@ -84,6 +84,20 @@ test("wallet coin purchase debits EGP and credits coins atomically", { skip: !en
     assert.equal(retry.coinBalance, 125);
     assert.equal(retry.walletBalanceEGP, 15);
 
+    // Reusing a committed key for a different package is not a retry of the
+    // original intent. It must be rejected without touching either ledger.
+    const conflictingRetry = await purchaseCoinsWithWallet(client, {
+      userId: "wallet-test-user",
+      packageId: 2,
+      idempotencyKey: "wallet-test-purchase-1",
+    });
+    assert.deepEqual(conflictingRetry, {
+      status: "idempotency_conflict",
+      purchaseId: first.purchaseId,
+      requestedPackageId: 2,
+      processedPackageId: 1,
+    });
+
     const ledgerCounts = await client.query(`
       SELECT
         (SELECT COUNT(*) FROM revenue_transactions WHERE type = 'spending') AS spending,

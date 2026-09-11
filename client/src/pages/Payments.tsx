@@ -1,5 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
+import { useWalletSocket } from "@/hooks/use-wallet-socket";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useRef, useEffect } from "react";
@@ -108,6 +109,23 @@ export default function Payments() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [activityKind, setActivityKind] = useState("all");
+  useWalletSocket(user?.id);
+  useEffect(() => {
+    // The lazy page mounts after the browser's initial fragment scroll. Handle
+    // its personal-report/purchase links once their sections actually exist.
+    const scrollToSection = () => {
+      const section = window.location.hash.slice(1);
+      if (["wallet-report", "coin-purchase", "wallet-charge"].includes(section)) {
+        document.getElementById(section)?.scrollIntoView({ block: "start" });
+      }
+    };
+    const frame = window.requestAnimationFrame(scrollToSection);
+    window.addEventListener("hashchange", scrollToSection);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("hashchange", scrollToSection);
+    };
+  }, []);
   const { data: activity = [], isLoading, isError, error } = useQuery<any[]>({
     queryKey: ["/api/payments/unified", activityKind],
     queryFn: async () => {
@@ -134,15 +152,28 @@ export default function Payments() {
     queryKey: ["/api/coins/packages"],
     queryFn: () => fetch("/api/coins/packages", { credentials: "include" }).then(r => r.json()),
   });
-  const { data: walletSummary } = useQuery<{ balanceEGP: number }>({
-    queryKey: ["/api/revenue", "coin-wallet-balance"],
+  const { data: walletSummary } = useQuery<{
+    balanceEGP: number;
+    withdrawableBalanceEGP?: number;
+  }>({
+    queryKey: ["/api/revenue", "coin-wallet-balance", user?.id],
     queryFn: async () => {
       const response = await fetch("/api/revenue?limit=1", { credentials: "include" });
       if (!response.ok) throw new Error("تعذر تحميل رصيد المحفظة");
       return response.json();
     },
+    enabled: !!user?.id,
   });
-  const [afsPurpose, setAfsPurpose] = useState<"wallet_top_up" | "coin_purchase" | "service_payment">("wallet_top_up");
+  const { data: coinWallet } = useQuery<{ balance?: number | string | null }>({
+    queryKey: ["/api/coins/wallet", user?.id],
+    queryFn: async () => {
+      const response = await fetch("/api/coins/wallet", { credentials: "include" });
+      if (!response.ok) throw new Error("تعذر تحميل رصيد العملات");
+      return response.json();
+    },
+    enabled: !!user,
+  });
+  const [afsPurpose, setAfsPurpose] = useState<"wallet_top_up" | "service_payment">("wallet_top_up");
   const [afsAmount, setAfsAmount] = useState("");
   const [afsPackageId, setAfsPackageId] = useState("");
   const [afsServiceType, setAfsServiceType] = useState<"ad_boost" | "ad_renewal" | "subscription">("ad_boost");
@@ -152,14 +183,17 @@ export default function Payments() {
   const walletCoinIntentKey = useRef<string | null>(null);
   useEffect(() => {
     afsIntentKey.current = null;
-  }, [afsPurpose, afsAmount, afsPackageId, afsServiceType, afsAdId, afsRenewalDays]);
+  }, [afsPurpose, afsAmount, afsServiceType, afsAdId, afsRenewalDays]);
+  useEffect(() => {
+    // A key is bound to one package intent. Selecting another package must
+    // start a fresh request rather than replaying the previous purchase.
+    walletCoinIntentKey.current = null;
+  }, [afsPackageId]);
   const afsPrerequisiteError = afsPurpose === "wallet_top_up"
     ? (!Number.isFinite(Number(afsAmount)) || Number(afsAmount) < 10 || Number(afsAmount) > 1_000_000
         ? "أدخل مبلغ شحن بين 10 و1,000,000 جنيه"
         : "")
-    : afsPurpose === "coin_purchase"
-      ? (!afsPackageId ? "اختر باقة العملات أولاً" : "")
-      : afsServiceType !== "subscription" && !afsAdId
+    : afsServiceType !== "subscription" && !afsAdId
         ? (userAds.length === 0 ? "لا يوجد إعلان في حسابك يمكن ربطه بهذه الخدمة" : "اختر الإعلان المطلوب أولاً")
         : "";
   const afsCheckout = useMutation({
@@ -168,9 +202,7 @@ export default function Payments() {
       afsIntentKey.current = idempotencyKey;
       const payload = afsPurpose === "wallet_top_up"
         ? { purpose: afsPurpose, amount: Number(afsAmount) }
-        : afsPurpose === "coin_purchase"
-          ? { purpose: afsPurpose, packageId: Number(afsPackageId) }
-          : {
+        : {
               purpose: afsPurpose,
               serviceType: afsServiceType,
               ...(afsServiceType !== "subscription" ? { adId: Number(afsAdId) } : {}),
@@ -414,43 +446,90 @@ export default function Payments() {
         </Button>
       </div>
 
-       {/* Unified activity summary */}
-      <section className="mb-5 rounded-2xl border-2 border-primary/30 bg-primary/5 p-4 sm:p-5">
+      {/* Personal balance report. All three values come from user-scoped
+          endpoints; no broadcaster or platform balances are included here. */}
+      <section id="wallet-report" className="mb-5 rounded-2xl border-2 border-emerald-500/25 bg-emerald-500/5 p-4 sm:p-5 scroll-mt-4" data-testid="wallet-report">
+        <div className="flex items-center gap-2 mb-1">
+          <CircleDollarSign className="w-5 h-5 text-emerald-600" />
+          <h2 className="font-extrabold">تقرير محفظتي</h2>
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">الأرصدة والحركات الخاصة بحسابك فقط</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+          <div className="rounded-xl border bg-background p-3">
+            <p className="text-[11px] text-muted-foreground">المتاح للإنفاق</p>
+            <p className="text-lg font-black text-sky-600">
+              {walletSummary?.balanceEGP == null ? "—" : `${Number(walletSummary.balanceEGP).toFixed(2)} ج.م`}
+            </p>
+          </div>
+          <div className="rounded-xl border bg-background p-3">
+            <p className="text-[11px] text-muted-foreground">أرباح قابلة للسحب</p>
+            <p className="text-lg font-black text-emerald-600">
+              {walletSummary?.withdrawableBalanceEGP == null ? "—" : `${Number(walletSummary.withdrawableBalanceEGP).toFixed(2)} ج.م`}
+            </p>
+          </div>
+          <div className="rounded-xl border bg-background p-3">
+            <p className="text-[11px] text-muted-foreground">رصيد العملات</p>
+            <p className="text-lg font-black text-amber-600">
+              {coinWallet?.balance == null ? "—" : `${Number(coinWallet.balance).toLocaleString("ar-EG")} عملة`}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => {
+            setAfsPurpose("wallet_top_up");
+            document.getElementById("wallet-charge")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}>
+            <Plus className="w-4 h-4 ml-1" /> شحن المحفظة
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => {
+            document.getElementById("coin-purchase")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}>
+            <Coins className="w-4 h-4 ml-1" /> شراء عملات من المحفظة
+          </Button>
+        </div>
+      </section>
+
+      {/* EGP wallet → coins is a separate action from AFS checkout. */}
+      <section id="coin-purchase" className="mb-5 rounded-2xl border-2 border-amber-400/35 bg-amber-50/50 dark:bg-amber-950/10 p-4 sm:p-5 scroll-mt-4" data-testid="wallet-coin-purchase">
+        <div className="flex items-center gap-2 mb-1">
+          <Coins className="w-5 h-5 text-amber-600" />
+          <h2 className="font-extrabold">شراء عملات من رصيد المحفظة</h2>
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">
+          لا يفتح هذا الإجراء صفحة AFS ولا يستخدم وضع الاختبار؛ يخصم من رصيد EGP ويضيف العملات في عملية واحدة.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Select value={afsPackageId} onValueChange={setAfsPackageId} disabled={walletCoinPurchase.isPending}>
+            <SelectTrigger className="flex-1"><SelectValue placeholder="اختر باقة العملات" /></SelectTrigger>
+            <SelectContent>{coinPackages.map((p: any) => <SelectItem key={p.id} value={String(p.id)}>{p.name} — {p.coins + (p.bonusCoins || p.bonus_coins || 0)} عملة / {p.priceEGP || p.price_egp} ج.م</SelectItem>)}</SelectContent>
+          </Select>
+          <Button
+            type="button"
+            disabled={!afsPackageId || walletCoinPurchase.isPending}
+            onClick={() => walletCoinPurchase.mutate()}
+            data-testid="btn-buy-coins-from-wallet"
+          >
+            {walletCoinPurchase.isPending ? "جارٍ الخصم والشحن..." : "شراء الآن"}
+          </Button>
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-2">
+          رصيد EGP الحالي: {walletSummary?.balanceEGP == null ? "جارٍ التحميل..." : `${Number(walletSummary.balanceEGP).toFixed(2)} ج.م`}
+        </p>
+      </section>
+
+      {/* Card charge action */}
+      <section id="wallet-charge" className="mb-5 rounded-2xl border-2 border-primary/30 bg-primary/5 p-4 sm:p-5 scroll-mt-4">
         <div className="flex items-center gap-2 mb-1"><CreditCard className="w-5 h-5 text-primary" /><h2 className="font-extrabold">الدفع الآمن بالبطاقة عبر AFS</h2></div>
         <p className="text-xs font-bold">ads-as.com — إحدى منصات شركة سوق ماركات</p>
-        <p className="text-xs text-muted-foreground mt-1 mb-3">Visa · Mastercard · Meeza ميزة. لن نطلب بيانات بطاقتك هنا؛ ستدخلها فقط داخل نموذج AFS الآمن.</p>
+        <p className="text-xs text-muted-foreground mt-1 mb-3">Visa · Mastercard · Meeza ميزة. لن نطلب بيانات بطاقتك هنا؛ ستدخلها فقط داخل نموذج AFS الآمن. أي وضع اختبار ظاهر هناك لا يضيف رصيداً حقيقياً.</p>
         <div className="flex flex-wrap gap-2 mb-3">
           <Button size="sm" variant={afsPurpose === "wallet_top_up" ? "default" : "outline"} onClick={() => setAfsPurpose("wallet_top_up")}>شحن المحفظة</Button>
-          <Button size="sm" variant={afsPurpose === "coin_purchase" ? "default" : "outline"} onClick={() => setAfsPurpose("coin_purchase")}>شراء عملات</Button>
           <Button size="sm" variant={afsPurpose === "service_payment" ? "default" : "outline"} onClick={() => setAfsPurpose("service_payment")}>دفع خدمة</Button>
         </div>
         {afsPurpose === "wallet_top_up" ? (
           <div className="space-y-2">
             <Input type="number" min="10" max="1000000" value={afsAmount} onChange={e => setAfsAmount(e.target.value)} placeholder="المبلغ بالجنيه (10 – 1,000,000)" />
             <p className="text-[11px] text-muted-foreground">يمكن استخدام رصيد المحفظة في الحملات، إعلانات الشريط، الكوبونات، الاستشارات وخدمات الذكاء، مع استمرار طرق الدفع القديمة.</p>
-          </div>
-        ) : afsPurpose === "coin_purchase" ? (
-          <div className="space-y-2">
-            <Select value={afsPackageId} onValueChange={setAfsPackageId}>
-              <SelectTrigger><SelectValue placeholder="اختر باقة العملات" /></SelectTrigger>
-              <SelectContent>{coinPackages.map((p: any) => <SelectItem key={p.id} value={String(p.id)}>{p.name} — {p.coins + (p.bonusCoins || p.bonus_coins || 0)} عملة / {p.priceEGP || p.price_egp} ج.م</SelectItem>)}</SelectContent>
-            </Select>
-            <div className="rounded-lg border border-amber-300/60 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2">
-              <p className="text-xs font-bold">الدفع من رصيد محفظة EGP</p>
-              <p className="text-[11px] text-muted-foreground">
-                رصيدك الحالي: {walletSummary?.balanceEGP == null ? "جارٍ التحميل..." : `${Number(walletSummary.balanceEGP).toFixed(2)} ج.م`}
-              </p>
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-full mt-2"
-                disabled={!afsPackageId || walletCoinPurchase.isPending}
-                onClick={() => walletCoinPurchase.mutate()}
-                data-testid="btn-buy-coins-from-wallet"
-              >
-                {walletCoinPurchase.isPending ? "جارٍ الخصم والشحن..." : "شراء من رصيد المحفظة"}
-              </Button>
-            </div>
           </div>
         ) : (
           <div className="space-y-2">
@@ -485,7 +564,7 @@ export default function Payments() {
             {afsPrerequisiteError}
           </p>
         )}
-         <Button className="w-full mt-3" disabled={afsPurpose === "coin_purchase" || afsCheckout.isPending || !!afsPrerequisiteError} onClick={() => afsCheckout.mutate()}>
+         <Button className="w-full mt-3" disabled={afsCheckout.isPending || !!afsPrerequisiteError} onClick={() => afsCheckout.mutate()}>
           {afsCheckout.isPending ? "جارٍ التحويل..." : "المتابعة للدفع بالبطاقة"}
         </Button>
       </section>

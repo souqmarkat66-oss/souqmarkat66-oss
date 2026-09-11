@@ -1040,6 +1040,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       let accepted = false;
       let battleState: any = null;
       let newSenderBalance = 0;
+      let newRecipientWalletBalanceEGP: number | null = null;
+      let recipientGiftEGP = 0;
       // Identity comes from the authenticated session, never from the payload.
       const authUid = (socket.data as any).authUserId;
       if (!authUid) {
@@ -1287,14 +1289,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             );
             if (recipientTransaction.rowCount !== 1) throw new Error("Gift recipient transaction failed");
             // Also credit revenue_transactions in EGP (1 coin = 0.05 EGP)
-             const egpAmount = parseFloat((broadcasterCoins * 0.05).toFixed(2));
+            const egpAmount = parseFloat((broadcasterCoins * 0.05).toFixed(2));
+            recipientGiftEGP = egpAmount;
             const revenueCredit = await client.query(
               `INSERT INTO revenue_transactions (user_id, type, amount_egp, description, channel_id)
                VALUES ($1, 'earning', $2, $3, (SELECT id FROM channels WHERE user_id = $1 LIMIT 1))
                RETURNING id`,
                 [recipientUserId, egpAmount, `هدايا من بث مباشر - ${gift.name}`]
             );
-             assertSingleRowResult(revenueCredit, "gift earnings credit");
+            assertSingleRowResult(revenueCredit, "gift earnings credit");
+            const recipientBalance = await client.query(
+              `SELECT COALESCE(SUM(CASE
+                 WHEN type IN ('earning', 'wallet_recharge') THEN amount_egp
+                 WHEN type IN ('spending', 'withdrawal', 'ai_charge') THEN -amount_egp
+                 ELSE 0
+               END), 0)::numeric AS balance
+               FROM revenue_transactions
+               WHERE user_id = $1`,
+              [recipientUserId],
+            );
+            newRecipientWalletBalanceEGP = parseLedgerAmount(
+              recipientBalance.rows[0]?.balance ?? 0,
+              "recipient wallet balance",
+            );
           }
           // This is deliberately the last room/identity check before commit.
           // A disconnect or seat replacement rolls back every ledger write.
@@ -1319,6 +1336,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!accepted) return;
       // Push the sender's new balance immediately (no client-side polling race).
       socket.emit("gift-accepted", { balance: newSenderBalance, giftType: data.giftType, eventId: data.eventId });
+      // The recipient is not the sender and therefore does not receive the
+      // gift-accepted event. Notify only that authenticated user's private
+      // room after commit so personal wallet reports refresh immediately.
+      if (newRecipientWalletBalanceEGP !== null) {
+        walletEmitter.emit("wallet:update", {
+          userId: recipientUserId,
+          amountEGP: recipientGiftEGP,
+          type: "earning",
+          description: `أرباح هدية ${gift.name} من بث مباشر`,
+          newBalance: newRecipientWalletBalanceEGP,
+        });
+      }
 
       const room = streamRooms.get(data.streamId);
       if (room?.battle?.active) {
@@ -1824,6 +1853,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           message: "رصيد المحفظة غير كافٍ",
           required: result.requiredEGP,
           balance: result.walletBalanceEGP,
+        });
+      }
+      if (result.status === "idempotency_conflict") {
+        return res.status(409).json({
+          message: "مفتاح العملية مستخدم لباقة عملات مختلفة. ابدأ عملية شراء جديدة.",
+          purchaseId: result.purchaseId,
         });
       }
       if (result.status === "purchased") {
@@ -4401,7 +4436,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
     const userId = req.user.claims.sub;
     const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 100);
     const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
-    const allowedTypes = ['earning', 'spending', 'withdrawal', 'ai_charge'] as const;
+    const allowedTypes = ['earning', 'spending', 'withdrawal', 'ai_charge', 'wallet_recharge'] as const;
     type RevenueTxType = typeof allowedTypes[number];
     const rawType = typeof req.query.type === 'string' ? req.query.type : undefined;
     const type: RevenueTxType | undefined = rawType && (allowedTypes as readonly string[]).includes(rawType)

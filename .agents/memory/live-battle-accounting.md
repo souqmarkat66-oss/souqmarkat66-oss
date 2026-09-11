@@ -26,6 +26,12 @@ New gift receipts credit spendable value once, as EGP earnings; received coin co
 **Why:** Crediting both spendable coins and equivalent EGP allows collaborating broadcasters to repeatedly gift the same value. EGP-to-coin purchases make this a profitable withdrawal loop.
 
 **How to apply:** Preserve the original-value 60/40 split, increment received/earned coin statistics without minting spendable recipient coins, and leave historical balances untouched. Test purchase-to-gift flows together, not just each ledger write in isolation.
+
+Financial balances and withdrawable earnings belong exclusively in personal reports, not anywhere on the livestream page—even in owner-only panels.
+
+**Why:** An owner-only DOM condition does not prevent screen/tab capture from broadcasting that panel. The owner explicitly requires the live experience to show public participant identity, audience, and round points only.
+
+**How to apply:** Keep all numeric wallet summaries off the live stage and its dialogs. Link to authenticated account-scoped reports in a separate tab so opening them does not terminate the stream. Never label PK points as financial balance.
 **Socket identity:** Socket.IO shares the express-session cookie (`io.engine.use(getSession())`); `send-gift` debits `socket.data.authUserId` and credits the DB stream owner — never trust userId/broadcasterUserId from event payloads, and self-gifting mints no 60% credit.
 
 Per-slot scoring: battle state keeps `playerScores` keyed by socketId (team score = sum only); gift handler increments the validated recipient slot; `live_battles.player_scores` jsonb stores [{team,userId,name,score}] on finish (idempotent ALTER in runMigrations, server/index.ts). Client renders an independent gem badge per slot from the broadcast playerScores map; guest identity resolved from the roster across both teams (never assume team B).

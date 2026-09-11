@@ -32,3 +32,9 @@ An explicitly owner-authorized sandbox on the published VPS is acceptable only a
 **Why:** A production-hosted integration test shares the application's real accounts and ledger. Successful test card transactions must not become spendable, including after the endpoint is switched back to Live.
 
 **How to apply:** Require explicit production sandbox opt-in, bind each new order to its server-selected environment, label checkout/history/results as test-only, reject cross-environment reuse, and keep sandbox verification outside every financial fulfillment path. Switching back to Live requires a fresh checkout; old test results remain non-financial.
+
+CVV and card-number controls are hosted cross-origin iframe fields, not ordinary inputs owned by the React page.
+
+**Why:** Main-document selectors miss them, and raw browser-debugger iframe sessions can detach during navigation, producing “Session with given id not found” or “Invalid InterceptionId” before any input validation is tested. These harness errors are not evidence of a CVV length limit.
+
+**How to apply:** Use frame-aware browser interaction with fresh frame contexts when investigating typing. Preserve hosted fields and SRI; do not collect CVV locally or enable optional/empty CVV as a supposed fix.
