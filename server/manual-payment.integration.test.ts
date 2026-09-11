@@ -172,6 +172,20 @@ async function createManualPaymentFixture(client: pg.PoolClient): Promise<void> 
       reviewed_at timestamp,
       reviewed_by text
     );
+    CREATE TABLE wallet_top_up_orders (
+      id serial PRIMARY KEY,
+      user_id varchar NOT NULL REFERENCES users(id),
+      amount_egp real NOT NULL,
+      payment_method text NOT NULL,
+      payment_ref text,
+      screenshot_url text,
+      status text NOT NULL DEFAULT 'pending',
+      admin_note text,
+      order_number text,
+      reviewed_at timestamp,
+      reviewed_by varchar,
+      created_at timestamp DEFAULT now()
+    );
     CREATE TABLE payment_service_deliveries (
       id serial PRIMARY KEY,
       payment_request_id integer NOT NULL REFERENCES payment_requests(id) ON DELETE CASCADE,
@@ -231,7 +245,7 @@ async function createManualPaymentFixture(client: pg.PoolClient): Promise<void> 
 }
 
 type CapturedRoute = {
-  method: "get" | "post" | "put";
+  method: "get" | "post" | "put" | "patch";
   path: string;
   handlers: RequestHandler[];
 };
@@ -248,7 +262,7 @@ function recordingApp(): { app: Express; routes: CapturedRoute[] } {
   app = new Proxy({}, {
     get: (_target, property) => {
       const method = String(property);
-      if (method === "get" || method === "post" || method === "put") {
+      if (method === "get" || method === "post" || method === "put" || method === "patch") {
         return (path: string, ...handlers: RequestHandler[]) => {
           if (typeof path === "string") routes.push({ method, path, handlers });
           return app;
@@ -292,6 +306,7 @@ async function startPaymentHttpHarness(routes: CapturedRoute[], userId: string, 
     capturedRoute(routes, "get", "/api/payments"),
     capturedRoute(routes, "put", "/api/payments/:id"),
     capturedRoute(routes, "put", "/api/admin/payments/:id"),
+    capturedRoute(routes, "patch", "/api/admin/wallet-topups/:id"),
     capturedRoute(routes, "post", "/api/ai/talking-avatar"),
   ]) {
     app[route.method](route.path, ...route.handlers);
@@ -311,7 +326,7 @@ async function startPaymentHttpHarness(routes: CapturedRoute[], userId: string, 
 
 async function paymentHttp(
   baseUrl: string,
-  method: "GET" | "POST" | "PUT",
+  method: "GET" | "POST" | "PUT" | "PATCH",
   path: string,
   body?: Record<string, unknown>,
   identity: "user" | "admin" = "user",
@@ -654,6 +669,112 @@ test("manual payment storage lifecycle uses an isolated development schema", asy
       if (originalReplId === undefined) delete process.env.REPL_ID;
       else process.env.REPL_ID = originalReplId;
     }
+
+    // The old wallet queue uses its own table and row shape.  Approval must
+    // still write only the operational revenue ledger, notify/refresh after
+    // commit, and remain one-shot when an admin retries the same action.
+    const legacyWallet = await applicationPool.query(
+      `INSERT INTO wallet_top_up_orders
+         (user_id, amount_egp, payment_method, payment_ref, screenshot_url, order_number)
+       VALUES ($1, 12.50, 'vodafone', 'Legacy-Wallet-Ref', 'https://ads-as.com/uploads/old-receipt.png', 'WLT-OLD-1')
+       RETURNING id`,
+      [userId],
+    );
+    const legacyApproval = await paymentHttp(
+      httpHarness.url,
+      "PATCH",
+      `/api/admin/wallet-topups/${legacyWallet.rows[0].id}`,
+      { action: "approve", adminNote: "legacy receipt verified" },
+      "admin",
+    );
+    assert.equal(legacyApproval.status, 200);
+    assert.equal(legacyApproval.body.status, "approved");
+    assert.equal(legacyApproval.body.amountEGP, 12.5);
+    assert.equal(legacyApproval.body.newBalance, 243);
+    const legacyReplay = await paymentHttp(
+      httpHarness.url,
+      "PATCH",
+      `/api/admin/wallet-topups/${legacyWallet.rows[0].id}`,
+      { action: "approve" },
+      "admin",
+    );
+    assert.equal(legacyReplay.status, 400);
+    const legacyLedger = await applicationPool.query(
+      `SELECT count(*)::int AS count
+         FROM revenue_transactions
+        WHERE user_id = $1 AND type = 'wallet_recharge' AND amount_egp = 12.50`,
+      [userId],
+    );
+    assert.equal(legacyLedger.rows[0].count, 1);
+    assert.equal(
+      (await applicationPool.query(
+        "SELECT count(*)::int AS count FROM notifications WHERE dedupe_key = $1",
+        [`wallet-topup:${legacyWallet.rows[0].id}:approved`],
+      )).rows[0].count,
+      1,
+    );
+
+    const legacyRejected = await applicationPool.query(
+      `INSERT INTO wallet_top_up_orders
+         (user_id, amount_egp, payment_method, payment_ref, order_number)
+       VALUES ($1, 7.50, 'vodafone', 'legacy-reject-ref', 'WLT-OLD-REJECT')
+       RETURNING id`,
+      [userId],
+    );
+    const legacyRejection = await paymentHttp(
+      httpHarness.url,
+      "PATCH",
+      `/api/admin/wallet-topups/${legacyRejected.rows[0].id}`,
+      { action: "reject", adminNote: "receipt not verified" },
+      "admin",
+    );
+    assert.equal(legacyRejection.status, 200);
+    assert.equal(legacyRejection.body.status, "rejected");
+    assert.equal(
+      (await applicationPool.query(
+        "SELECT status FROM wallet_top_up_orders WHERE id = $1",
+        [legacyRejected.rows[0].id],
+      )).rows[0].status,
+      "rejected",
+    );
+    assert.equal(
+      (await applicationPool.query(
+        "SELECT count(*)::int AS count FROM revenue_transactions WHERE user_id = $1 AND amount_egp = 7.50",
+        [userId],
+      )).rows[0].count,
+      0,
+    );
+
+    // A reference already pending in the legacy coin queue cannot be reused
+    // by a wallet approval, even when the old wallet row has no upload record.
+    await applicationPool.query(
+      `INSERT INTO coin_purchase_orders
+         (user_id, coins, amount_egp, payment_method, payment_ref, status)
+       VALUES ($1, 20, 10, 'vodafone', 'cross-legacy-ref', 'pending')`,
+      [userId],
+    );
+    const duplicateLegacyWallet = await applicationPool.query(
+      `INSERT INTO wallet_top_up_orders
+         (user_id, amount_egp, payment_method, payment_ref, order_number)
+       VALUES ($1, 10, 'vodafone', 'CROSS legacy REF', 'WLT-OLD-2')
+       RETURNING id`,
+      [userId],
+    );
+    const duplicateLegacyApproval = await paymentHttp(
+      httpHarness.url,
+      "PATCH",
+      `/api/admin/wallet-topups/${duplicateLegacyWallet.rows[0].id}`,
+      { action: "approve" },
+      "admin",
+    );
+    assert.equal(duplicateLegacyApproval.status, 409);
+    assert.equal(
+      (await applicationPool.query(
+        "SELECT status FROM wallet_top_up_orders WHERE id = $1",
+        [duplicateLegacyWallet.rows[0].id],
+      )).rows[0].status,
+      "pending",
+    );
 
     // The POST handler owns price and quantity. A stale/tampered amount is
     // rejected, while a client that omits amount receives the server price.

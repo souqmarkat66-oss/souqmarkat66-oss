@@ -172,10 +172,13 @@ export default function LiveStream() {
   const [payScreenshotPreview, setPayScreenshotPreview] = useState("");
   const [payUploading, setPayUploading] = useState(false);
   const [payLoading,      setPayLoading]      = useState(false);
+  const [walletPurchaseLoading, setWalletPurchaseLoading] = useState(false);
+  const [purchaseDoneMode, setPurchaseDoneMode] = useState<"wallet" | "manual" | null>(null);
   interface FlyingGift { id: number; emoji: string; x: number; glow?: string; big?: boolean; recipientSocketId?: string; }
   const [flyingGifts,     setFlyingGifts]     = useState<FlyingGift[]>([]);
   const giftAudioContextRef = useRef<AudioContext | null>(null);
   const payFileRef = useRef<HTMLInputElement | null>(null);
+  const walletPurchaseIntentKeyRef = useRef<string | null>(null);
 
   const playGiftSound = useCallback((coins: number) => {
     if (coins < 100 || typeof window === "undefined") return;
@@ -334,6 +337,29 @@ export default function LiveStream() {
     queryKey: ["/api/coins/packages"],
     queryFn: () => fetch("/api/coins/packages").then(r => r.json()),
   });
+  const { data: liveWalletSummary } = useQuery<{
+    balanceEGP?: number | string | null;
+    withdrawableBalanceEGP?: number | string | null;
+  }>({
+    queryKey: ["/api/revenue", "coin-wallet-balance", user?.id],
+    queryFn: async () => {
+      const response = await fetch("/api/revenue?limit=1", { credentials: "include" });
+      if (!response.ok) throw new Error("تعذر تحميل رصيد المحفظة");
+      return response.json();
+    },
+    enabled: !!user?.id,
+    refetchInterval: 15_000,
+  });
+  const { data: liveCoinWallet } = useQuery<{ balance?: number | string | null }>({
+    queryKey: ["/api/coins/wallet", user?.id],
+    queryFn: async () => {
+      const response = await fetch("/api/coins/wallet", { credentials: "include" });
+      if (!response.ok) throw new Error("تعذر تحميل رصيد العملات");
+      return response.json();
+    },
+    enabled: !!user?.id,
+    refetchInterval: 15_000,
+  });
 
   /* ─── HLS player for viewers (RTMP streams) ─────────── */
   const startHlsPlayer = useCallback(async (url: string) => {
@@ -466,6 +492,13 @@ export default function LiveStream() {
     socket.on("stream-like",   () => setLikesCount(p => p + 1));
     socket.on("chat-message",  (msg: ChatMsg) => setMessages(prev => [...prev.slice(-60), msg]));
     socket.on("connect",       () => socket.emit("join-stream", id));
+    socket.on("wallet:update", () => {
+      // Wallet events are emitted to the authenticated user's socket room.
+      // Refresh both balances so a gift, recharge, or wallet-funded package
+      // never leaves stale affordability information in the live panel.
+      queryClient.invalidateQueries({ queryKey: ["/api/revenue"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/coins/wallet"] });
+    });
     socket.on("disconnect", () => {
       giftAckWaitersRef.current.forEach(settle => settle(false));
       giftAckWaitersRef.current.clear();
@@ -580,6 +613,8 @@ export default function LiveStream() {
         giftAckWaitersRef.current.get(data.eventId)?.(true);
         giftAckWaitersRef.current.delete(data.eventId);
       }
+      queryClient.invalidateQueries({ queryKey: ["/api/coins/wallet"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/revenue"] });
     });
 
     if (isBroadcast) {
@@ -1653,6 +1688,7 @@ export default function LiveStream() {
       });
       const data = await res.json();
       if (res.ok) {
+        setPurchaseDoneMode("manual");
         setPurchaseStep("done");
       } else {
         toast({ title: "خطأ", description: data.message, variant: "destructive" });
@@ -1661,6 +1697,64 @@ export default function LiveStream() {
       toast({ title: "خطأ في الاتصال", variant: "destructive" });
     }
     setPayLoading(false);
+  };
+
+  const purchaseSelectedFromWallet = async () => {
+    if (!selectedPkg || walletPurchaseLoading) return;
+    const packageId = Number(selectedPkg.id);
+    if (!Number.isSafeInteger(packageId) || packageId < 1) {
+      toast({ title: "باقة العملات غير صالحة", variant: "destructive" });
+      return;
+    }
+    const amount = Number(selectedPkg.priceEgp);
+    const balance = Number(liveWalletSummary?.balanceEGP ?? 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast({ title: "تعذر قراءة سعر الباقة", description: "حدّث الباقات وحاول مرة أخرى", variant: "destructive" });
+      return;
+    }
+    if (balance < amount) {
+      toast({
+        title: "رصيد EGP غير كافٍ",
+        description: `تحتاج ${amount.toLocaleString("ar-EG")} ج.م — المتاح ${balance.toLocaleString("ar-EG")} ج.م`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setWalletPurchaseLoading(true);
+    const idempotencyKey = walletPurchaseIntentKeyRef.current || crypto.randomUUID();
+    walletPurchaseIntentKeyRef.current = idempotencyKey;
+    try {
+      const response = await fetch("/api/coins/purchase-with-wallet", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify({ packageId }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "تعذر شراء العملات من المحفظة");
+      walletPurchaseIntentKeyRef.current = null;
+      queryClient.invalidateQueries({ queryKey: ["/api/revenue"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/coins/wallet"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/coins/transactions"] });
+      setPurchaseDoneMode("wallet");
+      setPurchaseStep("done");
+      toast({
+        title: data.duplicate ? "تم تأكيد شراء العملات" : "تم شراء العملات ✅",
+        description: `${Number(data.coins || 0).toLocaleString("ar-EG")} عملة — الرصيد الجديد ${Number(data.coinBalance || 0).toLocaleString("ar-EG")} عملة`,
+      });
+    } catch (error) {
+      toast({
+        title: "تعذر شراء العملات من المحفظة",
+        description: error instanceof Error ? error.message : "حاول مرة أخرى",
+        variant: "destructive",
+      });
+    } finally {
+      setWalletPurchaseLoading(false);
+    }
   };
 
   /* ─── Battle helpers ─────────────────────────────────── */
@@ -3500,6 +3594,8 @@ export default function LiveStream() {
             setShowRechargeModal(false);
             setPurchaseStep("packages");
             setSelectedPkg(null);
+            walletPurchaseIntentKeyRef.current = null;
+            setPurchaseDoneMode(null);
             setPayRef("");
             setPayScreenshotUrl("");
             setPayScreenshotPreview("");
@@ -3514,7 +3610,7 @@ export default function LiveStream() {
                 <h3 className="text-white font-bold text-lg">
                   {purchaseStep === "packages" && "شحن العملات 🪙"}
                   {purchaseStep === "pay" && "إتمام الدفع 💳"}
-                  {purchaseStep === "done" && "تم استلام الطلب ✅"}
+                  {purchaseStep === "done" && (purchaseDoneMode === "wallet" ? "تم الشراء ✅" : "تم استلام الطلب ✅")}
                 </h3>
                 <button
                   type="button"
@@ -3529,6 +3625,8 @@ export default function LiveStream() {
                 setShowRechargeModal(false);
                 setPurchaseStep("packages");
                 setSelectedPkg(null);
+                walletPurchaseIntentKeyRef.current = null;
+                setPurchaseDoneMode(null);
                 setPayRef("");
                 setPayScreenshotUrl("");
                 setPayScreenshotPreview("");
@@ -3540,16 +3638,39 @@ export default function LiveStream() {
             {/* ── Step 1: Packages ── */}
             {purchaseStep === "packages" && (
               <>
+                <div
+                  className="mb-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-3"
+                  data-testid="live-recharge-balances"
+                >
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="text-white/60">رصيد EGP المتاح للشراء الفوري</span>
+                    <strong className="text-emerald-300" data-testid="live-wallet-balance">
+                      {liveWalletSummary?.balanceEGP == null
+                        ? "جارٍ التحميل..."
+                        : `${Number(liveWalletSummary.balanceEGP).toLocaleString("ar-EG", { minimumFractionDigits: 2 })} ج.م`}
+                    </strong>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 mt-1 text-xs">
+                    <span className="text-white/60">رصيد العملات الحالي</span>
+                    <strong className="text-yellow-300" data-testid="live-coin-balance">
+                      {liveCoinWallet?.balance == null
+                        ? "جارٍ التحميل..."
+                        : `${Number(liveCoinWallet.balance).toLocaleString("ar-EG")} عملة`}
+                    </strong>
+                  </div>
+                  <p className="mt-2 text-[10px] text-white/50">
+                    يمكنك شراء أي باقة من رصيد EGP فوراً، أو متابعة التحويل اليدوي وإرسال الإيصال للمراجعة.
+                  </p>
+                </div>
                 <a
                   href="/payments#coin-purchase"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="mb-4 block rounded-xl bg-amber-500 px-4 py-3 text-center font-bold text-black"
+                  className="mb-4 block rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-2 text-center text-xs font-bold text-amber-200"
                   data-testid="link-live-wallet-coin-purchase"
                 >
-                  شراء عملات من المحفظة ↗
+                  فتح تقرير المحفظة وشراء العملات ↗
                 </a>
-                <p className="mb-4 text-xs text-white/60">تفتح صفحة الدفع الخاصة بك في نافذة أخرى دون مغادرة اللايف.</p>
                 {/* Recharge code */}
                 <div className="bg-white/5 rounded-2xl p-3.5 mb-4 border border-white/10">
                   <p className="text-white/60 text-xs mb-2 font-bold">لديك كود شحن؟</p>
@@ -3576,6 +3697,8 @@ export default function LiveStream() {
                       onClick={() => {
                         setSelectedPkg(pkg);
                         setPurchaseStep("pay");
+                        setPurchaseDoneMode(null);
+                        walletPurchaseIntentKeyRef.current = null;
                         setPayRef("");
                         setPayScreenshotUrl("");
                         setPayScreenshotPreview("");
@@ -3617,9 +3740,36 @@ export default function LiveStream() {
                     <p className="text-white/40 text-xs">{selectedPkg.name}</p>
                   </div>
                 </div>
+                <div className="mb-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-3" data-testid="live-wallet-purchase">
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="text-white/60">شراء فوري من رصيد EGP</span>
+                    <strong className="text-emerald-300" data-testid="live-wallet-purchase-balance">
+                      {liveWalletSummary?.balanceEGP == null
+                        ? "جارٍ التحميل..."
+                        : `${Number(liveWalletSummary.balanceEGP).toLocaleString("ar-EG", { minimumFractionDigits: 2 })} ج.م متاح`}
+                    </strong>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void purchaseSelectedFromWallet()}
+                    disabled={
+                      walletPurchaseLoading
+                      || liveWalletSummary?.balanceEGP == null
+                      || !Number.isFinite(Number(liveWalletSummary?.balanceEGP))
+                      || Number(liveWalletSummary.balanceEGP) < Number(selectedPkg.priceEgp)
+                    }
+                    className="mt-2 w-full rounded-xl bg-emerald-500 py-2.5 text-sm font-black text-black disabled:cursor-not-allowed disabled:opacity-40"
+                    data-testid="btn-live-purchase-from-wallet"
+                  >
+                    {walletPurchaseLoading
+                      ? "جارٍ الخصم والشحن..."
+                      : `شراء فوراً — ${selectedPkg.priceEgp} ج.م`}
+                  </button>
+                  <p className="mt-1.5 text-[10px] text-white/45">يخصم الخادم من الرصيد المتاح ويضيف العملات في عملية واحدة آمنة.</p>
+                </div>
 
                 {/* Payment method selector */}
-                <p className="text-white/60 text-xs font-bold mb-2">اختر محفظتك المفضلة وانسخ الرقم للتحويل، أو استخدم تطبيق سوق ماركات:</p>
+                <p className="text-white/60 text-xs font-bold mb-2">تحويل يدوي عبر Vodafone أو Etisalat أو InstaPay أو Souq، ثم أرسل المرجع والإيصال للمراجعة:</p>
                 <div className="grid grid-cols-2 gap-2 mb-4">
                   {[
                     { key: "bank",      label: "تطبيق سوق ماركات", sub: "Souq Markets App", Icon: Radio,   color: "border-orange-500/60 bg-orange-500/10" },
@@ -3713,7 +3863,7 @@ export default function LiveStream() {
 
                 {/* Receipt upload is useful for review but the transfer reference is the required proof. */}
                 <div className="mb-4">
-                  <label className="text-white/60 text-xs font-bold mb-1.5 block">صورة إيصال الدفع (اختيارية)</label>
+                  <label className="text-white/60 text-xs font-bold mb-1.5 block">صورة إيصال الدفع (اختيارية للمراجعة)</label>
                   <input
                     ref={payFileRef}
                     type="file"
@@ -3763,7 +3913,7 @@ export default function LiveStream() {
                     {payLoading ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "تأكيد الطلب"}
                   </button>
                 </div>
-                <p className="text-white/20 text-[10px] text-center mt-3">سيتم مراجعة الطلب وإضافة العملات خلال دقائق</p>
+                <p className="text-white/20 text-[10px] text-center mt-3" data-testid="manual-purchase-pending-note">سيبقى التحويل اليدوي قيد مراجعة الأدمن حتى التحقق من المرجع/الإيصال، ثم تُضاف العملات.</p>
               </>
             )}
 
@@ -3771,13 +3921,23 @@ export default function LiveStream() {
             {purchaseStep === "done" && (
               <div className="text-center py-6">
                 <div className="text-6xl mb-4">✅</div>
-                <h4 className="text-white font-bold text-xl mb-2">تم استلام طلبك!</h4>
-                <p className="text-white/60 text-sm mb-1">سيتم مراجعة الدفع وإضافة العملات لمحفظتك</p>
-                <p className="text-yellow-400 text-sm font-bold mb-6">خلال بضع دقائق ⚡</p>
+                <h4 className="text-white font-bold text-xl mb-2">
+                  {purchaseDoneMode === "wallet" ? "تم شراء العملات فوراً!" : "تم استلام طلبك!"}
+                </h4>
+                <p className="text-white/60 text-sm mb-1">
+                  {purchaseDoneMode === "wallet"
+                    ? "تم الخصم من رصيد EGP وإضافة العملات لمحفظتك."
+                    : "سيتم مراجعة التحويل وإضافة العملات لمحفظتك بعد التحقق."}
+                </p>
+                <p className="text-yellow-400 text-sm font-bold mb-6">
+                  {purchaseDoneMode === "wallet" ? "الرصيد محدث الآن ⚡" : "قيد مراجعة الأدمن ⚡"}
+                </p>
                  <button onClick={() => {
                    setShowRechargeModal(false);
                    setPurchaseStep("packages");
                    setSelectedPkg(null);
+                  walletPurchaseIntentKeyRef.current = null;
+                  setPurchaseDoneMode(null);
                    setPayRef("");
                    setPayScreenshotUrl("");
                    setPayScreenshotPreview("");
@@ -3875,6 +4035,30 @@ export default function LiveStream() {
                   رصيدي وتقاريري ↗
                 </button>
               </div>
+            </div>
+            <div className="mb-3 grid grid-cols-2 gap-2" data-testid="gift-panel-balances">
+              <div className="rounded-xl border border-yellow-400/25 bg-yellow-400/5 px-3 py-2">
+                <p className="text-[10px] text-white/45">رصيد العملات</p>
+                <p className="text-sm font-black text-yellow-300" data-testid="gift-panel-coin-balance">
+                  {liveCoinWallet?.balance == null
+                    ? "جارٍ التحميل..."
+                    : `${Number(liveCoinWallet.balance).toLocaleString("ar-EG")} 🪙`}
+                </p>
+              </div>
+              <div className="rounded-xl border border-emerald-400/25 bg-emerald-400/5 px-3 py-2">
+                <p className="text-[10px] text-white/45">محفظة EGP المتاحة</p>
+                <p className="text-sm font-black text-emerald-300" data-testid="gift-panel-wallet-balance">
+                  {liveWalletSummary?.balanceEGP == null
+                    ? "جارٍ التحميل..."
+                    : `${Number(liveWalletSummary.balanceEGP).toLocaleString("ar-EG", { minimumFractionDigits: 2 })} ج.م`}
+                </p>
+              </div>
+            </div>
+            <div
+              className="mb-3 rounded-xl border border-orange-400/20 bg-orange-500/5 px-3 py-2 text-center text-[10px] font-bold text-white/65"
+              data-testid="gift-revenue-split"
+            >
+              من قيمة الهدية: <span className="text-orange-300">60% للمذيع</span> · <span className="text-white/55">40% للمنصة</span>
             </div>
 
             {/* Tabs */}

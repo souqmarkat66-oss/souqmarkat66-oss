@@ -77,6 +77,11 @@ import {
   buildRechargeRedemptionResponse,
 } from "./recharge-code";
 import {
+  legacyPaymentProofLocator,
+  legacyWalletTopUpReference,
+  parseLegacyWalletTopUpAmount,
+} from "./legacy-wallet-topup";
+import {
   ownerChannelProjection,
   publicAdProjection,
   publicChannelProjection,
@@ -2263,6 +2268,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const screenshotUrl = typeof req.body?.screenshotUrl === "string"
       ? req.body.screenshotUrl.trim()
       : "";
+    const screenshotLocator = legacyPaymentProofLocator(screenshotUrl);
     const rawPaymentMethod = String(req.body?.paymentMethod || "").trim();
     const paymentMethodAliases: Record<string, string> = {
       vodafone: "vodafone",
@@ -2360,20 +2366,46 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       for (const lockKey of lockKeys) {
         await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [lockKey]);
       }
+      const legacyWalletTable = await client.query(
+        `SELECT to_regclass('wallet_top_up_orders') IS NOT NULL AS available`,
+      );
+      const legacyWalletDuplicate = legacyWalletTable.rows[0]?.available
+        ? `
+          UNION ALL
+          SELECT id, status, 'wallet_top_up'::text AS source
+          FROM wallet_top_up_orders
+          WHERE ${canonicalPaymentReferenceSql("payment_ref")} = $1
+             OR (
+               $4::text IS NOT NULL
+               AND regexp_replace(
+                 regexp_replace(coalesce(screenshot_url, ''), '^https?://[^/]+', ''),
+                 '^/api/uploads/', '/uploads/'
+               ) = $4
+             )`
+        : "";
       const duplicate = await client.query(
         `SELECT id, status, 'coin_purchase'::text AS source
          FROM coin_purchase_orders
           WHERE (canonical_payment_ref = $1 OR ${canonicalPaymentReferenceSql("payment_ref")} = $1)
             OR proof_digest = $2
             OR (proof_digest IS NULL AND screenshot_url = $3)
+             OR ($4::text IS NOT NULL AND regexp_replace(
+               regexp_replace(coalesce(screenshot_url, ''), '^https?://[^/]+', ''),
+               '^/api/uploads/', '/uploads/'
+             ) = $4)
          UNION ALL
          SELECT id, status, 'payment_request'::text AS source
          FROM payment_requests
           WHERE (canonical_payment_ref = $1 OR ${canonicalPaymentReferenceSql("payment_ref")} = $1)
             OR proof_digest = $2
             OR (proof_digest IS NULL AND screenshot_url = $3)
+             OR ($4::text IS NOT NULL AND regexp_replace(
+               regexp_replace(coalesce(screenshot_url, ''), '^https?://[^/]+', ''),
+               '^/api/uploads/', '/uploads/'
+             ) = $4)
+          ${legacyWalletDuplicate}
          LIMIT 1`,
-        [canonicalRef, proofDigest, screenshotUrl],
+        [canonicalRef, proofDigest, screenshotUrl, screenshotLocator],
       );
       if (duplicate.rowCount === 1) {
         await client.query("ROLLBACK");
@@ -2532,6 +2564,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         );
         assertSingleRowResult(updated, "coin purchase order approval");
         await client.query("COMMIT");
+
+        // The order row and both coin ledger writes are committed before
+        // notifying the owner's socket.  Derive the payload from the locked
+        // order and the database wallet, never from admin/client input.
+        try {
+          const coinWallet = await pool.query(
+            `SELECT balance FROM coin_wallets WHERE user_id = $1 LIMIT 1`,
+            [order.user_id],
+          );
+          io.to(`user:${order.user_id}`).emit("coin-wallet-updated", {
+            userId: order.user_id,
+            balance: Number(coinWallet.rows[0]?.balance || 0),
+            coins,
+            type: "purchase",
+            orderId: Number(order.id),
+          });
+        } catch (error) {
+          console.error(
+            "[coin-purchase] coin socket refresh failed:",
+            error instanceof Error ? error.message : "unknown error",
+          );
+        }
 
         // Notifications are intentionally outside the ledger transaction:
         // a notification outage must never roll back a successful payment.
@@ -6091,6 +6145,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         const paymentRef = String(input.paymentRef || "").trim();
         const canonicalRef = canonicalPaymentReference(paymentRef);
         const screenshotUrl = input.screenshotUrl || null;
+        const screenshotLocator = legacyPaymentProofLocator(screenshotUrl);
         const client = await pool.connect();
         try {
           await client.query("BEGIN");
@@ -6098,20 +6153,46 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           for (const lockKey of lockKeys) {
             await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [lockKey]);
           }
+          const legacyWalletTable = await client.query(
+            `SELECT to_regclass('wallet_top_up_orders') IS NOT NULL AS available`,
+          );
+          const legacyWalletDuplicate = legacyWalletTable.rows[0]?.available
+            ? `
+              UNION ALL
+              SELECT id, status, 'wallet_top_up_order'::text AS source
+              FROM wallet_top_up_orders
+              WHERE ${canonicalPaymentReferenceSql("payment_ref")} = $1
+                 OR (
+                   $4::text IS NOT NULL
+                   AND regexp_replace(
+                     regexp_replace(coalesce(screenshot_url, ''), '^https?://[^/]+', ''),
+                     '^/api/uploads/', '/uploads/'
+                   ) = $4
+                 )`
+            : "";
           const duplicate = await client.query(
             `SELECT id, status, 'payment_request'::text AS source
              FROM payment_requests
              WHERE (canonical_payment_ref = $1 OR ${canonicalPaymentReferenceSql("payment_ref")} = $1)
                 OR proof_digest = $2
                 OR (proof_digest IS NULL AND screenshot_url = $3)
+                OR ($4::text IS NOT NULL AND regexp_replace(
+                  regexp_replace(coalesce(screenshot_url, ''), '^https?://[^/]+', ''),
+                  '^/api/uploads/', '/uploads/'
+                ) = $4)
              UNION ALL
              SELECT id, status, 'coin_purchase'::text AS source
              FROM coin_purchase_orders
              WHERE (canonical_payment_ref = $1 OR ${canonicalPaymentReferenceSql("payment_ref")} = $1)
                 OR proof_digest = $2
                 OR (proof_digest IS NULL AND screenshot_url = $3)
+                 OR ($4::text IS NOT NULL AND regexp_replace(
+                   regexp_replace(coalesce(screenshot_url, ''), '^https?://[^/]+', ''),
+                   '^/api/uploads/', '/uploads/'
+                 ) = $4)
+              ${legacyWalletDuplicate}
              LIMIT 1`,
-            [canonicalRef, proofDigest, screenshotUrl],
+            [canonicalRef, proofDigest, screenshotUrl, screenshotLocator],
           );
           if (duplicate.rowCount === 1) {
             await client.query("ROLLBACK");
@@ -9707,10 +9788,76 @@ ${reelTags}
     }
   });
 
+  /**
+   * Resolve a legacy receipt's digest only when the old URL can be mapped to
+   * a current local upload record.  This is deliberately best-effort:
+   * historical wallet rows were allowed to store absolute URLs and many
+   * predate uploaded_files.  A reference is still required for approval, but
+   * missing proof metadata must not make every legitimate old receipt
+   * unapprovable.
+   */
+  const resolveLegacyTopUpProofDigest = async (
+    screenshotUrl: unknown,
+  ): Promise<{ locator: string | null; digest: string | null }> => {
+    const locator = legacyPaymentProofLocator(screenshotUrl);
+    if (!locator) return { locator: null, digest: null };
+    const filename = locator.slice("/uploads/".length);
+    try {
+      const file = await pool.query(
+        `SELECT filename, mime_type, size
+         FROM uploaded_files
+         WHERE filename = $1
+         ORDER BY created_at DESC NULLS LAST, id DESC
+         LIMIT 1`,
+        [filename],
+      );
+      if (file.rowCount !== 1) return { locator, digest: null };
+      try {
+        const digest = await digestOwnedPaymentProof(locator, {
+          filename: file.rows[0].filename,
+          mimeType: file.rows[0].mime_type,
+          size: file.rows[0].size,
+        });
+        return { locator, digest };
+      } catch {
+        return { locator, digest: null };
+      }
+    } catch {
+      // Proof metadata is optional for old rows.  Do not turn an otherwise
+      // verifiable reference into a hard dependency on the upload table.
+      return { locator, digest: null };
+    }
+  };
+
+  const readLegacyWalletBalance = async (userId: string): Promise<number | null> => {
+    try {
+      const balanceR = await pool.query(
+        `SELECT COALESCE(SUM(CASE
+           WHEN type IN ('earning','wallet_recharge') THEN amount_egp
+           WHEN type IN ('spending','withdrawal','ai_charge') THEN -amount_egp
+           ELSE 0 END), 0) AS balance_egp
+         FROM revenue_transactions
+        WHERE user_id = $1`,
+        [userId],
+      );
+      const balance = Number(balanceR.rows[0]?.balance_egp);
+      return Number.isFinite(balance) ? balance : null;
+    } catch (error) {
+      console.error(
+        "[legacy-wallet-topup] post-commit balance refresh failed:",
+        error instanceof Error ? error.message : "unknown error",
+      );
+      return null;
+    }
+  };
+
   app.patch("/api/admin/wallet-topups/:id", isAuthenticated, requireAdmin, async (req: any, res) => {
     const { action, adminNote } = req.body || {};
-    const orderId = parseInt(req.params.id);
+    const orderId = Number(req.params.id);
     if (!action || !["approve", "reject"].includes(action)) return res.status(400).json({ message: "إجراء غير صالح" });
+    if (!Number.isSafeInteger(orderId) || orderId < 1) {
+      return res.status(400).json({ message: "رقم الطلب غير صالح", field: "id" });
+    }
 
     const client = await pool.connect();
     try {
@@ -9730,23 +9877,202 @@ ${reelTags}
       }
 
       if (action === "approve") {
+        let amountEGP: number;
+        try {
+          amountEGP = parseLegacyWalletTopUpAmount(order.amount_egp);
+        } catch {
+          await client.query("ROLLBACK");
+          return res.status(400).json({
+            message: "مبلغ طلب الشحن غير صالح؛ لم يتم تغيير الرصيد",
+            field: "amountEGP",
+          });
+        }
+        const canonicalRef = legacyWalletTopUpReference(order.payment_ref);
+        if (!canonicalRef) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({
+            message: "لا يمكن اعتماد الطلب قبل وجود رقم مرجع دفع واضح وقابل للتحقق",
+            field: "paymentRef",
+          });
+        }
+
+        const proof = await resolveLegacyTopUpProofDigest(order.screenshot_url);
+
+        // Serialize this approval against both current manual queues.  The
+        // same keys are acquired by their create routes, so a pending legacy
+        // approval cannot race a new request using the same reference/proof.
+        for (const lockKey of paymentProofLockKeys(canonicalRef, proof.digest)) {
+          await client.query(
+            `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+            [lockKey],
+          );
+        }
+
+        const existingClaim = await client.query(
+          `SELECT source_type, source_id
+           FROM manual_payment_reference_claims
+           WHERE flow = 'incoming' AND canonical_reference = $1
+           FOR UPDATE`,
+          [canonicalRef],
+        );
+        if (
+          existingClaim.rowCount === 1
+          && !(
+            existingClaim.rows[0].source_type === "wallet_top_up_order"
+            && Number(existingClaim.rows[0].source_id) === orderId
+          )
+        ) {
+          await client.query("ROLLBACK");
+          return res.status(409).json({
+            message: "مرجع الدفع مستخدم بالفعل في طلب دفع آخر ولا يمكن شحنه مرتين",
+            field: "paymentRef",
+          });
+        }
+
+        // Claims protect new rows, while the source-table checks protect
+        // historical rows that predate manual_payment_reference_claims.
+        // Approved historical rows stay untouched; they only block a new
+        // pending row from replaying their evidence.
+        const duplicateEvidence = await client.query(
+          `SELECT id, status, 'wallet_top_up_order'::text AS source_type
+             FROM wallet_top_up_orders
+            WHERE id <> $1
+              AND (
+                ${canonicalPaymentReferenceSql("payment_ref")} = $2
+                OR (
+                  $3::text IS NOT NULL
+                  AND regexp_replace(
+                    regexp_replace(coalesce(screenshot_url, ''), '^https?://[^/]+', ''),
+                    '^/api/uploads/', '/uploads/'
+                  ) = $3
+                )
+              )
+           UNION ALL
+           SELECT id, status, 'payment_request'::text AS source_type
+             FROM payment_requests
+            WHERE (
+                ${canonicalPaymentReferenceSql("payment_ref")} = $2
+                OR ($4::text IS NOT NULL AND proof_digest = $4)
+                OR (
+                  $3::text IS NOT NULL
+                  AND regexp_replace(
+                    regexp_replace(coalesce(screenshot_url, ''), '^https?://[^/]+', ''),
+                    '^/api/uploads/', '/uploads/'
+                  ) = $3
+                )
+              )
+           UNION ALL
+           SELECT id, status, 'coin_purchase_order'::text AS source_type
+             FROM coin_purchase_orders
+            WHERE (
+                ${canonicalPaymentReferenceSql("payment_ref")} = $2
+                OR ($4::text IS NOT NULL AND proof_digest = $4)
+                OR (
+                  $3::text IS NOT NULL
+                  AND regexp_replace(
+                    regexp_replace(coalesce(screenshot_url, ''), '^https?://[^/]+', ''),
+                    '^/api/uploads/', '/uploads/'
+                  ) = $3
+                )
+              )
+           LIMIT 1`,
+          [orderId, canonicalRef, proof.locator, proof.digest],
+        );
+        if (duplicateEvidence.rowCount === 1) {
+          await client.query("ROLLBACK");
+          return res.status(409).json({
+            message: "مرجع الدفع أو صورة الإيصال مستخدمة في طلب سابق ولا يمكن شحنها مرتين",
+            field: duplicateEvidence.rows[0].source_type === "wallet_top_up_order"
+              || duplicateEvidence.rows[0].source_type === "payment_request"
+              || duplicateEvidence.rows[0].source_type === "coin_purchase_order"
+              ? "paymentRef"
+              : undefined,
+            existingStatus: duplicateEvidence.rows[0].status,
+          });
+        }
+
+        const claim = await client.query(
+          `INSERT INTO manual_payment_reference_claims
+             (flow, canonical_reference, source_type, source_id)
+           VALUES ('incoming', $1, 'wallet_top_up_order', $2)
+           ON CONFLICT (flow, canonical_reference) DO NOTHING
+           RETURNING canonical_reference`,
+          [canonicalRef, orderId],
+        );
+        if (claim.rowCount !== 1) {
+          await client.query("ROLLBACK");
+          return res.status(409).json({
+            message: "مرجع الدفع مستخدم بالفعل في طلب دفع آخر ولا يمكن شحنه مرتين",
+            field: "paymentRef",
+          });
+        }
+
         // revenue_transactions is the only operational wallet ledger.
-        await client.query(
+        const ledger = await client.query(
           `INSERT INTO revenue_transactions (user_id, type, amount_egp, description)
-           VALUES ($1, 'wallet_recharge', $2, $3)`,
-          [order.user_id, order.amount_egp, `شحن محفظة — ${order.payment_method} — ${order.order_number}`]
+           VALUES ($1, 'wallet_recharge', $2, $3)
+           RETURNING id`,
+          [order.user_id, amountEGP, `شحن محفظة — ${order.payment_method} — ${order.order_number || order.id}`],
         );
-        await client.query(
-          `UPDATE wallet_top_up_orders SET status = 'approved', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
-          [adminNote || null, req.user.claims.sub, orderId]
+        assertSingleRowResult(ledger, "legacy wallet top-up ledger entry");
+        const updated = await client.query(
+          `UPDATE wallet_top_up_orders
+              SET status = 'approved',
+                  admin_note = $1,
+                  reviewed_at = NOW(),
+                  reviewed_by = $2
+            WHERE id = $3 AND status = 'pending'
+            RETURNING id`,
+          [adminNote || null, req.user.claims.sub, orderId],
         );
+        assertSingleRowResult(updated, "legacy wallet top-up approval");
         await client.query("COMMIT");
-        return res.json({ success: true, message: "تمت الموافقة وإضافة الرصيد" });
+
+        const newBalance = await readLegacyWalletBalance(order.user_id);
+        try {
+          walletEmitter.emit("wallet:update", {
+            userId: order.user_id,
+            amountEGP,
+            type: "wallet_recharge",
+            description: "شحن المحفظة بتحويل يدوي",
+            newBalance: newBalance ?? undefined,
+          });
+        } catch (error) {
+          console.error(
+            "[legacy-wallet-topup] wallet socket refresh failed:",
+            error instanceof Error ? error.message : "unknown error",
+          );
+        }
+        await createNotification(
+          order.user_id,
+          "payment",
+          "✅ تم قبول الدفع وشحن المحفظة",
+          `تمت إضافة ${amountEGP.toFixed(2)} ج.م إلى محفظتك`,
+          "/payments",
+          undefined,
+          req.user.claims.sub,
+          `wallet-topup:${order.id}:approved`,
+        );
+        return res.json({
+          success: true,
+          status: "approved",
+          orderId,
+          amountEGP,
+          newBalance,
+          message: "تمت الموافقة وإضافة الرصيد",
+        });
       } else {
-        await client.query(
-          `UPDATE wallet_top_up_orders SET status = 'rejected', admin_note = $1, reviewed_at = NOW(), reviewed_by = $2 WHERE id = $3`,
+        const updated = await client.query(
+          `UPDATE wallet_top_up_orders
+              SET status = 'rejected',
+                  admin_note = $1,
+                  reviewed_at = NOW(),
+                  reviewed_by = $2
+            WHERE id = $3 AND status = 'pending'
+            RETURNING id`,
           [adminNote || null, req.user.claims.sub, orderId]
         );
+        assertSingleRowResult(updated, "legacy wallet top-up rejection");
         await client.query("COMMIT");
         await recordPaymentFailure({
           dedupeKey: `wallet-topup:${order.id}:rejected`,
@@ -9758,7 +10084,32 @@ ${reelTags}
           reasonMessage: adminNote || "رفضت الإدارة طلب شحن المحفظة. للاستفسار تواصل مع الإدارة.",
           reference: order.order_number || order.id,
         });
-        return res.json({ success: true, message: "تم رفض الطلب" });
+        // Rejection does not change the balance, but publishing the same
+        // wallet event as other wallet actions makes stale clients refresh
+        // their payment/revenue views immediately.
+        const newBalance = await readLegacyWalletBalance(order.user_id);
+        try {
+          walletEmitter.emit("wallet:update", {
+            userId: order.user_id,
+            amountEGP: 0,
+            type: "wallet_recharge_rejected",
+            description: "تم رفض طلب شحن المحفظة",
+            newBalance: newBalance ?? undefined,
+          });
+        } catch (error) {
+          console.error(
+            "[legacy-wallet-topup] wallet socket refresh failed:",
+            error instanceof Error ? error.message : "unknown error",
+          );
+        }
+        return res.json({
+          success: true,
+          status: "rejected",
+          orderId,
+          amountEGP: Number.isFinite(Number(order.amount_egp)) ? Number(order.amount_egp) : null,
+          newBalance,
+          message: "تم رفض الطلب",
+        });
       }
     } catch (e: any) {
       try { await client.query("ROLLBACK"); } catch {}

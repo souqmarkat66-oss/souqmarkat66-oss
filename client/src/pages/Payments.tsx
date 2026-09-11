@@ -624,7 +624,7 @@ export default function Payments() {
       <section id="wallet-charge" className="mb-5 rounded-2xl border-2 border-primary/30 bg-primary/5 p-4 sm:p-5 scroll-mt-4">
         <div className="flex items-center gap-2 mb-1"><CreditCard className="w-5 h-5 text-primary" /><h2 className="font-extrabold">الدفع الآمن بالبطاقة عبر AFS</h2></div>
         <p className="text-xs font-bold">ads-as.com — إحدى منصات شركة سوق ماركات</p>
-        <p className="text-xs text-muted-foreground mt-1 mb-3">Visa · Mastercard · Meeza ميزة. لن نطلب بيانات بطاقتك هنا؛ ستدخلها فقط داخل نموذج AFS الآمن. أي وضع اختبار ظاهر هناك لا يضيف رصيداً حقيقياً.</p>
+        <p className="text-xs text-muted-foreground mt-1 mb-3">Visa · Mastercard · Meeza ميزة. لن نطلب بيانات بطاقتك هنا؛ ستدخلها فقط داخل نموذج AFS. لا نعرض الدفع بالبطاقة كجاهز للإنتاج: لا يتم اعتماد أو شحن أي رصيد إلا بعد نجاح AFS الموثّق حيّاً، ووضع الاختبار لا يضيف رصيداً حقيقياً.</p>
         <div className="flex flex-wrap gap-2 mb-3">
           <Button size="sm" variant={afsPurpose === "wallet_top_up" ? "default" : "outline"} onClick={() => setAfsPurpose("wallet_top_up")}>شحن المحفظة</Button>
           <Button size="sm" variant={afsPurpose === "service_payment" ? "default" : "outline"} onClick={() => setAfsPurpose("service_payment")}>دفع خدمة</Button>
@@ -703,6 +703,10 @@ export default function Payments() {
           data-testid="input-search-payments"
         />
       </div>
+      <div className="mb-4 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground" data-testid="canonical-payment-pending-note">
+         طلبات التحويل اليدوي، شحن المحفظة canonical، وباقات العملات تظهر هنا من قائمة <strong className="text-primary">payment_requests</strong> نفسها.
+         الحالة «قيد المراجعة» لا تضيف رصيداً حتى اعتماد الأدمن، وتظهر النتيجة المكتملة في نفس السجل دون إنشاء طلب ثانٍ.
+       </div>
 
       {/* Table */}
       <div className="border rounded-xl overflow-hidden bg-background">

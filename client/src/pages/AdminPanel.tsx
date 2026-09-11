@@ -41,11 +41,11 @@ const NAV = [
   { key: "streams",        label: "البث المباشر",          icon: Radio,           color: "text-red-400" },
   { key: "campaigns",      label: "الحملات الإعلانية",    icon: BarChart2,       color: "text-teal-400" },
   { key: "ticker_ads",     label: "شريط الإعلان العاجل",   icon: Megaphone,       color: "text-red-500" },
-  { key: "payments",       label: "طلبات التحويل والتنفيذ", icon: Banknote,        color: "text-green-400" },
+  { key: "payments",       label: "التحويلات والمدفوعات (canonical)", icon: Banknote, color: "text-green-400" },
   { key: "payment_report", label: "تقرير المدفوعات",      icon: DollarSign,      color: "text-violet-400" },
   { key: "boostorders",    label: "طلبات التعزيز",         icon: Zap,             color: "text-orange-400" },
   { key: "payreceipts",    label: "إيصالات الدفع",          icon: Banknote,        color: "text-emerald-500" },
-  { key: "walletcharges",  label: "طلبات شحن المحفظة",    icon: Banknote,        color: "text-emerald-400" },
+  { key: "walletcharges",  label: "شحن المحفظة القديم",    icon: Banknote,        color: "text-emerald-400" },
   { key: "renewalorders",  label: "طلبات التجديد",           icon: RefreshCw,       color: "text-blue-400" },
   { key: "reports",        label: "البلاغات",             icon: Flag,            color: "text-yellow-400" },
   { key: "ratings",        label: "تقييمات البائعين",      icon: Star,            color: "text-yellow-400" },
@@ -59,7 +59,7 @@ const NAV = [
   { key: "ai_control",     label: "تحكم الذكاء الاصطناعي", icon: Sparkles,        color: "text-violet-400" },
   { key: "ai_agent",       label: "🤖 مساعد التطوير AI",    icon: Bot,             color: "text-violet-500" },
   { key: "integrations",   label: "التكاملات والأسرار",      icon: KeyRound,        color: "text-amber-500" },
-  { key: "coins",          label: "نظام العملات",          icon: Gift,            color: "text-yellow-400" },
+  { key: "coins",          label: "نظام العملات والطلبات القديمة", icon: Gift,     color: "text-yellow-400" },
   { key: "settings",       label: "إعدادات المنصة",       icon: Settings,        color: "text-gray-400" },
   { key: "activity",       label: "سجل النشاط",           icon: Activity,        color: "text-slate-400" },
   { key: "admins",         label: "إدارة الأدمن",          icon: Shield,          color: "text-red-400" },
@@ -1282,6 +1282,8 @@ const SERVICE_TYPE_LABELS: Record<string, string> = {
   ai_video:   "ذكاء اصطناعي: فيديو",
   ai_content: "ذكاء اصطناعي: محتوى",
   ai_credits: "شحن رصيد ذكاء",
+  wallet_recharge: "شحن محفظة EGP (canonical)",
+  coin_package: "شراء باقة عملات",
   withdrawal: "سحب أرباح",
   other:      "أخرى",
 };
@@ -1477,10 +1479,15 @@ function PaymentsSection({ logAction }: { logAction: any }) {
     instapay: "InstaPay",
     souq: "محفظة سوق",
     visa_bank: "بطاقة بنكية",
+    afs_card: "بطاقة عبر AFS",
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" data-testid="canonical-payment-requests-queue">
+      <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-xs text-muted-foreground">
+        <strong className="text-violet-600">طلبات payment_requests canonical</strong>
+        {" "}— تشمل شحن محفظة EGP، باقات العملات والتحويلات اليدوية. راجع المرجع والإيصال قبل استخدام إجراء القبول أو الرفض.
+      </div>
       {pending.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-yellow-600 mb-3 flex items-center gap-2"><Clock className="w-4 h-4" /> معلقة ({pending.length})</h3>
@@ -3843,10 +3850,10 @@ function CoinsSection({ logAction }: { logAction: any }) {
   const totalPages = codesData?.pages || 1;
 
   return (
-    <div className="space-y-6" dir="rtl">
+    <div className="space-y-6" dir="rtl" data-testid="legacy-coin-purchase-queue">
       <div>
         <h2 className="text-2xl font-bold text-white mb-1">نظام العملات 🪙</h2>
-        <p className="text-white/50 text-sm">كل حركة العملات وحصة المنصة وطلبات الشحن والأكواد والباقات</p>
+        <p className="text-white/50 text-sm">كل حركة العملات وحصة المنصة وطلبات الشحن القديمة (coin_purchase_orders) والأكواد والباقات</p>
       </div>
 
       {/* Tabs */}
@@ -3980,9 +3987,19 @@ function CoinsSection({ logAction }: { logAction: any }) {
                           <span>🕐 {createdAt ? new Date(createdAt).toLocaleDateString("ar-EG") : "—"}</span>
                           {paymentRef && <span className="col-span-2">🔑 مرجع: <span className="font-mono text-white">{paymentRef}</span></span>}
                           {screenshotUrl && (
-                            <a className="col-span-2 text-blue-400 underline" href={screenshotUrl} target="_blank" rel="noopener noreferrer">
-                              🧾 فتح إيصال الدفع
-                            </a>
+                            <div className="col-span-2 space-y-1">
+                              <a className="text-blue-400 underline" href={screenshotUrl} target="_blank" rel="noopener noreferrer">
+                                🧾 فتح إيصال الدفع
+                              </a>
+                              <a href={screenshotUrl} target="_blank" rel="noopener noreferrer" className="block">
+                                <img
+                                  src={screenshotUrl}
+                                  alt="إيصال شراء العملات"
+                                  className="max-h-48 w-full rounded-xl border border-zinc-700 bg-black/20 object-contain"
+                                  data-testid={`img-coin-order-receipt-${order.id}`}
+                                />
+                              </a>
+                            </div>
                           )}
                           {reviewedBy && <span className="col-span-2 text-white/40">👤 راجعها: {reviewedBy}</span>}
                           {order.adminNote && <span className="col-span-2 text-orange-400">📝 {order.adminNote}</span>}
@@ -4375,8 +4392,32 @@ function WalletChargesSection({ logAction }: { logAction: any }) {
     refetchInterval: 30_000,
   });
 
-  const pending = (Array.isArray(orders) ? orders : []).filter((o: any) => o.status === "pending");
-  const done    = (Array.isArray(orders) ? orders : []).filter((o: any) => o.status !== "pending");
+  // All /api responses pass through the camel-case serializer, while older
+  // deployments of this endpoint returned raw legacy snake_case rows. Keep
+  // both names here so the legacy queue never appears empty or loses proof.
+  const normalizedOrders = (Array.isArray(orders) ? orders : []).map((o: any) => ({
+    ...o,
+    orderNumber: o.orderNumber ?? o.order_number,
+    amountEgp: o.amountEgp ?? o.amount_egp,
+    paymentMethod: o.paymentMethod ?? o.payment_method,
+    paymentRef: o.paymentRef ?? o.payment_ref,
+    screenshotUrl: o.screenshotUrl ?? o.screenshot_url,
+    firstName: o.firstName ?? o.first_name,
+    lastName: o.lastName ?? o.last_name,
+    createdAt: o.createdAt ?? o.created_at,
+    currentBalanceEgp: o.currentBalanceEgp ?? o.current_balance_egp,
+  }));
+  const pending = normalizedOrders.filter((o: any) => o.status === "pending");
+  const done    = normalizedOrders.filter((o: any) => o.status !== "pending");
+  const walletStats = {
+    totalCollected: ws?.totalCollectedEgp ?? ws?.totalCollectedEGP ?? ws?.total_collected_egp,
+    totalApprovedCount: ws?.totalApprovedCount ?? ws?.total_approved_count,
+    totalCurrentBalance: ws?.totalCurrentBalanceEgp ?? ws?.totalCurrentBalanceEGP ?? ws?.total_current_balance_egp,
+    usersWithBalance: ws?.usersWithBalance ?? ws?.users_with_balance,
+    totalSpent: ws?.totalSpentEgp ?? ws?.totalSpentEGP ?? ws?.total_spent_egp,
+    pendingAmount: ws?.pendingAmountEgp ?? ws?.pendingAmountEGP ?? ws?.pending_amount_egp,
+    pendingCount: ws?.pendingCount ?? ws?.pending_count,
+  };
 
   const handleAction = async (id: number, action: "approve" | "reject") => {
     try {
@@ -4401,9 +4442,9 @@ function WalletChargesSection({ logAction }: { logAction: any }) {
   };
 
   return (
-    <div className="space-y-4" dir="rtl">
+    <div className="space-y-4" dir="rtl" data-testid="legacy-wallet-topup-queue">
       <div className="flex items-center gap-3">
-        <h2 className="font-bold text-lg">طلبات شحن المحفظة</h2>
+        <h2 className="font-bold text-lg">طلبات شحن المحفظة القديمة (wallet_top_up_orders)</h2>
         {pending.length > 0 && (
           <span className="bg-emerald-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pending.length} معلق</span>
         )}
@@ -4413,23 +4454,23 @@ function WalletChargesSection({ logAction }: { logAction: any }) {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-gradient-to-br from-emerald-500/10 to-transparent p-4">
             <div className="text-xs text-muted-foreground mb-0.5">💰 إجمالي ما استلمته</div>
-            <div className="text-2xl font-bold text-emerald-600">{Number(ws.totalCollectedEGP || 0).toFixed(2)}</div>
-            <div className="text-xs text-muted-foreground">ج.م · {ws.totalApprovedCount || 0} عملية مقبولة</div>
+            <div className="text-2xl font-bold text-emerald-600">{Number(walletStats.totalCollected || 0).toFixed(2)}</div>
+            <div className="text-xs text-muted-foreground">ج.م · {walletStats.totalApprovedCount || 0} عملية مقبولة</div>
           </div>
           <div className="rounded-2xl border border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-500/10 to-transparent p-4">
             <div className="text-xs text-muted-foreground mb-0.5">🏦 رصيد في المحافظ</div>
-            <div className="text-2xl font-bold text-blue-600">{Number(ws.totalCurrentBalanceEGP || 0).toFixed(2)}</div>
-            <div className="text-xs text-muted-foreground">ج.م لدى {ws.usersWithBalance || 0} مستخدم</div>
+            <div className="text-2xl font-bold text-blue-600">{Number(walletStats.totalCurrentBalance || 0).toFixed(2)}</div>
+            <div className="text-xs text-muted-foreground">ج.م لدى {walletStats.usersWithBalance || 0} مستخدم</div>
           </div>
           <div className="rounded-2xl border border-purple-200 dark:border-purple-800 bg-gradient-to-br from-purple-500/10 to-transparent p-4">
             <div className="text-xs text-muted-foreground mb-0.5">⚡ أُنفق على الخدمات</div>
-            <div className="text-2xl font-bold text-purple-600">{Number(ws.totalSpentEGP || 0).toFixed(2)}</div>
+            <div className="text-2xl font-bold text-purple-600">{Number(walletStats.totalSpent || 0).toFixed(2)}</div>
             <div className="text-xs text-muted-foreground">ج.م (تعزيز + تجديد + AI)</div>
           </div>
           <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-gradient-to-br from-amber-500/10 to-transparent p-4">
             <div className="text-xs text-muted-foreground mb-0.5">⏳ طلبات معلقة</div>
-            <div className="text-2xl font-bold text-amber-600">{Number(ws.pendingAmountEGP || 0).toFixed(2)}</div>
-            <div className="text-xs text-muted-foreground">ج.م · {ws.pendingCount || 0} طلب</div>
+            <div className="text-2xl font-bold text-amber-600">{Number(walletStats.pendingAmount || 0).toFixed(2)}</div>
+            <div className="text-xs text-muted-foreground">ج.م · {walletStats.pendingCount || 0} طلب</div>
           </div>
         </div>
       )}
@@ -4456,18 +4497,18 @@ function WalletChargesSection({ logAction }: { logAction: any }) {
                 <div className="flex items-start gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs font-bold text-emerald-700 dark:text-emerald-400" data-testid={`text-wallet-order-${o.id}`}>{o.order_number}</span>
-                      <span className="text-xs font-bold text-green-600">{o.amount_egp} ج.م</span>
-                      <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded-full font-bold">{o.payment_method}</span>
+                      <span className="font-mono text-xs font-bold text-emerald-700 dark:text-emerald-400" data-testid={`text-wallet-order-${o.id}`}>{o.orderNumber}</span>
+                      <span className="text-xs font-bold text-green-600">{o.amountEgp} ج.م</span>
+                      <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded-full font-bold">{o.paymentMethod}</span>
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">
-                      {o.first_name} {o.last_name}
+                      {o.firstName} {o.lastName}
                       {o.email && <span className="ml-1">({o.email})</span>}
-                      {o.payment_ref && <span> — مرجع: <span className="font-mono font-bold">{o.payment_ref}</span></span>}
+                      {o.paymentRef && <span> — مرجع: <span className="font-mono font-bold">{o.paymentRef}</span></span>}
                     </div>
                     <div className="text-xs text-muted-foreground">
                       رصيد حالي: <span className="font-bold text-primary">{Number(o.currentBalanceEgp || 0).toFixed(2)} ج.م</span>
-                      {" | "}{o.created_at ? new Date(o.created_at).toLocaleString("ar-EG") : ""}
+                      {" | "}{o.createdAt ? new Date(o.createdAt).toLocaleString("ar-EG") : ""}
                     </div>
                     <input
                       value={note[o.id] || ""}
@@ -4494,12 +4535,12 @@ function WalletChargesSection({ logAction }: { logAction: any }) {
                     </button>
                   </div>
                 </div>
-                {o.screenshot_url && (
+                {o.screenshotUrl && (
                   <div>
                     <p className="text-xs text-muted-foreground mb-1 font-semibold">📸 صورة الإيصال:</p>
-                    <a href={o.screenshot_url} target="_blank" rel="noopener noreferrer">
+                    <a href={o.screenshotUrl} target="_blank" rel="noopener noreferrer">
                       <img
-                        src={o.screenshot_url}
+                        src={o.screenshotUrl}
                         alt="إيصال الدفع"
                         className="w-full max-h-48 object-contain rounded-lg border border-emerald-200 dark:border-emerald-800 cursor-pointer hover:opacity-90 transition-opacity"
                         data-testid={`img-wallet-receipt-${o.id}`}
@@ -4523,11 +4564,11 @@ function WalletChargesSection({ logAction }: { logAction: any }) {
               <div key={o.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-muted/30 border border-border/40">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono text-xs">{o.order_number}</span>
-                    <span className="font-bold text-xs text-green-600">{o.amount_egp} ج.م</span>
-                    <span className="text-xs text-muted-foreground">{o.payment_method}</span>
+                    <span className="font-mono text-xs">{o.orderNumber}</span>
+                    <span className="font-bold text-xs text-green-600">{o.amountEgp} ج.م</span>
+                    <span className="text-xs text-muted-foreground">{o.paymentMethod}</span>
                   </div>
-                  <div className="text-xs text-muted-foreground">{o.first_name} {o.last_name}</div>
+                  <div className="text-xs text-muted-foreground">{o.firstName} {o.lastName}</div>
                 </div>
                 <StatusBadge status={o.status === "approved" ? "approved" : o.status === "rejected" ? "rejected" : "pending"} />
               </div>
