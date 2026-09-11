@@ -129,8 +129,9 @@ export default function Payments() {
   const { data: activity = [], isLoading, isError, error } = useQuery<any[]>({
     queryKey: ["/api/payments/unified", activityKind],
     queryFn: async () => {
-      const suffix = activityKind === "all" ? "" : `?kind=${encodeURIComponent(activityKind)}`;
-      const res = await fetch(`/api/payments/unified${suffix}`, { credentials: "include" });
+      const params = new URLSearchParams({ scope: "self" });
+      if (activityKind !== "all") params.set("kind", activityKind);
+      const res = await fetch(`/api/payments/unified?${params.toString()}`, { credentials: "include" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.message || "تعذر تحميل سجل النشاط");

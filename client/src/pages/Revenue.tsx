@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,12 +11,21 @@ import { Progress } from "@/components/ui/progress";
 import {
   TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight, Loader2, CreditCard,
   Banknote, PhoneCall, AlertCircle, BarChart2, Eye, MousePointer,
-  ShieldX, Tv, Megaphone, Receipt, Filter, X
+  ShieldX, Tv, Megaphone, Receipt, Filter, X, Coins, CircleDollarSign,
+  History
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { format } from "date-fns";
-import { ar } from "date-fns/locale";
+import {
+  finiteReportNumber,
+  formatReportDate,
+  formatReportMoney,
+  formatReportMoneyOrUnavailable,
+  normalizeRevenueActivity,
+  normalizeRevenueActivityList,
+  normalizeRevenueTransaction,
+  normalizeRevenueTransactions,
+} from "@/lib/revenue-report";
 
 const PAYMENT_METHODS = [
   { value: "mobile_wallet", label: "محفظة إلكترونية", hint: "010 / 011 / 012 / 015" },
@@ -28,6 +37,18 @@ const PAYMENT_METHODS = [
 ];
 const NEW_WITHDRAWAL_METHODS = new Set(["mobile_wallet", "instapay", "visa_bank"]);
 
+async function fetchRevenueJson<T>(url: string): Promise<T> {
+  const response = await fetch(url, { credentials: "include" });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = body && typeof body === "object" && "message" in body
+      ? String((body as { message?: unknown }).message || `HTTP ${response.status}`)
+      : `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+  return body as T;
+}
+
 function WithdrawDialog({ balanceEGP, label, minWithdrawalEGP = 100 }: { balanceEGP: number; label: string; minWithdrawalEGP?: number }) {
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
@@ -36,6 +57,9 @@ function WithdrawDialog({ balanceEGP, label, minWithdrawalEGP = 100 }: { balance
   const [payoutDestination, setPayoutDestination] = useState("");
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const safeBalance = finiteReportNumber(balanceEGP);
+  const safeMinimum = Math.max(10, finiteReportNumber(minWithdrawalEGP, 100));
+  const requestedAmount = finiteReportNumber(amount, -1);
 
   const mutation = useMutation({
     mutationFn: () => apiRequest('POST', '/api/payments', {
@@ -45,7 +69,9 @@ function WithdrawDialog({ balanceEGP, label, minWithdrawalEGP = 100 }: { balance
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/publisher/report'] });
       queryClient.invalidateQueries({ queryKey: ['/api/advertiser/report'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/revenue'] });
       queryClient.invalidateQueries({ queryKey: ['/api/payments'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/payments/unified'] });
       setAmount("");
       setMethod("");
       setPayoutName("");
@@ -87,12 +113,12 @@ function WithdrawDialog({ balanceEGP, label, minWithdrawalEGP = 100 }: { balance
         <div className="space-y-4">
           <div className="bg-green-50 dark:bg-green-950/20 rounded-xl p-4">
             <div className="text-sm text-muted-foreground">رصيدك المتاح</div>
-            <div className="text-2xl font-bold text-green-600">{balanceEGP.toFixed(2)} ج.م</div>
+            <div className="text-2xl font-bold text-green-600">{formatReportMoney(safeBalance)} ج.م</div>
           </div>
           <div>
             <label className="text-sm font-medium">المبلغ (ج.م)</label>
             <Input type="number" value={amount} onChange={e => setAmount(e.target.value)}
-              placeholder={`الحد الأدنى ${minWithdrawalEGP} ج.م`} className="mt-1" data-testid="input-withdraw-amount" />
+               placeholder={`الحد الأدنى ${safeMinimum} ج.م`} className="mt-1" data-testid="input-withdraw-amount" />
           </div>
           <div>
             <label className="text-sm font-medium">طريقة الاستلام</label>
@@ -147,11 +173,11 @@ function WithdrawDialog({ balanceEGP, label, minWithdrawalEGP = 100 }: { balance
           <div className="flex items-start gap-2 bg-yellow-50 dark:bg-yellow-950/20 rounded-xl p-3">
             <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 shrink-0" />
             <p className="text-xs text-yellow-700 dark:text-yellow-400">
-               مراجعة الطلبات خلال 24-48 ساعة عمل. الحد الأدنى {minWithdrawalEGP} ج.م.
+               مراجعة الطلبات خلال 24-48 ساعة عمل. الحد الأدنى {safeMinimum} ج.م.
             </p>
           </div>
           <Button className="w-full" onClick={() => mutation.mutate()}
-            disabled={!amount || !method || payoutName.trim().length < 3 || !payoutDestination.trim() || parseFloat(amount) < minWithdrawalEGP || parseFloat(amount) > balanceEGP || mutation.isPending}
+             disabled={!amount || !method || payoutName.trim().length < 3 || !payoutDestination.trim() || requestedAmount < safeMinimum || requestedAmount > safeBalance || mutation.isPending}
             data-testid="btn-confirm-withdraw">
             {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin me-2" /> : null}
             تأكيد طلب السحب
@@ -215,7 +241,7 @@ function TransactionList({
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         if (cancelled) return;
-        setPages([json.transactions || []]);
+        setPages([normalizeRevenueTransactions(json?.transactions)]);
         setHasMore(!!json.hasMore);
       } catch (e: any) {
         if (!cancelled) toast({ variant: 'destructive', title: 'تعذر تحميل المعاملات', description: e.message });
@@ -233,7 +259,7 @@ function TransactionList({
       const res = await fetch(`/api/revenue?${queryString}&offset=${offset}`, { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      setPages(prev => [...prev, json.transactions || []]);
+      setPages(prev => [...prev, normalizeRevenueTransactions(json?.transactions)]);
       setHasMore(!!json.hasMore);
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'تعذر تحميل المزيد', description: e.message });
@@ -242,7 +268,7 @@ function TransactionList({
     }
   };
 
-  const all = pages.flat();
+  const all = pages.flat().map((transaction, index) => normalizeRevenueTransaction(transaction, index));
   const hasFilters = !!from || !!to || type !== defaultType;
 
   return (
@@ -315,11 +341,11 @@ function TransactionList({
                       {t.type === 'wallet_recharge' && <span className="text-[9px] bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 px-1.5 py-0.5 rounded-full font-bold">شحن محفظة</span>}
                       {t.description}
                     </div>
-                    <div className="text-[10px] text-muted-foreground">{t.createdAt ? format(new Date(t.createdAt), 'dd/MM/yy HH:mm', { locale: ar }) : ''}</div>
+                    <div className="text-[10px] text-muted-foreground">{formatReportDate(t.createdAt)}</div>
                   </div>
                 </div>
                 <div className={`font-bold text-xs ${(t.type === 'earning' || t.type === 'wallet_recharge') ? 'text-green-600' : 'text-red-500'}`}>
-                  {(t.type === 'earning' || t.type === 'wallet_recharge') ? '+' : '-'}{(t.amountEGP || 0).toFixed(4)} ج.م
+                  {(t.type === 'earning' || t.type === 'wallet_recharge') ? '+' : '-'}{formatReportMoney(t.amountEGP, 4)} ج.م
                 </div>
               </div>
             ))}
@@ -338,18 +364,362 @@ function TransactionList({
   );
 }
 
+const ACTIVITY_LABELS: Record<string, string> = {
+  deposit: "إيداع",
+  withdrawal: "سحب",
+  coin_purchase: "شراء عملات",
+  coin_recharge: "شحن عملات",
+  gift_sent: "هدية مرسلة",
+  gift_received: "هدية مستلمة",
+  platform_share: "حصة المنصة",
+  revenue: "أرباح",
+  spending: "إنفاق",
+  adjustment: "تسوية",
+};
+
+const ACTIVITY_STATUS_LABELS: Record<string, string> = {
+  pending: "قيد المراجعة",
+  failed: "فشل",
+  rejected: "مرفوض",
+  approved: "مقبول",
+  paid: "تم الدفع",
+  test: "اختبار فقط",
+  completed: "مكتمل",
+};
+
+function hasSettledActivityMovement(activity: ReturnType<typeof normalizeRevenueActivity>): boolean {
+  return activity.signedAmount !== 0
+    && ["completed", "paid", "approved", "fulfilled"].includes(activity.status);
+}
+
+function activityAmountLabel(activity: ReturnType<typeof normalizeRevenueActivity>): string {
+  const amount = formatReportMoney(activity.amount, activity.asset === "COIN" ? 0 : 2);
+  if (activity.amount > 0 && activity.signedAmount === 0) {
+    return `مطلوب ${amount} ${activity.asset === "COIN" ? "🪙" : "ج.م"}`;
+  }
+  return `${activity.signedAmount >= 0 ? "+" : "−"}${amount} ${activity.asset === "COIN" ? "🪙" : "ج.م"}`;
+}
+
+function reportNumberOrUnavailable(...values: unknown[]): number | null {
+  const value = values.find(candidate => candidate !== null && candidate !== undefined && candidate !== "");
+  return value === undefined ? null : finiteReportNumber(value);
+}
+
+function queryErrorText(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+/**
+ * The personal account section deliberately uses the authenticated unified
+ * activity feed rather than inventing values from channel/campaign totals.
+ * The ledger endpoint remains the fallback for deployments where the activity
+ * feed is temporarily unavailable.
+ */
+function PersonalReport() {
+  const reportQuery = useInfiniteQuery<any>({
+    queryKey: ['/api/revenue', 'personal-report'],
+    queryFn: ({ pageParam = 0 }) => fetchRevenueJson(`/api/revenue?limit=100&offset=${pageParam}`),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => lastPage?.hasMore
+      ? Number(lastPage.offset || 0) + Number(lastPage.limit || 100)
+      : undefined,
+  });
+  const activityQuery = useInfiniteQuery<any>({
+    queryKey: ['/api/payments/unified', 'revenue-report'],
+    queryFn: ({ pageParam = 0 }) => fetchRevenueJson(`/api/payments/unified?scope=self&limit=100&offset=${pageParam}&includeMeta=1`),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => lastPage?.hasMore
+      ? Number(lastPage.offset || 0) + Number(lastPage.limit || 100)
+      : undefined,
+  });
+  const { data: rawPayments, isError: paymentsError, error: paymentsQueryError } = useQuery<unknown>({
+    queryKey: ['/api/payments', 'revenue-report'],
+    queryFn: () => fetchRevenueJson('/api/payments?scope=self'),
+  });
+  const reportPages = reportQuery.data?.pages || [];
+  const report = reportPages[0];
+  const reportLoading = reportQuery.isLoading;
+  const reportIsError = reportQuery.isError;
+  const reportQueryError = reportQuery.error;
+  const reportHasMore = Boolean(reportPages[reportPages.length - 1]?.hasMore);
+  const activityLoading = activityQuery.isLoading;
+  const activityError = activityQuery.isError;
+  const activityQueryError = activityQuery.error;
+  const activityPages = activityQuery.data?.pages || [];
+  const rawActivity = activityPages.flatMap((page: any) => Array.isArray(page) ? page : page?.activities || []);
+  const activityHasMore = Boolean(activityPages[activityPages.length - 1]?.hasMore);
+  const reportError = reportIsError;
+
+  if (reportLoading && activityLoading) {
+    return <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
+  }
+
+  const ledgerTransactions = reportPages.flatMap((page: any) => normalizeRevenueTransactions(page?.transactions));
+  const activity = normalizeRevenueActivityList(rawActivity);
+  const history = activity.length > 0
+    ? activity
+    : ledgerTransactions.map((transaction, index) => normalizeRevenueActivity({
+      id: `revenue_transaction:${transaction.id}`,
+      source: transaction.campaignId != null
+        ? "ad_campaign"
+        : /هدية|هدايا|gift/i.test(transaction.description)
+          ? "live_gift"
+          : "revenue_transaction",
+      kind: transaction.type === "earning" ? "revenue" : transaction.type === "wallet_recharge" ? "deposit" : transaction.type === "withdrawal" ? "withdrawal" : "spending",
+      asset: "EGP",
+      amount: transaction.amountEGP,
+      signedAmount: ["earning", "wallet_recharge"].includes(transaction.type) ? transaction.amountEGP : -transaction.amountEGP,
+      moneyAmount: transaction.amountEGP,
+      status: "completed",
+      description: transaction.description,
+      reference: transaction.campaignId ?? transaction.channelId ?? "",
+      createdAt: transaction.createdAt,
+    }, index));
+  const totals = report?.totals || {};
+  const totalEarned = reportNumberOrUnavailable(
+    totals.earning ?? report?.totalEarnedEGP ?? report?.total_earned_egp,
+  );
+  const totalWithdrawn = reportNumberOrUnavailable(
+    totals.withdrawal ?? report?.withdrawnEGP ?? report?.withdrawn_egp,
+  );
+  const totalDeposits = reportNumberOrUnavailable(
+    totals.walletRecharge ?? totals.wallet_recharge ?? report?.walletRechargeEGP,
+  );
+  const ledgerSpending = reportNumberOrUnavailable(
+    totals.spending ?? report?.totalSpentEGP ?? report?.total_spent_egp,
+  );
+  const aiCharges = reportNumberOrUnavailable(totals.aiCharge ?? totals.ai_charge);
+  const totalSpent = ledgerSpending == null && aiCharges == null
+    ? null
+    : (ledgerSpending ?? 0) + (aiCharges ?? 0);
+  const balance = reportNumberOrUnavailable(report?.balanceEGP, report?.balance_egp);
+  const withdrawable = reportNumberOrUnavailable(
+    report?.withdrawableBalanceEGP ?? report?.withdrawable_balance_egp,
+  );
+  const earningSources = history.filter(row => row.kind === "revenue");
+  const withdrawals = history.filter(row => row.kind === "withdrawal");
+  const deposits = history.filter(row => row.kind === "deposit");
+  const coinPurchases = history.filter(row => row.kind === "coin_purchase");
+  const coinActivity = history.filter(row => row.asset === "COIN" || ["coin_purchase", "coin_recharge", "gift_sent", "gift_received"].includes(row.kind));
+  const payments = Array.isArray(rawPayments) ? rawPayments : [];
+  const withdrawalRequests = payments.filter((payment: any) => payment?.type === "withdrawal");
+  const coinPurchaseCount = activityError && activity.length === 0 ? null : coinPurchases.length;
+  const hasAnyData = history.length > 0 || withdrawalRequests.length > 0
+    || [totalEarned, totalDeposits, totalSpent].some(value => value != null && value > 0);
+  const hasQueryError = Boolean(reportError || activityError || paymentsError);
+  const historyUsesLedgerFallback = activity.length === 0 && ledgerTransactions.length > 0;
+  const recordsHaveMore = activityHasMore || (historyUsesLedgerFallback && reportHasMore);
+
+  return (
+    <div className="space-y-4 mb-8" data-testid="personal-revenue-report">
+      {reportError && (
+        <div role="alert" className="rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/20 dark:text-red-300">
+          تعذر تحميل ملخص الرصيد والأرقام الإجمالية: {queryErrorText(reportQueryError, "الخدمة غير متاحة")}. لم يتم استبدال البيانات الفاشلة بأصفار.
+        </div>
+      )}
+      {activityError && (
+        <div role="alert" className="rounded-xl border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs text-yellow-800 dark:border-yellow-900 dark:bg-yellow-950/20 dark:text-yellow-300">
+          تعذر تحميل سجل النشاط الكامل: {queryErrorText(activityQueryError, "الخدمة غير متاحة")}.
+          {historyUsesLedgerFallback ? " المعروض حالياً هو كشف الحساب المتاح فقط، وليس سجلاً كاملاً." : " لا يمكن اعتبار القائمة الفارغة دليلاً على عدم وجود معاملات."}
+        </div>
+      )}
+      {paymentsError && (
+        <div role="alert" className="rounded-xl border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs text-yellow-800 dark:border-yellow-900 dark:bg-yellow-950/20 dark:text-yellow-300">
+          تعذر تحميل طلبات السحب: {queryErrorText(paymentsQueryError, "الخدمة غير متاحة")}.
+        </div>
+      )}
+      <Card className="rounded-2xl border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <CircleDollarSign className="w-4 h-4 text-primary" /> التقرير المالي الشخصي
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            مصادر الأرباح وحركة محفظتك وسجل العملات — لحسابك الحالي فقط
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {[
+              { label: "الأرباح", value: totalEarned, icon: TrendingUp, color: "text-green-600" },
+              { label: "السحوبات", value: totalWithdrawn, icon: ArrowDownLeft, color: "text-orange-600" },
+              { label: "الإيداعات/الشحن", value: totalDeposits, icon: Wallet, color: "text-blue-600" },
+              { label: recordsHaveMore ? "عمليات شراء العملات المحمّلة" : "عمليات شراء العملات", value: coinPurchaseCount, icon: Coins, color: "text-amber-600", isCount: true },
+              { label: "الرصيد الحالي", value: balance, icon: Wallet, color: "text-primary" },
+            ].map(summary => (
+              <div key={summary.label} className="rounded-xl border bg-background/70 p-3">
+                <summary.icon className={`w-5 h-5 mb-1 ${summary.color}`} />
+                <div className="font-bold text-sm">
+                  {summary.value == null
+                    ? "غير متاح"
+                    : summary.isCount
+                      ? summary.value.toLocaleString("ar-EG")
+                      : formatReportMoneyOrUnavailable(summary.value)}
+                  {!summary.isCount && summary.value != null && <span className="text-[10px] font-normal text-muted-foreground ms-1">ج.م</span>}
+                </div>
+                <div className="text-[10px] text-muted-foreground">{summary.label}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span>القابل للسحب: <strong className="text-foreground">{formatReportMoneyOrUnavailable(withdrawable)}{withdrawable != null && " ج.م"}</strong></span>
+            <span>الإنفاق: <strong className="text-foreground">{formatReportMoneyOrUnavailable(totalSpent)}{totalSpent != null && " ج.م"}</strong></span>
+            {!hasQueryError && activity.length === 0 && report?.transactions == null && <span>لا تتوفر معاملات مالية بعد</span>}
+          </div>
+        </CardContent>
+      </Card>
+
+      {earningSources.length > 0 && (
+        <Card className="rounded-2xl">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2"><TrendingUp className="w-4 h-4 text-green-600" /> مصادر الأرباح</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1">
+              {earningSources.map(row => (
+              <div key={String(row.id)} className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-muted/50" data-testid={`earning-source-${row.id}`}>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1 truncate text-xs font-medium">
+                    <span className="truncate">{row.description}</span>
+                    <span className="shrink-0 rounded-full bg-green-100 px-1.5 py-0.5 text-[9px] text-green-700 dark:bg-green-900/30 dark:text-green-300">
+                      {row.source === "ad_campaign" ? "دخل إعلانات" : row.source === "live_gift" ? "هدايا البث المباشر" : "دخل آخر"}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">{formatReportDate(row.createdAt)}</div>
+                </div>
+                <span className="shrink-0 text-xs font-bold text-green-600">{activityAmountLabel(row)}</span>
+              </div>
+            ))}
+            {recordsHaveMore && <div className="pt-1 text-center text-[10px] text-muted-foreground">تم تحميل أحدث جزء من المصادر — استخدم زر تحميل النشاط الأقدم لاستكمالها</div>}
+          </CardContent>
+        </Card>
+      )}
+
+      {withdrawalRequests.length > 0 && (
+        <Card className="rounded-2xl">
+          <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Banknote className="w-4 h-4 text-orange-600" /> طلبات السحب</CardTitle></CardHeader>
+          <CardContent className="space-y-1">
+            {withdrawalRequests.slice(0, 20).map((payment: any) => (
+              <div key={String(payment.id)} className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2" data-testid={`personal-withdrawal-${payment.id}`}>
+                <div className="min-w-0">
+                  <div className="text-xs font-medium">{PAYMENT_METHODS.find(method => method.value === payment.method)?.label || payment.method || "وسيلة سحب"}</div>
+                  <div className="truncate text-[10px] text-muted-foreground">
+                    {payment.payoutName || "طلب سحب"}{payment.payoutDestinationMasked ? ` · ${payment.payoutDestinationMasked}` : ""}
+                  </div>
+                </div>
+                <div className="shrink-0 text-end">
+                  <div className="text-xs font-bold">{formatReportMoney(payment.amountEGP)} ج.م</div>
+                  <Badge variant={payment.status === "approved" ? "default" : payment.status === "rejected" ? "destructive" : "secondary"} className="text-[10px]">
+                    {payment.status === "approved" ? "مقبول" : payment.status === "rejected" ? "مرفوض" : "قيد المراجعة"}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+            {withdrawalRequests.length > 20 && <div className="pt-1 text-center text-[10px] text-muted-foreground">تظهر أحدث 20 طلب سحب فقط؛ راجع صفحة المدفوعات للقائمة الكاملة</div>}
+          </CardContent>
+        </Card>
+      )}
+
+      <Card className="rounded-2xl">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-2"><History className="w-4 h-4" /> سجل المعاملات والنشاط</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!hasAnyData ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              {hasQueryError ? "تعذر التحقق من وجود معاملات؛ أعد المحاولة بعد عودة الخدمة." : "لا توجد معاملات مالية أو مشتريات عملات بعد"}
+            </div>
+          ) : (
+            <div className="space-y-1 max-h-96 overflow-y-auto">
+              {history.map(row => (
+                <div key={String(row.id)} className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-muted/50" data-testid={`personal-activity-${row.id}`}>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${!hasSettledActivityMovement(row) ? "bg-muted text-muted-foreground" : row.signedAmount >= 0 ? "bg-green-100 text-green-600 dark:bg-green-900/30" : "bg-red-100 text-red-600 dark:bg-red-900/30"}`}>
+                      {row.asset === "COIN" ? <Coins className="w-3.5 h-3.5" /> : !hasSettledActivityMovement(row) ? <Receipt className="w-3.5 h-3.5" /> : row.signedAmount >= 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownLeft className="w-3.5 h-3.5" />}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1 truncate text-xs font-medium">
+                        <span className="truncate">{row.description}</span>
+                        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[9px]">{ACTIVITY_LABELS[row.kind] || "نشاط"}</span>
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {formatReportDate(row.createdAt)}
+                        {row.status !== "completed" ? ` · ${ACTIVITY_STATUS_LABELS[row.status] || row.status}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`shrink-0 text-xs font-bold ${!hasSettledActivityMovement(row) ? "text-muted-foreground" : row.signedAmount >= 0 ? "text-green-600" : "text-red-500"}`}>
+                    {activityAmountLabel(row)}
+                    {row.asset === "COIN" && row.moneyAmount != null && <span className="block text-[9px] font-normal text-muted-foreground">{formatReportMoney(row.moneyAmount)} ج.م</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {coinActivity.length > 0 && (
+            <div className="mt-4 border-t pt-3">
+              <div className="mb-2 text-xs font-bold text-amber-700 dark:text-amber-300">حركة العملات: هدايا وشحن ومشتريات</div>
+              <div className="space-y-1">
+                {coinActivity.map(row => (
+                  <div key={`coin-${String(row.id)}`} className="flex items-center justify-between gap-3 rounded-lg bg-amber-50/60 px-2 py-1.5 text-[11px] dark:bg-amber-950/10">
+                    <span className="truncate">
+                      {row.kind === "gift_sent" ? "هدية مرسلة" : row.kind === "gift_received" ? "هدية مستلمة" : row.kind === "coin_recharge" ? "شحن بكود عملات" : row.source === "afs_card" ? "شراء عملات بالبطاقة" : row.source === "coin_purchase_order" ? "شراء عملات يدوي" : "شراء عملات من المحفظة"}
+                      {" · "}{row.description}
+                    </span>
+                    <span className="shrink-0 font-bold">{activityAmountLabel(row)}</span>
+                  </div>
+                ))}
+              </div>
+              {recordsHaveMore && <div className="pt-1 text-center text-[10px] text-muted-foreground">تم تحميل أحدث جزء من حركة العملات — حمّل النشاط الأقدم لاستكمال السجل</div>}
+            </div>
+          )}
+          {activityHasMore && (
+            <div className="flex justify-center pt-3">
+              <Button variant="outline" size="sm" onClick={() => activityQuery.fetchNextPage()} disabled={activityQuery.isFetchingNextPage}>
+                {activityQuery.isFetchingNextPage && <Loader2 className="w-4 h-4 animate-spin me-2" />}
+                تحميل النشاط الأقدم
+              </Button>
+            </div>
+          )}
+          {reportHasMore && historyUsesLedgerFallback && (
+            <div className="flex justify-center pt-3">
+              <Button variant="outline" size="sm" onClick={() => reportQuery.fetchNextPage()} disabled={reportQuery.isFetchingNextPage}>
+                {reportQuery.isFetchingNextPage && <Loader2 className="w-4 h-4 animate-spin me-2" />}
+                تحميل كشف الحساب الأقدم
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {(withdrawals.length > 0 || deposits.length > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {deposits.length > 0 && <Card className="rounded-2xl"><CardContent className="p-4"><div className="text-xs font-bold mb-1 text-blue-600">آخر الإيداعات والشحن</div><div className="text-sm">{deposits.slice(0, 3).map(row => <div key={String(row.id)} className="flex justify-between gap-2 py-1"><span className="truncate">{row.description}</span><span className="shrink-0">{activityAmountLabel(row)}</span></div>)}</div></CardContent></Card>}
+          {withdrawals.length > 0 && <Card className="rounded-2xl"><CardContent className="p-4"><div className="text-xs font-bold mb-1 text-orange-600">آخر السحوبات</div><div className="text-sm">{withdrawals.slice(0, 3).map(row => <div key={String(row.id)} className="flex justify-between gap-2 py-1"><span className="truncate">{row.description}</span><span className="shrink-0">{activityAmountLabel(row)}</span></div>)}</div></CardContent></Card>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── ناشر ──────────────────────────────────────────────────────────────
 function PublisherTab() {
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading, isError, error } = useQuery<any>({
     queryKey: ['/api/publisher/report'],
-    queryFn: () => fetch('/api/publisher/report', { credentials: 'include' }).then(r => r.json()),
+    queryFn: () => fetchRevenueJson('/api/publisher/report'),
   });
   const { data: payments = [] } = useQuery<any[]>({
     queryKey: ['/api/payments'],
-    queryFn: () => fetch('/api/payments', { credentials: 'include' }).then(r => r.json()),
+    queryFn: async () => {
+      const value = await fetchRevenueJson<unknown>('/api/payments?scope=self');
+      return Array.isArray(value) ? value : [];
+    },
   });
 
   if (isLoading) return <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  if (isError) return (
+    <div role="alert" className="rounded-xl border border-red-300 bg-red-50 px-4 py-6 text-center text-sm text-red-700 dark:border-red-900 dark:bg-red-950/20 dark:text-red-300">
+      تعذر تحميل تقرير الناشر: {queryErrorText(error, "الخدمة غير متاحة")}. لم يتم اعتبار التقرير فارغاً.
+    </div>
+  );
   if (!data?.channel) return (
     <div className="text-center py-16">
       <Tv className="w-12 h-12 mx-auto mb-3 opacity-30" />
@@ -358,12 +728,19 @@ function PublisherTab() {
     </div>
   );
 
-  const { channel, channelStats, totalEarnedEGP, withdrawnEGP, balanceEGP, minWithdrawalEGP = 100 } = data;
-  const realImpr = Number(channelStats?.real_impressions || 0);
-  const realClicks = Number(channelStats?.real_clicks || 0);
-  const fraudImpr = Number(channelStats?.fraud_impressions || 0);
-  const fraudClicks = Number(channelStats?.fraud_clicks || 0);
-  const campaignsServed = Number(channelStats?.campaigns_served || 0);
+  const { channel, channelStats } = data;
+  const totalEarned = finiteReportNumber(data.totalEarnedEGP ?? data.total_earned_egp);
+  const withdrawn = finiteReportNumber(data.withdrawnEGP ?? data.withdrawn_egp);
+  const balance = finiteReportNumber(data.balanceEGP ?? data.balance_egp);
+  const minWithdrawal = Math.max(
+    10,
+    finiteReportNumber(data.minWithdrawalEGP ?? data.min_withdrawal_egp, 100),
+  );
+  const realImpr = finiteReportNumber(channelStats?.realImpressions ?? channelStats?.real_impressions);
+  const realClicks = finiteReportNumber(channelStats?.realClicks ?? channelStats?.real_clicks);
+  const fraudImpr = finiteReportNumber(channelStats?.fraudImpressions ?? channelStats?.fraud_impressions);
+  const fraudClicks = finiteReportNumber(channelStats?.fraudClicks ?? channelStats?.fraud_clicks);
+  const campaignsServed = finiteReportNumber(channelStats?.campaignsServed ?? channelStats?.campaigns_served);
 
   return (
     <div className="space-y-6">
@@ -378,16 +755,16 @@ function PublisherTab() {
               <Badge className="mt-1 bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 border-0 text-xs">ناشر معتمد ✓</Badge>
             </div>
           </div>
-          {balanceEGP >= minWithdrawalEGP && <WithdrawDialog balanceEGP={balanceEGP} label="أرباحي" minWithdrawalEGP={minWithdrawalEGP} />}
+          {balance >= minWithdrawal && <WithdrawDialog balanceEGP={balance} label="أرباحي" minWithdrawalEGP={minWithdrawal} />}
         </CardContent>
       </Card>
 
       {/* إحصائيات */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: "الرصيد المتاح", value: balanceEGP.toFixed(2), unit: "ج.م", icon: Wallet, color: "text-primary", bg: "from-primary/10 to-primary/5 border-primary/20" },
-          { label: "إجمالي الأرباح", value: totalEarnedEGP.toFixed(2), unit: "ج.م", icon: TrendingUp, color: "text-green-600", bg: "from-green-500/10 to-green-500/5 border-green-500/20" },
-          { label: "المسحوب", value: withdrawnEGP.toFixed(2), unit: "ج.م", icon: Banknote, color: "text-blue-500", bg: "from-blue-500/10 to-blue-500/5 border-blue-500/20" },
+          { label: "الرصيد المتاح", value: formatReportMoney(balance), unit: "ج.م", icon: Wallet, color: "text-primary", bg: "from-primary/10 to-primary/5 border-primary/20" },
+          { label: "إجمالي الأرباح", value: formatReportMoney(totalEarned), unit: "ج.م", icon: TrendingUp, color: "text-green-600", bg: "from-green-500/10 to-green-500/5 border-green-500/20" },
+          { label: "المسحوب", value: formatReportMoney(withdrawn), unit: "ج.م", icon: Banknote, color: "text-blue-500", bg: "from-blue-500/10 to-blue-500/5 border-blue-500/20" },
           { label: "حملات نُشرت فيها", value: campaignsServed.toString(), unit: "", icon: Megaphone, color: "text-purple-500", bg: "from-purple-500/10 to-purple-500/5 border-purple-500/20" },
         ].map(s => (
           <Card key={s.label} className={`rounded-2xl bg-gradient-to-br border ${s.bg}`}>
@@ -463,12 +840,17 @@ function PublisherTab() {
 
 // ── معلن ──────────────────────────────────────────────────────────────
 function AdvertiserTab() {
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading, isError, error } = useQuery<any>({
     queryKey: ['/api/advertiser/report'],
-    queryFn: () => fetch('/api/advertiser/report', { credentials: 'include' }).then(r => r.json()),
+    queryFn: () => fetchRevenueJson('/api/advertiser/report'),
   });
 
   if (isLoading) return <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  if (isError) return (
+    <div role="alert" className="rounded-xl border border-red-300 bg-red-50 px-4 py-6 text-center text-sm text-red-700 dark:border-red-900 dark:bg-red-950/20 dark:text-red-300">
+      تعذر تحميل تقرير المعلن: {queryErrorText(error, "الخدمة غير متاحة")}. لم يتم اعتبار التقرير فارغاً.
+    </div>
+  );
   if (!data?.campaigns?.length) return (
     <div className="text-center py-16">
       <Megaphone className="w-12 h-12 mx-auto mb-3 opacity-30" />
@@ -477,16 +859,18 @@ function AdvertiserTab() {
     </div>
   );
 
-  const { campaigns, totalSpentEGP, balanceEGP } = data;
+  const campaigns = Array.isArray(data.campaigns) ? data.campaigns : [];
+  const totalSpent = finiteReportNumber(data.totalSpentEGP ?? data.total_spent_egp);
+  const balance = finiteReportNumber(data.balanceEGP ?? data.balance_egp);
 
   return (
     <div className="space-y-6">
       {/* ملخص الإنفاق */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {[
-          { label: "إجمالي الإنفاق", value: totalSpentEGP.toFixed(2), unit: "ج.م", icon: CreditCard, color: "text-red-500", bg: "from-red-500/10 to-red-500/5 border-red-500/20" },
+          { label: "إجمالي الإنفاق", value: formatReportMoney(totalSpent), unit: "ج.م", icon: CreditCard, color: "text-red-500", bg: "from-red-500/10 to-red-500/5 border-red-500/20" },
           { label: "عدد الحملات", value: campaigns.length.toString(), unit: "", icon: Megaphone, color: "text-blue-500", bg: "from-blue-500/10 to-blue-500/5 border-blue-500/20" },
-          { label: "رصيدك الحالي", value: balanceEGP.toFixed(2), unit: "ج.م", icon: Wallet, color: "text-primary", bg: "from-primary/10 to-primary/5 border-primary/20" },
+          { label: "رصيدك الحالي", value: formatReportMoney(balance), unit: "ج.م", icon: Wallet, color: "text-primary", bg: "from-primary/10 to-primary/5 border-primary/20" },
         ].map(s => (
           <Card key={s.label} className={`rounded-2xl bg-gradient-to-br border ${s.bg}`}>
             <CardContent className="p-4">
@@ -515,31 +899,40 @@ function AdvertiserTab() {
               </div>
 
               {/* شريط الميزانية */}
-              {c.budgetEGP > 0 && (
+              {finiteReportNumber(c.budgetEGP) > 0 && (
                 <div>
+                  {(() => {
+                    const budgetEGP = finiteReportNumber(c.budgetEGP);
+                    const spentEGP = finiteReportNumber(c.spentEGP);
+                    const budgetPct = Math.max(0, finiteReportNumber(c.budgetPct));
+                    return (
+                      <>
                   <div className="flex justify-between text-xs text-muted-foreground mb-1">
                     <span>الميزانية المستهلكة</span>
-                    <span className={`font-bold ${c.budgetPct >= 90 ? 'text-red-500' : c.budgetPct >= 70 ? 'text-yellow-500' : 'text-green-600'}`}>
-                      {c.budgetPct}%
+                    <span className={`font-bold ${budgetPct >= 90 ? 'text-red-500' : budgetPct >= 70 ? 'text-yellow-500' : 'text-green-600'}`}>
+                      {budgetPct}%
                     </span>
                   </div>
-                  <Progress value={c.budgetPct} className={`h-2 ${c.budgetPct >= 90 ? '[&>div]:bg-red-500' : c.budgetPct >= 70 ? '[&>div]:bg-yellow-500' : ''}`} />
+                  <Progress value={Math.min(100, budgetPct)} className={`h-2 ${budgetPct >= 90 ? '[&>div]:bg-red-500' : budgetPct >= 70 ? '[&>div]:bg-yellow-500' : ''}`} />
                   <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                    <span>صُرف: {(c.spentEGP || 0).toFixed(3)} ج.م</span>
-                    <span>الميزانية: {c.budgetEGP} ج.م</span>
+                    <span>صُرف: {formatReportMoney(spentEGP, 3)} ج.م</span>
+                    <span>الميزانية: {formatReportMoney(budgetEGP)} ج.م</span>
                   </div>
+                      </>
+                    );
+                  })()}
                 </div>
               )}
 
               {/* إحصائيات الحملة */}
               <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                {[
-                  { label: "مشاهدات حقيقية", value: c.realImpressions.toLocaleString(), icon: Eye, cls: "text-teal-600" },
-                  { label: "نقرات حقيقية", value: c.realClicks.toLocaleString(), icon: MousePointer, cls: "text-indigo-600" },
-                  { label: "نسبة النقر CTR", value: `${c.ctr}%`, icon: BarChart2, cls: "text-blue-600" },
-                  { label: "سعر 1000 مشاهدة", value: `${c.cpmRate} ج.م`, icon: Banknote, cls: "text-purple-600" },
-                  { label: "سعر النقرة", value: `${c.cpcRate.toFixed(3)} ج.م`, icon: CreditCard, cls: "text-orange-600" },
-                  { label: "محاولات احتيال", value: (c.fraudImpressions + c.fraudClicks).toString(), icon: ShieldX, cls: "text-red-400" },
+                  {[
+                    { label: "مشاهدات حقيقية", value: finiteReportNumber(c.realImpressions).toLocaleString(), icon: Eye, cls: "text-teal-600" },
+                    { label: "نقرات حقيقية", value: finiteReportNumber(c.realClicks).toLocaleString(), icon: MousePointer, cls: "text-indigo-600" },
+                    { label: "نسبة النقر CTR", value: `${finiteReportNumber(c.ctr)}%`, icon: BarChart2, cls: "text-blue-600" },
+                    { label: "سعر 1000 مشاهدة", value: `${formatReportMoney(c.cpmRate)} ج.م`, icon: Banknote, cls: "text-purple-600" },
+                    { label: "سعر النقرة", value: `${formatReportMoney(c.cpcRate, 3)} ج.م`, icon: CreditCard, cls: "text-orange-600" },
+                    { label: "محاولات احتيال", value: (finiteReportNumber(c.fraudImpressions) + finiteReportNumber(c.fraudClicks)).toString(), icon: ShieldX, cls: "text-red-400" },
                 ].map(s => (
                   <div key={s.label} className="bg-muted/40 rounded-lg p-2 text-center">
                     <s.icon className={`w-3.5 h-3.5 mx-auto mb-1 ${s.cls}`} />
@@ -550,12 +943,12 @@ function AdvertiserTab() {
               </div>
 
               {/* تحذير الميزانية */}
-              {c.budgetPct >= 80 && c.status === 'active' && (
-                <div className={`flex items-center gap-2 rounded-lg p-2.5 text-xs ${c.budgetPct >= 100 ? 'bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-400' : 'bg-yellow-50 dark:bg-yellow-950/20 text-yellow-700 dark:text-yellow-400'}`}>
+              {finiteReportNumber(c.budgetPct) >= 80 && c.status === 'active' && (
+                <div className={`flex items-center gap-2 rounded-lg p-2.5 text-xs ${finiteReportNumber(c.budgetPct) >= 100 ? 'bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-400' : 'bg-yellow-50 dark:bg-yellow-950/20 text-yellow-700 dark:text-yellow-400'}`}>
                   <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                  {c.budgetPct >= 100
+                  {finiteReportNumber(c.budgetPct) >= 100
                     ? '⛔ انتهت الميزانية — الحملة متوقفة. اشحن رصيدك لاستئناف النشر.'
-                    : `⚠️ استهلكت ${c.budgetPct}% من الميزانية — اشحن رصيدك قبل توقف الحملة!`}
+                    : `⚠️ استهلكت ${finiteReportNumber(c.budgetPct)}% من الميزانية — اشحن رصيدك قبل توقف الحملة!`}
                 </div>
               )}
             </div>
@@ -643,11 +1036,11 @@ function AdvertiserTab() {
 export default function Revenue() {
   const { data: pubData } = useQuery<any>({
     queryKey: ['/api/publisher/report'],
-    queryFn: () => fetch('/api/publisher/report', { credentials: 'include' }).then(r => r.json()),
+    queryFn: () => fetchRevenueJson('/api/publisher/report'),
   });
   const { data: advData } = useQuery<any>({
     queryKey: ['/api/advertiser/report'],
-    queryFn: () => fetch('/api/advertiser/report', { credentials: 'include' }).then(r => r.json()),
+    queryFn: () => fetchRevenueJson('/api/advertiser/report'),
   });
 
   const isPublisher = !!pubData?.channel;
@@ -660,6 +1053,8 @@ export default function Revenue() {
         <h1 className="text-3xl font-extrabold flex items-center gap-2">💰 الإيرادات والتقارير</h1>
         <p className="text-muted-foreground mt-1">جميع المبالغ بالجنيه المصري — بياناتك الخاصة فقط</p>
       </div>
+
+      <PersonalReport />
 
       <Tabs defaultValue={defaultTab}>
         <TabsList className="mb-6 w-full">

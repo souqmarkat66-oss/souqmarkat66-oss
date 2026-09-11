@@ -55,6 +55,7 @@ import {
   sameGiftEventIdentity,
 } from "./wallet-ledger";
 import { purchaseCoinsWithWallet } from "./walletCoinPurchase";
+import { resolvePaymentUserScope } from "./activity-scope";
 import {
   buildExpiredRechargeCodeResponse,
   buildRechargeRedemptionResponse,
@@ -4434,48 +4435,57 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   // ================================================================
   app.get("/api/revenue", isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
-    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 100);
-    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
-    const allowedTypes = ['earning', 'spending', 'withdrawal', 'ai_charge', 'wallet_recharge'] as const;
-    type RevenueTxType = typeof allowedTypes[number];
-    const rawType = typeof req.query.type === 'string' ? req.query.type : undefined;
-    const type: RevenueTxType | undefined = rawType && (allowedTypes as readonly string[]).includes(rawType)
-      ? (rawType as RevenueTxType)
-      : undefined;
-    const txOptions: { limit: number; offset: number; type?: RevenueTxType; from?: Date; to?: Date } = { limit, offset };
-    if (type) txOptions.type = type;
-    const parseDate = (v: unknown): Date | undefined => {
-      if (typeof v !== 'string' || !v) return undefined;
-      const d = new Date(v);
-      return isNaN(d.getTime()) ? undefined : d;
-    };
-    const fromDate = parseDate(req.query.from);
-    const toDate = parseDate(req.query.to);
-    if (fromDate) txOptions.from = fromDate;
-    if (toDate) {
-      // إذا أُرسلت تاريخ فقط (YYYY-MM-DD) نعتبر نهاية اليوم شامل
-      if (typeof req.query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to)) {
-        toDate.setHours(23, 59, 59, 999);
+    try {
+      const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 100);
+      const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+      const allowedTypes = ['earning', 'spending', 'withdrawal', 'ai_charge', 'wallet_recharge'] as const;
+      type RevenueTxType = typeof allowedTypes[number];
+      const rawType = typeof req.query.type === 'string' ? req.query.type : undefined;
+      const type: RevenueTxType | undefined = rawType && (allowedTypes as readonly string[]).includes(rawType)
+        ? (rawType as RevenueTxType)
+        : undefined;
+      const txOptions: { limit: number; offset: number; type?: RevenueTxType; from?: Date; to?: Date } = { limit, offset };
+      if (type) txOptions.type = type;
+      const parseDate = (v: unknown): Date | undefined => {
+        if (typeof v !== 'string' || !v) return undefined;
+        const d = new Date(v);
+        return isNaN(d.getTime()) ? undefined : d;
+      };
+      const fromDate = parseDate(req.query.from);
+      const toDate = parseDate(req.query.to);
+      if (fromDate) txOptions.from = fromDate;
+      if (toDate) {
+        // إذا أُرسلت تاريخ فقط (YYYY-MM-DD) نعتبر نهاية اليوم شامل
+        if (typeof req.query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to)) {
+          toDate.setHours(23, 59, 59, 999);
+        }
+        txOptions.to = toDate;
       }
-      txOptions.to = toDate;
+      const [transactions, totals, balanceEGP, withdrawableBalanceEGP, channel, minWithdrawalRaw] = await Promise.all([
+        storage.getRevenueTransactions(userId, txOptions),
+        storage.getRevenueTotals(userId),
+        storage.getUserBalanceEGP(userId),
+        storage.getWithdrawableBalanceEGP(userId),
+        storage.getChannelByUserId(userId),
+        storage.getSetting('wallet_min_withdrawal_egp'),
+      ]);
+      const configuredMinimum = Number(minWithdrawalRaw);
+      const minWithdrawalEGP = Math.max(10, Number.isFinite(configuredMinimum) ? configuredMinimum : 100);
+      res.json({
+        transactions,
+        totals,
+        balanceEGP,
+        withdrawableBalanceEGP,
+        minWithdrawalEGP,
+        channel,
+        hasMore: transactions.length === limit,
+        limit,
+        offset,
+      });
+    } catch (error) {
+      console.error("[revenue] failed:", error instanceof Error ? error.message : "unknown database error");
+      res.status(500).json({ message: "تعذر تحميل التقرير المالي حالياً" });
     }
-    const [transactions, balanceEGP, withdrawableBalanceEGP, channel, minWithdrawalRaw] = await Promise.all([
-      storage.getRevenueTransactions(userId, txOptions),
-      storage.getUserBalanceEGP(userId),
-      storage.getWithdrawableBalanceEGP(userId),
-      storage.getChannelByUserId(userId),
-      storage.getSetting('wallet_min_withdrawal_egp'),
-    ]);
-    res.json({
-      transactions,
-      balanceEGP,
-      withdrawableBalanceEGP,
-      minWithdrawalEGP: Math.max(10, Number(minWithdrawalRaw || 100)),
-      channel,
-      hasMore: transactions.length === limit,
-      limit,
-      offset,
-    });
   });
 
   // ── تقرير المعلن التفصيلي ──────────────────────────────────────
@@ -4535,7 +4545,8 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         limit, offset,
       });
     } catch (e: any) {
-      res.status(500).json({ message: e.message });
+      console.error("[advertiser/report] failed:", e instanceof Error ? e.message : "unknown database error");
+      res.status(500).json({ message: "تعذر تحميل تقرير المعلن حالياً" });
     }
   });
 
@@ -4567,18 +4578,20 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
         storage.getWithdrawableBalanceEGP(userId),
         storage.getSetting('wallet_min_withdrawal_egp'),
       ]);
+      const configuredMinimum = Number(minWithdrawalRaw);
 
       res.json({
         channel, channelStats, transactions: txs,
         totalEarnedEGP: totals.earning,
         withdrawnEGP: totals.withdrawal,
         balanceEGP: balance,
-        minWithdrawalEGP: Math.max(10, Number(minWithdrawalRaw || 100)),
+        minWithdrawalEGP: Math.max(10, Number.isFinite(configuredMinimum) ? configuredMinimum : 100),
         hasMore: txs.length === limit,
         limit, offset,
       });
     } catch (e: any) {
-      res.status(500).json({ message: e.message });
+      console.error("[publisher/report] failed:", e instanceof Error ? e.message : "unknown database error");
+      res.status(500).json({ message: "تعذر تحميل تقرير الناشر حالياً" });
     }
   });
 
@@ -4586,19 +4599,21 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
   // PAYMENT REQUESTS
   // ================================================================
   app.get("/api/payments", isAuthenticated, async (req: any, res) => {
-    if (isAdminUser(req)) {
+    const userScope = resolvePaymentUserScope(req, isAdminUser(req));
+    if (userScope === null) {
       const all = await storage.getPaymentRequests();
       return res.json(all.map(safePaymentRequest));
     }
-    const mine = await storage.getPaymentRequests(req.user.claims.sub);
+    const mine = await storage.getPaymentRequests(userScope);
     res.json(mine.map(safePaymentRequest));
   });
 
   // A user-facing activity feed. Keep the underlying ledgers independent: each
   // row is emitted once, with an id that remains stable across sources.
   app.get("/api/payments/unified", isAuthenticated, async (req: any, res) => {
-    // Admin keeps the old all-users visibility; regular users only see their own activity.
-    const userId = isAdminUser(req) ? null : req.user.claims.sub;
+    // Admin keeps the old all-users visibility unless a personal report
+    // explicitly requests scope=self. Normal users can never widen the scope.
+    const userId = resolvePaymentUserScope(req, isAdminUser(req));
     const requestedKind = typeof req.query.kind === "string" ? req.query.kind : undefined;
     const allowedKinds = new Set([
       "deposit", "withdrawal", "coin_purchase", "coin_recharge",
@@ -4608,34 +4623,77 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
       return res.status(400).json({ message: "نوع النشاط غير صالح" });
     }
     const limit = Math.min(Math.max(Number.parseInt(req.query.limit as string, 10) || 50, 1), 100);
+    const offset = Math.max(Number.parseInt(req.query.offset as string, 10) || 0, 0);
+    const includeMeta = req.query.includeMeta === "1" || req.query.includeMeta === "true";
 
     try {
+      // Older installations may not have the legacy manual coin-order table.
+      // Do not let that optional history source take down the authenticated
+      // report: all current ledgers remain queryable without it.
+      const tableAvailability = await pool.query(
+        `SELECT to_regclass('public.coin_purchase_orders') IS NOT NULL AS has_legacy_coin_orders,
+                to_regclass('public.wallet_coin_purchases') IS NOT NULL AS has_wallet_coin_purchases`,
+      );
+      const hasLegacyCoinOrders = Boolean(tableAvailability.rows[0]?.has_legacy_coin_orders);
+      const hasWalletCoinPurchases = Boolean(tableAvailability.rows[0]?.has_wallet_coin_purchases);
+      const legacyCoinOrderActivity = hasLegacyCoinOrders ? `
+           UNION ALL
+           SELECT
+             'coin_purchase_order:' || id::text, 'coin_purchase_order'::text, id::text, user_id,
+             'coin_purchase'::text, 'COIN'::text, ABS(coins)::numeric,
+             CASE WHEN status = 'approved' THEN ABS(coins)::numeric ELSE 0::numeric END,
+             amount_egp::numeric, status, payment_method,
+             'طلب شراء عملات'::text, COALESCE(payment_ref, id::text), NULL::varchar, NULL::integer,
+             screenshot_url, created_at
+           FROM coin_purchase_orders WHERE ($1::varchar IS NULL OR user_id = $1)
+      ` : "";
+      const walletCoinPurchaseActivity = hasWalletCoinPurchases ? `
+           UNION ALL
+           SELECT
+             'wallet_coin_purchase:' || id::text, 'wallet_coin_purchase'::text, id::text, user_id,
+             'coin_purchase'::text, 'COIN'::text, coins::numeric, coins::numeric,
+             amount_egp::numeric, 'completed'::text, 'wallet'::text,
+             ('شراء ' || coins::text || ' عملة من رصيد المحفظة')::text,
+             idempotency_key, NULL::varchar, NULL::integer, NULL::text, created_at
+           FROM wallet_coin_purchases
+           WHERE ($1::varchar IS NULL OR user_id = $1)
+      ` : "";
+      const walletCoinPurchaseExclusion = hasWalletCoinPurchases ? `
+             AND NOT EXISTS (
+               SELECT 1 FROM wallet_coin_purchases wcp
+               WHERE wcp.revenue_transaction_id = revenue_transactions.id
+             )
+      ` : "";
       const result = await pool.query(
         `SELECT * FROM (
           SELECT
             'payment_request:' || id::text AS id,
             'payment_request'::text AS source, id::text AS source_id, user_id,
-            CASE WHEN type = 'withdrawal' THEN 'withdrawal' ELSE 'deposit' END AS kind,
+             CASE
+               WHEN type = 'withdrawal' THEN 'withdrawal'
+               WHEN type = 'top_up' AND service_type IS DISTINCT FROM 'wallet_recharge' THEN 'spending'
+               ELSE 'deposit'
+             END AS kind,
             'EGP'::text AS asset, ABS(amount_egp)::numeric AS amount,
-            CASE WHEN type = 'withdrawal' THEN -ABS(amount_egp)::numeric ELSE ABS(amount_egp)::numeric END AS signed_amount,
+             0::numeric AS signed_amount,
             amount_egp::numeric AS money_amount, status, method,
             COALESCE(service_type, CASE WHEN type = 'withdrawal' THEN 'طلب سحب أرباح' ELSE 'طلب إيداع' END) AS description,
             order_number AS reference, NULL::varchar AS related_user_id, NULL::integer AS related_stream_id,
             screenshot_url, created_at
           FROM payment_requests
           WHERE ($1::varchar IS NULL OR user_id = $1)
-            AND NOT (status = 'approved' AND type IN ('top_up', 'withdrawal'))
+            AND NOT (
+              status = 'approved'
+              AND (
+                type = 'withdrawal'
+                OR (type = 'top_up' AND service_type = 'wallet_recharge')
+              )
+            )
 
-          UNION ALL
-          SELECT
-            'coin_purchase_order:' || id::text, 'coin_purchase_order'::text, id::text, user_id,
-            'coin_purchase'::text, 'COIN'::text, ABS(coins)::numeric, ABS(coins)::numeric,
-            amount_egp::numeric, status, payment_method,
-            'طلب شراء عملات'::text, COALESCE(payment_ref, id::text), NULL::varchar, NULL::integer,
-            screenshot_url, created_at
-          FROM coin_purchase_orders WHERE ($1::varchar IS NULL OR user_id = $1)
+           ${legacyCoinOrderActivity}
+           ${walletCoinPurchaseActivity}
 
-          UNION ALL
+           UNION ALL
           SELECT
             'coin_transaction:' || id::text, 'coin_transaction'::text, id::text, user_id,
             CASE type
@@ -4669,7 +4727,16 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
 
           UNION ALL
           SELECT
-            'revenue_transaction:' || id::text, 'revenue_transaction'::text, id::text, user_id,
+             'revenue_transaction:' || id::text,
+             CASE
+               WHEN type = 'earning' AND campaign_id IS NOT NULL THEN 'ad_campaign'
+               WHEN type = 'earning' AND (
+                 LOWER(COALESCE(description, '')) LIKE '%هدية%'
+                 OR LOWER(COALESCE(description, '')) LIKE '%هدايا%'
+                 OR LOWER(COALESCE(description, '')) LIKE '%gift%'
+               ) THEN 'live_gift'
+               ELSE 'revenue_transaction'
+             END::text, id::text, user_id,
             CASE type
               WHEN 'earning' THEN 'revenue'
               WHEN 'withdrawal' THEN 'withdrawal'
@@ -4689,6 +4756,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
               SELECT 1 FROM afs_payment_orders apo
               WHERE apo.status = 'paid' AND apo.revenue_transaction_id = revenue_transactions.id
             )
+             ${walletCoinPurchaseExclusion}
 
           UNION ALL
           SELECT
@@ -4697,7 +4765,7 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
                  WHEN purpose = 'service_payment' THEN 'spending' ELSE 'deposit' END,
             CASE WHEN purpose = 'coin_purchase' THEN 'COIN' ELSE 'EGP' END,
             CASE WHEN purpose = 'coin_purchase' THEN COALESCE(coins, 0)::numeric ELSE ABS(amount_egp)::numeric END,
-            CASE WHEN status = 'paid' THEN
+            CASE WHEN status = 'paid' AND service_reference->>'_afsEnvironment' IS DISTINCT FROM 'test' THEN
               CASE WHEN purpose = 'coin_purchase' THEN COALESCE(coins, 0)::numeric
                    WHEN purpose = 'service_payment' THEN -ABS(amount_egp)::numeric
                    ELSE ABS(amount_egp)::numeric END
@@ -4718,11 +4786,20 @@ app.get("/api/settings", isAuthenticated, requireAdmin, async (req, res) => {
           FROM afs_payment_orders WHERE ($1::varchar IS NULL OR user_id = $1)
         ) activity
         WHERE ($2::text IS NULL OR kind = $2)
-        ORDER BY created_at DESC NULLS LAST
-        LIMIT $3`,
-        [userId, requestedKind || null, limit],
+         ORDER BY created_at DESC NULLS LAST, id DESC
+         LIMIT $3 OFFSET $4`,
+        [userId, requestedKind || null, includeMeta ? limit + 1 : limit, offset],
       );
-      res.json(result.rows);
+      const rows = includeMeta ? result.rows.slice(0, limit) : result.rows;
+      if (includeMeta) {
+        return res.json({
+          activities: rows,
+          hasMore: result.rows.length > limit,
+          limit,
+          offset,
+        });
+      }
+      res.json(rows);
     } catch (err) {
       console.error("[payments/unified] failed:", err instanceof Error ? err.message : "unknown database error");
       res.status(500).json({ message: "تعذر تحميل سجل النشاط حالياً" });
